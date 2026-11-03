@@ -74,6 +74,9 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 [code] Wait → show Processing; estimate only when reliable.
 [code] Stop early → cancel pending jobs in scope; keep every finished claim;
        late results from cancelled jobs are logged, never applied.
+[code] Every job carries the claim revision it worked on; a result for an
+       outdated revision is logged, never applied.                         (TLC fix R8)
+[code] A claim keeps its used revision through reprocessing and retry.     (TLC fix R4)
 [code] Freeze review scope = prepared chunks now; new viewing queues for later.
 [code] No supported claims in scope → don't start; show gaps and unverified
        claims with evidence; offer rewatch of that interval or retry.
@@ -92,20 +95,26 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 [user] Dispute an interpretation.
 [agent] Recheck source, show evidence, let the user explain; unsettled → stays disputed.
 [code] Later evidence revises a boundary mid-review → reprocess affected claims only.
+[code] While a review is open, a boundary move can't add material to its scope;
+       extra material queues for a later review. Shrinking is allowed.     (TLC fix R7)
+[code] A claim being rechecked is out of assessment until it passes again; an
+       open question on it pauses and the tutor says why.                  (TLC fix R3)
 [agent] Disclose the correction with evidence; update only affected observations.
 [code] Soft target (default 10 min, configurable) reached at a natural pause →
        offer continue / wrap up. Never a forced cutoff.
 [agent] Propose each observation's status (independent / partial / after help /
        unresolved / not assessed) from the actual turns.
 [code] Clamp the proposal: help before the answer caps at "after help";
-       skipped or unanswered is "not assessed".
+       skipped or unanswered is "not assessed"; a dispute still open or
+       unsettled saves as "disputed", never as a gap.                       (TLC fix R14)
 [code] Save notes, observations, suggested graph links, evidence refs (stable IDs).
 [code] Save fails → keep a pending save locally, show it, offer retry
        (stable IDs make retry overwrite, not duplicate).
+[code] Evidence cited by a pending save counts as cited; expiry skips it.  (TLC fix R16)
 [user] Inspect, edit, accept/correct links, revisit, delete.
 ```
 
-Flow sections A–D approved as a whole on 2026-11-03. Rules and TLC check pending.
+Flow sections A–D approved as a whole on 2026-11-03. The first TLC run broke R3, R4, R7, R8, R14 and R16; Derek approved the six flow fixes marked "TLC fix" above on 2026-11-03 (rules unchanged). Re-check pending.
 
 ## Rules (approved by Derek, 2026-11-03)
 
