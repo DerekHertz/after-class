@@ -288,7 +288,7 @@ function evidenceInScope(ids: readonly EvidenceId[], input: TutorInput): Verdict
   const inScope = new Set<EvidenceId>();
   for (const p of input.evidence.passages) if (Material.covers(scope, p.sourceId, p.interval)) inScope.add(p.id);
   for (const f of input.evidence.frames) {
-    if (Material.get(scope, f.sourceId).intervals().some((i) => i.start <= f.mediaS && f.mediaS <= i.end)) inScope.add(f.id);
+    if (Material.get(scope, f.sourceId).intervals().some((i) => i.start <= f.mediaS && f.mediaS < i.end)) inScope.add(f.id);
   }
   const outside = ids.filter((id) => !inScope.has(id));
   return outside.length === 0 ? OK : no(`evidence outside the review scope: ${outside.join(", ")}`);
