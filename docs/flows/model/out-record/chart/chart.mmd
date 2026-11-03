@@ -1,0 +1,50 @@
+---
+title: "After Class review record"
+---
+stateDiagram-v2
+  direction LR
+  state "At the same time" as all {
+    state "Review" as r0 {
+      s0: Reviewing
+      s1: Question open
+      s2: Review ended
+      s3: Detour offered
+      s4: On a detour
+      s5: Waiting for a resource
+      [*] --> s0
+      s0 --> s1: the tutor asks about a claim
+      s0 --> s2: you end the review and the save fails or you end the review and it saves
+      s1 --> s0: you skip or you answer
+      s1 --> s2: you end the review and the save fails or you end the review and it saves
+      s0 --> s3: the tutor offers a detour
+      s3 --> s0: you say no
+      s3 --> s2: you end the review and the save fails or you end the review and it saves
+      s3 --> s4: you say yes
+      s3 --> s5: you say yes
+      s4 --> s2: you end the review and the save fails or you end the review and it saves
+      s4 --> s0: the detour ends
+      s5 --> s2: you end the review and the save fails or you end the review and it saves
+      s5 --> s4: the resource search ends or you continue on lecture evidence
+    }
+    --
+    state "Note" as r1 {
+      s6: No note yet
+      s7: Save pending
+      s8: Note saved
+      s9: Note deleted
+      [*] --> s6
+      s6 --> s7: you end the review and the save fails
+      s6 --> s8: you end the review and it saves
+      s7 --> s8: you retry the save
+      s8 --> s9: you delete the note
+    }
+    --
+    state "Evidence" as r2 {
+      s10: Evidence kept
+      s11: Evidence deleted by me
+      s12: Evidence expired
+      [*] --> s10
+      s10 --> s11: you delete the evidence [when Review is Review ended and Note is not No note yet]
+      s10 --> s12: the evidence expires [when Review is Review ended and Note is Note deleted]
+    }
+  }

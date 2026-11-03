@@ -23,7 +23,6 @@ const STEPS = {
   YouAnswer: "you answer",
   YouSkip: "you skip",
   YouDispute: "you dispute the interpretation",
-  YouSettleTheDispute: "you settle the dispute",
   TutorOffersADetour: "the tutor offers a detour",
   YouAcceptTheDetour: "you say yes",
   YouDeclineTheDetour: "you say no",
@@ -37,6 +36,11 @@ const STEPS = {
 };
 
 export const step = (action, from, to) => {
+  if (action === "YouSettleTheDispute") {
+    const gap = Object.values(to.obs).filter((o) => o === "resolved gap").length >
+      Object.values(from.obs).filter((o) => o === "resolved gap").length;
+    return gap ? "you settle the dispute as a gap" : "you settle the dispute as not a gap";
+  }
   if (action === "YouEndTheReview") {
     return to.note === "saved" ? "you end the review and it saves" : "you end the review and the save fails";
   }

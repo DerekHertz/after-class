@@ -1,0 +1,40 @@
+---
+title: "After Class preparation and review"
+---
+stateDiagram-v2
+  direction LR
+  state "At the same time" as all {
+    state "Capture" as r0 {
+      s0: Not capturing
+      s1: Capturing
+      [*] --> s0
+      s0 --> s1: you start capture
+    }
+    --
+    state "Preparation" as r1 {
+      s2: Nothing closed yet
+      s3: Preparing
+      s4: Prepared
+      [*] --> s2
+      s2 --> s3: a chunk closes at a topic boundary or a chunk hits the time cap [when Capture is Capturing]
+      s3 --> s4: Jev passes a claim or Jev says no again and the claim is unverified
+      s4 --> s3: a later window moves a boundary [when Review is one of No review, Reviewing]
+      s4 --> s3: a later window moves a boundary and the tutor says why the question paused [when Review is Question open]
+    }
+    --
+    state "Review" as r2 {
+      s5: No review
+      s6: Reviewing
+      s7: Question open
+      s8: Question paused
+      [*] --> s5
+      s5 --> s6: you press Review now [when Capture is Capturing and Preparation is Prepared]
+      s6 --> s5: you end the review
+      s6 --> s7: the tutor asks about a claim [when Preparation is Prepared]
+      s7 --> s6: you answer
+      s7 --> s5: you end the review
+      s7 --> s8: a later window moves a boundary and the tutor says why the question paused
+      s8 --> s5: you end the review
+      s8 --> s7: the claim passes again and the question resumes [when Preparation is Prepared]
+    }
+  }

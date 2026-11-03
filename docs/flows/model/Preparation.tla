@@ -1,6 +1,7 @@
 ---- MODULE Preparation ----
 \* Capture, chunking, claim preparation, invites and review scope from docs/flows/after-class.md
 \* sections A-D. Checks R3-R10. The review record (detours, disputes, saving, evidence) is Record.tla.
+\* Each flow line tagged "(TLC fix Rn)" is quoted above the guard or step that models it.
 \* Time is abstract: "~30s", "~8 min" and "~15 min" are free choices of the order of steps.
 \* [agent] and [Jev] steps may give any answer the flow allows. [code] steps do what their line says.
 
@@ -31,18 +32,22 @@ VARIABLES
     review,         \* "none" | "nothing to review" | "active"
     scope,          \* chunks frozen into the review
     reviewed,       \* chunks whose review has ended
-    question        \* NoQuestion, or the claim the open question judges my answer against
+    question,       \* NoQuestion, or the claim the open question judges my answer against
+    paused          \* NoQuestion, or the claim whose question paused while it is rechecked
 
 vars == <<capture, watched, closed, boundary, boundaryFixed, status, revisions, late,
-          resources, invite, review, scope, reviewed, question>>
+          resources, invite, review, scope, reviewed, question, paused>>
 CaptureVars == <<capture, watched, closed, boundary, boundaryFixed>>
 PrepVars == <<status, revisions, late, resources>>
-ReviewVars == <<invite, review, scope, reviewed, question>>
+ReviewVars == <<invite, review, scope, reviewed, question, paused>>
 
-Material(ch) ==
+\* The passages chunk ch holds when chunk 1 ends at passage b.
+MaterialAt(ch, b) ==
     IF ch = 1
-    THEN IF 1 \in closed THEN 1..boundary ELSE 1..watched
-    ELSE IF 1 \in closed THEN (boundary + 1)..watched ELSE {}
+    THEN IF 1 \in closed THEN 1..b ELSE 1..watched
+    ELSE IF 1 \in closed THEN (b + 1)..watched ELSE {}
+
+Material(ch) == MaterialAt(ch, boundary)
 
 ScopeMaterial == UNION {Material(ch) : ch \in scope}
 
@@ -65,6 +70,7 @@ TypeOK ==
     /\ scope \subseteq Chunks
     /\ reviewed \subseteq Chunks
     /\ question \in {NoQuestion} \union Claims
+    /\ paused \in {NoQuestion} \union Claims
 
 Init ==
     /\ capture = "not started"
@@ -81,6 +87,7 @@ Init ==
     /\ scope = {}
     /\ reviewed = {}
     /\ question = NoQuestion
+    /\ paused = NoQuestion
 
 \* The chunk that is open now, or 0 when both are closed.
 OpenChunk == IF 1 \notin closed THEN 1 ELSE IF 2 \notin closed THEN 2 ELSE 0
@@ -146,7 +153,7 @@ ChunkClosesAtABoundary ==
     /\ CloseOpenChunk
     /\ invite' = "invited"
     /\ UNCHANGED <<capture, watched, boundaryFixed, revisions, late, resources>>
-    /\ UNCHANGED <<review, scope, reviewed, question>>
+    /\ UNCHANGED <<review, scope, reviewed, question, paused>>
 
 \* [code] Chunk exceeds time cap (~8 min watched) -> close it, provenance "time".
 \* [code] On a time-cap close, invite only if >= ~15 min watched since the last invite or Later.
@@ -156,7 +163,7 @@ ChunkHitsTheTimeCap ==
     /\ CloseOpenChunk
     /\ invite' \in {invite, "invited"}
     /\ UNCHANGED <<capture, watched, boundaryFixed, revisions, late, resources>>
-    /\ UNCHANGED <<review, scope, reviewed, question>>
+    /\ UNCHANGED <<review, scope, reviewed, question, paused>>
 
 \* [code] Later evidence revises a boundary mid-review -> reprocess affected claims only.
 \* The yes/no row ("flag for re-check on the next window") is how a closed boundary gets revised.
@@ -171,16 +178,26 @@ ALaterWindowMovesABoundary ==
         /\ nb >= 1
         /\ nb <= watched
         /\ (2 \in closed) => nb < watched
+        \* [code] While a review is open, a boundary move can't add material to its scope;
+        \*        extra material queues for a later review. Shrinking is allowed.  (TLC fix R7)
+        \* A move that would add material waits until the review ends. Until then the material stays
+        \* in a chunk outside the scope, which a later review covers.
+        /\ review = "active" => UNION {MaterialAt(ch, nb) : ch \in scope} \subseteq ScopeMaterial
         /\ boundary' = nb
     /\ boundaryFixed' = TRUE
-    /\ status' = [c \in Claims |->
-                    IF c \in ClaimsIn(closed) /\ status[c] \in InFlight \union {"supported", "unverified"}
-                    THEN "checking" ELSE status[c]]
+    /\ LET redo == {c \in ClaimsIn(closed) : status[c] \in InFlight \union {"supported", "unverified"}}
+       IN /\ status' = [c \in Claims |-> IF c \in redo THEN "checking" ELSE status[c]]
+          \* [code] A claim being rechecked is out of assessment until it passes again; an
+          \*        open question on it pauses and the tutor says why.  (TLC fix R3)
+          /\ IF question \in redo
+             THEN /\ paused' = question
+                  /\ question' = NoQuestion
+             ELSE UNCHANGED <<paused, question>>
     /\ late' = [c \in Claims |->
                     IF c \in ClaimsIn(closed) /\ status[c] \in InFlight
                     THEN late[c] \union {"outdated"} ELSE late[c]]
     /\ UNCHANGED <<capture, watched, closed, revisions, resources>>
-    /\ UNCHANGED ReviewVars
+    /\ UNCHANGED <<invite, review, scope, reviewed>>
 
 \* ---------------- C. Preparation and review invites ----------------
 
@@ -192,9 +209,13 @@ AgentWritesAClaim(c) ==
 
 \* [Jev] "Does this evidence support the claim in its stated scope?"
 \* [code] yes -> supported_by_check. no/uncertain -> one revision.
+\* [code] A claim keeps its used revision through reprocessing and retry.  (TLC fix R4)
+\* revisions is never reset, so a claim checked again after reprocessing or retry that has used
+\* its revision goes the way of "Still no/uncertain -> unverified".
 JevChecksAClaim(c) ==
     /\ status[c] = "checking"
-    /\ status' \in {[status EXCEPT ![c] = "supported"], [status EXCEPT ![c] = "revising"]}
+    /\ status' \in {[status EXCEPT ![c] = "supported"],
+                    [status EXCEPT ![c] = IF revisions[c] = 0 THEN "revising" ELSE "unverified"]}
     /\ UNCHANGED CaptureVars /\ UNCHANGED <<revisions, late, resources>> /\ UNCHANGED ReviewVars
 
 \* [agent] Revise once against the evidence; never fill missing capture.
@@ -212,14 +233,13 @@ JevRechecksAClaim(c) ==
     /\ UNCHANGED CaptureVars /\ UNCHANGED <<revisions, late, resources>> /\ UNCHANGED ReviewVars
 
 \* [code] Stop early -> ... late results from cancelled jobs are logged, never applied.
-\* No flow line says what happens to a late result from an outdated job, so it is handled like
-\* any other result: its verdict lands on the claim.
+\* [code] Every job carries the claim revision it worked on; a result for an
+\*        outdated revision is logged, never applied.  (TLC fix R8)
+\* An "outdated" job is one whose carried revision is older than the claim's after a boundary move.
 ALateResultArrives(c) ==
     /\ \E kind \in late[c] :
         /\ late' = [late EXCEPT ![c] = @ \ {kind}]
-        /\ IF kind = "cancelled"
-           THEN UNCHANGED status
-           ELSE status' \in {[status EXCEPT ![c] = "supported"], [status EXCEPT ![c] = "unverified"]}
+        /\ UNCHANGED status
     /\ UNCHANGED CaptureVars /\ UNCHANGED <<revisions, resources>> /\ UNCHANGED ReviewVars
 
 \* [agent] Separate job: find supplemental resources for supported concepts.
@@ -239,13 +259,13 @@ ResourceSearchEnds ==
 YouChooseLater ==
     /\ invite \in {"invited", "waiting"}
     /\ invite' = "later"
-    /\ UNCHANGED CaptureVars /\ UNCHANGED PrepVars /\ UNCHANGED <<review, scope, reviewed, question>>
+    /\ UNCHANGED CaptureVars /\ UNCHANGED PrepVars /\ UNCHANGED <<review, scope, reviewed, question, paused>>
 
 \* [user] ... wait. [code] Wait -> show Processing; estimate only when reliable.
 YouChooseWait ==
     /\ invite = "invited"
     /\ invite' = "waiting"
-    /\ UNCHANGED CaptureVars /\ UNCHANGED PrepVars /\ UNCHANGED <<review, scope, reviewed, question>>
+    /\ UNCHANGED CaptureVars /\ UNCHANGED PrepVars /\ UNCHANGED <<review, scope, reviewed, question, paused>>
 
 \* [user] Review now ... (Review now always available.)
 \* [code] Freeze review scope = prepared chunks now; new viewing queues for later.
@@ -255,7 +275,7 @@ YouStartAReview ==
     /\ review' = "active"
     /\ scope' = ReadyScope
     /\ invite' = "none"
-    /\ UNCHANGED <<reviewed, question>>
+    /\ UNCHANGED <<reviewed, question, paused>>
     /\ UNCHANGED CaptureVars /\ UNCHANGED PrepVars
 
 \* [code] No supported claims in scope -> don't start; show gaps and unverified claims with evidence.
@@ -263,7 +283,7 @@ YouPressReviewNowWithNothingSupported ==
     /\ review = "none"
     /\ ~HasSupported(ReadyScope)
     /\ review' = "nothing to review"
-    /\ UNCHANGED <<invite, scope, reviewed, question>>
+    /\ UNCHANGED <<invite, scope, reviewed, question, paused>>
     /\ UNCHANGED CaptureVars /\ UNCHANGED PrepVars
 
 \* [code] ... offer rewatch of that interval or retry.
@@ -276,7 +296,7 @@ YouRewatchOrRetry ==
        \/ status' = [c \in Claims |->
                         IF c \in ClaimsIn(closed \ reviewed) /\ status[c] = "dropped"
                         THEN "queued" ELSE status[c]]
-    /\ UNCHANGED <<invite, scope, reviewed, question>>
+    /\ UNCHANGED <<invite, scope, reviewed, question, paused>>
     /\ UNCHANGED CaptureVars /\ UNCHANGED <<revisions, late, resources>>
 
 \* [user] ... Stop early.
@@ -298,7 +318,7 @@ YouStopEarly ==
           /\ review' = IF ok THEN "active" ELSE "nothing to review"
           /\ scope' = IF ok THEN closed \ reviewed ELSE scope
     /\ invite' = "none"
-    /\ UNCHANGED <<reviewed, question>>
+    /\ UNCHANGED <<reviewed, question, paused>>
     /\ UNCHANGED CaptureVars /\ UNCHANGED <<revisions, resources>>
 
 \* ---------------- D. Review ----------------
@@ -310,8 +330,25 @@ TutorAsksAboutAClaim(c) ==
     /\ review = "active"
     /\ question = NoQuestion
     /\ c \in ClaimsIn(scope)
+    /\ c # paused
     /\ status[c] \notin {"unverified", "dropped"}
+    \* [code] A claim being rechecked is out of assessment until it passes again.  (TLC fix R3)
+    /\ status[c] \notin Pending
     /\ question' = c
+    /\ UNCHANGED <<invite, review, scope, reviewed, paused>>
+    /\ UNCHANGED CaptureVars /\ UNCHANGED PrepVars
+
+\* [code] A claim being rechecked is out of assessment until it passes again; an
+\*        open question on it pauses and the tutor says why.  (TLC fix R3)
+\* The paused question is how the tutor returns to that claim, once the claim passes again. If the
+\* claim ends unverified, the question stays paused until the review ends.
+TutorResumesThePausedQuestion ==
+    /\ review = "active"
+    /\ question = NoQuestion
+    /\ paused # NoQuestion
+    /\ status[paused] = "supported"
+    /\ question' = paused
+    /\ paused' = NoQuestion
     /\ UNCHANGED <<invite, review, scope, reviewed>>
     /\ UNCHANGED CaptureVars /\ UNCHANGED PrepVars
 
@@ -319,7 +356,7 @@ TutorAsksAboutAClaim(c) ==
 YouAnswer ==
     /\ question # NoQuestion
     /\ question' = NoQuestion
-    /\ UNCHANGED <<invite, review, scope, reviewed>>
+    /\ UNCHANGED <<invite, review, scope, reviewed, paused>>
     /\ UNCHANGED CaptureVars /\ UNCHANGED PrepVars
 
 \* [user] ... end.
@@ -329,6 +366,7 @@ YouEndTheReview ==
     /\ reviewed' = reviewed \union scope
     /\ scope' = {}
     /\ question' = NoQuestion
+    /\ paused' = NoQuestion
     /\ UNCHANGED invite
     /\ UNCHANGED CaptureVars /\ UNCHANGED PrepVars
 
@@ -355,6 +393,7 @@ Next ==
     \/ YouRewatchOrRetry
     \/ YouStopEarly
     \/ \E c \in Claims : TutorAsksAboutAClaim(c)
+    \/ TutorResumesThePausedQuestion
     \/ YouAnswer
     \/ YouEndTheReview
 

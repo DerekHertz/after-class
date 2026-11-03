@@ -1,147 +1,26 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 0 and seed 8580200985787098924 with 1 worker on 8 cores with 1986MB heap and 64MB offheap memory [pid: 1684204] (Linux 6.18.54.1-microsoft-standard-WSL2 amd64, Ubuntu 21.0.12.1 x86_64, MSBDiskFPSet, DiskStateQueue).
-Parsing file /home/dhertzell/AfterClass/docs/flows/model/Preparation.tla
-Parsing file /tmp/statechart-AMLxh6/statechart-g2c2ra/tmp-verdict-1/Naturals.tla
+Running breadth-first search Model-Checking with fp 0 and seed 8087878550912899848 with 1 worker on 8 cores with 1986MB heap and 64MB offheap memory [pid: 1867574] (Linux 6.18.54.1-microsoft-standard-WSL2 amd64, Ubuntu 21.0.12.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/dhertzell/AfterClass/.claude/worktrees/agent-a4a7579d4d37c6c62/docs/flows/model/Preparation.tla
+Parsing file /tmp/statechart-MAHrNu/statechart-ZQnXNb/tmp-verdict-1/Naturals.tla
 Semantic processing of module Naturals
 Semantic processing of module Preparation
-Starting... (2026-11-03 13:06:53)
+Starting... (2026-11-03 14:10:46)
 Implied-temporal checking--satisfiability problem has 2 branches.
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-03 13:06:53.
-Error: Action property R8_LateResultsNeverOverwrite is violated.
-Error: The behavior up to this point is:
-State 1: <Initial predicate>
-/\ boundary = 0
-/\ reviewed = {}
-/\ boundaryFixed = FALSE
-/\ watched = 0
-/\ review = "none"
-/\ revisions = (<<1, 1>> :> 0 @@ <<2, 1>> :> 0)
-/\ invite = "none"
-/\ late = (<<1, 1>> :> {} @@ <<2, 1>> :> {})
-/\ question = <<0, 0>>
-/\ resources = "not started"
-/\ capture = "not started"
-/\ scope = {}
-/\ status = (<<1, 1>> :> "none" @@ <<2, 1>> :> "none")
-/\ closed = {}
-
-State 2: <YouStartCapture line 99, col 5 to line 102, col 49 of module Preparation>
-/\ boundary = 0
-/\ reviewed = {}
-/\ boundaryFixed = FALSE
-/\ watched = 0
-/\ review = "none"
-/\ revisions = (<<1, 1>> :> 0 @@ <<2, 1>> :> 0)
-/\ invite = "none"
-/\ late = (<<1, 1>> :> {} @@ <<2, 1>> :> {})
-/\ question = <<0, 0>>
-/\ resources = "not started"
-/\ capture = "capturing"
-/\ scope = {}
-/\ status = (<<1, 1>> :> "none" @@ <<2, 1>> :> "none")
-/\ closed = {}
-
-State 3: <YouWatchAPassage line 106, col 5 to line 111, col 49 of module Preparation>
-/\ boundary = 0
-/\ reviewed = {}
-/\ boundaryFixed = FALSE
-/\ watched = 1
-/\ review = "none"
-/\ revisions = (<<1, 1>> :> 0 @@ <<2, 1>> :> 0)
-/\ invite = "none"
-/\ late = (<<1, 1>> :> {} @@ <<2, 1>> :> {})
-/\ question = <<0, 0>>
-/\ resources = "not started"
-/\ capture = "capturing"
-/\ scope = {}
-/\ status = (<<1, 1>> :> "none" @@ <<2, 1>> :> "none")
-/\ closed = {}
-
-State 4: <YouWatchAPassage line 106, col 5 to line 111, col 49 of module Preparation>
-/\ boundary = 0
-/\ reviewed = {}
-/\ boundaryFixed = FALSE
-/\ watched = 2
-/\ review = "none"
-/\ revisions = (<<1, 1>> :> 0 @@ <<2, 1>> :> 0)
-/\ invite = "none"
-/\ late = (<<1, 1>> :> {} @@ <<2, 1>> :> {})
-/\ question = <<0, 0>>
-/\ resources = "not started"
-/\ capture = "capturing"
-/\ scope = {}
-/\ status = (<<1, 1>> :> "none" @@ <<2, 1>> :> "none")
-/\ closed = {}
-
-State 5: <ChunkClosesAtABoundary line 144, col 5 to line 149, col 54 of module Preparation>
-/\ boundary = 2
-/\ reviewed = {}
-/\ boundaryFixed = FALSE
-/\ watched = 2
-/\ review = "none"
-/\ revisions = (<<1, 1>> :> 0 @@ <<2, 1>> :> 0)
-/\ invite = "invited"
-/\ late = (<<1, 1>> :> {} @@ <<2, 1>> :> {})
-/\ question = <<0, 0>>
-/\ resources = "not started"
-/\ capture = "capturing"
-/\ scope = {}
-/\ status = (<<1, 1>> :> "queued" @@ <<2, 1>> :> "none")
-/\ closed = {1}
-
-State 6: <AgentWritesAClaim line 189, col 5 to line 191, col 96 of module Preparation>
-/\ boundary = 2
-/\ reviewed = {}
-/\ boundaryFixed = FALSE
-/\ watched = 2
-/\ review = "none"
-/\ revisions = (<<1, 1>> :> 0 @@ <<2, 1>> :> 0)
-/\ invite = "invited"
-/\ late = (<<1, 1>> :> {} @@ <<2, 1>> :> {})
-/\ question = <<0, 0>>
-/\ resources = "not started"
-/\ capture = "capturing"
-/\ scope = {}
-/\ status = (<<1, 1>> :> "checking" @@ <<2, 1>> :> "none")
-/\ closed = {1}
-
-State 7: <ALaterWindowMovesABoundary line 167, col 5 to line 183, col 27 of module Preparation>
-/\ boundary = 1
-/\ reviewed = {}
-/\ boundaryFixed = TRUE
-/\ watched = 2
-/\ review = "none"
-/\ revisions = (<<1, 1>> :> 0 @@ <<2, 1>> :> 0)
-/\ invite = "invited"
-/\ late = (<<1, 1>> :> {"outdated"} @@ <<2, 1>> :> {})
-/\ question = <<0, 0>>
-/\ resources = "not started"
-/\ capture = "capturing"
-/\ scope = {}
-/\ status = (<<1, 1>> :> "checking" @@ <<2, 1>> :> "none")
-/\ closed = {1}
-
-State 8: <ALateResultArrives line 218, col 5 to line 223, col 90 of module Preparation>
-/\ boundary = 1
-/\ reviewed = {}
-/\ boundaryFixed = TRUE
-/\ watched = 2
-/\ review = "none"
-/\ revisions = (<<1, 1>> :> 0 @@ <<2, 1>> :> 0)
-/\ invite = "invited"
-/\ late = (<<1, 1>> :> {} @@ <<2, 1>> :> {})
-/\ question = <<0, 0>>
-/\ resources = "not started"
-/\ capture = "capturing"
-/\ scope = {}
-/\ status = (<<1, 1>> :> "supported" @@ <<2, 1>> :> "none")
-/\ closed = {1}
-
-660 states generated, 290 distinct states found, 176 states left on queue.
-The depth of the complete state graph search is 8.
-The average outdegree of the complete state graph is 3 (minimum is 0, the maximum 9 and the 95th percentile is 7).
-Finished in 00s at (2026-11-03 13:06:53)
+Finished computing initial states: 1 distinct state generated at 2026-11-03 14:10:46.
+Progress(16) at 2026-11-03 14:10:49: 176,749 states generated (176,749 s/min), 37,955 distinct states found (37,955 ds/min), 11,304 states left on queue.
+Progress(29) at 2026-11-03 14:10:58: 747,809 states generated, 112,424 distinct states found, 0 states left on queue.
+Checking 2 branches of temporal properties for the complete state space with 224848 total distinct states at (2026-11-03 14:10:58)
+Finished checking temporal properties in 01s at 2026-11-03 14:11:00
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 3.9E-9
+  based on the actual fingerprints:  val = 5.8E-10
+747809 states generated, 112424 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 29.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 10 and the 95th percentile is 3).
+Finished in 14s at (2026-11-03 14:11:00)
 

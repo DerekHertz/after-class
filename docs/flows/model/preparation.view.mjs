@@ -15,7 +15,8 @@ const preparation = (v) => {
 const review = (v) => {
   if (v.review === "nothing to review") return "Nothing to review";
   if (v.review === "none") return "No review";
-  return v.question[1] === 0 ? "Reviewing" : "Question open";
+  if (v.question[1] !== 0) return "Question open";
+  return v.paused[1] === 0 ? "Reviewing" : "Question paused";
 };
 
 export const title = "After Class preparation and review";
@@ -26,8 +27,6 @@ export const state = (v) => ({
   Review: review(v),
 });
 
-const changed = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
-
 const STEPS = {
   YouStartCapture: "you start capture",
   YouWatchAPassage: "you watch a passage",
@@ -36,10 +35,8 @@ const STEPS = {
   YouStopCapture: "you stop capture",
   ChunkClosesAtABoundary: "a chunk closes at a topic boundary",
   ChunkHitsTheTimeCap: "a chunk hits the time cap",
-  ALaterWindowMovesABoundary: "a later window moves a boundary",
   AgentWritesAClaim: "the agent writes a claim",
   AgentRevisesAClaim: "the agent revises a claim",
-  JevRechecksAClaim: "Jev checks the revised claim",
   ResourceSearchStarts: "a resource search starts",
   ResourceSearchEnds: "the resource search ends",
   YouChooseLater: "you choose Later",
@@ -49,17 +46,23 @@ const STEPS = {
   YouRewatchOrRetry: "you rewatch or retry",
   YouStopEarly: "you choose Stop early",
   TutorAsksAboutAClaim: "the tutor asks about a claim",
+  TutorResumesThePausedQuestion: "the claim passes again and the question resumes",
+  ALateResultArrives: "a late result is logged",
   YouAnswer: "you answer",
   YouEndTheReview: "you end the review",
 };
 
 export const step = (action, from, to) => {
-  if (action === "JevChecksAClaim") {
-    const failed = Object.keys(to.status).some((k) => to.status[k] === "revising" && from.status[k] !== "revising");
-    return failed ? "Jev says a claim is not supported" : "Jev says a claim is supported";
+  if (action === "JevChecksAClaim" || action === "JevRechecksAClaim") {
+    const became = (s) => Object.keys(to.status).some((k) => to.status[k] === s && from.status[k] !== s);
+    if (became("revising")) return "Jev says no and the claim gets its one revision";
+    if (became("unverified")) return "Jev says no again and the claim is unverified";
+    return "Jev passes a claim";
   }
-  if (action === "ALateResultArrives") {
-    return changed(from.status, to.status) ? "an outdated result lands on a claim" : "a cancelled result is logged";
+  if (action === "ALaterWindowMovesABoundary") {
+    return from.question[1] !== 0 && to.question[1] === 0
+      ? "a later window moves a boundary and the tutor says why the question paused"
+      : "a later window moves a boundary";
   }
   return STEPS[action] ?? action;
 };
