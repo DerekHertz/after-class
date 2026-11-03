@@ -505,6 +505,7 @@ describe("extension build", () => {
     expect(readFileSync(join(out, "content.js"), "utf8")).not.toMatch(/^\s*(import|export)\s/m);
     expect(manifest.host_permissions).toContain("https://www.youtube.com/*");
     expect(manifest.host_permissions).toContain("http://127.0.0.1:4317/*");
+    expect(manifest.host_permissions).not.toContain("http://localhost:4317/*");
   });
 
   test("copying to a Windows path replaces a previous build but refuses an unrelated non-empty folder", () => {

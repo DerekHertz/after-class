@@ -5,7 +5,7 @@
   "description": "Explicit, visible capture of YouTube lectures for After Class reviews.",
   "minimum_chrome_version": "120",
   "permissions": ["storage", "unlimitedStorage", "tabs", "scripting", "alarms"],
-  "host_permissions": ["https://www.youtube.com/*", "http://localhost:4317/*", "http://127.0.0.1:4317/*"],
+  "host_permissions": ["https://www.youtube.com/*", "http://127.0.0.1:4317/*"],
   "background": { "service_worker": "worker.js", "type": "module" },
   "action": { "default_popup": "popup.html", "default_title": "After Class" },
   "options_page": "options.html",

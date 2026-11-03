@@ -304,7 +304,9 @@ async function recover(): Promise<void> {
 }
 
 // The pairing token must stay out of reach of content scripts.
-void chrome.storage.local.setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" }).catch(() => {});
+chrome.storage.local.setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" })?.catch((e: unknown) => {
+  console.error("After Class: could not restrict the pairing token to trusted contexts; content scripts may be able to read it", e);
+});
 void chrome.alarms.create(FLUSH_ALARM, { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === FLUSH_ALARM) void recover();
