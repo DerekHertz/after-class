@@ -23,7 +23,8 @@ export type StageUsage = {
   readonly errors: number;
   readonly aborted: number;
   readonly unknownCostCalls: number;
-  readonly usd: Readonly<Record<Exclude<Cost["kind"], "unknown">, number>>;
+  /** Null for a kind this stage made no calls of, so a total never shows $0.00 for money nobody measured. */
+  readonly usd: Readonly<Record<Exclude<Cost["kind"], "unknown">, number | null>>;
   /** Sums over calls that reported tokens; null when none did. */
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
@@ -121,15 +122,15 @@ export function createLedger(db: Db): Ledger {
       )
       .all(...w.args);
 
-    const out = new Map<Purpose, { provider: Provider; calls: number; errors: number; aborted: number; unknown: number; usd: Record<"measured" | "notional" | "estimated", number>; tokens: [number | null, number | null, number | null] }>();
+    const out = new Map<Purpose, { provider: Provider; calls: number; errors: number; aborted: number; unknown: number; usd: Record<"measured" | "notional" | "estimated", number | null>; tokens: [number | null, number | null, number | null] }>();
     const add = (a: number | null, b: number | null) => (b === null ? a : (a ?? 0) + b);
     for (const r of rows) {
-      const s = out.get(r.purpose) ?? { provider: r.provider, calls: 0, errors: 0, aborted: 0, unknown: 0, usd: { measured: 0, notional: 0, estimated: 0 }, tokens: [null, null, null] as [number | null, number | null, number | null] };
+      const s = out.get(r.purpose) ?? { provider: r.provider, calls: 0, errors: 0, aborted: 0, unknown: 0, usd: { measured: null, notional: null, estimated: null }, tokens: [null, null, null] as [number | null, number | null, number | null] };
       s.calls += r.calls;
       s.errors += r.errors;
       s.aborted += r.aborted;
       if (r.cost_kind === "unknown") s.unknown += r.calls;
-      else s.usd[r.cost_kind] += r.usd ?? 0;
+      else s.usd[r.cost_kind] = (s.usd[r.cost_kind] ?? 0) + (r.usd ?? 0);
       s.tokens = [add(s.tokens[0], r.input_tokens), add(s.tokens[1], r.output_tokens), add(s.tokens[2], r.cache_read_tokens)];
       out.set(r.purpose, s);
     }
