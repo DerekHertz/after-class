@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { randomId, stableId } from "../src/shared/ids";
-import type { CaptureId, ChunkRevisionId, ClaimId, EvidenceId, ReviewId, ThreadId, TurnId } from "../src/shared/ids";
+import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, EvidenceId, ReviewId, ThreadId, TurnId } from "../src/shared/ids";
 import type {
   AssessableClaim, ChunkPrep, ChunkProvenance, ChunkRevision, Claim, ClaimStatus, EvidenceBundle, Gap, LearnerAct, Passage, ReviewState,
   StartResult, Turn, TurnEvent, TutorMove, TutorMoveKind,
@@ -47,23 +47,29 @@ class World {
 
   constructor(readonly db: Db) {}
 
+  /** Closes chunk `ordinal`, or appends a new revision of it when it already closed. */
   close(ordinal: number, start: number, end: number, provenance: ChunkProvenance = "boundary"): ChunkRevision {
     const material = Material.of([[SRC, [interval(start, end)]]]);
+    const chunkId = stableId("chk", this.captureId, ordinal);
+    const latest = this.chunks.find((c) => c.chunkId === chunkId) ?? null;
     const rev: ChunkRevision = {
       id: stableId("crv", ordinal, start, end),
-      chunkId: stableId("chk", this.captureId, ordinal),
+      chunkId,
       captureId: this.captureId,
       ordinal,
-      revisionNo: 1,
+      revisionNo: (latest?.revisionNo ?? 0) + 1,
       material,
       windows: [],
       provenance,
       closedAtSeq: this.db.nextSeq(),
-      supersedes: null,
+      supersedes: latest?.id ?? null,
     };
     this.chunks = [...this.chunks.filter((c) => c.ordinal !== ordinal), rev];
+    this.revisions.push(rev);
     return rev;
   }
+
+  revisions: ChunkRevision[] = [];
 
   /** A claim whose single piece of evidence sits at [start, end). */
   claim(n: number, start: number, end: number, status: ClaimStatus = "supported_by_check", text = `claim ${n}`): ClaimId {
@@ -80,6 +86,7 @@ class World {
 
   readonly deps = {
     currentChunks: (_: CaptureId): readonly ChunkRevision[] => this.chunks,
+    chunkHistory: (chunkId: ChunkId): readonly ChunkRevision[] => this.revisions.filter((r) => r.chunkId === chunkId),
     prep: (id: ChunkRevisionId): ChunkPrep => {
       const rev = this.chunks.find((c) => c.id === id)!;
       const claims = [...this.claims].filter(([, c]) => this.inside(rev.material, c.evidence)).map(([cid, c]) => ({ id: cid, status: c.status }) as unknown as Claim);
@@ -250,49 +257,57 @@ describe("foldInvites (flow C invite policy)", () => {
     kind: "chunk_closed", seq: seq(n), provenance, chunk: stableId("crv", n), watchedS,
   });
   const answered = (n: number, a: "review_now" | "later" | "wait" | "stop_early", watchedS: number): InviteEvent => ({ kind: "answer", seq: seq(n), answer: a, watchedS });
+  const fold = (events: readonly InviteEvent[], gapS: number) => foldInvites(events, gapS).state;
 
   test("a boundary close invites", () => {
-    expect(foldInvites([closed(1, "boundary", 300)], 900)).toEqual({ state: "invited", atChunk: stableId("crv", 1) });
+    expect(fold([closed(1, "boundary", 300)], 900)).toEqual({ state: "invited", atChunk: stableId("crv", 1) });
   });
 
   test("a time-cap close invites only after the gap since the last invite", () => {
     const events = [closed(1, "boundary", 300), closed(2, "time", 780)];
-    expect(foldInvites(events, 900)).toEqual({ state: "invited", atChunk: stableId("crv", 1) });
-    expect(foldInvites([...events, closed(3, "time", 1260)], 900)).toEqual({ state: "invited", atChunk: stableId("crv", 3) });
+    expect(fold(events, 900)).toEqual({ state: "invited", atChunk: stableId("crv", 1) });
+    expect(fold([...events, closed(3, "time", 1260)], 900)).toEqual({ state: "invited", atChunk: stableId("crv", 3) });
   });
 
   test("a time-cap close with nothing before it invites once enough was watched", () => {
-    expect(foldInvites([closed(1, "time", 480)], 900)).toEqual({ state: "none" });
-    expect(foldInvites([closed(1, "time", 960)], 900)).toMatchObject({ state: "invited" });
+    expect(fold([closed(1, "time", 480)], 900)).toEqual({ state: "none" });
+    expect(fold([closed(1, "time", 960)], 900)).toMatchObject({ state: "invited" });
   });
 
   test("session_end sends no invite", () => {
-    expect(foldInvites([closed(1, "session_end", 5000)], 900)).toEqual({ state: "none" });
+    expect(fold([closed(1, "session_end", 5000)], 900)).toEqual({ state: "none" });
   });
 
-  test("a revised boundary leaves the state as it was", () => {
-    expect(foldInvites([closed(1, "boundary_revised", 300)], 900)).toEqual({ state: "none" });
-    expect(foldInvites([closed(1, "boundary", 300), answered(2, "later", 300), closed(3, "boundary_revised", 300)], 900)).toEqual({ state: "later" });
+  test("a chunk first stored with its boundary already revised closed at a boundary, so it invites", () => {
+    expect(fold([closed(1, "boundary_revised", 300)], 900)).toEqual({ state: "invited", atChunk: stableId("crv", 1) });
+  });
+
+  test("a repeated answer to the same invite changes nothing; the next invite takes answers afresh", () => {
+    const once = [closed(1, "boundary", 300), answered(2, "later", 300), closed(3, "time", 700)];
+    const twice = [...once, answered(4, "later", 700)];
+    expect(foldInvites(twice, 900)).toEqual(foldInvites(once, 900));
+    expect(fold([...twice, closed(5, "time", 1250)], 900)).toMatchObject({ state: "invited" });
+    expect(fold([...twice, closed(5, "boundary", 800), answered(6, "later", 800), closed(7, "time", 1250)], 900)).toEqual({ state: "later" });
   });
 
   test("Later waits for the next boundary close, and restarts the time-cap gap", () => {
     const afterLater = [closed(1, "boundary", 300), answered(2, "later", 300)];
-    expect(foldInvites(afterLater, 900)).toEqual({ state: "later" });
-    expect(foldInvites([...afterLater, closed(3, "time", 780)], 900)).toEqual({ state: "later" });
-    expect(foldInvites([...afterLater, closed(3, "time", 1300)], 900)).toMatchObject({ state: "invited" });
-    expect(foldInvites([...afterLater, closed(3, "boundary", 400)], 900)).toMatchObject({ state: "invited" });
+    expect(fold(afterLater, 900)).toEqual({ state: "later" });
+    expect(fold([...afterLater, closed(3, "time", 780)], 900)).toEqual({ state: "later" });
+    expect(fold([...afterLater, closed(3, "time", 1300)], 900)).toMatchObject({ state: "invited" });
+    expect(fold([...afterLater, closed(3, "boundary", 400)], 900)).toMatchObject({ state: "invited" });
   });
 
   test("Wait shows waiting; review_now, stop_early and a started review clear the invite", () => {
     const invited = closed(1, "boundary", 300);
-    expect(foldInvites([invited, answered(2, "wait", 300)], 900)).toEqual({ state: "waiting" });
-    expect(foldInvites([invited, answered(2, "review_now", 300)], 900)).toEqual({ state: "none" });
-    expect(foldInvites([invited, answered(2, "stop_early", 300)], 900)).toEqual({ state: "none" });
-    expect(foldInvites([invited, { kind: "review_started", seq: seq(2) }], 900)).toEqual({ state: "none" });
+    expect(fold([invited, answered(2, "wait", 300)], 900)).toEqual({ state: "waiting" });
+    expect(fold([invited, answered(2, "review_now", 300)], 900)).toEqual({ state: "none" });
+    expect(fold([invited, answered(2, "stop_early", 300)], 900)).toEqual({ state: "none" });
+    expect(fold([invited, { kind: "review_started", seq: seq(2) }], 900)).toEqual({ state: "none" });
   });
 
   test("events are folded in seq order whatever order they arrive in", () => {
-    expect(foldInvites([answered(2, "later", 300), closed(1, "boundary", 300)], 900)).toEqual({ state: "later" });
+    expect(fold([answered(2, "later", 300), closed(1, "boundary", 300)], 900)).toEqual({ state: "later" });
   });
 });
 
@@ -386,6 +401,32 @@ describe("invite", () => {
     const c = r.world.close(2, 780, 1100);
     expect(r.reviews.invite(r.capture)).toEqual({ state: "invited", atChunk: c.id });
     expect(r.reviews.answerInvite(r.capture, "wait")).toEqual({ state: "waiting" });
+  });
+
+  test("an outstanding boundary invite survives a revision of that chunk's boundary, and names the new revision", () => {
+    const r = rig();
+    r.world.close(0, 0, 300);
+    const revised = r.world.close(0, 0, 330, "boundary_revised");
+    expect(r.reviews.invite(r.capture)).toEqual({ state: "invited", atChunk: revised.id });
+  });
+
+  test("a boundary revision after Later is the same close, not a new invite", () => {
+    const r = rig();
+    r.world.close(0, 0, 300);
+    r.reviews.answerInvite(r.capture, "later");
+    r.world.close(0, 0, 330, "boundary_revised");
+    expect(r.reviews.invite(r.capture)).toEqual({ state: "later" });
+  });
+
+  test("a retried Later stores nothing and does not push the next time-cap invite back", () => {
+    const r = rig();
+    r.world.close(0, 0, 300);
+    r.reviews.answerInvite(r.capture, "later");
+    r.world.close(1, 300, 700, "time");
+    expect(r.reviews.answerInvite(r.capture, "later")).toEqual({ state: "later" });
+    expect(r.db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM invite_answers").get()!.n).toBe(1);
+    r.world.close(2, 700, 1250, "time");
+    expect(r.reviews.invite(r.capture)).toMatchObject({ state: "invited" });
   });
 
   test("a session_end close sends no invite, and Review now stays available", () => {

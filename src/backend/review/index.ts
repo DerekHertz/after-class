@@ -12,7 +12,7 @@
  *   for await (const ev of reviews.turn(reviewId, turnId, act)) send(ev);
  */
 import { stableId } from "../../shared/ids";
-import type { CaptureId, ChunkRevisionId, ClaimId, EvidenceId, ReviewId, ThreadId, TurnId } from "../../shared/ids";
+import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, EvidenceId, ReviewId, ThreadId, TurnId } from "../../shared/ids";
 import type {
   AssessableClaim, ChunkPrep, ChunkRevision, Claim, CodeNotice, Correction, EvidenceBundle, FrozenScope, InviteAnswer, InviteState,
   LearnerAct, ReviewOptions, ReviewView, Seq, StartChoice, StartResult, Turn, TurnEvent, TutorMove,
@@ -78,6 +78,8 @@ export type ReviewsOptions = {
 
 export type ReviewsDeps = {
   currentChunks(captureId: CaptureId): readonly ChunkRevision[];
+  /** Segmentation's `history`: every revision of a chunk, oldest first. */
+  chunkHistory(chunkId: ChunkId): readonly ChunkRevision[];
   prep(id: ChunkRevisionId): ChunkPrep;
   stopEarly(captureId: CaptureId, ids: readonly ChunkRevisionId[]): Seq;
   assessableIn(captureId: CaptureId, material: Material): readonly AssessableClaim[];
@@ -154,18 +156,23 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
 
   // ───────────────────────────── invites ─────────────────────────────
 
-  /** Watched seconds at each close: chunks partition the watched material, so a running sum of their durations. */
+  /**
+   * One close per chunk, at its first revision's seq and provenance, so revising a
+   * chunk's boundary neither drops its invite nor sends a second one.
+   * Watched seconds at each close: chunks partition the watched material, so a running sum of their durations.
+   */
   function closeEvents(captureId: CaptureId): InviteEvent[] {
     let watchedS = 0;
     return [...deps.currentChunks(captureId)]
       .sort((a, b) => a.ordinal - b.ordinal)
       .map((c): InviteEvent => {
         watchedS += Material.duration(c.material);
-        return { kind: "chunk_closed", seq: c.closedAtSeq, provenance: c.provenance, chunk: c.id, watchedS };
+        const first = deps.chunkHistory(c.chunkId)[0] ?? c;
+        return { kind: "chunk_closed", seq: first.closedAtSeq, provenance: first.provenance, chunk: c.id, watchedS };
       });
   }
 
-  function invite(captureId: CaptureId): InviteState {
+  function inviteFold(captureId: CaptureId) {
     const events: InviteEvent[] = [
       ...closeEvents(captureId),
       ...q.answers.all(captureId).map((a): InviteEvent => ({ kind: "answer", seq: asSeq(a.seq), answer: a.answer, watchedS: a.watched_s })),
@@ -174,9 +181,16 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     return foldInvites(events, timeInviteGapS);
   }
 
+  const invite = (captureId: CaptureId): InviteState => inviteFold(captureId).state;
+
+  /** Idempotent per invite: an answer already given to the latest invite is a retry and stores nothing. */
   function answerInvite(captureId: CaptureId, answer: InviteAnswer): InviteState {
-    q.insertAnswer.run(deps.nextSeq(), captureId, answer, deps.watchedSeconds(captureId), Math.round(now()));
-    return invite(captureId);
+    return db.tx(() => {
+      if (!inviteFold(captureId).answered.has(answer)) {
+        q.insertAnswer.run(deps.nextSeq(), captureId, answer, deps.watchedSeconds(captureId), Math.round(now()));
+      }
+      return invite(captureId);
+    });
   }
 
   // ───────────────────────────── options and start ─────────────────────────────

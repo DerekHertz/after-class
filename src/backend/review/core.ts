@@ -10,31 +10,40 @@ import type {
 import { Material } from "../../shared/time";
 
 export type InviteEvent =
+  /** One per chunk, at its first close: a later revision of the chunk is the same close. `chunk` is its current revision. */
   | { readonly kind: "chunk_closed"; readonly seq: Seq; readonly provenance: ChunkProvenance; readonly chunk: ChunkRevisionId; readonly watchedS: number }
   | { readonly kind: "answer"; readonly seq: Seq; readonly answer: InviteAnswer; readonly watchedS: number }
   | { readonly kind: "review_started"; readonly seq: Seq };
 
+/** `answered`: the answers already given to the latest invite, so a retried answer can be recognised. */
+export type InviteFold = { readonly state: InviteState; readonly answered: ReadonlySet<InviteAnswer> };
+
 /**
  * Flow C invite policy as a fold.
- *   boundary close                          → invited; mark = watchedS
+ *   boundary / boundary_revised close       → invited; mark = watchedS
  *   time close, watchedS − mark ≥ 900       → invited; mark = watchedS
- *   boundary_revised / session_end          → unchanged (SYNTHESIS open question 5: no invite on session end)
+ *   session_end                             → unchanged (SYNTHESIS open question 5: no invite on session end)
+ *   an answer already given to this invite  → unchanged
  *   later                                   → "later"; mark = watchedS (next invite at next boundary close)
  *   wait                                    → "waiting"
  *   review_now / stop_early / review_started → "none"
  */
-export function foldInvites(events: readonly InviteEvent[], timeInviteGapS: number): InviteState {
+export function foldInvites(events: readonly InviteEvent[], timeInviteGapS: number): InviteFold {
   let state: InviteState = { state: "none" };
   let mark = 0;
+  let answered = new Set<InviteAnswer>();
   for (const e of [...events].sort((a, b) => a.seq - b.seq)) {
     switch (e.kind) {
       case "chunk_closed":
-        if (e.provenance === "boundary" || (e.provenance === "time" && e.watchedS - mark >= timeInviteGapS)) {
+        if (e.provenance === "boundary" || e.provenance === "boundary_revised" || (e.provenance === "time" && e.watchedS - mark >= timeInviteGapS)) {
           state = { state: "invited", atChunk: e.chunk };
           mark = e.watchedS;
+          answered = new Set();
         }
         break;
       case "answer":
+        if (answered.has(e.answer)) break;
+        answered.add(e.answer);
         if (e.answer === "later") {
           state = { state: "later" };
           mark = e.watchedS;
@@ -49,7 +58,7 @@ export function foldInvites(events: readonly InviteEvent[], timeInviteGapS: numb
         break;
     }
   }
-  return state;
+  return { state, answered };
 }
 
 /**
