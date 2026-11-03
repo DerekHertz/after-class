@@ -13,6 +13,10 @@
  * Mounted (M3): GET /health (Host and Origin only), GET /usage, GET /app/* (the bundle from scripts/build-app.ts,
  * Host and Origin only, because a navigation cannot carry a header; the token rides in the HTML's
  * <meta name="afterclass-token">). Every other `ROUTES` entry answers 501 until M4 and M7 mount it.
+ *
+ * Accepted limit: the token is in the HTML of GET /app/, so any local process or user that can reach 127.0.0.1:<port>
+ * can read it, even though the token file is 0600. The checks above stop web pages and DNS rebinding, not local code.
+ * Before M4 mounts /ingest, set an explicit maxRequestBodySize (Bun's default is 128 MB).
  * Not yet: GET /events (SSE), GET /trace/captures/:id, GET /memo/:key.
  */
 import { createHash, timingSafeEqual } from "node:crypto";
