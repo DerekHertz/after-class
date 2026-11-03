@@ -1,5 +1,7 @@
 /**
  * M3: the HTTP shell. Auth (Host, Origin, token), the routes M3 mounts, and the bundled review app.
+ * M4: ingest, capture view, invite answer. M7a: the review routes, over the real review and record modules on an
+ * in-memory db with a fake preparation world and a scripted tutor task.
  * Fetch cannot send an arbitrary Host or an unnormalised path, so requests that need either go over a raw socket.
  */
 import { afterAll, describe, expect, test } from "bun:test";
@@ -11,12 +13,31 @@ import { buildApp } from "../scripts/build-app";
 import { MAX_BODY_BYTES, authorize, serve } from "../src/backend/http";
 import type { AuthConfig } from "../src/backend/http";
 import { createEvidence } from "../src/backend/evidence";
+import type { Db } from "../src/backend/db";
+import { asSeq } from "../src/backend/db";
+import type { Preparation } from "../src/backend/preparation";
+import { createMemo } from "../src/backend/providers/memo";
+import type { Task } from "../src/backend/providers/memo";
 import { createLedger } from "../src/backend/providers/ledger";
+import { createRecord } from "../src/backend/record";
+import { createReviews } from "../src/backend/review";
 import type { Reviews } from "../src/backend/review";
-import type { InviteAnswer, InviteState } from "../src/shared/domain";
-import { stableId } from "../src/shared/ids";
-import { ROUTES, captureResponse, ingestAckResponse } from "../src/shared/wire";
-import { testDb } from "./fakes";
+import { nextThreadId } from "../src/backend/review/tutor";
+import type { TutorInput, TutorOutput } from "../src/backend/review/tutor";
+import type { Segmentation } from "../src/backend/segmentation";
+import type {
+  AssessableClaim, ChunkPrep, ChunkRevision, Claim, ClaimStatus, EvidenceBundle, Gap, InviteAnswer, InviteState, LearnerAct, Passage, Seq,
+} from "../src/shared/domain";
+import { randomId, stableId } from "../src/shared/ids";
+import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, EvidenceId, IdPart, ReviewId, TurnId } from "../src/shared/ids";
+import { Material, interval } from "../src/shared/time";
+import type { Interval } from "../src/shared/time";
+import {
+  ROUTES, captureResponse, ingestAckResponse, reviewOptionsResponse, reviewViewResponse, saveResponse, startReviewResponse, tutorStreamEvent,
+} from "../src/shared/wire";
+import { fakeTask, ok, testDb } from "./fakes";
+import type { FakeStep } from "./fakes";
+import { raceAt } from "./interleave";
 
 const TOKEN = "tok-9f3a1c77e0b24d5aa8c1";
 const EXT_ID = "abcdefghijklmnopabcdefghijklmnop";
@@ -48,16 +69,19 @@ function fixtureApp(): string {
   return dir;
 }
 
-/** The real evidence module on an in-memory db; reviews is a fake whose invite state a test sets. */
-function world() {
-  const db = testDb();
-  const dir = scratchDir("afterclass-data-");
-  const evidence = createEvidence(db, dir, {
+function evidenceOn(db: Db) {
+  return createEvidence(db, scratchDir("afterclass-data-"), {
     lookupFrameChange: (input) => ({ kind: "missing", key: stableId("key", input.after.frame.id) }),
     runFrameChange: async () => undefined,
     frameChangeKey: (input) => stableId("key", input.after.frame.id),
     onChange: () => {},
   });
+}
+
+/** The real evidence module on an in-memory db; reviews is a fake whose invite state a test sets. */
+function world() {
+  const db = testDb();
+  const evidence = evidenceOn(db);
   const invite = { state: { state: "none" } as InviteState, answers: [] as InviteAnswer[] };
   const reviews = {
     invite: () => invite.state,
@@ -210,13 +234,17 @@ describe("health and the API", () => {
     expect(bad.headers.get("access-control-allow-origin")).toBeNull();
   });
 
-  test("other ROUTES are 501 after auth and id validation; bad ids are 400; unknown paths are 404", async () => {
+  test("the record and evidence ROUTES (M7b) are 501 after auth and id validation; bad ids are 400; unknown paths are 404", async () => {
     const { base } = start();
     expect((await fetch(`${base}/captures/${CAP}`)).status).toBe(401);
-    expect((await fetch(`${base}/captures/${CAP}/review-options`, { headers: bearer })).status).toBe(501);
+    expect((await fetch(`${base}/record`, { headers: bearer })).status).toBe(501);
+    expect((await fetch(`${base}/evidence?captureId=${CAP}`, { headers: bearer })).status).toBe(501);
+    expect((await fetch(`${base}/frames/${stableId("ev", "x")}`, { headers: bearer })).status).toBe(501);
+    expect((await fetch(`${base}/record/notes/${stableId("note", "x")}`, { method: "PATCH", headers: bearer })).status).toBe(501);
+    expect((await fetch(`${base}/record/notes/${stableId("note", "x")}`, { method: "DELETE", headers: bearer })).status).toBe(501);
+    expect((await fetch(`${base}/record/evidence/delete`, { method: "POST", headers: bearer })).status).toBe(501);
     expect((await fetch(`${base}/captures/not-an-id`, { headers: bearer })).status).toBe(400);
     expect((await fetch(`${base}/reviews/${CAP}`, { headers: bearer })).status).toBe(400);
-    expect((await fetch(`${base}/reviews/${stableId("rvw", "x")}`, { headers: bearer })).status).toBe(501);
     expect((await fetch(`${base}/nope`, { headers: bearer })).status).toBe(404);
     expect((await fetch(`${base}/usage`, { method: "POST", headers: bearer })).status).toBe(404);
   });
@@ -495,5 +523,618 @@ describe("GET /captures/:id and the invite answer", () => {
     expect((await post(base, `/captures/${CAP}/invite`, "{")).status).toBe(400);
     expect((await post(base, "/captures/not-an-id/invite", { answer: "later" })).status).toBe(400);
     expect(invite.answers).toEqual(["later"]);
+  });
+});
+
+// ───────────────────────────── M7a: review routes ─────────────────────────────
+
+const SRC = stableId("src", "youtube", "lecture");
+const CONCEPT = stableId("cpt", "c");
+
+type WorldClaim = { text: string; evidence: EvidenceId[]; status: ClaimStatus; checkedAt?: Seq };
+
+/** What preparation would answer for one capture, from plain data (the review module's own tests use the same shape). */
+class World {
+  readonly captureId: CaptureId = randomId("cap");
+  chunks: ChunkRevision[] = [];
+  claims = new Map<ClaimId, WorldClaim>();
+  evidence = new Map<EvidenceId, Interval>();
+  gaps: Gap[] = [];
+  pendingChunks = new Set<ChunkRevisionId>();
+  revisions: ChunkRevision[] = [];
+
+  constructor(readonly db: Db) {}
+
+  close(ordinal: number, start: number, end: number): ChunkRevision {
+    const rev: ChunkRevision = {
+      id: stableId("crv", ordinal, start, end),
+      chunkId: stableId("chk", this.captureId, ordinal),
+      captureId: this.captureId,
+      ordinal,
+      revisionNo: 1,
+      material: Material.of([[SRC, [interval(start, end)]]]),
+      windows: [],
+      provenance: "boundary",
+      closedAtSeq: this.db.nextSeq(),
+      supersedes: null,
+    };
+    this.chunks = [...this.chunks, rev];
+    this.revisions.push(rev);
+    return rev;
+  }
+
+  claim(n: number, start: number, end: number, status: ClaimStatus = "supported_by_check"): ClaimId {
+    const id = stableId("clm", "k", n);
+    const ev = stableId("ev", "w", n);
+    this.evidence.set(ev, interval(start, end));
+    this.claims.set(id, { text: `claim ${n}`, evidence: [ev], status });
+    return id;
+  }
+
+  /** A check result lands: new status, stamped with the check's seq. */
+  check(id: ClaimId, status: ClaimStatus): void {
+    const c = this.claims.get(id)!;
+    c.status = status;
+    c.checkedAt = this.db.nextSeq();
+  }
+
+  private inside(material: Material, ids: readonly EvidenceId[]): boolean {
+    return ids.every((e) => Material.covers(material, SRC, this.evidence.get(e)!));
+  }
+
+  readonly deps = {
+    currentChunks: (_: CaptureId): readonly ChunkRevision[] => this.chunks,
+    chunkHistory: (chunkId: ChunkId): readonly ChunkRevision[] => this.revisions.filter((r) => r.chunkId === chunkId),
+    prep: (id: ChunkRevisionId): ChunkPrep => {
+      const rev = this.chunks.find((c) => c.id === id)!;
+      const claims = [...this.claims].filter(([, c]) => this.inside(rev.material, c.evidence)).map(([cid, c]) => ({ id: cid, status: c.status }) as unknown as Claim);
+      return {
+        chunkRevisionId: id,
+        interpretation: "done",
+        claims,
+        finished: !this.pendingChunks.has(id) && claims.every((c) => !c.status.startsWith("awaiting")),
+        supportedCount: claims.filter((c) => c.status === "supported_by_check").length,
+      };
+    },
+    stopEarly: (_: CaptureId, ids: readonly ChunkRevisionId[]) => {
+      for (const id of ids) {
+        this.pendingChunks.delete(id);
+        const rev = this.chunks.find((c) => c.id === id)!;
+        for (const c of this.claims.values()) if (c.status.startsWith("awaiting") && this.inside(rev.material, c.evidence)) c.status = "dropped";
+      }
+      return this.db.nextSeq();
+    },
+    assessableIn: (_: CaptureId, material: Material): readonly AssessableClaim[] =>
+      [...this.claims]
+        .filter(([, c]) => c.status === "supported_by_check" && this.inside(material, c.evidence))
+        .map(([id, c]) => ({ id, conceptId: CONCEPT, text: c.text, evidence: c.evidence, assumptions: [] }) as unknown as AssessableClaim),
+    claimsIn: (_: CaptureId, material: Material): readonly Claim[] =>
+      [...this.claims]
+        .filter(([, c]) => this.inside(material, c.evidence))
+        .map(([id, c]): Claim => ({
+          id,
+          sourceChunkId: stableId("chk", this.captureId, 0),
+          conceptId: CONCEPT,
+          original: { text: c.text, evidence: [c.evidence[0]!, ...c.evidence.slice(1)], visualDependent: false, assumptions: [] },
+          originalCheck: c.checkedAt
+            ? { verdict: c.status === "supported_by_check" ? "yes" : "no", p: null, reason: "jev", memoKey: stableId("key", id), atSeq: c.checkedAt }
+            : null,
+          revision: null,
+          revisionCheck: null,
+          status: c.status,
+        })),
+    bundle: (material: Material): EvidenceBundle => ({
+      material,
+      passages: [...this.evidence]
+        .filter(([, i]) => Material.covers(material, SRC, i))
+        .map(([id, i]) => ({ kind: "passage", id, sourceId: SRC, interval: i, text: `passage ${id}` }) as unknown as Passage),
+      frames: [],
+      gaps: this.gaps.filter((g) => Material.get(material, g.sourceId).overlapFraction(g.interval) > 0),
+      ads: [],
+    }),
+    watchedSeconds: (_: CaptureId) => this.chunks.reduce((s, c) => s + Material.duration(c.material), 0),
+    runWrapUp: () => Promise.reject(new Error("the record owns wrap-up in these tests")),
+    nextSeq: (): Seq => this.db.nextSeq(),
+  };
+}
+
+type Script = (input: TutorInput, call: number) => TutorOutput | Promise<TutorOutput>;
+
+/** A header line then prose, which the fake task streams in 9-character pieces so the header arrives split. A script that throws is a failed model call. */
+function modelTask(script: Script) {
+  return fakeTask<IdPart, TutorOutput>({
+    purpose: "tutor_turn",
+    provider: "claude",
+    answer: async (input, call): Promise<FakeStep<TutorOutput>> => {
+      try {
+        const out = await script(input as unknown as TutorInput, call);
+        return ok(out, { deltas: `${JSON.stringify(out.move)}\n${out.say}`.match(/[\s\S]{1,9}/g) ?? [] });
+      } catch (e) {
+        return { kind: "error", message: e instanceof Error ? e.message : String(e), retryable: false, usage: null };
+      }
+    },
+  });
+}
+
+/** A tutor that always takes a legal move: disclose a pending correction, wrap up when it must, else ask, follow up, then close. */
+function pick(input: TutorInput): TutorOutput {
+  const a = input.allowed;
+  const open = input.state.openThread;
+  if (a.includes("disclose_correction")) {
+    const c = input.state.corrections.find((x) => !x.disclosed)!;
+    return { move: { kind: "disclose_correction", correctionId: c.id, threadIds: [], evidence: [] }, say: "One question rested on a claim that did not hold up." };
+  }
+  if (a.includes("wrap_up")) return { move: { kind: "wrap_up" }, say: "Let's wrap up here." };
+  if (a.includes("ask_main")) {
+    const claim = input.claims[0]!;
+    return { move: { kind: "ask_main", threadId: nextThreadId(input.state), claimIds: [claim.id] }, say: `In your own words, what is ${claim.text}? Take your time.` };
+  }
+  const followed = input.turns.some((t) => t.actor === "tutor" && t.move.kind === "ask_followup" && t.move.threadId === open);
+  return followed
+    ? { move: { kind: "close_thread", threadId: open! }, say: "Good. Let's leave that there." }
+    : { move: { kind: "ask_followup", threadId: open! }, say: "And why does that hold?" };
+}
+
+const count = (db: Db, sql: string) => db.sql.query<{ n: number }, []>(sql).get()!.n;
+const learnerRows = (db: Db) => count(db, "SELECT COUNT(*) AS n FROM review_turns WHERE actor = 'learner'");
+const tutorRows = (db: Db) => count(db, "SELECT COUNT(*) AS n FROM review_turns WHERE actor = 'tutor'");
+const reviewRows = (db: Db) => count(db, "SELECT COUNT(*) AS n FROM reviews");
+
+async function until(done: () => boolean, ms = 3000): Promise<void> {
+  const t0 = Date.now();
+  while (!done()) {
+    if (Date.now() - t0 > ms) throw new Error("timed out waiting");
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+const said = (words: string): LearnerAct => ({ kind: "answer", text: words, modality: "text" });
+
+/**
+ * The real review and record modules and the real HTTP server on one in-memory db. Preparation and segmentation are
+ * answered from `world`; the tutor and wrap-up are scripted. `retries` records preparation.retry calls.
+ */
+function reviewRig(script: Script = pick) {
+  const db = testDb();
+  const world = new World(db);
+  const model = modelTask(script);
+  const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
+  const task: Task<TutorInput, TutorOutput> = {
+    ...(model as unknown as Task<TutorInput, TutorOutput>),
+    canonicalInput: (i) => ({ turns: i.turns.map((t) => t.id), repair: i.repairNote, claims: i.claims.map((c) => c.id) }),
+  };
+  const reviews = createReviews(db, {
+    ...world.deps,
+    runTutor: (input, streamTo, signal) => memo.run(task, input, { signal, streamTo }),
+    clearFailures: memo.clearFailures,
+  });
+  const usable = (reviewId: ReviewId) => world.deps.assessableIn(world.captureId, reviews.view(reviewId).scope.material);
+  const flags = { failSave: false };
+  const record = createRecord(db, {
+    turns: (reviewId) => reviews.view(reviewId).turns,
+    claims: usable,
+    wrapUp: async (reviewId) => {
+      const turns = reviews.view(reviewId).turns;
+      const threads = turns.flatMap((t) => (t.actor === "tutor" && t.move.kind === "ask_main" ? [t.move.threadId] : []));
+      return {
+        observations: threads.map((threadId) => ({ threadId, proposed: "independent" as const, rationale: "explained it unaided" })),
+        notes: [{ conceptId: CONCEPT, tutorSummary: "Covered the claims.", evidence: usable(reviewId).flatMap((c) => c.evidence) }],
+      };
+    },
+    snapshotEvidenceInTx: () => {
+      if (flags.failSave) throw new Error("disk full");
+    },
+  });
+  const retries: { captureId: CaptureId; ids: readonly ChunkRevisionId[] }[] = [];
+  const preparation = {
+    prep: world.deps.prep,
+    retry: (captureId: CaptureId, ids: readonly ChunkRevisionId[]) => {
+      retries.push({ captureId, ids });
+      return db.nextSeq();
+    },
+  } as unknown as Preparation;
+  const segmentation = { current: world.deps.currentChunks } as unknown as Segmentation;
+
+  const server = serve({
+    modules: { ledger: createLedger(db), evidence: evidenceOn(db), reviews, record, preparation, segmentation },
+    auth: { port: 0, extensionId: EXT_ID, token: TOKEN },
+    appDir: fixtureApp(),
+  });
+  servers.push(server);
+  const base = `http://127.0.0.1:${server.port}`;
+  const capture = world.captureId;
+
+  /** One chunk [0, 300) holding claims A and B, both supported. */
+  const prepare = () => ({ rev: world.close(0, 0, 300), a: world.claim(1, 10, 20), b: world.claim(2, 30, 40) });
+
+  const startReview = async (reviewId: ReviewId = randomId("rvw"), choice = "prepared_only", captureId: CaptureId = capture) => {
+    const r = await post(base, `/captures/${captureId}/reviews`, { reviewId, choice });
+    return { reviewId, status: r.status, body: (await r.json()) as Record<string, any> };
+  };
+
+  /** POST a turn and read its whole NDJSON stream. */
+  const turn = async (reviewId: ReviewId, act: LearnerAct, turnId: TurnId = randomId("turn")) => {
+    const r = await post(base, `/reviews/${reviewId}/turns`, { turnId, act });
+    const body = await r.text();
+    const lines = body.split("\n");
+    const events = body === "" ? [] : lines.slice(0, -1).map((l) => tutorStreamEvent.parse(JSON.parse(l)));
+    return { turnId, status: r.status, type: r.headers.get("content-type"), body, lines, events };
+  };
+
+  const view = async (reviewId: ReviewId) => {
+    const r = await fetch(`${base}/reviews/${reviewId}`, { headers: bearer });
+    return { status: r.status, body: (await r.json()) as Record<string, any> };
+  };
+
+  return { db, world, model, base, flags, retries, capture, prepare, startReview, turn, view };
+}
+
+type Rig = ReturnType<typeof reviewRig>;
+const moveOf = (events: readonly { type: string }[]) => (events.find((e) => e.type === "move") as { move: { kind: string } } | undefined)?.move.kind;
+const startedIn = async (rig: Rig) => {
+  rig.prepare();
+  const s = await rig.startReview();
+  expect(s.body.kind).toBe("started");
+  return s.reviewId;
+};
+
+describe("GET /captures/:id/review-options", () => {
+  test("answers nothing_to_review, processing and ready in the route's schema", async () => {
+    const rig = reviewRig();
+    const get = async () => reviewOptionsResponse.parse(await (await fetch(`${rig.base}/captures/${rig.capture}/review-options`, { headers: bearer })).json());
+    expect(await get()).toMatchObject({ kind: "nothing_to_review", gaps: [] });
+
+    const { rev } = rig.prepare();
+    expect(await get()).toMatchObject({ kind: "ready", scope: { supportedClaims: 2 } });
+
+    rig.world.pendingChunks.add(rev.id);
+    expect(await get()).toMatchObject({ kind: "processing", pendingChunks: 1 });
+    expect((await fetch(`${rig.base}/captures/${rig.capture}/review-options`)).status).toBe(401);
+    expect((await fetch(`${rig.base}/captures/nope/review-options`, { headers: bearer })).status).toBe(400);
+  });
+});
+
+describe("POST /captures/:id/reviews", () => {
+  test("starts a review with the scope in the route's schema, Material as canonical rows", async () => {
+    const rig = reviewRig();
+    rig.prepare();
+    const s = await rig.startReview();
+    expect(s.status).toBe(200);
+    expect(startReviewResponse.parse(s.body)).toMatchObject({ kind: "started", reviewId: s.reviewId });
+    expect(s.body.scope.material).toEqual([[SRC, [[0, 300]]]]);
+    expect(s.body.scope.claimsAtStart).toHaveLength(2);
+    expect(reviewRows(rig.db)).toBe(1);
+  });
+
+  test('R15: "Retrying a save never creates a duplicate record." A resent start returns the stored scope and inserts nothing', async () => {
+    const rig = reviewRig();
+    rig.prepare();
+    const first = await rig.startReview();
+    rig.world.claim(3, 50, 60);
+    const again = await rig.startReview(first.reviewId);
+    expect(again.body).toEqual(first.body);
+    expect(reviewRows(rig.db)).toBe(1);
+    expect((await rig.startReview(first.reviewId, "prepared_only", randomId("cap"))).status).toBe(409);
+    expect(reviewRows(rig.db)).toBe(1);
+  });
+
+  test('R10: "A review never starts with zero supported claims in scope." nothing_to_review carries gaps, unverified claims and rewatch, writes no review, and Retry reaches preparation', async () => {
+    const rig = reviewRig();
+    const rev = rig.world.close(0, 0, 300);
+    const unverified = rig.world.claim(1, 10, 20, "unverified");
+    rig.world.gaps.push({ sourceId: SRC, interval: interval(100, 130), channel: "transcript", reason: "no_transcript" });
+    const s = await rig.startReview();
+    expect(s.status).toBe(200);
+    const body = startReviewResponse.parse(s.body);
+    expect(body).toMatchObject({ kind: "nothing_to_review", gaps: [{ reason: "no_transcript" }], unverified: [{ id: unverified }] });
+    if (body.kind === "nothing_to_review") expect(body.rewatch.length).toBeGreaterThan(0);
+    expect(reviewRows(rig.db)).toBe(0);
+    expect(count(rig.db, "SELECT COUNT(*) AS n FROM review_turns")).toBe(0);
+
+    const retry = await post(rig.base, `/captures/${rig.capture}/retry-preparation`, {});
+    expect(retry.status).toBe(204);
+    expect(rig.retries).toEqual([{ captureId: rig.capture, ids: [rev.id] }]);
+  });
+
+  test("a stop-early start while a chunk is still preparing labels the review partial", async () => {
+    const rig = reviewRig();
+    rig.prepare();
+    const slow = rig.world.close(1, 300, 600);
+    rig.world.pendingChunks.add(slow.id);
+    rig.world.claim(3, 400, 410, "awaiting_check");
+    const s = await rig.startReview(randomId("rvw"), "stop_early");
+    expect(startReviewResponse.parse(s.body)).toMatchObject({ kind: "started", scope: { partial: [{ kind: "stopped_early", droppedClaims: 1 }] } });
+  });
+
+  test("bad ids and bodies are 400 and a wrong token is 401; nothing is written", async () => {
+    const rig = reviewRig();
+    rig.prepare();
+    const url = `/captures/${rig.capture}/reviews`;
+    const good = { reviewId: randomId("rvw"), choice: "prepared_only" };
+    expect((await post(rig.base, url, { ...good, reviewId: "rvw_nope" })).status).toBe(400);
+    expect((await post(rig.base, url, { ...good, choice: "later" })).status).toBe(400);
+    expect((await post(rig.base, url, { choice: "prepared_only" })).status).toBe(400);
+    expect((await post(rig.base, url, "{")).status).toBe(400);
+    expect((await post(rig.base, "/captures/nope/reviews", good)).status).toBe(400);
+    expect((await post(rig.base, url, good, { "Content-Type": "application/json" })).status).toBe(401);
+    expect((await post(rig.base, url, good, { Authorization: "Bearer nope" })).status).toBe(401);
+    expect(reviewRows(rig.db)).toBe(0);
+  });
+});
+
+describe("POST /reviews/:id/turns", () => {
+  test("streams one JSON object per line: learner turn stored, prose, then the move, then turn_complete", async () => {
+    const rig = reviewRig();
+    const reviewId = await startedIn(rig);
+    const t = await rig.turn(reviewId, { kind: "resume" });
+    expect(t.status).toBe(200);
+    expect(t.type).toContain("application/x-ndjson");
+    expect(t.body.endsWith("\n")).toBe(true);
+    expect(t.lines.at(-1)).toBe("");
+    for (const line of t.lines.slice(0, -1)) {
+      expect(line).not.toBe("");
+      expect(() => JSON.parse(line)).not.toThrow();
+    }
+    const types = t.events.map((e) => e.type);
+    expect(types[0]).toBe("learner_turn_stored");
+    expect(types.at(-1)).toBe("turn_complete");
+    expect(types.filter((x) => x === "turn_complete" || x === "turn_failed")).toHaveLength(1);
+    expect(types.indexOf("sentence")).toBeGreaterThan(0);
+    expect(types.indexOf("move")).toBeGreaterThan(types.lastIndexOf("sentence"));
+    expect(moveOf(t.events)).toBe("ask_main");
+    expect(t.events.filter((e) => e.type === "sentence").map((e) => (e as { text: string }).text)).toEqual([
+      "In your own words, what is claim 1?",
+      "Take your time.",
+    ]);
+    expect(learnerRows(rig.db)).toBe(1);
+    expect(tutorRows(rig.db)).toBe(1);
+  });
+
+  test("a client that disconnects mid-stream does not corrupt the turn: it still commits once, and a resend replays it without the model", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const rig = reviewRig(async (input) => {
+      await gate;
+      return pick(input);
+    });
+    const reviewId = await startedIn(rig);
+    const turnId = randomId("turn");
+    const ac = new AbortController();
+    const res = await fetch(`${rig.base}/reviews/${reviewId}/turns`, {
+      method: "POST", headers: JSON_HEADERS, signal: ac.signal, body: JSON.stringify({ turnId, act: { kind: "resume" } }),
+    });
+    const reader = res.body!.getReader();
+    const first = await reader.read();
+    expect(tutorStreamEvent.parse(JSON.parse(new TextDecoder().decode(first.value).trim()))).toEqual({ type: "learner_turn_stored", turnId });
+    ac.abort();
+    await reader.read().catch(() => undefined);
+    expect(tutorRows(rig.db)).toBe(0);
+
+    release();
+    await until(() => tutorRows(rig.db) === 1);
+    expect(learnerRows(rig.db)).toBe(1);
+    expect(rig.model.calls).toHaveLength(1);
+
+    const resent = await rig.turn(reviewId, { kind: "resume" }, turnId);
+    expect(resent.events[0]).toEqual({ type: "learner_turn_stored", turnId });
+    expect(resent.events.at(-1)?.type).toBe("turn_complete");
+    expect(moveOf(resent.events)).toBe("ask_main");
+    expect(rig.model.calls).toHaveLength(1);
+    expect(learnerRows(rig.db)).toBe(1);
+    expect(tutorRows(rig.db)).toBe(1);
+  });
+
+  test('R15: a resent turn that already completed replays the stored reply and neither inserts nor calls the model', async () => {
+    const rig = reviewRig();
+    const reviewId = await startedIn(rig);
+    const first = await rig.turn(reviewId, { kind: "resume" });
+    const again = await rig.turn(reviewId, { kind: "resume" }, first.turnId);
+    expect(again.events.at(-1)).toEqual(first.events.at(-1));
+    expect(moveOf(again.events)).toBe(moveOf(first.events));
+    expect(rig.model.calls).toHaveLength(1);
+    expect(learnerRows(rig.db)).toBe(1);
+    expect(tutorRows(rig.db)).toBe(1);
+  });
+
+  test('R15: a resent turn racing its original asks the model once and stores one learner and one tutor turn', async () => {
+    let hook: () => void = () => {};
+    const rig = reviewRig((input) => {
+      hook();
+      return pick(input);
+    });
+    const reviewId = await startedIn(rig);
+    const turnId = randomId("turn");
+    const { first, second } = await raceAt(
+      "model-called",
+      (il) => {
+        hook = () => il.at("model-called");
+        return rig.turn(reviewId, { kind: "resume" }, turnId);
+      },
+      () => rig.turn(reviewId, { kind: "resume" }, turnId),
+    );
+    for (const t of [first, second]) {
+      expect(t.events[0]).toEqual({ type: "learner_turn_stored", turnId });
+      expect(t.events.at(-1)?.type).toBe("turn_complete");
+      expect(moveOf(t.events)).toBe("ask_main");
+    }
+    expect(rig.model.calls).toHaveLength(1);
+    expect(learnerRows(rig.db)).toBe(1);
+    expect(tutorRows(rig.db)).toBe(1);
+  });
+
+  test('R3: "A claim can be used to judge my answers only if it passed the evidence check." A claim that loses its check while the tutor talks is not the question that is stored', async () => {
+    let hook: () => void = () => {};
+    const rig = reviewRig((input) => {
+      hook();
+      return pick(input);
+    });
+    const { a } = rig.prepare();
+    const started = await rig.startReview();
+    const { first } = await raceAt(
+      "model-called",
+      (il) => {
+        hook = () => il.at("model-called");
+        return rig.turn(started.reviewId, { kind: "resume" });
+      },
+      () => rig.world.check(a, "unverified"),
+    );
+    expect(first.events.at(-1)?.type).toBe("turn_complete");
+    expect(moveOf(first.events)).toBe("disclose_correction");
+    expect(rig.model.calls).toHaveLength(2);
+
+    const { body } = await rig.view(started.reviewId);
+    const turns = body.turns as { actor: string; move?: { kind: string; claimIds?: string[] }; notice?: { kind: string } }[];
+    const tutors = turns.filter((t) => t.actor === "tutor");
+    expect(tutors.map((t) => t.move?.kind)).toEqual(["disclose_correction"]);
+    expect(tutors.some((t) => t.move?.claimIds?.includes(a))).toBe(false);
+    expect(turns.some((t) => t.actor === "code" && t.notice?.kind === "correction_pending")).toBe(true);
+  });
+
+  test("a failed model call reports turn_failed with retryable, keeps the learner's turn, and a resend finishes it", async () => {
+    let down = true;
+    const rig = reviewRig((input) => {
+      if (down) throw new Error("model down");
+      return pick(input);
+    });
+    const reviewId = await startedIn(rig);
+    const failed = await rig.turn(reviewId, { kind: "resume" });
+    expect(failed.events.map((e) => e.type)).toEqual(["learner_turn_stored", "turn_failed"]);
+    expect(failed.events.at(-1)).toMatchObject({ type: "turn_failed", retryable: true });
+    expect(learnerRows(rig.db)).toBe(1);
+    expect(tutorRows(rig.db)).toBe(0);
+
+    down = false;
+    const resent = await rig.turn(reviewId, { kind: "resume" }, failed.turnId);
+    expect(resent.events.at(-1)?.type).toBe("turn_complete");
+    expect(learnerRows(rig.db)).toBe(1);
+    expect(tutorRows(rig.db)).toBe(1);
+  });
+
+  test("an unknown review is 404 and stores nothing; bad ids and bodies are 400; a wrong token is 401", async () => {
+    const rig = reviewRig();
+    const reviewId = await startedIn(rig);
+    const turnId = randomId("turn");
+    const url = `/reviews/${reviewId}/turns`;
+    expect((await post(rig.base, `/reviews/${randomId("rvw")}/turns`, { turnId, act: { kind: "resume" } })).status).toBe(404);
+    expect((await post(rig.base, "/reviews/nope/turns", { turnId, act: { kind: "resume" } })).status).toBe(400);
+    expect((await post(rig.base, url, { turnId: "turn_nope", act: { kind: "resume" } })).status).toBe(400);
+    expect((await post(rig.base, url, { turnId, act: { kind: "juggle" } })).status).toBe(400);
+    expect((await post(rig.base, url, { turnId, act: { kind: "answer", text: "   ", modality: "text" } })).status).toBe(400);
+    expect((await post(rig.base, url, { act: { kind: "resume" } })).status).toBe(400);
+    expect((await post(rig.base, url, "{")).status).toBe(400);
+    expect((await post(rig.base, url, { turnId, act: { kind: "resume" } }, { "Content-Type": "application/json" })).status).toBe(401);
+    expect(learnerRows(rig.db)).toBe(0);
+    expect(rig.model.calls).toHaveLength(0);
+  });
+});
+
+describe("GET /reviews/:id, POST /reviews/:id/save and the replay review", () => {
+  test("a review through HTTP: start, five streamed turns, wrap up, save; the view carries turns, the ended state, saved and the observations", async () => {
+    const rig = reviewRig();
+    const reviewId = await startedIn(rig);
+    const acts: LearnerAct[] = [{ kind: "resume" }, said("lines meeting at a point"), said("because both equations hold there"), { kind: "skip" }, { kind: "wrap_up" }];
+    const moves: (string | undefined)[] = [];
+    for (const act of acts) {
+      const t = await rig.turn(reviewId, act);
+      expect(t.events.at(-1)?.type).toBe("turn_complete");
+      moves.push(moveOf(t.events));
+    }
+    expect(moves).toEqual(["ask_main", "ask_followup", "close_thread", "ask_main", "wrap_up"]);
+    expect(rig.model.calls).toHaveLength(5);
+
+    const before = await rig.view(reviewId);
+    expect(before.status).toBe(200);
+    reviewViewResponse.parse(before.body);
+    expect(before.body).toMatchObject({ reviewId, captureId: rig.capture, saved: "unsaved", observations: [], state: { phase: "ended", mainQuestions: 2 } });
+    expect(before.body.scope.material).toEqual([[SRC, [[0, 300]]]]);
+    expect(before.body.turns.filter((t: { actor: string }) => t.actor === "learner")).toHaveLength(5);
+    expect(before.body.turns.filter((t: { actor: string }) => t.actor === "tutor")).toHaveLength(5);
+
+    const save = await post(rig.base, `/reviews/${reviewId}/save`, {});
+    expect(save.status).toBe(200);
+    expect(saveResponse.parse(await save.json())).toMatchObject({ kind: "saved", observations: 2 });
+
+    const after = await rig.view(reviewId);
+    reviewViewResponse.parse(after.body);
+    expect(after.body.saved).toBe("saved");
+    expect(after.body.observations).toHaveLength(2);
+    const status = (thread: string) => after.body.observations.find((o: { threadId: string }) => o.threadId === thread).status;
+    expect(status(nextThreadId({ reviewId, mainQuestions: 0 }))).toBe("independent");
+    expect(status(nextThreadId({ reviewId, mainQuestions: 1 }))).not.toBe("independent");
+
+    const resaved = await post(rig.base, `/reviews/${reviewId}/save`, {});
+    expect(await resaved.json()).toEqual({ kind: "saved", notes: 1, observations: 2, links: 0 });
+    expect(count(rig.db, "SELECT COUNT(*) AS n FROM observations")).toBe(2);
+    expect(count(rig.db, "SELECT COUNT(*) AS n FROM notes")).toBe(1);
+  });
+
+  test("GET /reviews/:id of an unknown review is 404, of a bad id 400, without the token 401", async () => {
+    const rig = reviewRig();
+    expect((await rig.view(randomId("rvw"))).status).toBe(404);
+    expect((await fetch(`${rig.base}/reviews/nope`, { headers: bearer })).status).toBe(400);
+    expect((await fetch(`${rig.base}/reviews/${randomId("rvw")}`)).status).toBe(401);
+  });
+
+  test("POST /reviews/:id/save: unknown review 404, wrong token 401, a failed save reads save_pending and a retry saves once", async () => {
+    const rig = reviewRig();
+    const reviewId = await startedIn(rig);
+    await rig.turn(reviewId, { kind: "resume" });
+    await rig.turn(reviewId, { kind: "end" });
+    expect((await post(rig.base, `/reviews/${randomId("rvw")}/save`, {})).status).toBe(404);
+    expect((await post(rig.base, `/reviews/${reviewId}/save`, {}, { "Content-Type": "application/json" })).status).toBe(401);
+
+    rig.flags.failSave = true;
+    const failed = await post(rig.base, `/reviews/${reviewId}/save`, {});
+    expect(failed.status).toBe(200);
+    expect(saveResponse.parse(await failed.json())).toMatchObject({ kind: "save_failed", retryable: true });
+    expect((await rig.view(reviewId)).body.saved).toBe("save_pending");
+    expect(count(rig.db, "SELECT COUNT(*) AS n FROM saved_reviews")).toBe(0);
+
+    rig.flags.failSave = false;
+    expect(saveResponse.parse(await (await post(rig.base, `/reviews/${reviewId}/save`, {})).json()).kind).toBe("saved");
+    expect((await rig.view(reviewId)).body.saved).toBe("saved");
+    expect(count(rig.db, "SELECT COUNT(*) AS n FROM saved_reviews")).toBe(1);
+  });
+});
+
+describe("POST /captures/:id/retry-preparation", () => {
+  test("retries the chunks that are unfinished or have no supported claim, and none that are fine; answers 204", async () => {
+    const rig = reviewRig();
+    const fine = rig.world.close(0, 0, 300);
+    rig.world.claim(1, 10, 20);
+    const empty = rig.world.close(1, 300, 600);
+    rig.world.claim(2, 400, 410, "unverified");
+    const slow = rig.world.close(2, 600, 900);
+    rig.world.pendingChunks.add(slow.id);
+    const r = await post(rig.base, `/captures/${rig.capture}/retry-preparation`, {});
+    expect(r.status).toBe(204);
+    expect(await r.text()).toBe("");
+    expect(rig.retries).toEqual([{ captureId: rig.capture, ids: [empty.id, slow.id] }]);
+    expect(rig.retries[0]!.ids).not.toContain(fine.id);
+  });
+
+  test("a bad capture id is 400, a wrong token 401, and with no preparation or record wired the M7a routes that need them are 501", async () => {
+    const rig = reviewRig();
+    expect((await post(rig.base, "/captures/nope/retry-preparation", {})).status).toBe(400);
+    expect((await post(rig.base, `/captures/${rig.capture}/retry-preparation`, {}, { "Content-Type": "application/json" })).status).toBe(401);
+    expect(rig.retries).toEqual([]);
+    const bare = start();
+    expect((await post(bare.base, `/captures/${CAP}/retry-preparation`, {})).status).toBe(501);
+    expect((await post(bare.base, `/reviews/${stableId("rvw", "x")}/save`, {})).status).toBe(501);
+  });
+});
+
+describe("capture and review are independent", () => {
+  test('R9: "Starting a review doesn\'t stop capture, and stopping capture doesn\'t end a review." Facts keep arriving after a review starts, and a review goes on after capture stops', async () => {
+    const rig = reviewRig();
+    rig.prepare();
+    expect((await ingest(rig.base, wireFacts(0, 4), rig.capture)).status).toBe(200);
+    const started = await rig.startReview();
+    expect(started.body.kind).toBe("started");
+    const more = await ackOf(await ingest(rig.base, wireFacts(4, 3), rig.capture));
+    expect(more).toMatchObject({ ackedThroughSeq: 6, capture: { status: { state: "capturing" } } });
+    const stop = { kind: "control", action: "stop", reason: "user", clientSeq: 7, wallMs: 2000 };
+    expect(await ackOf(await ingest(rig.base, [stop], rig.capture))).toMatchObject({ capture: { status: { state: "stopped" } } });
+    expect((await rig.turn(started.reviewId, { kind: "resume" })).events.at(-1)?.type).toBe("turn_complete");
   });
 });

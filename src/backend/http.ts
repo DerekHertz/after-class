@@ -12,8 +12,10 @@
  *
  * Mounted (M3): GET /health (Host and Origin only), GET /usage, GET /app/* (the bundle from scripts/build-app.ts,
  * Host and Origin only, because a navigation cannot carry a header; the token rides in the HTML's
- * <meta name="afterclass-token">). M4 adds POST /ingest, GET /captures/:id and POST /captures/:id/invite. Every other
- * `ROUTES` entry answers 501 until M7 mounts it.
+ * <meta name="afterclass-token">). M4 adds POST /ingest, GET /captures/:id and POST /captures/:id/invite. M7a adds the
+ * review routes: review options, start review, send turn (an NDJSON stream), get review, save, and
+ * POST /captures/:id/retry-preparation (not yet in `ROUTES`). Every other `ROUTES` entry (the record view and edits,
+ * evidence lookup, frame images) answers 501 until M7b mounts it.
  *
  * Accepted limit: the token is in the HTML of GET /app/, so any local process or user that can reach 127.0.0.1:<port>
  * can read it, even though the token file is 0600. The checks above stop web pages and DNS rebinding, not local code.
@@ -24,9 +26,14 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import { parseId } from "../shared/ids";
 import type { IdKind } from "../shared/ids";
-import type { CaptureId } from "../shared/ids";
-import { BadRequest, ROUTES, matchRoute, parseIngestBatch, parseInviteAnswerRequest } from "../shared/wire";
+import type { CaptureId, ReviewId } from "../shared/ids";
+import type { FrozenScope, ReviewSaveState, ReviewView, StartResult, TurnEvent } from "../shared/domain";
+import { Material } from "../shared/time";
+import {
+  BadRequest, ROUTES, matchRoute, parseIngestBatch, parseInviteAnswerRequest, parseStartReviewRequest, parseTurnRequest,
+} from "../shared/wire";
 import type { EvidenceStore } from "./evidence";
+import type { Preparation } from "./preparation";
 import type { Reviews } from "./review";
 import type { LearningRecord } from "./record";
 import type { Segmentation } from "./segmentation";
@@ -36,6 +43,7 @@ import type { Memo } from "./providers/memo";
 export type Modules = {
   readonly evidence: EvidenceStore;
   readonly segmentation: Segmentation;
+  readonly preparation: Preparation;
   readonly reviews: Reviews;
   readonly record: LearningRecord;
   readonly ledger: Ledger;
@@ -76,8 +84,11 @@ export function authorize(headers: Headers, expected: AuthConfig, opts: { readon
 }
 
 export type ServeOptions = {
-  /** M4 reads the ledger, evidence and the invite state; M7 widens this to every module. */
-  readonly modules: Pick<Modules, "ledger" | "evidence" | "reviews">;
+  /**
+   * `record`, `preparation` and `segmentation` are optional until main.ts passes them: a route that needs one answers
+   * 501 without it, and a review's `saved` reads "unsaved". M7b widens this to every module.
+   */
+  readonly modules: Pick<Modules, "ledger" | "evidence" | "reviews"> & Partial<Pick<Modules, "record" | "preparation" | "segmentation">>;
   /** `port` 0 binds a free port (tests); the Host check then uses the bound port. */
   readonly auth: AuthConfig;
   /** Directory holding the bundled review app (scripts/build-app.ts writes dist/app). */
@@ -231,9 +242,92 @@ const reply = (name: keyof typeof ROUTES, body: unknown, cors: Record<string, st
   return json(200, r.kind === "json" ? r.schema.parse(body) : body, cors);
 };
 
-async function mounted(name: string, matched: { readonly params: Record<string, string> }, req: Request, opts: ServeOptions, port: number, cors: Record<string, string>): Promise<Response | null> {
-  const { evidence, reviews } = opts.modules;
+/** A `Material` is a Map and would cross JSON as `{}`; the wire carries `Material.canonical` rows. */
+const wireScope = (scope: FrozenScope) => ({ ...scope, material: Material.canonical(scope.material) });
+
+const wireStart = (r: StartResult) => (r.kind === "started" ? { ...r, scope: wireScope(r.scope) } : r);
+
+/** Validates a response already in wire form against its `ROUTES` schema, then sends it as it is (the schema's output would decode Material back into a Map). */
+function replyWire(name: keyof typeof ROUTES, wire: unknown, cors: Record<string, string>): Response {
+  const r = ROUTES[name].reply;
+  if (r.kind === "json") r.schema.parse(wire);
+  return json(200, wire, cors);
+}
+
+/** The view of a review, or null when there is no such review; any other failure is the module's and propagates. */
+function reviewOf(reviews: Reviews, reviewId: ReviewId): ReviewView | null {
+  try {
+    return reviews.view(reviewId);
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith("unknown review")) return null;
+    throw e;
+  }
+}
+
+/**
+ * The record keeps no save state to ask, so `saved` is: a saved record exists for the review (notes, observations or
+ * links), or this process saw the save succeed; failing that, "save_pending" if this process saw it fail.
+ */
+function savedOf(record: LearningRecord | undefined, outcomes: Map<ReviewId, ReviewSaveState>, reviewId: ReviewId): { readonly saved: ReviewSaveState; readonly observations: ReviewView["observations"] } {
+  if (!record) return { saved: "unsaved", observations: [] };
+  const rec = record.view({ reviewId });
+  const exists = rec.notes.length + rec.observations.length + rec.links.length > 0;
+  const seen = outcomes.get(reviewId);
+  return { saved: exists || seen === "saved" ? "saved" : (seen ?? "unsaved"), observations: rec.observations };
+}
+
+const encoder = new TextEncoder();
+
+/**
+ * One JSON object per line. The stream ends after the module's last event; if the module throws, the learner's turn is
+ * already stored, so the client is told to resend it (R15). A client that disconnects does not end the turn: the rest
+ * of it is drained so the tutor turn is committed once, and a resend then replays it instead of calling the model again.
+ */
+function ndjson(events: AsyncIterable<TurnEvent>, cors: Record<string, string>): Response {
+  const it = events[Symbol.asyncIterator]();
+  const wire = ROUTES.sendTurn.reply;
+  const line = (e: TurnEvent) => encoder.encode(`${JSON.stringify(wire.kind === "ndjson" ? wire.event.parse(e) : e)}\n`);
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const next = await it.next();
+        if (cancelled) return;
+        if (next.done) controller.close();
+        else controller.enqueue(line(next.value));
+      } catch {
+        if (cancelled) return;
+        controller.enqueue(line({ type: "turn_failed", error: "internal error", retryable: true }));
+        controller.close();
+      }
+    },
+    async cancel() {
+      cancelled = true;
+      try {
+        while (!(await it.next()).done);
+      } catch {
+        // the turn failed with nobody listening; the client's resend will say so
+      }
+    },
+  });
+  return new Response(body, { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", ...SECURITY_HEADERS, ...cors } });
+}
+
+/** `POST /captures/:captureId/retry-preparation`. Not in `ROUTES` yet: wire.ts is frozen for this PR. */
+function matchLocal(method: string, pathname: string): { readonly name: string; readonly params: Record<string, string> } | null {
+  const m = method === "POST" ? /^\/captures\/([^/]+)\/retry-preparation$/.exec(pathname) : null;
+  if (!m) return null;
+  try {
+    return { name: "retryPreparation", params: { captureId: decodeURIComponent(m[1]!) } };
+  } catch {
+    return null;
+  }
+}
+
+async function mounted(name: string, matched: { readonly params: Record<string, string> }, req: Request, opts: ServeOptions, port: number, cors: Record<string, string>, outcomes: Map<ReviewId, ReviewSaveState>): Promise<Response | null> {
+  const { evidence, reviews, record, preparation, segmentation } = opts.modules;
   const captureId = matched.params.captureId as CaptureId | undefined;
+  const reviewId = matched.params.reviewId as ReviewId | undefined;
   try {
     switch (name) {
       case "ingest": {
@@ -265,6 +359,41 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
         const { answer } = parseInviteAnswerRequest(await readJson(req));
         return reply("answerInvite", reviews.answerInvite(captureId!, answer), cors);
       }
+      case "reviewOptions":
+        return reply("reviewOptions", reviews.options(captureId!), cors);
+      case "startReview": {
+        const body = parseStartReviewRequest(await readJson(req));
+        const existing = reviewOf(reviews, body.reviewId);
+        if (existing && existing.captureId !== captureId) return failure(409, "that review belongs to another capture", cors);
+        return replyWire("startReview", wireStart(reviews.start(captureId!, body.choice, body.reviewId)), cors);
+      }
+      case "sendTurn": {
+        const { turnId, act } = parseTurnRequest(await readJson(req));
+        if (!reviewOf(reviews, reviewId!)) return failure(404, "unknown review", cors);
+        return ndjson(reviews.turn(reviewId!, turnId, act), cors);
+      }
+      case "review": {
+        const view = reviewOf(reviews, reviewId!);
+        if (!view) return failure(404, "unknown review", cors);
+        const { saved, observations } = savedOf(record, outcomes, reviewId!);
+        return replyWire("review", { ...view, scope: wireScope(view.scope), observations: [...view.observations, ...observations], saved }, cors);
+      }
+      case "save": {
+        if (!record) return null;
+        if (!reviewOf(reviews, reviewId!)) return failure(404, "unknown review", cors);
+        const result = await record.save(reviewId!);
+        outcomes.set(reviewId!, result.kind === "saved" ? "saved" : "save_pending");
+        return reply("save", result, cors);
+      }
+      case "retryPreparation": {
+        if (!preparation || !segmentation) return null;
+        const stuck = segmentation.current(captureId!).filter((rev) => {
+          const prep = preparation.prep(rev.id);
+          return !prep.finished || prep.supportedCount === 0;
+        });
+        if (stuck.length > 0) preparation.retry(captureId!, stuck.map((rev) => rev.id));
+        return new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...cors } });
+      }
       default:
         return null;
     }
@@ -274,7 +403,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
   }
 }
 
-async function handle(req: Request, opts: ServeOptions, auth: AuthConfig): Promise<Response> {
+async function handle(req: Request, opts: ServeOptions, auth: AuthConfig, outcomes: Map<ReviewId, ReviewSaveState>): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
 
@@ -292,7 +421,7 @@ async function handle(req: Request, opts: ServeOptions, auth: AuthConfig): Promi
 
   // Bun normalises `..` out of req.url before we see it, so a traversal aimed past /app/ arrives as an unrouted path;
   // answering 404 before the token check keeps it a 404 (and reveals nothing: ROUTES is public).
-  const matched = matchRoute(req.method, path);
+  const matched = matchRoute(req.method, path) ?? matchLocal(req.method, path);
   const v = authorize(req.headers, auth, { requireToken: matched !== null });
   if (!v.ok) return failure(v.status, v.status === 401 ? "unauthorized" : "forbidden");
   const cors = corsHeaders(req.headers.get("origin"), v.origin);
@@ -303,18 +432,21 @@ async function handle(req: Request, opts: ServeOptions, auth: AuthConfig): Promi
   }
 
   if (matched.name === "usage") return json(200, opts.modules.ledger.summary(), cors);
-  return (await mounted(matched.name, matched, req, opts, auth.port, cors)) ?? failure(501, "not implemented", cors);
+  return (await mounted(matched.name, matched, req, opts, auth.port, cors, outcomes)) ?? failure(501, "not implemented", cors);
 }
 
 export function serve(opts: ServeOptions): Bun.Server<undefined> {
   let auth = opts.auth;
+  const outcomes = new Map<ReviewId, ReviewSaveState>();
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: opts.auth.port,
+    // A tutor turn can be silent for a long while before its first word; Bun's default of 10 s would cut the stream.
+    idleTimeout: 255,
     maxRequestBodySize: opts.maxBodyBytes ?? MAX_BODY_BYTES,
     async fetch(req) {
       try {
-        return await handle(req, opts, auth);
+        return await handle(req, opts, auth, outcomes);
       } catch {
         return failure(500, "internal error");
       }
