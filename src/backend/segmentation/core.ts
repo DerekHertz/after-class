@@ -33,7 +33,8 @@ function materialOf(passages: readonly Passage[]): Material {
  * passages) yields no new window.
  */
 export function buildWindows(captureId: CaptureId, order: WatchOrder, cfg: SegmentationConfig): BoundaryWindow[] {
-  const passages = order.passages.map((w) => w.passage);
+  const seen = new Set<string>();
+  const passages = order.passages.map((w) => w.passage).filter((p) => !seen.has(p.id) && Boolean(seen.add(p.id)));
   const stopped = order.status.state === "stopped";
   const windows: BoundaryWindow[] = [];
   const usedFrames = new Set<EvidenceId>();

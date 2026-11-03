@@ -196,6 +196,15 @@ describe("chunk plan", () => {
   });
 });
 
+describe("watch order with repeats", () => {
+  test("a passage listed twice yields no extra window", () => {
+    const ps = lecture(SRC_A, 0, 90);
+    const once = buildWindows(CAP, watchOrder(ps), CFG).map((w) => w.id);
+    const twice = buildWindows(CAP, watchOrder([...ps, ...ps]), CFG).map((w) => w.id);
+    expect(twice).toEqual(once);
+  });
+});
+
 describe("boundary revision", () => {
   test("is off by default: a no/no after a close stays in the new chunk", () => {
     const p = plan(["no/no", "yes/yes", "no/no"], { cfg: { ...CFG, reviseOnNextNoNo: false } });
