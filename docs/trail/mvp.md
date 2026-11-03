@@ -10,4 +10,4 @@ Short entries: what was decided, by whom, why.
   2. State checked at one point and used at a later one (races): #2 R3 at commit, #6 pause/resume, #10 delta race.
   3. Half-open interval off by one: #5, #12 R7, evidence `<=`.
   4. Stale id or snapshot: #3 encodes, #6 video id, #2 correction ids.
-  Fixes in code, before wording: (3) one interval helper in `src/shared/time.ts` with a property test, used by every module (M2). (2) a shared test helper that interleaves two events at a chosen point, used by M5 (scheduler) and M7. (1, 4) the M10 replay test resends every request and checks nothing duplicates.
+  Fixes in code, before wording: (3) one interval helper in `src/shared/time.ts` with a property test, used by every module (its own small PR after M2). (2) a shared test helper that interleaves two events at a chosen point, used by M5 (scheduler) and M7. (1, 4) the M10 replay test resends every request and checks nothing duplicates.
