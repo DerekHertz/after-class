@@ -6,18 +6,82 @@
  * not_assessed is outside the rank: it means "no evidence about understanding".
  * Downgrades the tutor proposed are kept; code only ever caps.
  */
-import type { DisputeState, Observation, ObservationStatus, RecordedStatus, ThreadFacts, Turn } from "../../shared/domain";
-import type { ThreadId } from "../../shared/ids";
+import type { DisputeState, Observation, ObservationStatus, RecordedStatus, Seq, ThreadFacts, TutorMove, Turn } from "../../shared/domain";
+import type { ThreadId, TurnId } from "../../shared/ids";
 import { HELP_MOVES } from "../../shared/domain";
+
+const HELP: ReadonlySet<TutorMove["kind"]> = new Set(HELP_MOVES);
+
+function bySeq(turns: readonly Turn[]): readonly Turn[] {
+  return [...turns].sort((a, b) => a.seq - b.seq);
+}
+
+/** The threads a tutor move is about. A correction disclosure can touch several. */
+export function moveThreads(move: TutorMove): readonly ThreadId[] {
+  switch (move.kind) {
+    case "disclose_correction":
+      return move.threadIds;
+    case "propose_detour":
+    case "detour_step":
+    case "wrap_up":
+      return [];
+    default:
+      return [move.threadId];
+  }
+}
 
 /**
  * Facts about one thread, derived from turns in seq order.
  *   substantive answer = learner `answer` act in the thread (skip / dont_know are not answers)
  *   help               = tutor turn in the thread whose move.kind ∈ HELP_MOVES (single list in domain.ts)
+ *   endedBySkip        = the learner's last answer, skip or dont_know in the thread was a skip
+ *   saidDontKnowOnly   = no substantive answer, at least one dont_know, and not ended by a skip
  */
 export function threadFacts(threadId: ThreadId, turns: readonly Turn[]): ThreadFacts {
-  void HELP_MOVES;
-  throw new Error("not implemented");
+  let firstSubstantiveAnswerSeq: Seq | null = null;
+  let firstHelpSeq: Seq | null = null;
+  let lastResponse: "answer" | "skip" | "dont_know" | null = null;
+  let saidDontKnow = false;
+  const learnerTurns: TurnId[] = [];
+  const helpTurns: TurnId[] = [];
+  for (const t of bySeq(turns)) {
+    if (t.actor === "learner" && t.threadId === threadId) {
+      learnerTurns.push(t.id);
+      const k = t.act.kind;
+      if (k === "answer" || k === "skip" || k === "dont_know") lastResponse = k;
+      if (k === "answer" && firstSubstantiveAnswerSeq === null) firstSubstantiveAnswerSeq = t.seq;
+      if (k === "dont_know") saidDontKnow = true;
+    } else if (t.actor === "tutor" && HELP.has(t.move.kind) && moveThreads(t.move).includes(threadId)) {
+      helpTurns.push(t.id);
+      if (firstHelpSeq === null) firstHelpSeq = t.seq;
+    }
+  }
+  const endedBySkip = lastResponse === "skip";
+  return {
+    threadId,
+    firstSubstantiveAnswerSeq,
+    firstHelpSeq,
+    endedBySkip,
+    saidDontKnowOnly: firstSubstantiveAnswerSeq === null && saidDontKnow && !endedBySkip,
+    learnerTurns,
+    helpTurns,
+  };
+}
+
+/**
+ * A thread's dispute as the turn log shows it. The tutor's `settled` claim
+ * never resolves anything: only the learner does, through record.resolveDispute.
+ *   learner dispute in the thread            → open
+ *   tutor answer_dispute, settled: false     → unsettled
+ *   tutor answer_dispute, settled: true      → stays open until the learner resolves it
+ */
+export function threadDispute(threadId: ThreadId, turns: readonly Turn[]): Exclude<DisputeState, { kind: "resolved_by_learner" }> {
+  let d: Exclude<DisputeState, { kind: "resolved_by_learner" }> = { kind: "none" };
+  for (const t of bySeq(turns)) {
+    if (t.actor === "learner" && t.threadId === threadId && t.act.kind === "dispute") d = { kind: "open", turnId: t.id };
+    else if (t.actor === "tutor" && t.move.kind === "answer_dispute" && t.move.threadId === threadId && !t.move.settled && d.kind !== "none") d = { kind: "unsettled" };
+  }
+  return d;
 }
 
 /**
@@ -35,7 +99,17 @@ export function threadFacts(threadId: ThreadId, turns: readonly Turn[]): ThreadF
  * The learner's override is clamped the same way. Returns what it was clamped from, for the audit line.
  */
 export function clampStatus(proposed: ObservationStatus, facts: ThreadFacts, dispute: DisputeState): { readonly status: RecordedStatus; readonly clampedFrom: ObservationStatus | null } {
-  throw new Error("not implemented");
+  const status = clamped(proposed, facts, dispute);
+  return { status, clampedFrom: status === proposed ? null : proposed };
+}
+
+function clamped(proposed: ObservationStatus, facts: ThreadFacts, dispute: DisputeState): RecordedStatus {
+  if (dispute.kind === "open" || dispute.kind === "unsettled") return "disputed";
+  const answeredAt = facts.firstSubstantiveAnswerSeq;
+  if (answeredAt === null) return facts.saidDontKnowOnly ? "unresolved" : "not_assessed";
+  const helpedFirst = facts.firstHelpSeq !== null && facts.firstHelpSeq < answeredAt;
+  if (helpedFirst && (proposed === "independent" || proposed === "partial")) return "after_help";
+  return proposed;
 }
 
 /**
