@@ -88,7 +88,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           )}
           <Composer
             actions={actions.filter((a) => a !== "continue" && a !== "wrap_up")}
-            disabled={streaming}
+            disabled={streaming || state.unsent.length > 0}
+            sendError={state.sendError}
             speech={speech}
             onSpeaking={controller.learnerSpeaking}
             send={(id, text, modality) => controller.send(toAct(id, text, modality))}
@@ -172,13 +173,14 @@ function Actions({ ids, disabled, send }: { readonly ids: readonly ActionId[]; r
 }
 
 function Composer({
-  actions, disabled, speech, onSpeaking, send,
+  actions, disabled, sendError, speech, onSpeaking, send,
 }: {
   readonly actions: readonly ActionId[];
   readonly disabled: boolean;
+  readonly sendError: string | null;
   readonly speech: SpeechInput;
   readonly onSpeaking: () => void;
-  readonly send: (id: ActionId, text: string, modality: "speech" | "text") => Promise<void>;
+  readonly send: (id: ActionId, text: string, modality: "speech" | "text") => Promise<boolean>;
 }) {
   const [draft, setDraft] = useState("");
   const [listening, setListening] = useState(false);
@@ -209,8 +211,8 @@ function Composer({
 
   async function fire(id: ActionId) {
     const text = draft.trim();
-    await send(id, text, modality.current);
-    if (NEEDS_TEXT.has(id)) {
+    const accepted = await send(id, text, modality.current);
+    if (accepted && NEEDS_TEXT.has(id)) {
       setDraft("");
       modality.current = "text";
     }
@@ -219,6 +221,7 @@ function Composer({
   const empty = draft.trim() === "";
   return (
     <div className="composer">
+      {sendError !== null && <p className="note note-error" role="alert">{sendError}</p>}
       {hasText && (
         <>
           <textarea

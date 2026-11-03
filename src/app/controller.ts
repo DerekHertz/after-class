@@ -9,10 +9,16 @@
  * A turn that failed before it was stored is resent from the store with its
  * original id. A stored turn the tutor never answered is resent from the
  * review view, again with its original id.
+ *
+ * While an unsent turn exists, `send` is refused: the oldest unsent turn must
+ * be resent first, so turns reach the backend in the order the learner made
+ * them. An act the backend would reject is refused before it is stored.
  */
+import { z } from "zod";
 import type { LearnerAct, ReviewView } from "../shared/domain";
 import type { ReviewId, TurnId } from "../shared/ids";
 import { randomId } from "../shared/ids";
+import { learnerAct } from "../shared/wire";
 import { ApiError } from "./api";
 import type { Api } from "./api";
 import { reduceLive, startLive, unansweredLearnerTurn } from "./core";
@@ -25,6 +31,8 @@ export type SessionState = {
   readonly loadError: string | null;
   readonly live: Live | null;
   readonly unsent: readonly UnsentTurn[];
+  /** Why the last `send` was refused, or null. */
+  readonly sendError: string | null;
   readonly saving: boolean;
   /** Set while a save is pending: the last attempt failed, or the backend reports `save_pending`. Retry calls the same save. */
   readonly saveError: string | null;
@@ -35,7 +43,8 @@ export type ReviewController = {
   getState(): SessionState;
   subscribe(listener: () => void): () => void;
   load(): Promise<void>;
-  send(act: LearnerAct): Promise<void>;
+  /** True when the act was accepted and sent; false when it was refused (invalid, or an earlier turn is unsent) or ignored. */
+  send(act: LearnerAct): Promise<boolean>;
   /** Resend the oldest unsent turn, or the stored turn the tutor never answered. Same id as before. */
   retryTurn(): Promise<void>;
   save(): Promise<void>;
@@ -58,7 +67,7 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
   const { api, reviewId, speaker, unsent } = deps;
   const mint = deps.mintTurnId ?? (() => randomId("turn"));
   const now = deps.nowMs ?? Date.now;
-  let state: SessionState = { view: null, loadError: null, live: null, unsent: [], saving: false, saveError: null, savedSummary: null };
+  let state: SessionState = { view: null, loadError: null, live: null, unsent: [], sendError: null, saving: false, saveError: null, savedSummary: null };
   const listeners = new Set<() => void>();
   let streaming = false;
 
@@ -81,11 +90,11 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
   }
 
   /** One turn at a time, claimed before the first await so a double click cannot start two. */
-  async function exclusive(run: () => Promise<void>): Promise<void> {
-    if (streaming) return;
+  async function exclusive<T>(run: () => Promise<T>): Promise<T | undefined> {
+    if (streaming) return undefined;
     streaming = true;
     try {
-      await run();
+      return await run();
     } finally {
       streaming = false;
     }
@@ -143,15 +152,27 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
     async load() {
       await Promise.all([refreshView(), refreshUnsent()]);
     },
-    send: (act) =>
-      exclusive(async () => {
+    send: async (act) =>
+      (await exclusive(async () => {
+        const parsed = learnerAct.safeParse(act);
+        if (!parsed.success) {
+          set({ sendError: `Not sent. ${z.prettifyError(parsed.error)}` });
+          return false;
+        }
+        if ((await unsent.forReview(reviewId)).length > 0) {
+          await refreshUnsent();
+          set({ sendError: "Your earlier message was not delivered yet. Retry it before sending another." });
+          return false;
+        }
+        set({ sendError: null });
         if (act.kind === "pause" || act.kind === "end") speaker.stop();
         const turnId = mint();
         // Persist before any network call: a crash after this line resends the same id.
         await unsent.put({ turnId, reviewId, act, createdAtMs: now() });
         await refreshUnsent();
         await runTurn(turnId, act);
-      }),
+        return true;
+      })) ?? false,
     retryTurn: () =>
       exclusive(async () => {
         const [oldest] = await unsent.forReview(reviewId);

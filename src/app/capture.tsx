@@ -3,13 +3,23 @@ import { randomId } from "../shared/ids";
 import type { CaptureId, ReviewId } from "../shared/ids";
 import type { ReviewOptions, StartChoice } from "../shared/domain";
 import type { AppApi } from "./api";
-import { formatClock, inspectBundle, optionsScreen, sourceTitles } from "./core";
+import { formatClock, inspectBundle, optionsScreen, sourceTitles, sourceVideos } from "./core";
 import type { OptionsScreen, SourceTitles, StartOffer } from "./core";
-import { BundleInspector, ErrorNote, Link, navigate, useAsync } from "./ui";
+import { BundleInspector, ErrorNote, EvidencePane, Link, navigate, useAsync } from "./ui";
 
 const POLL_MS = 3000;
 
-export function OptionsView({ screen, busy, onStart }: { readonly screen: OptionsScreen; readonly busy: boolean; readonly onStart: (c: StartChoice) => void }) {
+export type OptionsViewProps = {
+  readonly screen: OptionsScreen;
+  readonly busy: boolean;
+  readonly onStart: (c: StartChoice) => void;
+  /** Ask the backend for fresh review options. */
+  readonly onRetry: () => void;
+  readonly api: AppApi;
+  readonly titles: SourceTitles;
+};
+
+export function OptionsView({ screen, busy, onStart, onRetry, api, titles }: OptionsViewProps) {
   switch (screen.kind) {
     case "ready":
       return (
@@ -56,7 +66,8 @@ export function OptionsView({ screen, busy, onStart }: { readonly screen: Option
               <ul>
                 {screen.unverified.map((u, i) => (
                   <li key={i}>
-                    {u.text} <span className="muted">({u.status}; cites {u.evidence.length} passage{u.evidence.length === 1 ? "" : "s"} or frame{u.evidence.length === 1 ? "" : "s"})</span>
+                    {u.text} <span className="muted">({u.status})</span>
+                    {u.evidence.length > 0 ? <EvidencePane api={api} ids={u.evidence} titles={titles} /> : <p className="muted">It cited no source passage or frame.</p>}
                   </li>
                 ))}
               </ul>
@@ -65,9 +76,18 @@ export function OptionsView({ screen, busy, onStart }: { readonly screen: Option
           {screen.rewatch.length > 0 && (
             <>
               <h3>Rewatch to fill in</h3>
-              <ul>{screen.rewatch.map((r, i) => <li key={i}>{r.where}</li>)}</ul>
+              <ul>
+                {screen.rewatch.map((r, i) => (
+                  <li key={i}>
+                    {r.href === null ? r.where : <a href={r.href} target="_blank" rel="noopener noreferrer">{r.where}</a>}
+                  </li>
+                ))}
+              </ul>
             </>
           )}
+          <p>
+            <button type="button" disabled={busy} onClick={onRetry}>Check again</button> <span className="muted">Looks for claims that have passed the evidence check since.</span>
+          </p>
         </section>
       );
   }
@@ -115,6 +135,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
   }, [processing, options.data, reload]);
 
   const titles = sourceTitles(capture.data?.capture ?? null);
+  const videos = sourceVideos(capture.data?.capture ?? null);
   const shown = refused ?? options.data;
 
   async function start(choice: StartChoice) {
@@ -157,7 +178,16 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
       )}
       <ErrorNote error={options.error} retry={options.reload} />
       <ErrorNote error={startError} />
-      {shown && <OptionsView screen={optionsScreen(shown, titles)} busy={starting} onStart={start} />}
+      {shown && (
+        <OptionsView
+          screen={optionsScreen(shown, titles, videos)}
+          busy={starting}
+          onStart={start}
+          onRetry={() => { setRefused(null); options.reload(); }}
+          api={api}
+          titles={titles}
+        />
+      )}
       {shown?.kind === "ready" && (
         <p>
           <button type="button" onClick={() => answer("later")}>Later</button> <span className="muted">Keeps preparing; you will be invited again at the next boundary.</span>
@@ -166,11 +196,6 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
       {shown?.kind === "processing" && (
         <p>
           <button type="button" onClick={() => answer("wait")}>Wait</button> <span className="muted">Stay here until it is ready.</span>
-        </p>
-      )}
-      {refused && (
-        <p>
-          <button type="button" onClick={() => { setRefused(null); options.reload(); }}>Check again</button>
         </p>
       )}
       <section>

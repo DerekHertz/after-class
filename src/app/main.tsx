@@ -43,6 +43,16 @@ function Home() {
   );
 }
 
+function NotFound() {
+  return (
+    <main>
+      <h1>Page not found</h1>
+      <p>That address is not a page in After Class.</p>
+      <p><Link to={{ page: "home" }}>Go to the start</Link></p>
+    </main>
+  );
+}
+
 function App() {
   const route = parseRoute(usePathname());
   switch (route.page) {
@@ -60,6 +70,8 @@ function App() {
       return <RecordScreen api={api} reviewId={route.reviewId === null ? null : parseId("rvw", route.reviewId)} />;
     case "usage":
       return <UsageScreen api={api} />;
+    case "not_found":
+      return <NotFound />;
   }
 }
 

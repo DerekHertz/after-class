@@ -37,6 +37,16 @@ export function sourceTitles(capture: CaptureView | null): SourceTitles {
   return new Map((capture?.sources ?? []).map((s) => [s.id, s.title]));
 }
 
+/** Source id to YouTube video id, for links that reopen the lecture. */
+export type SourceVideos = ReadonlyMap<SourceId, string>;
+
+export function sourceVideos(capture: CaptureView | null): SourceVideos {
+  return new Map((capture?.sources ?? []).map((s) => [s.id, s.videoId]));
+}
+
+export const watchUrl = (videoId: string, seconds: number): string =>
+  `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&t=${Math.max(0, Math.floor(seconds))}s`;
+
 const titleOf = (titles: SourceTitles, id: SourceId): string => titles.get(id) ?? id;
 
 // ───────────────────────────── Review options ───────────────────────────────
@@ -86,7 +96,8 @@ export type OptionsScreen =
       readonly kind: "nothing";
       readonly gaps: readonly { readonly where: string; readonly reason: string }[];
       readonly unverified: readonly { readonly text: string; readonly status: string; readonly evidence: readonly EvidenceId[] }[];
-      readonly rewatch: readonly { readonly where: string }[];
+      /** Null until the capture view says which video the source is. */
+      readonly rewatch: readonly { readonly where: string; readonly href: string | null }[];
     };
 
 export function estimateText(estimateS: number | null): string | null {
@@ -107,7 +118,7 @@ export const CLAIM_STATUS_LABEL = {
 export const claimText = (c: Claim): string => (c.revision ?? c.original).text;
 export const claimEvidence = (c: Claim): readonly EvidenceId[] => (c.revision ?? c.original).evidence;
 
-export function optionsScreen(options: ReviewOptions, titles: SourceTitles = new Map()): OptionsScreen {
+export function optionsScreen(options: ReviewOptions, titles: SourceTitles = new Map(), videos: SourceVideos = new Map()): OptionsScreen {
   switch (options.kind) {
     case "ready":
       return {
@@ -136,7 +147,10 @@ export function optionsScreen(options: ReviewOptions, titles: SourceTitles = new
         kind: "nothing",
         gaps: options.gaps.map((g) => ({ where: `${titleOf(titles, g.sourceId)}, ${formatInterval(g.interval)}`, reason: GAP_LABEL[g.reason] })),
         unverified: options.unverified.map((c) => ({ text: claimText(c), status: CLAIM_STATUS_LABEL[c.status], evidence: claimEvidence(c) })),
-        rewatch: options.rewatch.map((r) => ({ where: `${titleOf(titles, r.sourceId)}, ${formatInterval(r.interval)}` })),
+        rewatch: options.rewatch.map((r) => {
+          const videoId = videos.get(r.sourceId);
+          return { where: `${titleOf(titles, r.sourceId)}, ${formatInterval(r.interval)}`, href: videoId === undefined ? null : watchUrl(videoId, r.interval.start) };
+        }),
       };
   }
 }
@@ -462,7 +476,7 @@ const KIND_LABEL = {
 export function usageRows(summary: UsageSummary): UsageRow[] {
   return (Object.keys(KIND_LABEL) as (keyof typeof KIND_LABEL)[]).map((k) => {
     const { calls, usd } = summary.byKind[k];
-    const amount = calls === 0 ? "none" : k === "unknown" || usd === null ? "unknown" : `$${usd.toFixed(usd < 1 ? 4 : 2)}`;
+    const amount = calls === 0 ? "none" : k === "unknown" || usd === null ? "unknown" : usd > 0 && usd < 0.0001 ? "<$0.0001" : `$${usd.toFixed(usd < 1 ? 4 : 2)}`;
     return { kind: KIND_LABEL[k], calls, amount };
   });
 }
@@ -474,11 +488,17 @@ export type Route =
   | { readonly page: "capture"; readonly id: string }
   | { readonly page: "review"; readonly id: string }
   | { readonly page: "record"; readonly reviewId: string | null }
-  | { readonly page: "usage" };
+  | { readonly page: "usage" }
+  | { readonly page: "not_found" };
 
 /** `/app/capture/<id>`, `/app/review/<id>`, `/app/record[/<reviewId>]`, `/app/usage`. */
 export function parseRoute(pathname: string): Route {
-  const parts = pathname.replace(/^\/app(?=\/|$)/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  let parts: string[];
+  try {
+    parts = pathname.replace(/^\/app(?=\/|$)/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  } catch {
+    return { page: "not_found" };
+  }
   const [page, id] = parts;
   if (page === "capture" && id) return { page: "capture", id };
   if (page === "review" && id) return { page: "review", id };
@@ -489,7 +509,8 @@ export function parseRoute(pathname: string): Route {
 
 export const routePath = (r: Route): string => {
   switch (r.page) {
-    case "home": return "/app/";
+    case "home":
+    case "not_found": return "/app/";
     case "capture": return `/app/capture/${encodeURIComponent(r.id)}`;
     case "review": return `/app/review/${encodeURIComponent(r.id)}`;
     case "record": return r.reviewId === null ? "/app/record" : `/app/record/${encodeURIComponent(r.reviewId)}`;

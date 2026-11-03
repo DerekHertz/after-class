@@ -6,6 +6,11 @@ export class StreamError extends Error {
   override readonly name = "StreamError";
 }
 
+/** The stream ended inside a line: the connection dropped, which is not the same as the server sending garbage. */
+export class TruncatedStream extends Error {
+  override readonly name = "TruncatedStream";
+}
+
 /** Splits a byte stream into JSON values, one per line. A multi-byte character or a line may be cut at any chunk boundary. */
 export async function* ndjson(body: ReadableStream<Uint8Array>): AsyncGenerator<unknown> {
   const reader = body.getReader();
@@ -32,7 +37,15 @@ export async function* ndjson(body: ReadableStream<Uint8Array>): AsyncGenerator<
       if (done) break;
     }
     const rest = buffer.trim();
-    if (rest !== "") yield parse(rest);
+    if (rest !== "") {
+      let value: unknown;
+      try {
+        value = JSON.parse(rest);
+      } catch {
+        throw new TruncatedStream(`the connection closed mid-line: ${rest.slice(0, 80)}`);
+      }
+      yield value;
+    }
   } finally {
     await reader.cancel().catch(() => undefined);
   }
@@ -55,6 +68,10 @@ export async function* tutorEvents(body: ReadableStream<Uint8Array>): AsyncGener
     }
   } catch (e) {
     if (e instanceof StreamError) throw e;
+    if (e instanceof TruncatedStream) {
+      yield CUT_OFF;
+      return;
+    }
     yield { type: "turn_failed", error: e instanceof Error ? e.message : String(e), retryable: true };
     return;
   }

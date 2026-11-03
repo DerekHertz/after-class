@@ -3,7 +3,8 @@
  * the pure view logic, and the session controller driven by a fake backend.
  * Nothing here touches a network, a browser or a model.
  */
-import { createElement } from "react";
+import { createElement, isValidElement } from "react";
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "bun:test";
 import type { LearnerAct, ReviewView, TurnEvent, UsageSummary } from "../src/shared/domain";
@@ -13,17 +14,18 @@ import { Material, interval } from "../src/shared/time";
 import { ApiError, createApi, evidenceParams } from "../src/app/api";
 import type { Api } from "../src/app/api";
 import { OptionsView } from "../src/app/capture";
+import type { AppApi } from "../src/app/api";
 import { createReviewController } from "../src/app/controller";
 import {
   availableActions, conversationLines, currentEvidenceIds, estimateText, formatClock, inspectBundle, liveText, noteView, observationRow,
   optionsScreen, parseRoute, reduceLive, routePath, softTargetPrompt, startLive, toAct, unansweredLearnerTurn, usageRows,
 } from "../src/app/core";
-import { evidenceBundlez, reviewViewz } from "../src/app/decode";
+import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { StreamError, ndjson, tutorEvents } from "../src/app/ndjson";
 import { UsageTable } from "../src/app/record";
 import { createSpeechInput, createSynthSpeaker } from "../src/app/speech";
 import type { RecognitionLike, Speaker } from "../src/app/speech";
-import { BundleInspector } from "../src/app/ui";
+import { BundleInspector, EvidencePane } from "../src/app/ui";
 import { createIndexedDbUnsent, createMemoryUnsent } from "../src/app/unsent";
 
 // ───────────────────────────── Fixtures ─────────────────────────────────────
@@ -73,6 +75,14 @@ const parsedReview = (o: Parameters<typeof reviewJson>[0] = {}): ReviewView => r
 const tutorAsk = turnJson(1, "tutor", { move: { kind: "ask_main", threadId: thr, claimIds: [clm] }, say: "What does a logical clock give you?" });
 const learnerAnswer = (n = 2) => turnJson(n, "learner", { act: { kind: "answer", text: "An ordering of events.", modality: "speech" } });
 
+/** Every element in a rendered tree, found without a DOM by walking props.children. */
+function findElements(node: ReactNode, match: (e: { type: unknown; props: unknown }) => boolean): { type: unknown; props: unknown }[] {
+  if (Array.isArray(node)) return node.flatMap((n) => findElements(n, match));
+  if (!isValidElement(node)) return [];
+  const el = node as { type: unknown; props: { children?: ReactNode } };
+  return [...(match(el) ? [el] : []), ...findElements(el.props.children, match)];
+}
+
 const enc = new TextEncoder();
 const line = (e: TurnEvent) => `${JSON.stringify(e)}\n`;
 
@@ -115,6 +125,14 @@ describe("NDJSON tutor stream", () => {
 
   test("a stream that ends without a terminal event becomes a retryable failure", async () => {
     const events = await collect(tutorEvents(streamOf(line(stored("a")), line(sentence("Half a")))));
+    expect(events.at(-1)).toMatchObject({ type: "turn_failed", retryable: true });
+  });
+
+  test("a stream cut mid-line is a dropped connection, retryable, not a StreamError", async () => {
+    const whole = line(stored("a")) + line(sentence("Half a sentence")) + line(complete("a"));
+    const cutAt = whole.indexOf("Half") + 6;
+    const events = await collect(tutorEvents(streamOf(whole.slice(0, cutAt))));
+    expect(events.map((e) => e.type)).toEqual(["learner_turn_stored", "turn_failed"]);
     expect(events.at(-1)).toMatchObject({ type: "turn_failed", retryable: true });
   });
 
@@ -273,20 +291,45 @@ describe("review options screens", () => {
     expect(some.kind === "processing" && some.offers.map((o) => o.choice)).toEqual(["prepared_only", "stop_early"]);
   });
 
-  test("nothing to review lists gaps, unverified claims with their status, and the rewatch intervals", () => {
-    const screen = optionsScreen(
-      { kind: "nothing_to_review", gaps: [], unverified: [], rewatch: [{ sourceId: src, interval: interval(120, 180) }] },
-      titles,
-    );
-    expect(screen).toEqual({ kind: "nothing", gaps: [], unverified: [], rewatch: [{ where: "Lamport clocks, 2:00 to 3:00" }] });
+  test("nothing to review lists gaps, unverified claims with their status, and a watch link per rewatch interval", () => {
+    const options = { kind: "nothing_to_review", gaps: [], unverified: [], rewatch: [{ sourceId: src, interval: interval(120, 180) }] } as const;
+    expect(optionsScreen(options, titles, new Map([[src, "QgWz_s7uugE"]]))).toEqual({
+      kind: "nothing", gaps: [], unverified: [],
+      rewatch: [{ where: "Lamport clocks, 2:00 to 3:00", href: "https://www.youtube.com/watch?v=QgWz_s7uugE&t=120s" }],
+    });
+    expect(optionsScreen(options, titles)).toMatchObject({ rewatch: [{ where: "Lamport clocks, 2:00 to 3:00", href: null }] });
   });
 
+  const fakeApi = {} as AppApi;
+  const view = (o: Parameters<typeof optionsScreen>[0], onRetry: () => void = () => {}, videos = new Map([[src, "QgWz_s7uugE"]])) =>
+    createElement(OptionsView, { screen: optionsScreen(o, titles, videos), busy: false, onStart: () => {}, onRetry, api: fakeApi, titles });
+  const html = (o: Parameters<typeof optionsScreen>[0]) => renderToStaticMarkup(view(o));
+  const nothing = { kind: "nothing_to_review", gaps: [], unverified: [], rewatch: [{ sourceId: src, interval: interval(120, 180) }] } as const;
+
   test("the rendered screens carry the content", () => {
-    const html = (o: Parameters<typeof optionsScreen>[0]) => renderToStaticMarkup(createElement(OptionsView, { screen: optionsScreen(o, titles), busy: false, onStart: () => {} }));
     expect(html({ kind: "processing", readyNow: null, pendingChunks: 2, estimateS: null })).toContain("No reliable time estimate yet.");
     expect(html({ kind: "processing", readyNow: null, pendingChunks: 2, estimateS: 300 })).toContain("about 5 min");
     expect(html({ kind: "ready", scope: { chunkRevisions: [crv], supportedClaims: 4, partial: [] } })).toContain("Review now");
     expect(html({ kind: "nothing_to_review", gaps: [], unverified: [], rewatch: [] })).toContain("Nothing to review yet");
+  });
+
+  test("Flow C: nothing to review offers a retry and each rewatch interval as a link that opens the video at that time", () => {
+    const out = html(nothing);
+    expect(out).toContain('href="https://www.youtube.com/watch?v=QgWz_s7uugE&amp;t=120s"');
+    expect(out).toContain("Lamport clocks, 2:00 to 3:00");
+    expect(out).toContain("Check again");
+    let retried = 0;
+    const button = findElements(OptionsView({ screen: optionsScreen(nothing, titles), busy: false, onStart: () => {}, onRetry: () => retried++, api: fakeApi, titles }), (e) => e.type === "button");
+    expect(button.map((b) => (b.props as { children?: unknown }).children)).toEqual(["Check again"]);
+    (button[0]!.props as { onClick: () => void }).onClick();
+    expect(retried).toBe(1);
+  });
+
+  test("an unverified claim shows the evidence it cited, in the evidence pane", () => {
+    const o = reviewOptionsz.parse({ kind: "nothing_to_review", gaps: [], unverified: [claimJson("unverified")], rewatch: [] });
+    const panes = findElements(OptionsView({ screen: optionsScreen(o, titles), busy: false, onStart: () => {}, onRetry: () => {}, api: fakeApi, titles }), (e) => e.type === EvidencePane);
+    expect(panes.map((p) => (p.props as { ids: unknown }).ids)).toEqual([[ev1]]);
+    expect(renderToStaticMarkup(view(o))).toContain("Loading evidence...");
   });
 });
 
@@ -447,6 +490,12 @@ describe("usage view", () => {
     expect(html).not.toContain("$0");
   });
 
+  test("a small non-zero amount never reads as $0.0000", () => {
+    expect(usageRows(summary({ measured: { calls: 1, usd: 0.00002 } }))[0]!.amount).toBe("<$0.0001");
+    expect(usageRows(summary({ measured: { calls: 1, usd: 0.0001 } }))[0]!.amount).toBe("$0.0001");
+    expect(usageRows(summary({ measured: { calls: 1, usd: 0 } }))[0]!.amount).toBe("$0.0000");
+  });
+
   test("a measured kind that arrives without an amount reads unknown, not zero", () => {
     expect(usageRows(summary({ measured: { calls: 1, usd: null } }))[0]!.amount).toBe("unknown");
     expect(usageRows(summary({ measured: { calls: 1, usd: 12.5 } }))[0]!.amount).toBe("$12.50");
@@ -464,6 +513,12 @@ describe("routes and clocks", () => {
     expect(parseRoute("/")).toEqual({ page: "home" });
     expect(parseRoute("/app/review")).toEqual({ page: "home" });
     for (const r of [{ page: "review", id: "rvw_x" }, { page: "record", reviewId: null }, { page: "usage" }] as const) expect(parseRoute(routePath(r))).toEqual(r);
+  });
+
+  test("malformed percent-encoding routes to not-found instead of throwing", () => {
+    expect(parseRoute("/app/review/%E0%A4%A")).toEqual({ page: "not_found" });
+    expect(parseRoute("/app/capture/%")).toEqual({ page: "not_found" });
+    expect(routePath({ page: "not_found" })).toBe("/app/");
   });
 
   test("formatClock", () => {
@@ -781,5 +836,31 @@ describe("review session controller", () => {
     });
     await h.controller.save();
     expect(h.controller.getState().saveError).toBe("offline");
+  });
+  test("after a reload with an unsent turn, a new send is refused with a message and nothing is sent or stored", async () => {
+    const h = setup({ sendTurn: ({ turnId }) => events({ type: "learner_turn_stored", turnId }, { type: "turn_complete", turnId }) });
+    const original = { turnId: randomId("turn"), reviewId, act: answer, createdAtMs: 5 };
+    await h.unsent.put(original);
+    await h.controller.load();
+    const accepted = await h.controller.send({ kind: "answer", text: "A newer answer.", modality: "text" });
+    expect(accepted).toBe(false);
+    expect(h.sends).toEqual([]);
+    expect(await h.unsent.forReview(reviewId)).toEqual([original]);
+    expect(h.controller.getState().sendError).toContain("not delivered");
+    await h.controller.retryTurn();
+    expect(h.sends).toEqual([{ turnId: original.turnId, act: answer }]);
+    expect(await h.controller.send({ kind: "answer", text: "A newer answer.", modality: "text" })).toBe(true);
+    expect(h.sends.map((c) => c.act.kind === "answer" && c.act.text)).toEqual(["An ordering of events.", "A newer answer."]);
+    expect(h.controller.getState().sendError).toBeNull();
+  });
+
+  test("an over-length answer is rejected up front with a message and never reaches the unsent store", async () => {
+    const h = setup({ sendTurn: ({ turnId }) => events({ type: "learner_turn_stored", turnId }, { type: "turn_complete", turnId }) });
+    const accepted = await h.controller.send({ kind: "answer", text: "x".repeat(8001), modality: "text" });
+    expect(accepted).toBe(false);
+    expect(h.sends).toEqual([]);
+    expect(await h.unsent.forReview(reviewId)).toEqual([]);
+    expect(h.controller.getState().unsent).toEqual([]);
+    expect(h.controller.getState().sendError).toContain("8000");
   });
 });
