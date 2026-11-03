@@ -152,17 +152,23 @@ export function createRecord(db: Db, deps: {
     return db.tx(() => {
       const ms = now();
       let notes = 0;
+      const cited = new Set<EvidenceId>(b.links.flatMap((l) => l.evidence));
       for (const n of b.notes) {
         if (q.tombstoned.get(n.id)!.n > 0) continue;
         q.upsertNote.run(n.id, n.reviewId, n.conceptId, JSON.stringify(n.generated), ms);
-        for (const e of n.evidence) q.noteEvidence.run(n.id, e);
+        for (const e of n.evidence) {
+          q.noteEvidence.run(n.id, e);
+          cited.add(e);
+        }
         notes += 1;
       }
       for (const o of b.observations) {
         q.upsertObservation.run(o.id, o.reviewId, o.threadId, JSON.stringify(o.claimIds), JSON.stringify(o.conceptIds), o.proposed, JSON.stringify(o.facts), ms);
       }
       for (const l of b.links) q.upsertLink.run(l.id, reviewId, l.from, l.to, l.type, JSON.stringify(l.evidence), l.rationale, ms);
-      deps.snapshotEvidenceInTx(b.evidence);
+      // A re-save must not bring back evidence the user let go: a deleted note's citations, or evidence they deleted.
+      const deleted = new Set(q.deletedEvidence.all(JSON.stringify([...cited])).map((r) => r.evidence_id));
+      deps.snapshotEvidenceInTx([...cited].filter((id) => !deleted.has(id)).sort());
       // Last, so the R16 hold on raw evidence lifts only once the snapshots exist.
       q.markSaved.run(reviewId, b.hash, ms);
       return { kind: "saved", notes, observations: b.observations.length, links: b.links.length } as const;
