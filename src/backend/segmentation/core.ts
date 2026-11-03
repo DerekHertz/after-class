@@ -152,7 +152,7 @@ export function planChunks(
 
     const reconsider = reconsiderable;
     reconsiderable = null;
-    if (reconsider !== null && newConcept === "no" && stoppingPoint === "no") {
+    if (cfg.reviseOnNextNoNo && reconsider !== null && newConcept === "no" && stoppingPoint === "no") {
       const target = closed[reconsider]!;
       target.windows.push(...open.map((e) => e.w), w);
       target.provenance = "boundary_revised";

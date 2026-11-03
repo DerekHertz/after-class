@@ -27,9 +27,15 @@ export type SegmentationConfig = {
   readonly contextS: number; // 120
   readonly timeCapS: number; // 480
   readonly maxFramesPerWindow: number; // 2
+  /**
+   * Off by default: a no/no right after a close usually means the NEW topic is
+   * mid-explanation, not that the old one continued, so this would routinely
+   * pull the next topic's first minute into the closed chunk. Jev lab measures it.
+   */
+  readonly reviseOnNextNoNo: boolean;
 };
 
-export const SEGMENTATION_DEFAULTS: SegmentationConfig = { windowNewS: 30, contextS: 120, timeCapS: 480, maxFramesPerWindow: 2 };
+export const SEGMENTATION_DEFAULTS: SegmentationConfig = { windowNewS: 30, contextS: 120, timeCapS: 480, maxFramesPerWindow: 2, reviseOnNextNoNo: false };
 
 export type WindowTrace = { readonly window: BoundaryWindow; readonly judgment: BoundaryJudgment | "pending" | "failed"; readonly route: Route | null; readonly note: string };
 

@@ -13,7 +13,7 @@ import type { SegmentationConfig } from "../src/backend/segmentation";
 import { fakeTask, ok, testDb } from "./fakes";
 
 /** 30 s windows are three 10 s passages; the cap is five windows so cap tests stay short. */
-const CFG: SegmentationConfig = { windowNewS: 30, contextS: 60, timeCapS: 150, maxFramesPerWindow: 2 };
+const CFG: SegmentationConfig = { windowNewS: 30, contextS: 60, timeCapS: 150, maxFramesPerWindow: 2, reviseOnNextNoNo: true };
 const SRC_A = stableId("src", "youtube", "lectureA");
 const SRC_B = stableId("src", "youtube", "lectureB");
 const CAP = randomId("cap");
@@ -87,7 +87,7 @@ describe("flow B routing table", () => {
   });
 
   test("the starting values are the flow B numbers", () => {
-    expect(SEGMENTATION_DEFAULTS).toEqual({ windowNewS: 30, contextS: 120, timeCapS: 480, maxFramesPerWindow: 2 });
+    expect(SEGMENTATION_DEFAULTS).toEqual({ windowNewS: 30, contextS: 120, timeCapS: 480, maxFramesPerWindow: 2, reviseOnNextNoNo: false });
   });
 });
 
@@ -197,6 +197,12 @@ describe("chunk plan", () => {
 });
 
 describe("boundary revision", () => {
+  test("is off by default: a no/no after a close stays in the new chunk", () => {
+    const p = plan(["no/no", "yes/yes", "no/no"], { cfg: { ...CFG, reviseOnNextNoNo: false } });
+    expect(p.closed).toEqual([[[0], "boundary"]]);
+    expect(p.open).toEqual([1, 2]);
+  });
+
   test("a no/no first window after a boundary close moves that boundary forward through that window, once per boundary", () => {
     const p = plan(["no/no", "no/no", "yes/yes", "no/no", "no/no", "yes/yes", "no/no"], { stopped: true });
     expect(p.closed[0]).toEqual([[0, 1, 2, 3], "boundary_revised"]);
