@@ -13,7 +13,7 @@ import type {
 } from "./domain";
 import { parseId } from "./ids";
 import type { CaptureId, EvidenceId, Id, IdKind, ReviewId, TurnId } from "./ids";
-import { media } from "./time";
+import { Material, media } from "./time";
 
 export class BadRequest extends Error {
   override readonly name = "BadRequest";
@@ -177,3 +177,24 @@ export function parseEvidenceDeleteRequest(raw: unknown): { readonly evidenceIds
 
 /** NDJSON lines of POST /reviews/:id/turns. Same shape as the domain TurnEvent. */
 export type TutorStreamEvent = TurnEvent;
+
+// ───────────────────────────── Material ─────────────────────────────────────
+
+/** A Map cannot survive JSON, so a Material travels as `Material.canonical` rows: `[sourceId, [[start, end], ...]][]`. */
+export const materialWire = z
+  .array(z.tuple([idOf("src"), z.array(z.tuple([z.number().nonnegative(), z.number().nonnegative()]))]))
+  .transform((rows) => Material.fromCanonical(rows));
+
+export function encodeMaterial(m: Material): string {
+  return JSON.stringify(Material.canonical(m));
+}
+
+export function decodeMaterial(raw: string): Material {
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    throw new BadRequest("material is not JSON");
+  }
+  return parseWith(materialWire, json);
+}

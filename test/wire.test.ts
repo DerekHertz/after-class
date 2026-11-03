@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { randomId } from "../src/shared/ids";
+import { randomId, stableId } from "../src/shared/ids";
+import { Material, interval } from "../src/shared/time";
 import {
-  BadRequest, parseIngestBatch, parseLinkDecisionRequest, parseObservationOverrideRequest, parseStartReviewRequest, parseTurnRequest,
+  BadRequest, decodeMaterial, encodeMaterial, parseIngestBatch, parseLinkDecisionRequest, parseObservationOverrideRequest, parseStartReviewRequest, parseTurnRequest,
 } from "../src/shared/wire";
 
 const captureId = randomId("cap");
@@ -68,5 +69,26 @@ describe("app requests", () => {
   test("the learner can never record 'disputed' themselves", () => {
     expect(() => parseObservationOverrideRequest({ status: "disputed" })).toThrow(BadRequest);
     expect(parseLinkDecisionRequest({ decision: { corrected: "part_of" } }).decision).toEqual({ corrected: "part_of" });
+  });
+});
+
+describe("Material wire form", () => {
+  const a = stableId("src", "yt", "QgWz_s7uugE");
+  const b = stableId("src", "yt", "dQw4w9WgXcQ");
+  const two = Material.of([[a, [interval(0, 120), interval(300, 420)]], [b, [interval(10.5, 20.25)]]]);
+
+  test("a two-source Material survives encode, a JSON round trip, decode", () => {
+    const encoded = encodeMaterial(two);
+    expect(JSON.parse(encoded)).toEqual(Material.canonical(two));
+    const viaJson = JSON.stringify(JSON.parse(encoded));
+    expect(Material.equals(decodeMaterial(viaJson), two)).toBe(true);
+    expect(encodeMaterial(decodeMaterial(encoded))).toBe(encoded);
+  });
+
+  test("an empty Material round-trips and a malformed one is a BadRequest", () => {
+    expect(Material.isEmpty(decodeMaterial(encodeMaterial(Material.empty)))).toBe(true);
+    expect(() => decodeMaterial("not json")).toThrow(BadRequest);
+    expect(() => decodeMaterial(JSON.stringify([["src_x", [[0, 1]]]]))).toThrow(BadRequest);
+    expect(() => decodeMaterial(JSON.stringify([[a, [[-1, 1]]]]))).toThrow(BadRequest);
   });
 });
