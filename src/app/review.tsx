@@ -71,14 +71,12 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             )}
           </ol>
           {canRetry && (
-            <p className="note">
-              {state.unsent.length > 0
-                ? "Your last message was not delivered."
-                : state.live?.status === "failed"
-                  ? "The tutor's reply did not finish."
-                  : "The tutor has not replied to your last message."}{" "}
-              <button type="button" onClick={() => void controller.retryTurn()}>Retry</button>
-            </p>
+            <UndeliveredNote
+              unsent={state.unsent.length}
+              failed={state.live?.status === "failed"}
+              onRetry={() => void controller.retryTurn()}
+              onDiscard={() => void controller.discardUnsent()}
+            />
           )}
           {soft && (
             <div className="note">
@@ -113,6 +111,22 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
         </section>
       </div>
     </main>
+  );
+}
+
+/** Discard is the way out of a message the backend refuses for good; End is offered again once it is gone. */
+export function UndeliveredNote({ unsent, failed, onRetry, onDiscard }: { readonly unsent: number; readonly failed: boolean; readonly onRetry: () => void; readonly onDiscard: () => void }) {
+  return (
+    <p className="note">
+      {unsent > 0 ? "Your last message was not delivered." : failed ? "The tutor's reply did not finish." : "The tutor has not replied to your last message."}{" "}
+      <button type="button" onClick={onRetry}>Retry</button>
+      {unsent > 0 && (
+        <>
+          {" "}
+          <button type="button" onClick={onDiscard}>Discard message</button> <span className="muted">Drops it. It is not counted as an answer.</span>
+        </>
+      )}
+    </p>
   );
 }
 

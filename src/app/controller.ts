@@ -47,6 +47,11 @@ export type ReviewController = {
   send(act: LearnerAct): Promise<boolean>;
   /** Resend the oldest unsent turn, or the stored turn the tutor never answered. Same id as before. */
   retryTurn(): Promise<void>;
+  /**
+   * Drop every unsent turn and the failure it left. The backend never stored them, so nothing is counted for them
+   * (R13: "A skipped or unanswered question is never counted as understood.").
+   */
+  discardUnsent(): Promise<void>;
   save(): Promise<void>;
   /** The learner started speaking: the tutor goes quiet. */
   learnerSpeaking(): void;
@@ -180,6 +185,13 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
         const waiting = state.view ? unansweredLearnerTurn(state.view.turns) : null;
         if (waiting) return runTurn(waiting.id, waiting.act);
       }),
+    discardUnsent: async () => {
+      await exclusive(async () => {
+        for (const t of await unsent.forReview(reviewId)) await unsent.remove(t.turnId);
+        set({ live: state.live?.status === "failed" ? null : state.live, sendError: null });
+        await refreshUnsent();
+      });
+    },
     save,
     learnerSpeaking: () => speaker.stop(),
   };

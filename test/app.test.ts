@@ -23,6 +23,7 @@ import {
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { StreamError, ndjson, tutorEvents } from "../src/app/ndjson";
 import { UsageTable } from "../src/app/record";
+import { UndeliveredNote } from "../src/app/review";
 import { createSpeechInput, createSynthSpeaker } from "../src/app/speech";
 import type { RecognitionLike, Speaker } from "../src/app/speech";
 import { BundleInspector, EvidencePane } from "../src/app/ui";
@@ -852,6 +853,52 @@ describe("review session controller", () => {
     expect(await h.controller.send({ kind: "answer", text: "A newer answer.", modality: "text" })).toBe(true);
     expect(h.sends.map((c) => c.act.kind === "answer" && c.act.text)).toEqual(["An ordering of events.", "A newer answer."]);
     expect(h.controller.getState().sendError).toBeNull();
+  });
+
+  test("a turn the backend rejects for good can be discarded, and the review can then be ended", async () => {
+    const h = setup({
+      sendTurn: ({ turnId, act }) => {
+        if (act.kind === "answer") {
+          return (async function* () {
+            throw new ApiError("another turn on this review is still running", 409);
+          })();
+        }
+        return events({ type: "learner_turn_stored", turnId }, { type: "turn_complete", turnId });
+      },
+    });
+    await h.controller.send(answer);
+    expect(h.controller.getState().live).toMatchObject({ status: "failed", retryable: false });
+    expect(h.controller.getState().unsent).toHaveLength(1);
+    expect(await h.controller.send({ kind: "end" })).toBe(false);
+
+    await h.controller.discardUnsent();
+    const after = h.controller.getState();
+    expect(after.unsent).toEqual([]);
+    expect(after.live).toBeNull();
+    expect(after.sendError).toBeNull();
+    expect(await h.unsent.forReview(reviewId)).toEqual([]);
+
+    expect(await h.controller.send({ kind: "end" })).toBe(true);
+    expect(h.sends.map((c) => c.act.kind)).toEqual(["answer", "end"]);
+  });
+
+  test("an undelivered message offers Retry and Discard; a tutor reply that stalled offers Retry only", () => {
+    const buttons = (props: Parameters<typeof UndeliveredNote>[0]) =>
+      findElements(UndeliveredNote(props), (e) => e.type === "button").map((b) => (b.props as { children?: unknown }).children);
+    const base = { unsent: 1, failed: true, onRetry: () => {}, onDiscard: () => {} };
+    expect(buttons(base)).toEqual(["Retry", "Discard message"]);
+    expect(buttons({ ...base, unsent: 0 })).toEqual(["Retry"]);
+    let discarded = 0;
+    const [, discard] = findElements(UndeliveredNote({ ...base, onDiscard: () => discarded++ }), (e) => e.type === "button");
+    (discard!.props as { onClick: () => void }).onClick();
+    expect(discarded).toBe(1);
+  });
+
+  test("discarding with nothing unsent does nothing, and never touches a turn that is streaming", async () => {
+    const h = setup({ sendTurn: ({ turnId }) => events({ type: "learner_turn_stored", turnId }, { type: "turn_complete", turnId }) });
+    await h.controller.discardUnsent();
+    expect(h.controller.getState().unsent).toEqual([]);
+    expect(h.sends).toEqual([]);
   });
 
   test("an over-length answer is rejected up front with a message and never reaches the unsent store", async () => {
