@@ -36,8 +36,6 @@ describe("Derek's rules are quoted verbatim", () => {
 });
 
 describe("Derek's rules", () => {
-  test.todo("R1 passages exist only for segments wholly inside watched spans in active control periods (W3: clipToWatched, watchedMaterial)");
-  test.todo("R2 ad facts never contribute material; isAdShowing fails closed on either signal; implausible spans add no material (W1: isAdShowing; W3: spanPlausible)");
   test.todo("R3 a header with a non-assessable claim id is rejected before any word streams; assessable() returns null unless supported_by_check (W8: validateMove; W6: assessable)");
   test.todo("R4 deriveClaimStatus never yields a second revision; recheck no/uncertain/failed ⇒ unverified; a boundary move keeps the used revision (W6)");
   test.todo("R5 answering Later leaves preparation.demand() identical (W7 + W6)");
@@ -47,5 +45,4 @@ describe("Derek's rules", () => {
   test.todo("R9 start() leaves CaptureView.status unchanged; a stop control fact leaves ReviewView.state.phase unchanged (W7 + W3)");
   test.todo("R10 start() with zero assessable claims returns nothing_to_review and writes no review row (W7)");
   test.todo("R15 save twice ⇒ identical row counts and IDs; a resent turn or start with the same app-minted id inserts nothing (W8, W7)");
-  test.todo("R16 sweepExpired keeps snapshots cited by any live note and raw evidence of unsaved reviews; deletes after deleteNote + expiry (W3; triggers tested in test/db.test.ts)");
 });
