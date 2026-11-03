@@ -46,7 +46,7 @@ const ask = (t: ThreadId, n: number): TutorMove => ({ kind: "ask_main", threadId
 const answer = (text: string): LearnerAct => ({ kind: "answer", text, modality: "speech" });
 const facts = (l: ReturnType<typeof log>, t: ThreadId = T1) => threadFacts(t, l.turns);
 const clamp = (l: ReturnType<typeof log>, proposed: Parameters<typeof clampStatus>[0], t: ThreadId = T1) =>
-  clampStatus(proposed, facts(l, t), threadDispute(t, l.turns)).status;
+  clampStatus(proposed, facts(l, t), threadDispute(t, l.turns), true).status;
 
 describe("R12: help before the answer caps at after_help", () => {
   test.each([
@@ -55,14 +55,14 @@ describe("R12: help before the answer caps at after_help", () => {
     ["correction disclosure", { kind: "disclose_correction", correctionId: "c1", threadIds: [T1], evidence: [] }],
   ] as const)("%s before the first answer", (_, help) => {
     const l = log().tutor(ask(T1, 1)).learner({ kind: "hint_request" }, T1).tutor(help as TutorMove).learner(answer("rows meet"), T1);
-    expect(clampStatus("independent", facts(l), NONE)).toEqual({ status: "after_help", clampedFrom: "independent" });
+    expect(clampStatus("independent", facts(l), NONE, true)).toEqual({ status: "after_help", clampedFrom: "independent" });
     expect(clamp(l, "partial")).toBe("after_help");
     expect(clamp(l, "unresolved")).toBe("unresolved");
   });
 
   test("help after the first answer does not cap", () => {
     const l = log().tutor(ask(T1, 1)).learner(answer("rows meet"), T1).tutor({ kind: "hint", threadId: T1 });
-    expect(clampStatus("independent", facts(l), NONE)).toEqual({ status: "independent", clampedFrom: null });
+    expect(clampStatus("independent", facts(l), NONE, true)).toEqual({ status: "independent", clampedFrom: null });
   });
 
   test("help on another thread does not cap this one", () => {
@@ -74,7 +74,7 @@ describe("R12: help before the answer caps at after_help", () => {
 describe("R13: skipped or unanswered is not_assessed", () => {
   test("a skipped question", () => {
     const l = log().tutor(ask(T1, 1)).learner({ kind: "skip" }, T1);
-    expect(clampStatus("independent", facts(l), NONE)).toEqual({ status: "not_assessed", clampedFrom: "independent" });
+    expect(clampStatus("independent", facts(l), NONE, true)).toEqual({ status: "not_assessed", clampedFrom: "independent" });
   });
 
   test("a question with no learner turn at all", () => {
@@ -106,6 +106,19 @@ describe("R14: a disputed assessment is never a learning gap unless the learner 
       expect(isLearningGap({ status, dispute: threadDispute(T1, l.turns) })).toBe(false);
     }
     expect(threadDispute(T1, unsettled.turns)).toEqual({ kind: "unsettled" });
+  });
+
+  test("a dispute sent with no thread counts against the open thread, as the tutor's state does", () => {
+    const l = log().tutor(ask(T1, 1)).learner(answer("x"), T1).learner({ kind: "dispute", text: "the board said columns" }, null);
+    expect(threadDispute(T1, l.turns)).toEqual({ kind: "open", turnId: stableId("turn", 3) });
+    expect(clamp(l, "partial")).toBe("disputed");
+    expect(threadFacts(T1, l.turns).learnerTurns).toEqual([stableId("turn", 2), stableId("turn", 3)]);
+  });
+
+  test("a threadless dispute after the thread closed is not charged to it", () => {
+    const l = log().tutor(ask(T1, 1)).learner(answer("x"), T1).tutor({ kind: "close_thread", threadId: T1 }).learner({ kind: "dispute", text: "hm" }, null);
+    expect(threadDispute(T1, l.turns)).toEqual(NONE);
+    expect(clamp(l, "partial")).toBe("partial");
   });
 
   test("only the learner's it_was_my_gap resolution lets a gap count", () => {
@@ -285,6 +298,78 @@ describe("the learning record", () => {
     await h.record.save(REVIEW);
     h.db.sql.run(`INSERT INTO evidence_deletions (evidence_id, request_id, deleted_ms, seq) VALUES (?, 'req', 42, 1)`, [ev(1)]);
     expect(h.record.view({ reviewId: REVIEW }).unavailableEvidence).toEqual([{ kind: "deleted", id: ev(1), deletedAtMs: 42 }]);
+  });
+});
+
+describe("a dispute you settle saves the way you settled it; the tutor's proposal can't override it", () => {
+  const disputedTurns = () =>
+    log().tutor(ask(T1, 1)).learner(answer("they are columns"), T1).learner({ kind: "dispute", text: "the board showed columns" }, T1)
+      .learner({ kind: "end" }, null).tutor({ kind: "wrap_up" }).turns;
+  const obsId = stableId("obs", REVIEW, T1);
+
+  test.each(["independent", "partial"] as const)("first proposal %s", async (first) => {
+    let proposed: WrapUpOutput["observations"][number]["proposed"] = first;
+    const h = harness({ turns: disputedTurns(), wrapUp: async () => ({ observations: [{ threadId: T1, proposed, rationale: "r" }], notes: [] }) });
+    const saved = async () => {
+      await h.record.save(REVIEW);
+      return h.record.view({ reviewId: REVIEW }).observations[0]!;
+    };
+    expect(isLearningGap(await saved())).toBe(false);
+
+    h.record.resolveDispute(obsId, "learner_was_right");
+    for (const p of ["independent", "partial", "unresolved"] as const) {
+      proposed = p;
+      expect(isLearningGap(await saved())).toBe(false);
+    }
+
+    h.record.resolveDispute(obsId, "it_was_my_gap");
+    for (const [p, status] of [["independent", "unresolved"], ["partial", "partial"], ["after_help", "unresolved"], ["unresolved", "unresolved"]] as const) {
+      proposed = p;
+      const o = await saved();
+      expect(o).toMatchObject({ status, dispute: { kind: "resolved_by_learner", outcome: "it_was_my_gap" } });
+      expect(isLearningGap(o)).toBe(true);
+    }
+  });
+});
+
+describe("R3: a claim that is not assessable at save is not assessed", () => {
+  test("its observation clamps to not_assessed, a learner override included; assessable threads keep their status", async () => {
+    const turns = log()
+      .tutor(ask(T1, 1)).learner(answer("rows meet"), T1).tutor({ kind: "close_thread", threadId: T1 })
+      .tutor(ask(T2, 2)).learner(answer("columns combine"), T2)
+      .learner({ kind: "end" }, null).tutor({ kind: "wrap_up" }).turns;
+    const wrapUp: WrapUpOutput = {
+      observations: [{ threadId: T1, proposed: "partial", rationale: "r" }, { threadId: T2, proposed: "partial", rationale: "r" }],
+      notes: [],
+    };
+    const h = harness({ turns, wrapUp: async () => wrapUp, claims: () => [claim(1)] });
+    await h.record.save(REVIEW);
+    const [t1, t2] = h.record.view({ reviewId: REVIEW }).observations;
+    expect(t1).toMatchObject({ proposed: "partial", status: "partial" });
+    expect(t2).toMatchObject({ proposed: "partial", status: "not_assessed", clampedFrom: "partial" });
+    expect(isLearningGap(t2!)).toBe(false);
+
+    h.record.overrideObservation(stableId("obs", REVIEW, T2), "unresolved");
+    expect(h.record.view({ reviewId: REVIEW }).observations[1]!.status).toBe("not_assessed");
+  });
+});
+
+describe("a re-save never re-snapshots evidence the user let go", () => {
+  test("evidence only a deleted note cited is not snapshotted again", async () => {
+    const h = harness();
+    await h.record.save(REVIEW);
+    h.record.deleteNote(stableId("note", REVIEW, concept(1)));
+    await h.record.save(REVIEW);
+    expect(h.calls.snapshots).toEqual([[ev(1), ev(2)].sort(), [ev(2)]]);
+  });
+
+  test("evidence the user deleted is not snapshotted again, though a live note still cites it", async () => {
+    const h = harness();
+    await h.record.save(REVIEW);
+    h.db.sql.run(`INSERT INTO evidence_deletions (evidence_id, request_id, deleted_ms, seq) VALUES (?, 'req', 42, 1)`, [ev(2)]);
+    await h.record.save(REVIEW);
+    expect(h.calls.snapshots).toEqual([[ev(1), ev(2)].sort(), [ev(1)]]);
+    expect(h.record.view({ reviewId: REVIEW }).unavailableEvidence).toEqual([{ kind: "deleted", id: ev(2), deletedAtMs: 42 }]);
   });
 });
 

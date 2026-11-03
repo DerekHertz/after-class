@@ -55,7 +55,7 @@ export type LearningRecord = {
 type NoteRow = { id: string; review_id: string; concept_id: string; generated_json: string; user_edit: string | null };
 type ObservationRow = {
   id: string; review_id: string; thread_id: string; claim_ids_json: string; concept_ids_json: string; proposed: ObservationStatus;
-  facts_json: string; resolution: "learner_was_right" | "it_was_my_gap" | null; override: ObservationStatus | null;
+  facts_json: string; assessable: 0 | 1; resolution: "learner_was_right" | "it_was_my_gap" | null; override: ObservationStatus | null;
 };
 type LinkRow = { id: string; from_concept: string; to_concept: string; type: SubjectLinkSuggestion["type"]; evidence_json: string; rationale: string; decision_json: string | null };
 
@@ -83,10 +83,10 @@ export function createRecord(db: Db, deps: {
     // Add-only: a re-save never drops a citation, so it never releases evidence the note once held (R16).
     noteEvidence: db.sql.query(`INSERT OR IGNORE INTO note_evidence (note_id, evidence_id) VALUES (?, ?)`),
     upsertObservation: db.sql.query(
-      `INSERT INTO observations (id, review_id, thread_id, claim_ids_json, concept_ids_json, proposed, facts_json, saved_ms)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+      `INSERT INTO observations (id, review_id, thread_id, claim_ids_json, concept_ids_json, proposed, facts_json, saved_ms, assessable)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
        ON CONFLICT (id) DO UPDATE SET claim_ids_json = excluded.claim_ids_json, concept_ids_json = excluded.concept_ids_json,
-         proposed = excluded.proposed, facts_json = excluded.facts_json`,
+         proposed = excluded.proposed, facts_json = excluded.facts_json, assessable = excluded.assessable`,
     ),
     upsertLink: db.sql.query(
       `INSERT INTO link_suggestions (id, review_id, from_concept, to_concept, type, evidence_json, rationale, saved_ms)
@@ -122,7 +122,7 @@ export function createRecord(db: Db, deps: {
       `SELECT evidence_id, deleted_ms FROM evidence_deletions WHERE evidence_id IN (SELECT value FROM json_each(?)) ORDER BY evidence_id`,
     ),
     observations: db.sql.query<ObservationRow, [string | null, string | null]>(
-      `SELECT o.id, o.review_id, o.thread_id, o.claim_ids_json, o.concept_ids_json, o.proposed, o.facts_json,
+      `SELECT o.id, o.review_id, o.thread_id, o.claim_ids_json, o.concept_ids_json, o.proposed, o.facts_json, o.assessable,
          (SELECT value FROM observation_decisions WHERE observation_id = o.id AND kind = 'dispute_resolution') AS resolution,
          (SELECT value FROM observation_decisions WHERE observation_id = o.id AND kind = 'override') AS override
        FROM observations o
@@ -152,17 +152,23 @@ export function createRecord(db: Db, deps: {
     return db.tx(() => {
       const ms = now();
       let notes = 0;
+      const cited = new Set<EvidenceId>(b.links.flatMap((l) => l.evidence));
       for (const n of b.notes) {
         if (q.tombstoned.get(n.id)!.n > 0) continue;
         q.upsertNote.run(n.id, n.reviewId, n.conceptId, JSON.stringify(n.generated), ms);
-        for (const e of n.evidence) q.noteEvidence.run(n.id, e);
+        for (const e of n.evidence) {
+          q.noteEvidence.run(n.id, e);
+          cited.add(e);
+        }
         notes += 1;
       }
       for (const o of b.observations) {
-        q.upsertObservation.run(o.id, o.reviewId, o.threadId, JSON.stringify(o.claimIds), JSON.stringify(o.conceptIds), o.proposed, JSON.stringify(o.facts), ms);
+        q.upsertObservation.run(o.id, o.reviewId, o.threadId, JSON.stringify(o.claimIds), JSON.stringify(o.conceptIds), o.proposed, JSON.stringify(o.facts), ms, o.assessable ? 1 : 0);
       }
       for (const l of b.links) q.upsertLink.run(l.id, reviewId, l.from, l.to, l.type, JSON.stringify(l.evidence), l.rationale, ms);
-      deps.snapshotEvidenceInTx(b.evidence);
+      // A re-save must not bring back evidence the user let go: a deleted note's citations, or evidence they deleted.
+      const deleted = new Set(q.deletedEvidence.all(JSON.stringify([...cited])).map((r) => r.evidence_id));
+      deps.snapshotEvidenceInTx([...cited].filter((id) => !deleted.has(id)).sort());
       // Last, so the R16 hold on raw evidence lifts only once the snapshots exist.
       q.markSaved.run(reviewId, b.hash, ms);
       return { kind: "saved", notes, observations: b.observations.length, links: b.links.length } as const;
@@ -212,7 +218,7 @@ export function createRecord(db: Db, deps: {
       const fromTurns = threadDispute(threadId, turns);
       const dispute: DisputeState = fromTurns.kind !== "none" && r.resolution !== null ? { kind: "resolved_by_learner", outcome: r.resolution } : fromTurns;
       const facts = JSON.parse(r.facts_json) as ThreadFacts;
-      const { status, clampedFrom } = clampStatus(r.override ?? r.proposed, facts, dispute);
+      const { status, clampedFrom } = clampStatus(r.override ?? r.proposed, facts, dispute, r.assessable === 1);
       return {
         id: r.id as ObservationId,
         reviewId: rid,

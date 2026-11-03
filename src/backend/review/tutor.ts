@@ -3,7 +3,7 @@
  *
  * Each turn, `reviewState` folds the log and `allowedMoves` computes the closed
  * set of move kinds the tutor may pick. Rules live here, not in the prompt:
- *   R3  ask_main.claimIds ⊆ usable AssessableClaim IDs
+ *   R3  ask_main.claimIds ⊆ usable AssessableClaim IDs; an open thread on a claim no longer usable may only be closed
  *   R11 detour_step allowed ⇔ detour.kind === "active" (only a learner detour_accept gets there)
  *   R7  cited evidence IDs ⊆ scope material
  *   ≤ 3 main questions; hint/explain requests force that move; a pending correction forces disclosure first
@@ -15,7 +15,7 @@
  */
 import { z } from "zod";
 import { stableId } from "../../shared/ids";
-import type { ConceptId, EvidenceId, Id, IdKind, ResourceId, ThreadId, TurnId } from "../../shared/ids";
+import type { ClaimId, ConceptId, EvidenceId, Id, IdKind, ResourceId, ThreadId, TurnId } from "../../shared/ids";
 import type {
   AssessableClaim, Correction, DetourState, EvidenceBundle, FrozenScope, LearnerActKind, Observation, ReviewPhase, ReviewState, Turn,
   TutorMove, TutorMoveKind,
@@ -24,7 +24,7 @@ import { Material } from "../../shared/time";
 import { ProviderError } from "../providers/memo";
 import type { Task } from "../providers/memo";
 import type { ClaudeCli, ClaudeRequest } from "../providers/claude";
-import { moveThreads } from "./clamp";
+import { attributeTurns, moveThreads } from "./clamp";
 
 export const MAX_MAIN_QUESTIONS = 3;
 
@@ -68,7 +68,7 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
   let wrapUpRequested = false;
   const readyResources = new Set<ResourceId>();
   const disclosed = new Set<string>();
-  const sorted = bySeq(turns);
+  const sorted = attributeTurns(turns);
   let activeMs = 0;
   let activeSince: number | null = sorted[0]?.atMs ?? null;
   const stopClock = (atMs: number) => {
@@ -102,7 +102,7 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
           wrapUpRequested = false;
           break;
         case "dispute":
-          openDispute = t.threadId ?? openThread;
+          openDispute = t.threadId;
           break;
         case "detour_accept":
           if (detour.kind === "proposed") {
@@ -180,9 +180,24 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
 }
 
 /**
+ * Flow D's TLC fix for R3, "A claim being rechecked is out of assessment until
+ * it passes again; an open question on it pauses and the tutor says why."
+ * The open thread's claims that are not usable now; any means the thread is paused.
+ */
+function recheckedClaims(openThread: ThreadId | null, ctx: Pick<TutorInput, "turns" | "claims">): readonly ClaimId[] {
+  if (openThread === null) return [];
+  const usable = new Set(ctx.claims.map((c) => c.id));
+  for (const t of ctx.turns) {
+    if (t.actor === "tutor" && t.move.kind === "ask_main" && t.move.threadId === openThread) return t.move.claimIds.filter((id) => !usable.has(id));
+  }
+  return [];
+}
+
+/**
  * R11: "A detour only starts after I say yes."
  *   if phase != "active": return {}
  *   if any correction !disclosed: return {"disclose_correction"}
+ *   open thread names a claim not usable now (R3): return {"wrap_up"} if wrapUpRequested else {"close_thread"}
  *   hint_request / explain_request / dispute pending: return the move that answers it
  *   if wrapUpRequested (learner wrap_up or end): return {"wrap_up"}
  *   just accepted a detour that can start: return {"detour_step"}
@@ -195,9 +210,10 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
  * Code (not the tutor) appends a soft_target_reached notice when the last tutor
  * move was close_thread and activeSeconds ≥ softTargetS ∧ !softTargetOffered.
  */
-export function allowedMoves(state: ReviewState): ReadonlySet<TutorMoveKind> {
+export function allowedMoves(state: ReviewState, ctx: Pick<TutorInput, "turns" | "claims">): ReadonlySet<TutorMoveKind> {
   if (state.phase !== "active") return new Set();
   if (state.corrections.some((c) => !c.disclosed)) return new Set(["disclose_correction"]);
+  if (recheckedClaims(state.openThread, ctx).length > 0) return new Set([state.wrapUpRequested ? "wrap_up" : "close_thread"]);
   const last = state.lastLearnerAct?.act.kind;
   const forced = last === undefined ? undefined : FORCED_RESPONSE[last];
   if (forced !== undefined) return new Set([forced]);
@@ -288,7 +304,7 @@ function evidenceInScope(ids: readonly EvidenceId[], input: TutorInput): Verdict
   const inScope = new Set<EvidenceId>();
   for (const p of input.evidence.passages) if (Material.covers(scope, p.sourceId, p.interval)) inScope.add(p.id);
   for (const f of input.evidence.frames) {
-    if (Material.get(scope, f.sourceId).intervals().some((i) => i.start <= f.mediaS && f.mediaS <= i.end)) inScope.add(f.id);
+    if (Material.get(scope, f.sourceId).intervals().some((i) => i.start <= f.mediaS && f.mediaS < i.end)) inScope.add(f.id);
   }
   const outside = ids.filter((id) => !inScope.has(id));
   return outside.length === 0 ? OK : no(`evidence outside the review scope: ${outside.join(", ")}`);
@@ -327,6 +343,10 @@ function all(...checks: readonly (() => Verdict)[]): Verdict {
 export function validateMove(move: TutorMove, input: TutorInput): { readonly ok: true } | { readonly ok: false; readonly why: string } {
   const { state } = input;
   if (!input.allowed.includes(move.kind)) return no(`${move.kind} is not allowed now; allowed: ${input.allowed.join(", ") || "(none)"}`);
+  const rechecked = recheckedClaims(state.openThread, input);
+  if (rechecked.length > 0 && move.kind !== "close_thread" && move.kind !== "disclose_correction" && moveThreads(move).includes(state.openThread!)) {
+    return no(`thread ${state.openThread} is paused while ${rechecked.join(", ")} is rechecked; only close it`);
+  }
   switch (move.kind) {
     case "ask_main": {
       if (state.mainQuestions >= MAX_MAIN_QUESTIONS) return no(`at most ${MAX_MAIN_QUESTIONS} main questions`);
@@ -431,6 +451,10 @@ export function tutorPrompt(input: TutorInput): string {
   ];
   const pending = state.corrections.filter((c) => !c.disclosed);
   if (pending.length > 0) sections.push(`Pending corrections to disclose:\n${pending.map((c) => `- ${c.id}: claim ${c.claimId} ${c.change}`).join("\n")}`);
+  const rechecked = recheckedClaims(state.openThread, input);
+  if (rechecked.length > 0) {
+    sections.push(`Open thread ${state.openThread} is paused: claim ${rechecked.join(", ")} is being rechecked and is out of assessment until it passes again. Ask or judge nothing on it; tell the learner why it is paused.`);
+  }
   sections.push(`Usable claims (the only ones you may ask about or judge against):\n${input.claims.map((c) => `- ${c.id} (concept ${c.conceptId}): ${c.text} [evidence: ${c.evidence.join(", ")}]${c.assumptions.length ? ` assumptions: ${c.assumptions.join("; ")}` : ""}`).join("\n")}`);
   sections.push(`Lecture evidence (cite only these IDs):\n${[
     ...input.evidence.passages.map((p) => `- ${p.id} passage ${p.interval.start}s-${p.interval.end}s: ${JSON.stringify(p.text)}`),

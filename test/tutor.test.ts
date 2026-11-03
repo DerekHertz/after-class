@@ -3,7 +3,7 @@ import { z } from "zod";
 import { stableId } from "../src/shared/ids";
 import type { ClaimId, ConceptId, EvidenceId, ResourceId, ReviewId, SourceId, ThreadId, TurnId } from "../src/shared/ids";
 import type {
-  AssessableClaim, CodeNotice, Correction, EvidenceBundle, FrozenScope, LearnerAct, Passage, Turn, TutorMove, TutorMoveKind,
+  AssessableClaim, CodeNotice, Correction, EvidenceBundle, Frame, FrozenScope, LearnerAct, Passage, Turn, TutorMove, TutorMoveKind,
 } from "../src/shared/domain";
 import { Material, interval } from "../src/shared/time";
 import { allowedMoves, nextThreadId, parseMoveHeader, reviewState, tutorTask, validateMove, wrapUpTask } from "../src/backend/review/tutor";
@@ -77,17 +77,20 @@ function stateOf(turns: readonly Turn[], corrections: readonly Correction[] = []
   return reviewState(REVIEW, turns, corrections, 600, nowMs);
 }
 
-function allowed(turns: readonly Turn[], corrections: readonly Correction[] = []): TutorMoveKind[] {
-  return [...allowedMoves(stateOf(turns, corrections))].sort();
+const USABLE = [claim(1), claim(2)];
+
+function allowed(turns: readonly Turn[], corrections: readonly Correction[] = [], claims: readonly AssessableClaim[] = USABLE): TutorMoveKind[] {
+  return [...allowedMoves(stateOf(turns, corrections), { turns, claims })].sort();
 }
 
-function inputFor(turns: readonly Turn[], opts: { corrections?: Correction[]; allowed?: TutorMoveKind[] } = {}): TutorInput {
+function inputFor(turns: readonly Turn[], opts: { corrections?: Correction[]; allowed?: TutorMoveKind[]; claims?: AssessableClaim[] } = {}): TutorInput {
   const state = stateOf(turns, opts.corrections ?? []);
+  const claims = opts.claims ?? USABLE;
   return {
     state,
-    allowed: opts.allowed ?? [...allowedMoves(state)],
+    allowed: opts.allowed ?? [...allowedMoves(state, { turns, claims })],
     scope: SCOPE,
-    claims: [claim(1), claim(2)],
+    claims,
     evidence: BUNDLE,
     turns,
     priorObservations: [],
@@ -185,6 +188,47 @@ describe("allowedMoves", () => {
   });
 });
 
+describe("R3: a claim being rechecked is out of assessment until it passes again", () => {
+  const withdrawn: Correction = { id: "cor-w", claimId: claimId(1), change: "withdrawn", disclosed: false };
+  const recheckLog = () => log().tutor(askMain(1)).learner(answer("x"), thread(1));
+  const disclose: TutorMove = { kind: "disclose_correction", correctionId: "cor-w", threadIds: [thread(1)], evidence: [ev(1)] };
+  const ALL: TutorMoveKind[] = ["ask_followup", "diagnose", "hint", "explain", "answer_dispute", "close_thread"];
+  const onThread: TutorMove[] = [
+    { kind: "ask_followup", threadId: thread(1) },
+    { kind: "diagnose", threadId: thread(1), hypothesis: "h", evidence: [ev(2)] },
+    { kind: "hint", threadId: thread(1) },
+    { kind: "explain", threadId: thread(1), evidence: [ev(2)] },
+  ];
+
+  test("an open question on it pauses: the tutor says why, then may only close the thread", () => {
+    const l = recheckLog();
+    expect(allowed(l.turns, [withdrawn], [claim(2)])).toEqual(["disclose_correction"]);
+    l.tutor(disclose).learner(answer("y"), thread(1));
+    expect(allowed(l.turns, [withdrawn], [claim(2)])).toEqual(["close_thread"]);
+  });
+
+  test("a hint, explain or dispute request on the paused thread does not reopen it", () => {
+    for (const act of [{ kind: "hint_request" }, { kind: "explain_request" }, { kind: "dispute", text: "no" }] as const) {
+      const l = recheckLog().tutor(disclose).learner(act, thread(1));
+      expect(allowed(l.turns, [withdrawn], [claim(2)])).toEqual(["close_thread"]);
+    }
+  });
+
+  test("validateMove rejects any move on the paused thread but closing it, whatever the allowed set says", () => {
+    const l = recheckLog().tutor(disclose).learner(answer("y"), thread(1));
+    const input = inputFor(l.turns, { corrections: [withdrawn], claims: [claim(2)], allowed: ALL });
+    for (const move of onThread) expect(validateMove(move, input).ok).toBe(false);
+    expect(validateMove({ kind: "close_thread", threadId: thread(1) }, input).ok).toBe(true);
+  });
+
+  test("a claim that passes again puts the thread back in assessment", () => {
+    const l = recheckLog().tutor(disclose).learner(answer("y"), thread(1));
+    expect(allowed(l.turns, [], USABLE)).toContain("ask_followup");
+    const input = inputFor(l.turns, { claims: USABLE, allowed: ALL });
+    for (const move of onThread) expect(validateMove(move, input).ok).toBe(true);
+  });
+});
+
 describe("R11: detours", () => {
   const proposal: TutorMove = { kind: "propose_detour", topic: "row picture", reason: "seems unsure about rows", needsResource: null };
 
@@ -248,6 +292,15 @@ describe("validateMove", () => {
     expect(validateMove(diagnose([ev(1)]), inputFor(l.turns)).ok).toBe(true);
     expect(validateMove(diagnose([ev(99)]), inputFor(l.turns)).ok).toBe(false);
     expect(validateMove(diagnose([stableId("ev", "never shown") as EvidenceId]), inputFor(l.turns)).ok).toBe(false);
+  });
+
+  test("R7: a frame exactly at the scope's end is outside the half-open scope", () => {
+    const frame = (n: number, at: number) => ({ kind: "frame", id: stableId("ev", "frame", n), sourceId: SRC, mediaS: at, width: 1, height: 1 }) as unknown as Frame;
+    const l = log().tutor(askMain(1)).learner({ kind: "explain_request" }, thread(1));
+    const input = { ...inputFor(l.turns), evidence: { ...BUNDLE, frames: [frame(1, 599.5), frame(2, 600)] } };
+    const explain = (n: number): TutorMove => ({ kind: "explain", threadId: thread(1), evidence: [stableId("ev", "frame", n) as EvidenceId] });
+    expect(validateMove(explain(1), input).ok).toBe(true);
+    expect(validateMove(explain(2), input).ok).toBe(false);
   });
 
   test("one source-grounded diagnostic question per thread", () => {

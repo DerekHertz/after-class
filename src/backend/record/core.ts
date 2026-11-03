@@ -5,12 +5,13 @@ import { canonicalJson, stableId } from "../../shared/ids";
 import type { ConceptId, EvidenceId, IdPart, ReviewId, ThreadId } from "../../shared/ids";
 import type { AssessableClaim, NonEmpty, Note, NoteSegment, Observation, SubjectLinkSuggestion, Turn } from "../../shared/domain";
 import type { WrapUpOutput } from "../review/tutor";
-import { moveThreads, threadFacts } from "../review/clamp";
+import { attributeTurns, moveThreads, threadFacts } from "../review/clamp";
 
 export type RecordBundle = {
   readonly hash: string;
   readonly notes: readonly Omit<Note, "userEdit">[];
-  readonly observations: readonly Omit<Observation, "status" | "clampedFrom" | "dispute" | "corrections">[];
+  /** `assessable`: every claim the thread asked about was still usable at save (R3). */
+  readonly observations: readonly (Omit<Observation, "status" | "clampedFrom" | "dispute" | "corrections"> & { readonly assessable: boolean })[];
   readonly links: readonly SubjectLinkSuggestion[];
   readonly evidence: readonly EvidenceId[];
 };
@@ -34,7 +35,7 @@ function sortedUnique<T extends string>(xs: Iterable<T>): T[] {
  * Every thread gets an observation; a thread the wrap-up skipped is proposed not_assessed.
  */
 export function buildBundle(reviewId: ReviewId, turns: readonly Turn[], claims: readonly AssessableClaim[], wrapUp: WrapUpOutput, links: readonly SubjectLinkSuggestion[] = []): RecordBundle {
-  const ordered = [...turns].sort((a, b) => a.seq - b.seq);
+  const ordered = attributeTurns(turns);
   const claimById = new Map(claims.map((c) => [c.id, c]));
 
   const threads: { readonly id: ThreadId; readonly claims: NonEmpty<AssessableClaim["id"]> }[] = [];
@@ -56,6 +57,7 @@ export function buildBundle(reviewId: ReviewId, turns: readonly Turn[], claims: 
     conceptIds: conceptsOf(th.claims),
     proposed: proposals.get(th.id) ?? "not_assessed",
     facts: threadFacts(th.id, ordered),
+    assessable: th.claims.every((id) => claimById.has(id)),
   }));
 
   const known = new Set<string>(claims.flatMap((c) => c.evidence));

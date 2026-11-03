@@ -401,6 +401,12 @@ CREATE TABLE saved_reviews (
   saved_ms INTEGER NOT NULL
 ) STRICT;`,
     },
+    {
+      id: "002-observation-assessable",
+      sql: `
+-- R3: whether every claim the thread asked about was still assessable when the review was saved.
+ALTER TABLE observations ADD COLUMN assessable INTEGER NOT NULL DEFAULT 1 CHECK (assessable IN (0, 1));`,
+    },
   ],
 };
 
