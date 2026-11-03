@@ -695,7 +695,7 @@ const said = (words: string): LearnerAct => ({ kind: "answer", text: words, moda
  * The real review and record modules and the real HTTP server on one in-memory db. Preparation and segmentation are
  * answered from `world`; the tutor and wrap-up are scripted. `retries` records preparation.retry calls.
  */
-function reviewRig(script: Script = pick) {
+function reviewRig(script: Script = pick, extra: { turnDeadlineMs?: number } = {}) {
   const db = testDb();
   const world = new World(db);
   const model = modelTask(script);
@@ -743,7 +743,7 @@ function reviewRig(script: Script = pick) {
   const server = serve({
     modules: { ledger: createLedger(db), evidence, reviews, record, preparation, segmentation },
     auth: { port: 0, extensionId: EXT_ID, token: TOKEN },
-    appDir: fixtureApp(),
+    appDir: fixtureApp(), ...extra,
   });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
@@ -993,6 +993,92 @@ describe("POST /reviews/:id/turns", () => {
     expect(tutors.map((t) => t.move?.kind)).toEqual(["disclose_correction"]);
     expect(tutors.some((t) => t.move?.claimIds?.includes(a))).toBe(false);
     expect(turns.some((t) => t.actor === "code" && t.notice?.kind === "correction_pending")).toBe(true);
+  });
+
+  test("one turn at a time per review: a second turn post with a different turnId while one runs is 409 and stores nothing; the same turnId still replays", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const rig = reviewRig(async (input, call) => {
+      if (call === 1) await gate;
+      return pick(input);
+    });
+    const reviewId = await startedIn(rig);
+    const second = await rig.startReview(randomId("rvw"), "prepared_only", randomId("cap"));
+    const other = second.reviewId;
+    const turnId = randomId("turn");
+    const running = await post(rig.base, `/reviews/${reviewId}/turns`, { turnId, act: { kind: "resume" } });
+    await until(() => rig.model.calls.length === 1);
+
+    const refused = await post(rig.base, `/reviews/${reviewId}/turns`, { turnId: randomId("turn"), act: said("too soon") });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({ error: expect.any(String) });
+    expect(learnerRows(rig.db)).toBe(1);
+    expect(rig.model.calls).toHaveLength(1);
+
+    // another review is not held up
+    const elsewhere = await rig.turn(other, { kind: "resume" });
+
+    expect(elsewhere.events.at(-1)?.type).toBe("turn_complete");
+
+    const joined = post(rig.base, `/reviews/${reviewId}/turns`, { turnId, act: { kind: "resume" } });
+    release();
+    for (const r of [running, await joined]) {
+      const events = (await r.text()).trim().split("\n").map((l) => tutorStreamEvent.parse(JSON.parse(l)));
+      expect(events.at(-1)?.type).toBe("turn_complete");
+    }
+    expect(learnerRows(rig.db)).toBe(2);
+    expect(rig.model.calls).toHaveLength(2);
+
+    const next = await rig.turn(reviewId, said("lines meeting at a point"));
+    expect(next.status).toBe(200);
+    expect(next.events.at(-1)?.type).toBe("turn_complete");
+  });
+
+  test("a turn stream that outlives the server's deadline ends with turn_failed retryable; the turn goes on, holds the review until it ends, and a resend replays it", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const rig = reviewRig(async (input) => {
+      await gate;
+      return pick(input);
+    }, { turnDeadlineMs: 60 });
+    const reviewId = await startedIn(rig);
+    const turnId = randomId("turn");
+    const t0 = Date.now();
+    const late = await rig.turn(reviewId, { kind: "resume" }, turnId);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(50);
+    expect(late.events.map((e) => e.type)).toEqual(["learner_turn_stored", "turn_failed"]);
+    expect(late.events.at(-1)).toMatchObject({ type: "turn_failed", retryable: true });
+    expect(tutorRows(rig.db)).toBe(0);
+
+    expect((await post(rig.base, `/reviews/${reviewId}/turns`, { turnId: randomId("turn"), act: said("meanwhile") })).status).toBe(409);
+
+    release();
+    await until(() => tutorRows(rig.db) === 1);
+    let resent = await rig.turn(reviewId, { kind: "resume" }, turnId);
+    for (let i = 0; i < 100 && resent.status === 409; i++) {
+      await Bun.sleep(10);
+      resent = await rig.turn(reviewId, { kind: "resume" }, turnId);
+    }
+    expect(resent.events.at(-1)?.type).toBe("turn_complete");
+    expect(moveOf(resent.events)).toBe("ask_main");
+    expect(rig.model.calls).toHaveLength(1);
+    expect(learnerRows(rig.db)).toBe(1);
+    expect(tutorRows(rig.db)).toBe(1);
+  });
+
+  test("a turn that fails frees the review for the next post", async () => {
+    let fail = true;
+    const rig = reviewRig((input) => {
+      if (fail) throw new Error("model down");
+      return pick(input);
+    });
+    const reviewId = await startedIn(rig);
+    const failed = await rig.turn(reviewId, { kind: "resume" });
+    expect(failed.events.at(-1)).toMatchObject({ type: "turn_failed", retryable: true });
+    fail = false;
+    const next = await rig.turn(reviewId, { kind: "resume" });
+    expect(next.status).toBe(200);
+    expect(next.events.at(-1)?.type).toBe("turn_complete");
   });
 
   test("a failed model call reports turn_failed with retryable, keeps the learner's turn, and a resend finishes it", async () => {

@@ -26,7 +26,7 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import { parseId } from "../shared/ids";
 import type { IdKind } from "../shared/ids";
-import type { CaptureId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, SourceId } from "../shared/ids";
+import type { CaptureId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, SourceId, TurnId } from "../shared/ids";
 import type { EvidenceBundle, Frame, FrozenScope, Passage, ReviewSaveState, ReviewView, StartResult, TurnEvent } from "../shared/domain";
 import { Material } from "../shared/time";
 import type { Interval } from "../shared/time";
@@ -98,6 +98,8 @@ export type ServeOptions = {
   readonly appDir: string;
   /** Largest request body the server reads; Bun answers 413 beyond it. Defaults to `MAX_BODY_BYTES`. */
   readonly maxBodyBytes?: number;
+  /** How long a turn stream may run before it ends with `turn_failed` (retryable). Defaults to `TURN_DEADLINE_MS`; tests shorten it. */
+  readonly turnDeadlineMs?: number;
 };
 
 export const DEFAULT_PORT = 4317;
@@ -306,42 +308,71 @@ function evidenceByIds(evidence: EvidenceStore, ids: readonly EvidenceId[]): Evi
 
 const encoder = new TextEncoder();
 
+/** A turn stream is cut off after this long; the turn itself carries on and its resend replays it. */
+export const TURN_DEADLINE_MS = 5 * 60 * 1000;
+
+/** The turn each review is running, with how many streams are on it (the same turnId may join), so a second turn waits. */
+type InFlight = Map<ReviewId, { readonly turnId: TurnId; streams: number }>;
+
+type TurnGuard = { readonly inFlight: InFlight; readonly deadlineMs: number };
+
 /**
  * One JSON object per line. The stream ends after the module's last event; if the module throws, the learner's turn is
  * already stored, so the client is told to resend it (R15). A client that disconnects does not end the turn: the rest
  * of it is drained so the tutor turn is committed once, and a resend then replays it instead of calling the model again.
+ * After `deadlineMs` the stream says `turn_failed` (retryable) and closes, and the rest is drained the same way.
+ * `release` runs once, when the module has finished, so the review stays held for as long as the turn really runs.
  */
-function ndjson(events: AsyncIterable<TurnEvent>, cors: Record<string, string>): Response {
+function ndjson(events: AsyncIterable<TurnEvent>, cors: Record<string, string>, deadlineMs: number, release: () => void): Response {
   const it = events[Symbol.asyncIterator]();
   const wire = ROUTES.sendTurn.reply;
   const line = (e: TurnEvent) => encoder.encode(`${JSON.stringify(wire.kind === "ndjson" ? wire.event.parse(e) : e)}\n`);
-  let cancelled = false;
+  let abandoned = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const finish = () => {
+    clearTimeout(timer);
+    release();
+  };
+  const drain = async () => {
+    abandoned = true;
+    try {
+      while (!(await it.next()).done);
+    } catch {
+      // the turn failed with nobody listening; the client's resend will say so
+    } finally {
+      finish();
+    }
+  };
   const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      timer = setTimeout(() => {
+        if (abandoned) return;
+        controller.enqueue(line({ type: "turn_failed", error: "the tutor took too long; send the turn again", retryable: true }));
+        controller.close();
+        void drain();
+      }, deadlineMs);
+    },
     async pull(controller) {
       try {
         const next = await it.next();
-        if (cancelled) return;
-        if (next.done) controller.close();
-        else controller.enqueue(line(next.value));
+        if (abandoned) return;
+        if (next.done) {
+          finish();
+          controller.close();
+        } else controller.enqueue(line(next.value));
       } catch {
-        if (cancelled) return;
+        if (abandoned) return;
+        finish();
         controller.enqueue(line({ type: "turn_failed", error: "internal error", retryable: true }));
         controller.close();
       }
     },
-    async cancel() {
-      cancelled = true;
-      try {
-        while (!(await it.next()).done);
-      } catch {
-        // the turn failed with nobody listening; the client's resend will say so
-      }
-    },
+    cancel: () => (abandoned ? undefined : drain()),
   });
   return new Response(body, { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", ...SECURITY_HEADERS, ...cors } });
 }
 
-async function mounted(name: string, matched: { readonly params: Record<string, string> }, req: Request, opts: ServeOptions, port: number, cors: Record<string, string>): Promise<Response | null> {
+async function mounted(name: string, matched: { readonly params: Record<string, string> }, req: Request, opts: ServeOptions, port: number, cors: Record<string, string>, guard: TurnGuard): Promise<Response | null> {
   const { evidence, reviews, record, preparation, segmentation } = opts.modules;
   const captureId = matched.params.captureId as CaptureId | undefined;
   const reviewId = matched.params.reviewId as ReviewId | undefined;
@@ -390,7 +421,15 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
       case "sendTurn": {
         const { turnId, act } = parseTurnRequest(await readJson(req));
         if (!reviewOf(reviews, reviewId!)) return failure(404, "unknown review", cors);
-        return ndjson(reviews.turn(reviewId!, turnId, act), cors);
+        const running = guard.inFlight.get(reviewId!);
+        if (running && running.turnId !== turnId) return failure(409, "another turn on this review is still running", cors);
+        const held = running ?? { turnId, streams: 0 };
+        held.streams += 1;
+        guard.inFlight.set(reviewId!, held);
+        const release = () => {
+          if (--held.streams === 0 && guard.inFlight.get(reviewId!) === held) guard.inFlight.delete(reviewId!);
+        };
+        return ndjson(reviews.turn(reviewId!, turnId, act), cors, guard.deadlineMs, release);
       }
       case "review": {
         const view = reviewOf(reviews, reviewId!);
@@ -478,7 +517,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
   }
 }
 
-async function handle(req: Request, opts: ServeOptions, auth: AuthConfig): Promise<Response> {
+async function handle(req: Request, opts: ServeOptions, auth: AuthConfig, guard: TurnGuard): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
 
@@ -507,11 +546,12 @@ async function handle(req: Request, opts: ServeOptions, auth: AuthConfig): Promi
   }
 
   if (matched.name === "usage") return json(200, opts.modules.ledger.summary(), cors);
-  return (await mounted(matched.name, matched, req, opts, auth.port, cors)) ?? failure(501, "not implemented", cors);
+  return (await mounted(matched.name, matched, req, opts, auth.port, cors, guard)) ?? failure(501, "not implemented", cors);
 }
 
 export function serve(opts: ServeOptions): Bun.Server<undefined> {
   let auth = opts.auth;
+  const guard: TurnGuard = { inFlight: new Map(), deadlineMs: opts.turnDeadlineMs ?? TURN_DEADLINE_MS };
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: opts.auth.port,
@@ -520,7 +560,7 @@ export function serve(opts: ServeOptions): Bun.Server<undefined> {
     maxRequestBodySize: opts.maxBodyBytes ?? MAX_BODY_BYTES,
     async fetch(req) {
       try {
-        return await handle(req, opts, auth);
+        return await handle(req, opts, auth, guard);
       } catch {
         return failure(500, "internal error");
       }
