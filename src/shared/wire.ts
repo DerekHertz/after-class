@@ -3,17 +3,21 @@
  * into domain types. Routes call `parse*`; nothing past a route sees `unknown`.
  * Domain modules never import this file (test/boundaries.test.ts).
  *
+ * `ROUTES` (below) is the one table of every HTTP route either client calls, with request, query and response schemas.
  * Extension → backend:  POST /ingest  { captureId, facts }  →  IngestAck
  * App → backend:        request bodies below; tutor turns stream NDJSON TutorStreamEvent.
+ * A `Material` crosses JSON as `Material.canonical` rows (`encodeMaterial` / `decodeMaterial`).
  */
 import { z } from "zod";
 import { FRAME_BOUNDS } from "./domain";
 import type {
-  CaptureFact, CaptureView, InviteAnswer, InviteState, LearnerAct, LinkDecision, ObservationStatus, StartChoice, TurnEvent,
+  CaptureFact, CaptureView, Claim, ClaimDraft, DetourState, EvidenceBundle, Frame, FrozenScope, InviteAnswer, InviteState, LearnerAct,
+  LinkDecision, Note, Observation, ObservationStatus, Passage, RecordView, ReviewOptions, ReviewView, SaveResult, Seq, StartChoice,
+  StartResult, Turn, TurnEvent, TutorMove, UsageSummary,
 } from "./domain";
 import { parseId } from "./ids";
 import type { CaptureId, EvidenceId, Id, IdKind, ReviewId, TurnId } from "./ids";
-import { media } from "./time";
+import { Material, media } from "./time";
 
 export class BadRequest extends Error {
   override readonly name = "BadRequest";
@@ -177,3 +181,439 @@ export function parseEvidenceDeleteRequest(raw: unknown): { readonly evidenceIds
 
 /** NDJSON lines of POST /reviews/:id/turns. Same shape as the domain TurnEvent. */
 export type TutorStreamEvent = TurnEvent;
+
+// ───────────────────────────── Material ─────────────────────────────────────
+
+/** A Map cannot survive JSON, so a Material travels as `Material.canonical` rows: `[sourceId, [[start, end], ...]][]`. */
+export const materialWire = z
+  .array(z.tuple([idOf("src"), z.array(z.tuple([z.number().nonnegative(), z.number().nonnegative()]))]))
+  .transform((rows) => Material.fromCanonical(rows));
+
+export function encodeMaterial(m: Material): string {
+  return JSON.stringify(Material.canonical(m));
+}
+
+export function decodeMaterial(raw: string): Material {
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    throw new BadRequest("material is not JSON");
+  }
+  return parseWith(materialWire, json);
+}
+
+// ───────────────────────────── Responses ────────────────────────────────────
+
+const seqz = z.number().int().nonnegative().transform((n) => n as Seq);
+const intervalz = z.object({ start: mediaS, end: mediaS });
+const nonEmpty = <T extends z.ZodType>(item: T) => z.tuple([item], item);
+
+const verdict = z.enum(["yes", "no", "uncertain"]);
+const channel = z.enum(["transcript", "frames", "playback"]);
+const adSignal = z.enum(["dom_class", "duration_mismatch"]);
+
+// ───────────────────────────── Evidence ─────────────────────────────────────
+
+const gapz = z.object({
+  sourceId: idOf("src"),
+  interval: intervalz,
+  channel,
+  reason: z.enum([
+    "no_transcript", "transcript_declined", "hidden_tab", "frame_stall", "channel_failed", "capture_paused",
+    "partially_watched_segment", "implausible_span",
+  ]),
+});
+
+// The brand exists to stop the backend hand-building passages; the app only
+// receives passages the backend already clipped to watched time (R1).
+const passagez = z
+  .object({
+    kind: z.literal("passage"), id: idOf("ev"), sourceId: idOf("src"), transcriptRevId: idOf("trv"), interval: intervalz,
+    text: z.string(), origin: z.enum(["panel", "caption_intercept", "asr"]),
+  })
+  .transform((p) => p as unknown as Passage);
+
+const framez = z
+  .object({
+    kind: z.literal("frame"), id: idOf("ev"), sourceId: idOf("src"), mediaS: mediaS, width: z.number(), height: z.number(),
+    teaching: z.enum(["kept", "dropped", "uncertain", "unjudged"]),
+  })
+  .transform((f) => f as unknown as Frame);
+
+const adz = z.object({ sourceId: idOf("src"), atContentS: mediaS, wallDurationMs: z.number(), signals: nonEmpty(adSignal) });
+const deletedz = z.object({ kind: z.literal("deleted"), id: idOf("ev"), deletedAtMs: z.number() });
+
+export const evidenceBundleResponse = z.object({
+  material: materialWire,
+  passages: z.array(passagez),
+  frames: z.array(framez),
+  gaps: z.array(gapz),
+  ads: z.array(adz),
+}) satisfies z.ZodType<EvidenceBundle>;
+
+// ───────────────────────────── Capture ──────────────────────────────────────
+
+const inviteState: z.ZodType<InviteState> = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("none") }),
+  z.object({ state: z.literal("invited"), atChunk: idOf("crv") }),
+  z.object({ state: z.literal("later") }),
+  z.object({ state: z.literal("waiting") }),
+]);
+
+const captureViewz = z.object({
+  captureId: idOf("cap"),
+  status: z.discriminatedUnion("state", [
+    z.object({ state: z.literal("capturing") }),
+    z.object({ state: z.literal("paused"), reason: z.enum(["user", "left_watch_page", "returned_to_watch_page", "tab_closed"]) }),
+    z.object({ state: z.literal("stopped") }),
+  ]),
+  sources: z.array(
+    z.object({ id: idOf("src"), videoId: z.string(), title: z.string(), url: z.string(), channelName: z.string(), durationS: z.number().nullable() }),
+  ),
+  currentSourceId: idOf("src").nullable(),
+  transcript: z.enum(["available", "unavailable_offer_asr", "gap_accepted", "asr_running", "unknown"]),
+  health: z.array(z.object({ channel, health: z.enum(["ok", "failed", "stalled", "unknown"]), detail: z.string() })),
+  watchedSeconds: z.number(),
+}) satisfies z.ZodType<CaptureView>;
+
+export const captureResponse = z.object({ capture: captureViewz, invite: inviteState });
+export type CaptureResponse = z.output<typeof captureResponse>;
+
+// ───────────────────────────── Claims and options ───────────────────────────
+
+const claimDraftz = z.object({
+  text: z.string(), evidence: nonEmpty(idOf("ev")), visualDependent: z.boolean(), assumptions: z.array(z.string()),
+}) satisfies z.ZodType<ClaimDraft>;
+
+const checkz = z.object({
+  verdict, p: z.number().nullable(), reason: z.enum(["jev", "invalid_refs", "error"]), memoKey: idOf("key"), atSeq: seqz,
+});
+
+const claimz = z.object({
+  id: idOf("clm"),
+  sourceChunkId: idOf("chk"),
+  conceptId: idOf("cpt"),
+  original: claimDraftz,
+  originalCheck: checkz.nullable(),
+  revision: claimDraftz.nullable(),
+  revisionCheck: checkz.nullable(),
+  status: z.enum(["awaiting_check", "awaiting_revision", "awaiting_recheck", "supported_by_check", "unverified", "dropped"]),
+}) satisfies z.ZodType<Claim>;
+
+const partialReasonz = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("capture_gap"), gap: gapz }),
+  z.object({ kind: z.literal("stopped_early"), droppedClaims: z.number() }),
+  z.object({ kind: z.literal("unverified_claims"), count: z.number() }),
+  z.object({ kind: z.literal("chunks_still_preparing"), count: z.number() }),
+]);
+
+const scopePreviewz = z.object({ chunkRevisions: nonEmpty(idOf("crv")), supportedClaims: z.number(), partial: z.array(partialReasonz) });
+
+const nothingToReviewz = z.object({
+  kind: z.literal("nothing_to_review"),
+  gaps: z.array(gapz),
+  unverified: z.array(claimz),
+  rewatch: z.array(z.object({ sourceId: idOf("src"), interval: intervalz })),
+});
+
+export const reviewOptionsResponse = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("ready"), scope: scopePreviewz }),
+  z.object({ kind: z.literal("processing"), readyNow: scopePreviewz.nullable(), pendingChunks: z.number(), estimateS: z.number().nullable() }),
+  nothingToReviewz,
+]) satisfies z.ZodType<ReviewOptions>;
+
+const frozenScopez = z.object({
+  chunkRevisions: nonEmpty(idOf("crv")),
+  material: materialWire,
+  claimsAtStart: nonEmpty(idOf("clm")),
+  partial: z.array(partialReasonz),
+  frozenAtSeq: seqz,
+}) satisfies z.ZodType<FrozenScope>;
+
+export const startReviewResponse = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("started"), reviewId: idOf("rvw"), scope: frozenScopez }),
+  nothingToReviewz,
+]) satisfies z.ZodType<StartResult>;
+
+// ───────────────────────────── Review ───────────────────────────────────────
+
+const evidenceIds = z.array(idOf("ev"));
+
+const tutorMovez: z.ZodType<TutorMove> = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("ask_main"), threadId: idOf("thr"), claimIds: nonEmpty(idOf("clm")) }),
+  z.object({ kind: z.literal("ask_followup"), threadId: idOf("thr") }),
+  z.object({ kind: z.literal("diagnose"), threadId: idOf("thr"), hypothesis: z.string(), evidence: evidenceIds }),
+  z.object({ kind: z.literal("hint"), threadId: idOf("thr") }),
+  z.object({ kind: z.literal("explain"), threadId: idOf("thr"), evidence: evidenceIds }),
+  z.object({ kind: z.literal("propose_detour"), topic: z.string(), reason: z.string(), needsResource: idOf("res").nullable() }),
+  z.object({ kind: z.literal("detour_step") }),
+  z.object({ kind: z.literal("answer_dispute"), threadId: idOf("thr"), evidence: evidenceIds, settled: z.boolean() }),
+  z.object({ kind: z.literal("disclose_correction"), correctionId: z.string(), threadIds: z.array(idOf("thr")), evidence: evidenceIds }),
+  z.object({ kind: z.literal("close_thread"), threadId: idOf("thr") }),
+  z.object({ kind: z.literal("wrap_up") }),
+]);
+
+const codeNoticez = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("soft_target_reached"), elapsedS: z.number() }),
+  z.object({ kind: z.literal("correction_pending"), correctionId: z.string(), affectedClaims: z.array(idOf("clm")) }),
+  z.object({ kind: z.literal("resource_ready"), resourceId: idOf("res") }),
+]);
+
+const turnBase = { id: idOf("turn"), reviewId: idOf("rvw"), seq: seqz, atMs: z.number() };
+
+const learnerTurnz = z.object({ ...turnBase, actor: z.literal("learner"), threadId: idOf("thr").nullable(), act: learnerAct });
+
+const turnz = z.discriminatedUnion("actor", [
+  learnerTurnz,
+  z.object({ ...turnBase, actor: z.literal("tutor"), threadId: idOf("thr").nullable(), move: tutorMovez, say: z.string() }),
+  z.object({ ...turnBase, actor: z.literal("code"), threadId: z.null(), notice: codeNoticez }),
+]) satisfies z.ZodType<Turn>;
+
+const detourz: z.ZodType<DetourState> = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("none") }),
+  z.object({ kind: z.literal("proposed"), turnId: idOf("turn"), topic: z.string(), needsResource: idOf("res").nullable() }),
+  z.object({ kind: z.literal("awaiting_resource"), resourceId: idOf("res"), topic: z.string() }),
+  z.object({ kind: z.literal("active"), topic: z.string(), acceptedTurnId: idOf("turn") }),
+]);
+
+const reviewStatez = z.object({
+  reviewId: idOf("rvw"),
+  phase: z.enum(["active", "paused", "ended"]),
+  mainQuestions: z.number(),
+  openThread: idOf("thr").nullable(),
+  lastLearnerAct: learnerTurnz.nullable(),
+  detour: detourz,
+  openDispute: idOf("thr").nullable(),
+  corrections: z.array(z.object({ id: z.string(), claimId: idOf("clm"), change: z.enum(["withdrawn", "text_changed", "new_in_scope"]), disclosed: z.boolean() })),
+  activeSeconds: z.number(),
+  softTargetS: z.number(),
+  softTargetOffered: z.boolean(),
+  wrapUpRequested: z.boolean(),
+});
+
+const observationStatus = z.enum(["independent", "partial", "after_help", "unresolved", "not_assessed"]);
+
+const observationz = z.object({
+  id: idOf("obs"),
+  reviewId: idOf("rvw"),
+  threadId: idOf("thr"),
+  claimIds: nonEmpty(idOf("clm")),
+  conceptIds: z.array(idOf("cpt")),
+  proposed: observationStatus,
+  status: z.union([observationStatus, z.literal("disputed")]),
+  clampedFrom: observationStatus.nullable(),
+  dispute: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("none") }),
+    z.object({ kind: z.literal("open"), turnId: idOf("turn") }),
+    z.object({ kind: z.literal("unsettled") }),
+    z.object({ kind: z.literal("resolved_by_learner"), outcome: z.enum(["learner_was_right", "it_was_my_gap"]) }),
+  ]),
+  corrections: z.array(z.string()),
+  facts: z.object({
+    threadId: idOf("thr"),
+    firstSubstantiveAnswerSeq: seqz.nullable(),
+    firstHelpSeq: seqz.nullable(),
+    endedBySkip: z.boolean(),
+    saidDontKnowOnly: z.boolean(),
+    learnerTurns: z.array(idOf("turn")),
+    helpTurns: z.array(idOf("turn")),
+  }),
+}) satisfies z.ZodType<Observation>;
+
+export const reviewViewResponse = z.object({
+  reviewId: idOf("rvw"),
+  captureId: idOf("cap"),
+  scope: frozenScopez,
+  state: reviewStatez,
+  turns: z.array(turnz),
+  observations: z.array(observationz),
+  saved: z.enum(["unsaved", "saved", "save_pending"]),
+}) satisfies z.ZodType<ReviewView>;
+
+export const tutorStreamEvent = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("learner_turn_stored"), turnId: idOf("turn") }),
+  z.object({ type: z.literal("move"), turnId: idOf("turn"), move: tutorMovez }),
+  z.object({ type: z.literal("say_delta"), text: z.string() }),
+  z.object({ type: z.literal("sentence"), text: z.string() }),
+  z.object({ type: z.literal("turn_complete"), turnId: idOf("turn") }),
+  z.object({ type: z.literal("turn_failed"), error: z.string(), retryable: z.boolean() }),
+]) satisfies z.ZodType<TurnEvent>;
+
+// ───────────────────────────── Record, save, usage ──────────────────────────
+
+const noteAuthor = z.enum(["learner", "tutor", "source"]);
+
+const notez = z.object({
+  id: idOf("note"),
+  reviewId: idOf("rvw"),
+  conceptId: idOf("cpt"),
+  generated: z.array(z.object({ author: noteAuthor, text: z.string(), turnId: idOf("turn").nullable(), evidence: evidenceIds })),
+  userEdit: z.string().nullable(),
+  evidence: evidenceIds,
+}) satisfies z.ZodType<Note>;
+
+export const recordViewResponse = z.object({
+  notes: z.array(notez),
+  observations: z.array(observationz),
+  links: z.array(
+    z.object({
+      id: idOf("lnk"),
+      from: idOf("cpt"),
+      to: idOf("cpt"),
+      type: linkType,
+      evidence: evidenceIds,
+      rationale: z.string(),
+      decision: z.union([z.enum(["suggested", "accepted", "rejected"]), z.object({ corrected: linkType })]),
+    }),
+  ),
+  unavailableEvidence: z.array(deletedz),
+}) satisfies z.ZodType<RecordView>;
+
+export const saveResponse = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("saved"), notes: z.number(), observations: z.number(), links: z.number() }),
+  z.object({ kind: z.literal("save_failed"), error: z.string(), retryable: z.literal(true) }),
+]) satisfies z.ZodType<SaveResult>;
+
+const COST_KINDS = ["measured", "notional", "estimated", "unknown"] as const;
+const PURPOSES = ["boundary", "frame_change", "claim_check", "interpretation", "claim_revision", "resource_search", "tutor_turn", "wrap_up"] as const;
+
+/** A kind with no calls may be omitted by the backend; it decodes as zero calls and no amount, never as $0. */
+export const usageResponse = z
+  .object({
+    byKind: z.partialRecord(z.enum(COST_KINDS), z.object({ calls: z.number(), usd: z.number().nullable() })),
+    byPurpose: z.partialRecord(z.enum(PURPOSES), z.object({ calls: z.number(), errors: z.number(), unknownCost: z.number() })),
+  })
+  .transform(
+    (s): UsageSummary => ({
+      byKind: Object.fromEntries(COST_KINDS.map((k) => [k, s.byKind[k] ?? { calls: 0, usd: null }])) as UsageSummary["byKind"],
+      byPurpose: Object.fromEntries(PURPOSES.map((p) => [p, s.byPurpose[p] ?? { calls: 0, errors: 0, unknownCost: 0 }])) as UsageSummary["byPurpose"],
+    }),
+  );
+
+/** Response of POST /ingest. `ackedThroughSeq` is -1 until `clientSeq` 0 has arrived. */
+export const ingestAckResponse = z.object({
+  ackedThroughSeq: z.number().int().min(-1),
+  invite: inviteState,
+  capture: captureViewz,
+  reviewAppUrl: z.string(),
+}) satisfies z.ZodType<IngestAck>;
+
+// ───────────────────────────── Route table ──────────────────────────────────
+
+/** Query of GET /evidence: exactly one of `material`, `ids` or `captureId`. */
+export const evidenceQuery = z.union([
+  z.strictObject({
+    material: z.string().transform((s, ctx) => {
+      try {
+        return JSON.parse(s) as unknown;
+      } catch {
+        ctx.issues.push({ code: "custom", message: "material is not JSON", input: s });
+        return z.NEVER;
+      }
+    }).pipe(materialWire),
+  }),
+  z.strictObject({ ids: z.string().transform((s) => s.split(",")).pipe(z.array(idOf("ev")).min(1).max(1000)) }),
+  z.strictObject({ captureId: idOf("cap") }),
+]);
+
+/** Query of GET /record. */
+export const recordQuery = z.strictObject({ reviewId: idOf("rvw").optional() });
+
+/**
+ * What a route sends back. `ndjson` streams one `event` per line and ends on `turn_complete` or `turn_failed`.
+ * `empty` is 204 No Content: the app's commands read no body, so the backend sends none.
+ */
+export type Reply =
+  | { readonly kind: "json"; readonly schema: z.ZodType }
+  | { readonly kind: "ndjson"; readonly event: z.ZodType<TutorStreamEvent> }
+  | { readonly kind: "jpeg" }
+  | { readonly kind: "empty" };
+
+export type Method = "GET" | "POST" | "PATCH" | "DELETE";
+
+export type PathParams<P extends string> = P extends `${string}:${infer K}/${infer R}` ? K | PathParams<`/${R}`> : P extends `${string}:${infer K}` ? K : never;
+
+export type Route<P extends string = string> = {
+  readonly method: Method;
+  /** `:name` segments are path parameters (ids, percent-encoded on the wire). */
+  readonly path: P;
+  readonly query: z.ZodType | null;
+  readonly request: z.ZodType | null;
+  readonly reply: Reply;
+};
+
+function route<const P extends string>(
+  method: Method, path: P, spec: { readonly query?: z.ZodType; readonly request?: z.ZodType; readonly reply: Reply },
+): Route<P> {
+  return { method, path, query: spec.query ?? null, request: spec.request ?? null, reply: spec.reply };
+}
+
+const json = (schema: z.ZodType): Reply => ({ kind: "json", schema });
+const EMPTY: Reply = { kind: "empty" };
+
+/**
+ * Every HTTP route the extension worker (src/extension/**) and the review app's `createApi` (src/app/**) call, plus
+ * the request and response schemas the backend and both clients agree on. All routes need the pairing token
+ * (`Authorization: Bearer`). A request body is JSON; a 4xx body is `{ "error": string }`.
+ *
+ * `clientSeq` starts at 0 per capture and rises by 1 per fact. `POST /ingest` is idempotent on (captureId, clientSeq)
+ * and answers with `ackedThroughSeq`, the highest contiguous clientSeq stored, or -1 before clientSeq 0 has arrived.
+ *
+ * Callers: `ingest`, `answerInvite` and `usage` are called by the extension worker; the rest by the review app.
+ * The invite answer returns the new InviteState because the extension reads it back; the app ignores it.
+ */
+export const ROUTES = {
+  ingest: route("POST", "/ingest", { request: ingestBatch, reply: json(ingestAckResponse) }),
+  captureView: route("GET", "/captures/:captureId", { reply: json(captureResponse) }),
+  answerInvite: route("POST", "/captures/:captureId/invite", { request: inviteAnswerRequest, reply: json(inviteState) }),
+  reviewOptions: route("GET", "/captures/:captureId/review-options", { reply: json(reviewOptionsResponse) }),
+  startReview: route("POST", "/captures/:captureId/reviews", { request: startReviewRequest, reply: json(startReviewResponse) }),
+  sendTurn: route("POST", "/reviews/:reviewId/turns", { request: turnRequest, reply: { kind: "ndjson", event: tutorStreamEvent } }),
+  review: route("GET", "/reviews/:reviewId", { reply: json(reviewViewResponse) }),
+  save: route("POST", "/reviews/:reviewId/save", { reply: json(saveResponse) }),
+  record: route("GET", "/record", { query: recordQuery, reply: json(recordViewResponse) }),
+  usage: route("GET", "/usage", { reply: json(usageResponse) }),
+  evidence: route("GET", "/evidence", { query: evidenceQuery, reply: json(evidenceBundleResponse) }),
+  frameImage: route("GET", "/frames/:evidenceId", { reply: { kind: "jpeg" } }),
+  editNote: route("PATCH", "/record/notes/:noteId", { request: noteEditRequest, reply: EMPTY }),
+  deleteNote: route("DELETE", "/record/notes/:noteId", { reply: EMPTY }),
+  decideLink: route("POST", "/record/links/:linkId", { request: linkDecisionRequest, reply: EMPTY }),
+  resolveDispute: route("POST", "/record/observations/:observationId/dispute-resolution", { request: disputeResolutionRequest, reply: EMPTY }),
+  overrideObservation: route("POST", "/record/observations/:observationId/override", { request: observationOverrideRequest, reply: EMPTY }),
+  deleteEvidence: route("POST", "/record/evidence/delete", { request: evidenceDeleteRequest, reply: EMPTY }),
+} as const;
+
+export type RouteName = keyof typeof ROUTES;
+
+/** The path of a route with its parameters filled in and percent-encoded. A query string is the caller's to append. */
+export function routeUrl<P extends string>(r: Route<P>, params: Record<PathParams<P>, string>): string {
+  return r.path.replace(/:(\w+)/g, (_, k: string) => encodeURIComponent((params as Record<string, string>)[k]!));
+}
+
+/** Finds the route for a request's method and path (no query string); path parameters come back decoded. */
+export function matchRoute(method: string, pathname: string): { readonly name: RouteName; readonly params: Record<string, string> } | null {
+  const parts = pathname.split("/");
+  for (const name of Object.keys(ROUTES) as RouteName[]) {
+    const r: Route = ROUTES[name];
+    if (r.method !== method) continue;
+    const want = r.path.split("/");
+    if (want.length !== parts.length) continue;
+    const params: Record<string, string> = {};
+    let ok = true;
+    for (let i = 0; i < want.length && ok; i++) {
+      const w = want[i]!;
+      const p = parts[i]!;
+      if (w.startsWith(":")) {
+        try {
+          params[w.slice(1)] = decodeURIComponent(p);
+        } catch {
+          ok = false;
+        }
+        ok = ok && p !== "";
+      } else ok = w === p;
+    }
+    if (ok) return { name, params };
+  }
+  return null;
+}
