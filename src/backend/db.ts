@@ -191,6 +191,16 @@ WHEN ${PENDING_SAVE_HOLDS("OLD.capture_id")}
   AND NOT EXISTS (SELECT 1 FROM evidence_deletions d WHERE d.evidence_id = OLD.evidence_id)
 BEGIN SELECT RAISE(ABORT, 'R16: frames of an unsaved review are held'); END;`,
     },
+    {
+      id: "002-snapshot-fields",
+      sql: `
+-- A snapshot must rebuild a Passage or Frame after its raw facts expire, so it carries the fields 001 left out.
+ALTER TABLE evidence_snapshots ADD COLUMN transcript_rev_id TEXT;
+ALTER TABLE evidence_snapshots ADD COLUMN origin TEXT;
+ALTER TABLE evidence_snapshots ADD COLUMN width INTEGER;
+ALTER TABLE evidence_snapshots ADD COLUMN height INTEGER;
+CREATE INDEX frames_by_capture ON frames (capture_id);`,
+    },
   ],
 
   segmentation: [
