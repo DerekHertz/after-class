@@ -3,7 +3,7 @@
  */
 import type { EvidenceId, SourceId } from "../../shared/ids";
 import type { AssessableClaim, ChunkPrep, Claim, ClaimDraft, ClaimStatus, EvidenceBundle, Seq, Verdict } from "../../shared/domain";
-import { Material } from "../../shared/time";
+import { Material, contains } from "../../shared/time";
 import type { Interval, MediaSeconds } from "../../shared/time";
 import { appliesBefore } from "../providers/memo";
 import type { Lookup } from "../providers/memo";
@@ -116,7 +116,7 @@ export type Located =
 
 export function inside(m: Material, where: Located): boolean {
   if (where.kind === "span") return Material.covers(m, where.sourceId, where.interval);
-  return Material.get(m, where.sourceId).intervals().some((i) => i.start <= where.at && where.at < i.end);
+  return Material.get(m, where.sourceId).intervals().some((i) => contains(i, where.at));
 }
 
 export function locate(bundle: EvidenceBundle): ReadonlyMap<EvidenceId, Located> {
