@@ -17,6 +17,8 @@ export type TabCaptureState = {
   readonly lastAck: IngestAck | null;
   readonly uploadBacklog: number;
   readonly lastError: string | null;
+  /** A closing span was lost at the last pause; the playback channel is reported failed until capture resumes. */
+  readonly playbackGap: boolean;
   /** Facts the backend refused and the outbox set aside (a placeholder went in their place). Never dropped silently. */
   readonly deadLetters: DeadLetterSummary;
 };
@@ -49,6 +51,11 @@ export type FromContent = CaptureFactBody | ContentSignal | { readonly type: "fl
 
 /** How long the worker waits for the content script's closing span before pausing without it. */
 export const FLUSH_TIMEOUT_MS = 1000;
+
+/** Ends the failure `closingSpanGap` opened. Evidence-neutral: an ok channel fact only closes a failure episode. */
+export function playbackRecovered(): CaptureFactBody {
+  return { kind: "channel", channel: "playback", health: "ok", videoId: null, atMediaS: null, detail: "capture resumed" };
+}
 
 /** The visible gap when a closing span could not be had; the backend turns a failed playback channel into a gap. */
 export function closingSpanGap(why: string): CaptureFactBody {
@@ -86,7 +93,7 @@ export function transition(
     case "start":
       if (current !== null && current.state !== "stopped") return noop;
       return {
-        next: { tabId: event.tabId, captureId: mintCaptureId(), state: "capturing", pauseReason: null, nextClientSeq: 0, lastAck: null, uploadBacklog: 0, lastError: null, deadLetters: { count: 0, latestReason: null } },
+        next: { tabId: event.tabId, captureId: mintCaptureId(), state: "capturing", pauseReason: null, nextClientSeq: 0, lastAck: null, uploadBacklog: 0, lastError: null, playbackGap: false, deadLetters: { count: 0, latestReason: null } },
         fact: control("start", "user"),
       };
     case "pause":

@@ -1,7 +1,9 @@
 /** The real service worker module on fakes (see worker-harness.ts). */
 import { afterAll, describe, expect, test } from "bun:test";
 import { media } from "../src/shared/time";
-import { boot, connectPort, feed, kindsOf, newEnv, restoreGlobals, sendPopup, span, wait } from "./worker-harness";
+import { randomId } from "../src/shared/ids";
+import { createIdbOutbox } from "../src/extension/worker/outbox";
+import { FakeIDB, boot, connectPort, feed, kindsOf, newEnv, restoreGlobals, sendPopup, span, wait } from "./worker-harness";
 
 afterAll(restoreGlobals);
 
@@ -17,6 +19,23 @@ describe("pairing token protection", () => {
     env.accessLevelError = new Error("setAccessLevel unsupported");
     const { errors } = await boot(env);
     expect(errors.join("\n")).toContain("setAccessLevel unsupported");
+  });
+});
+
+describe("outbox database upgrade", () => {
+  test("a version 1 database keeps its unsent facts and gains the dead-letter store", async () => {
+    const cap = randomId("cap");
+    const idb = new FakeIDB();
+    idb.version = 1;
+    idb.stores.set("facts", { keyPath: ["captureId", "clientSeq"], rows: new Map([[JSON.stringify([cap, 0]), { captureId: cap, clientSeq: 0, wallMs: 1, body: span(0, 5) }]]) });
+    idb.stores.set("seq", { keyPath: "captureId", rows: new Map([[JSON.stringify(cap), { captureId: cap, next: 1 }]]) });
+    const store = createIdbOutbox(idb as unknown as IDBFactory);
+    expect((await store.pending(cap, 10)).map((f) => f.clientSeq)).toEqual([0]);
+    expect((await store.append(cap, span(5, 10), 2)).clientSeq).toBe(1);
+    const [first] = await store.pending(cap, 1);
+    await store.quarantine(cap, first!, { kind: "channel", channel: "playback", health: "failed", videoId: null, atMediaS: null, detail: "withheld" }, "refused");
+    expect((await store.deadLetters(cap)).map((d) => [d.clientSeq, d.reason])).toEqual([[0, "refused"]]);
+    expect(idb.version).toBe(2);
   });
 });
 

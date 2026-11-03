@@ -16,7 +16,7 @@
 import type { CaptureId } from "../../shared/ids";
 import type { CaptureFactBody, InviteAnswer, InviteState } from "../../shared/domain";
 import type { IngestAck } from "../../shared/wire";
-import { FLUSH_TIMEOUT_MS, acceptsFact, badgeFor, closingSpanGap, isWatchUrl, safeReviewUrl, transition } from "./control";
+import { FLUSH_TIMEOUT_MS, acceptsFact, badgeFor, closingSpanGap, isWatchUrl, playbackRecovered, safeReviewUrl, transition } from "./control";
 import type { ControlEvent, DeadLetterSummary, FromContent, OptionsRequest, PopupRequest, TabCaptureState, ToContent } from "./control";
 import { classifyStatus, createFlusher, createIdbOutbox, isIngestAck } from "./outbox";
 import type { FlushOutcome, Transport } from "./outbox";
@@ -178,6 +178,19 @@ async function requestFlush(tabId: number): Promise<string | null> {
   });
 }
 
+const tabQueues = new Map<number, Promise<unknown>>();
+
+/**
+ * Control events for one tab run one at a time, each from its flush through its transition. Without this a
+ * Resume arriving during a Pause's flush wait sees a still-capturing tab, is a no-op, and the Pause lands after it.
+ * Not the global `serialized` chain: the closing spans the flush waits for arrive through that one.
+ */
+function applyEvent(tabId: number, event: ControlEvent): Promise<TabCaptureState | null> {
+  const run = (tabQueues.get(tabId) ?? Promise.resolve()).then(() => applyEventNow(tabId, event));
+  tabQueues.set(tabId, run.catch(() => {}));
+  return run;
+}
+
 /**
  * Applies a control event, persists its control fact, and tells the content script whether to observe.
  * R1: "Evidence only comes from intervals I actually watched while capture was on." The span the page is
@@ -185,7 +198,7 @@ async function requestFlush(tabId: number): Promise<string | null> {
  * fact is written (while the gate still accepts it). If it cannot be had, the control fact still goes
  * in and a gap is logged ahead of it, never a silent loss.
  */
-async function applyEvent(tabId: number, event: ControlEvent): Promise<TabCaptureState | null> {
+async function applyEventNow(tabId: number, event: ControlEvent): Promise<TabCaptureState | null> {
   let gap: string | null = null;
   if (event.kind === "pause" || event.kind === "stop" || event.kind === "left_watch_page" || event.kind === "tab_closed") {
     if ((await readState(tabId))?.state === "capturing") gap = event.kind === "tab_closed" ? "the tab was closed" : await requestFlush(tabId);
@@ -195,8 +208,16 @@ async function applyEvent(tabId: number, event: ControlEvent): Promise<TabCaptur
     const { next, fact } = transition(tabs[tabId] ?? null, event);
     if (next === null) return null;
     tabs[tabId] = next;
-    if (fact && gap !== null) await appendIn(tabs, tabId, closingSpanGap(gap));
+    if (fact && gap !== null) {
+      await appendIn(tabs, tabId, closingSpanGap(gap));
+      tabs[tabId] = { ...tabs[tabId]!, playbackGap: true };
+    }
     if (fact) await appendIn(tabs, tabId, fact);
+    // The gap lasts until capture resumes; without this ok every later span would be reported as a channel failure.
+    if (fact?.kind === "control" && fact.action === "resume" && tabs[tabId]!.playbackGap) {
+      await appendIn(tabs, tabId, playbackRecovered());
+      tabs[tabId] = { ...tabs[tabId]!, playbackGap: false };
+    }
     await saveTabs(tabs);
     const saved = tabs[tabId]!;
     renderBadge(tabId, saved);

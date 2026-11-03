@@ -39,12 +39,18 @@ export class FakeIDB {
     return r;
   }
 
-  open(): Any {
+  /** The version the stored database is at; opening at a higher one runs onupgradeneeded once. */
+  version = 0;
+
+  open(_name?: string, version = 1): Any {
     const r: Any = {};
     setTimeout(() => {
       const db = this.db();
       r.result = db;
-      r.onupgradeneeded?.();
+      if (version > this.version) {
+        this.version = version;
+        r.onupgradeneeded?.();
+      }
       r.onsuccess?.();
     }, 0);
     return r;

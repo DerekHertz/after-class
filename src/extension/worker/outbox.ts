@@ -256,7 +256,13 @@ export async function flushCapture(store: OutboxStore, transport: Transport, cap
       }
       const placeholder = placeholderFor(fact, why);
       await store.quarantine(captureId, fact, placeholder, `${fact.body.kind} fact: ${why}`);
-      return send([{ ...fact, body: placeholder }]);
+      const sent = await send([{ ...fact, body: placeholder }]);
+      // A failure fact stays open until the channel's next ok, flagging every later span. One lost fact is not a
+      // broken channel, so close it at the tail; a transcript stays failed because it is still missing.
+      if (sent === null && placeholder.kind === "channel" && placeholder.channel !== "transcript") {
+        await store.append(captureId, { ...placeholder, health: "ok", videoId: null, atMediaS: null, detail: `${WITHHELD}: one fact was withheld, the channel is otherwise working` }, Date.now());
+      }
+      return sent;
     }
     const mid = Math.ceil(batch.length / 2);
     for (const half of [batch.slice(0, mid), batch.slice(mid)]) {

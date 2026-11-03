@@ -87,6 +87,81 @@ describe("the closing span", () => {
   });
 });
 
+describe("control events that land inside a flush wait", () => {
+  /** A page that takes `ms` to answer the flush. */
+  const slowFlush = (p: FakePort, ms = 200) => {
+    p.onPost = (m) => {
+      if (m.type === "flush") {
+        setTimeout(() => {
+          feed(p, span(5, 8));
+          feed(p, { type: "flushed" });
+        }, ms);
+      }
+    };
+  };
+  const later = <T>(ms: number, f: () => Promise<T>) => wait(ms).then(f);
+
+  test("Pause then Resume 20 ms later ends capturing, with the pause and the resume both recorded", async () => {
+    const { env, c, p } = await capturing();
+    slowFlush(p);
+    const [, resumed] = await Promise.all([sendPopup(c, { type: "pause", tabId: 1 }), later(20, () => sendPopup(c, { type: "resume", tabId: 1 }))]);
+    expect(resumed.error).toBeUndefined();
+    expect((await sendPopup(c, { type: "status", tabId: 1 })).state.state).toBe("capturing");
+    await wait(80);
+    expect(stored(env)).toEqual(["control:start", "span", "span", "control:pause", "control:resume"]);
+  });
+
+  test("leaving the watch page and then the user's Resume ends capturing the same way", async () => {
+    const { env, c, p } = await capturing();
+    slowFlush(p);
+    c.tabs.onUpdated.fire(1, { url: "https://www.youtube.com/" });
+    const resumed = await later(20, () => sendPopup(c, { type: "resume", tabId: 1 }));
+    expect(resumed.error).toBeUndefined();
+    expect((await sendPopup(c, { type: "status", tabId: 1 })).state.state).toBe("capturing");
+    await wait(80);
+    expect(stored(env)).toEqual(["control:start", "span", "span", "control:pause", "control:resume"]);
+  });
+
+  test("Pause twice is one pause fact and one flush", async () => {
+    const { env, c, p } = await capturing();
+    slowFlush(p);
+    await Promise.all([sendPopup(c, { type: "pause", tabId: 1 }), later(20, () => sendPopup(c, { type: "pause", tabId: 1 }))]);
+    await wait(80);
+    expect(stored(env)).toEqual(["control:start", "span", "span", "control:pause"]);
+    expect(p.posted.filter((m) => m.type === "flush")).toHaveLength(1);
+  });
+
+  test("Pause then Stop is a pause fact and then a stop fact", async () => {
+    const { env, c, p } = await capturing();
+    slowFlush(p);
+    await Promise.all([sendPopup(c, { type: "pause", tabId: 1 }), later(20, () => sendPopup(c, { type: "stop", tabId: 1 }))]);
+    await wait(80);
+    expect(stored(env)).toEqual(["control:start", "span", "span", "control:pause", "control:stop"]);
+  });
+});
+
+describe("the playback gap after a lost closing span", () => {
+  const kindsWithHealth = (env: ReturnType<typeof newEnv>) =>
+    [...[...env.backend.stored.values()][0]!.values()].map((f) => (f.kind === "channel" ? `channel:${(f as unknown as { health: string }).health}` : f.kind === "control" ? `control:${(f as unknown as { action: string }).action}` : f.kind));
+
+  test("Resume ends it with an ok, so later spans are not all reported as channel failures", async () => {
+    const { env, c } = await capturing();
+    await sendPopup(c, { type: "pause", tabId: 1 });
+    await sendPopup(c, { type: "resume", tabId: 1 });
+    await wait(80);
+    expect(kindsWithHealth(env)).toEqual(["control:start", "span", "channel:failed", "control:pause", "control:resume", "channel:ok"]);
+  });
+
+  test("a pause whose closing span arrived adds no gap and no ok", async () => {
+    const { env, c, p } = await capturing();
+    answeringFlush(p);
+    await sendPopup(c, { type: "pause", tabId: 1 });
+    await sendPopup(c, { type: "resume", tabId: 1 });
+    await wait(80);
+    expect(kindsWithHealth(env)).toEqual(["control:start", "span", "span", "control:pause", "control:resume"]);
+  });
+});
+
 describe("worker to content messages", () => {
   test("observe messages carry the capture id, and a new start gets a new one", async () => {
     const { c, p } = await capturing();

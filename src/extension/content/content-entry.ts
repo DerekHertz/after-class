@@ -118,8 +118,7 @@ export function startContent(deps: ContentDeps): void {
     }
   }
 
-  async function readTranscript(force: boolean): Promise<void> {
-    const videoId = currentVideoId();
+  async function readTranscript(force: boolean, videoId = currentVideoId()): Promise<void> {
     // Keyed by capture: a Stop then Start on the same video is a new capture and needs its own transcript fact.
     const key = `${captureId ?? ""}:${videoId}`;
     if (videoId === "" || (!force && transcribed.has(key))) return;
@@ -127,13 +126,12 @@ export function startContent(deps: ContentDeps): void {
     send(await deps.acquireTranscript(videoId, deps.findPlayer()?.video.duration || null));
   }
 
-  async function beginVideo(): Promise<void> {
-    const videoId = currentVideoId();
+  async function beginVideo(videoId = currentVideoId()): Promise<void> {
     if (videoId === "") return;
     const source = await deps.readSourceMetadata(videoId);
     if (source.durationS !== null) durations.set(videoId, source.durationS);
     send(source);
-    await readTranscript(false);
+    await readTranscript(false, videoId);
   }
 
   function ensureObservers(): boolean {
@@ -188,7 +186,7 @@ export function startContent(deps: ContentDeps): void {
   deps.watchNavigation({
     onWatchPage(videoId) {
       send({ type: "returned_to_watch_page", videoId });
-      if (observing) void beginVideo();
+      if (observing) void beginVideo(videoId);
     },
     onLeftWatchPage() {
       flushObservers();

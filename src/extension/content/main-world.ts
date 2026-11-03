@@ -74,6 +74,8 @@ export function installTimedTextTap(): void {
  */
 const STREAM_EVENTS = ["loadstart", "emptied", "loadedmetadata", "durationchange", "playing", "seeking", "timeupdate"] as const;
 
+const NAVIGATION_EVENTS = ["yt-navigate-finish", "yt-page-data-updated"] as const;
+
 export function installStreamIdMirror(doc: Document = document): void {
   const mirror = () => {
     let id: unknown;
@@ -86,6 +88,8 @@ export function installStreamIdMirror(doc: Document = document): void {
     else doc.documentElement.removeAttribute(STREAM_ID_ATTR);
   };
   for (const e of STREAM_EVENTS) doc.addEventListener(e, mirror, true);
+  // The content script's navigation check listens on window in the capture phase and registers later, so this runs first.
+  for (const e of NAVIGATION_EVENTS) (doc.defaultView ?? doc).addEventListener(e, mirror, true);
   mirror();
 }
 

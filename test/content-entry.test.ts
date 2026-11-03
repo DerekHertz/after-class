@@ -200,6 +200,35 @@ describe("which video a span belongs to (R1)", () => {
     expect(pickVideoId("", VID)).toBe(VID);
   });
 
+  test("navigating to a new video reads that video's source and transcript even while the stream id is still the old one", async () => {
+    const r = rig();
+    r.deliver(observe(true, CAP_A));
+    await wait();
+    r.setUrlId(VID2);
+    r.nav().onWatchPage(VID2);
+    await wait();
+    expect(r.transcriptCalls).toEqual([VID, VID2]);
+    expect(r.posted.filter((m) => "kind" in m && m.kind === "source").map((m) => (m as { videoId: string }).videoId)).toEqual([VID, VID2]);
+  });
+
+  test("the mirror also follows YouTube's own navigation events, so the id is fresh when the content script reacts", () => {
+    const view = new EventTarget();
+    const attrs = new Map<string, string>();
+    const doc = Object.assign(new EventTarget(), {
+      defaultView: view,
+      documentElement: { setAttribute: (k: string, v: string) => void attrs.set(k, v), removeAttribute: (k: string) => void attrs.delete(k) },
+      getElementById: () => ({ getVideoData: () => ({ video_id: current }) }),
+    }) as unknown as Document;
+    let current: string | null = VID;
+    installStreamIdMirror(doc);
+    current = VID2;
+    view.dispatchEvent(new Event("yt-navigate-finish"));
+    expect(attrs.get(STREAM_ID_ATTR)).toBe(VID2);
+    current = VID;
+    view.dispatchEvent(new Event("yt-page-data-updated"));
+    expect(attrs.get(STREAM_ID_ATTR)).toBe(VID);
+  });
+
   test("the main-world mirror republishes the player's loaded id on media events and clears it when the player has none", () => {
     const doc = new EventTarget() as unknown as Document & { _root: Map<string, string>; _id: string | null };
     const attrs = new Map<string, string>();
