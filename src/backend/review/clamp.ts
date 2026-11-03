@@ -12,6 +12,9 @@ import { HELP_MOVES } from "../../shared/domain";
 
 const HELP: ReadonlySet<TutorMove["kind"]> = new Set(HELP_MOVES);
 
+/** Statuses that count as a learning gap when no dispute stands in the way. */
+const GAP: ReadonlySet<RecordedStatus> = new Set(["unresolved", "partial"]);
+
 /**
  * Turns in seq order, each learner turn sent with no thread attributed to the
  * thread open at that point. The tutor's state, the clamp and the record all
@@ -100,6 +103,9 @@ export function threadDispute(threadId: ThreadId, turns: readonly Turn[]): Exclu
  * R14: "A disputed assessment is never counted as a learning gap unless I resolve it that way."
  *
  *   dispute open or unsettled                    → "disputed"      (R14, explicit clamp; the TLC fix)
+ *   learner resolved it_was_my_gap:
+ *     proposed is a gap status                   → proposed
+ *     otherwise                                  → "unresolved"    (a dispute you settle saves the way you settled it)
  *   no substantive answer:
  *     only dont_know                             → "unresolved"    (SYNTHESIS open question 2)
  *     skipped / unanswered                       → "not_assessed"  (R13)
@@ -115,6 +121,7 @@ export function clampStatus(proposed: ObservationStatus, facts: ThreadFacts, dis
 
 function clamped(proposed: ObservationStatus, facts: ThreadFacts, dispute: DisputeState): RecordedStatus {
   if (dispute.kind === "open" || dispute.kind === "unsettled") return "disputed";
+  if (dispute.kind === "resolved_by_learner" && dispute.outcome === "it_was_my_gap") return GAP.has(proposed) ? proposed : "unresolved";
   const answeredAt = facts.firstSubstantiveAnswerSeq;
   if (answeredAt === null) return facts.saidDontKnowOnly ? "unresolved" : "not_assessed";
   const helpedFirst = facts.firstHelpSeq !== null && facts.firstHelpSeq < answeredAt;
@@ -129,8 +136,7 @@ function clamped(proposed: ObservationStatus, facts: ThreadFacts, dispute: Dispu
  * gap (SYNTHESIS open question 3).
  */
 export function isLearningGap(o: Pick<Observation, "status" | "dispute">): boolean {
-  const gapStatus = o.status === "unresolved" || o.status === "partial";
-  return gapStatus && disputeAllowsGap(o.dispute);
+  return GAP.has(o.status) && disputeAllowsGap(o.dispute);
 }
 
 function disputeAllowsGap(d: DisputeState): boolean {
