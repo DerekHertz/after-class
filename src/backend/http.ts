@@ -87,8 +87,8 @@ export function authorize(headers: Headers, expected: AuthConfig, opts: { readon
 
 export type ServeOptions = {
   /**
-   * `record`, `preparation` and `segmentation` are optional until main.ts passes them: a route that needs one answers
-   * 501 without it, and a review's `saved` reads "unsaved". M7b widens this to every module.
+   * main.ts passes every module. `record`, `preparation` and `segmentation` stay optional so a test can serve a subset:
+   * a route that needs a missing one answers 501, and a review's `saved` reads "unsaved".
    */
   readonly modules: Pick<Modules, "ledger" | "reviews"> & { readonly evidence: EvidenceStore & Pick<EvidenceStoreWithProbe, "watchedMaterial"> }
     & Partial<Pick<Modules, "record" | "preparation" | "segmentation">>;

@@ -190,6 +190,76 @@ describe("main, replay mode with fake tasks", () => {
   }, 30_000);
 });
 
+// ───────────────────────────── M7b: the record, preparation and segmentation reach the server ─────────────────────────────
+
+describe("main, the live backend serves save, retry-preparation, the record and evidence", () => {
+  const wrapUpScript = (failFirst: number) => {
+    let calls = 0;
+    return scripted<unknown, { observations: never[]; notes: never[] }>("wrap_up", "claude", () => `wrap-${Math.min(calls, 1)}`, () => {
+      calls += 1;
+      return calls <= failFirst ? fail("claude timed out") : ok({ observations: [], notes: [] });
+    });
+  };
+
+  const json = async (r: Response) => ({ status: r.status, body: (await r.json()) as Record<string, any> });
+  const get = (b: Boot, path: string) => fetch(`${b.base}${path}`, { headers: authed(b.r.token) }).then(json);
+  const post = (b: Boot, path: string, body: unknown = {}) => fetch(`${b.base}${path}`, { method: "POST", headers: authed(b.r.token), body: JSON.stringify(body) }).then(json);
+
+  test("save and retry-preparation answer instead of 501; a failed save reads save_pending across a restart, and retrying it twice saves one record (R15)", async () => {
+    const fakes = fakeTasks();
+    const wrapUp = wrapUpScript(1);
+    const tasks = { ...fakes.tasks, wrapUp } as unknown as TaskSet;
+    const configDir = dir("afterclass-config-");
+    const env = { AFTERCLASS_DATA: dir("afterclass-data-"), AFTERCLASS_MODE: "replay" };
+    const first = await boot({ tasks, configDir }, env);
+    await ingest(first, fixture({ frames: false }));
+    await until(() => first.r.modules.segmentation.current(CAP).some((c) => first.r.modules.preparation.prep(c.id).finished));
+
+    // retry-preparation: nothing is stuck, so nothing is re-queued, but the route is wired
+    const retry = await fetch(`${first.base}/captures/${CAP}/retry-preparation`, { method: "POST", headers: authed(first.r.token) });
+    expect(retry.status).toBe(204);
+    expect((await post(first, `/reviews/${stableId("rvw", "none")}/save`)).status).toBe(404);
+
+    const reviewId = stableId("rvw", "main-test-review");
+    const started = await post(first, `/captures/${CAP}/reviews`, { reviewId, choice: "prepared_only" });
+    expect(started.body.kind).toBe("started");
+    expect((await get(first, `/reviews/${reviewId}`)).body.saved).toBe("unsaved");
+
+    expect((await post(first, `/reviews/${reviewId}/save`)).body).toMatchObject({ kind: "save_failed", retryable: true });
+    expect((await get(first, `/reviews/${reviewId}`)).body.saved).toBe("save_pending");
+
+    await first.r.stop();
+    running.splice(running.indexOf(first.r), 1);
+    const second = await boot({ tasks, configDir }, env);
+    expect((await get(second, `/reviews/${reviewId}`)).body.saved).toBe("save_pending");
+
+    const once = await post(second, `/reviews/${reviewId}/save`);
+    const twice = await post(second, `/reviews/${reviewId}/save`);
+    expect(once.body).toEqual({ kind: "saved", notes: 0, observations: 0, links: 0 });
+    expect(twice.body).toEqual(once.body);
+    expect((await get(second, `/reviews/${reviewId}`)).body.saved).toBe("saved");
+    expect(second.r.modules.db.sql.query("SELECT COUNT(*) AS n FROM saved_reviews").get()).toEqual({ n: 1 });
+    expect((await get(second, `/record?reviewId=${reviewId}`)).status).toBe(200);
+  }, 30_000);
+
+  test("the evidence routes answer from the real store: lookup, a frame image, and a delete", async () => {
+    const fakes = fakeTasks();
+    const b = await boot({ tasks: fakes.tasks }, { AFTERCLASS_MODE: "replay" });
+    await ingest(b, fixture({ frames: true }));
+    const bundle = await get(b, `/evidence?captureId=${CAP}`);
+    expect(bundle.status).toBe(200);
+    expect(bundle.body.passages.length).toBe(10);
+    const frame = bundle.body.frames[0] as { id: string };
+    const image = await fetch(`${b.base}/frames/${frame.id}`, { headers: authed(b.r.token) });
+    expect(image.status).toBe(200);
+    expect(Buffer.from(await image.arrayBuffer())).toEqual(JPEG);
+
+    const gone = await fetch(`${b.base}/record/evidence/delete`, { method: "POST", headers: authed(b.r.token), body: JSON.stringify({ evidenceIds: [frame.id] }) });
+    expect(gone.status).toBe(204);
+    expect((await fetch(`${b.base}/frames/${frame.id}`, { headers: authed(b.r.token) })).status).toBe(404);
+  }, 30_000);
+});
+
 // ───────────────────────────── replay refuses every live call ─────────────────────────────
 
 describe("main, replay mode without tasks", () => {
