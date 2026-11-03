@@ -190,6 +190,7 @@ const fixtures: Record<RouteName, Fixture> = {
   resolveDispute: { params: { observationId: obs }, request: { outcome: "it_was_my_gap" } },
   overrideObservation: { params: { observationId: obs }, request: { status: "after_help" } },
   deleteEvidence: { request: { evidenceIds: [ev1, ev2] } },
+  retryPreparation: { params: { captureId: cap } },
 };
 
 const names = Object.keys(ROUTES) as RouteName[];
@@ -267,6 +268,7 @@ describe("ROUTES", () => {
 describe("both clients stay inside ROUTES", () => {
   const appCalls: Record<RouteName, ((api: AppApi) => Promise<unknown>) | null> = {
     ingest: null,
+    retryPreparation: null, // the app's "Check again" button gets wired to it in a later PR
     captureView: (a) => a.captureView(cap),
     answerInvite: (a) => a.answerInvite(cap, "later"),
     reviewOptions: (a) => a.reviewOptions(cap),

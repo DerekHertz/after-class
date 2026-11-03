@@ -32,5 +32,6 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 - `clientSeq` starts at 0 per capture and rises by 1 per fact. `POST /ingest` is idempotent on (captureId, clientSeq) and returns `ackedThroughSeq`, the highest contiguous clientSeq stored, or -1 before clientSeq 0 has arrived.
 - `POST /captures/:captureId/invite` returns the new `InviteState`. The extension reads it back; the app ignores it.
 - The record commands (`PATCH`/`DELETE` notes, link decisions, dispute resolution, override, evidence delete) reply 204 with no body.
+- `POST /captures/:captureId/retry-preparation` (`retryPreparation`) takes no body and replies 204. It re-queues the capture's chunks that are unfinished or have no supported claim; the app's "Check again" is its caller.
 - A `Material` crosses JSON as `Material.canonical` rows. Use `encodeMaterial` and `decodeMaterial`; the `GET /evidence?material=` value is `encodeURIComponent(encodeMaterial(m))`.
 - Response schemas live in `wire.ts`. `src/app/decode.ts` still holds its own copies until the app switches to import them.

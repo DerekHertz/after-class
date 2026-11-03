@@ -14,8 +14,8 @@
  * Host and Origin only, because a navigation cannot carry a header; the token rides in the HTML's
  * <meta name="afterclass-token">). M4 adds POST /ingest, GET /captures/:id and POST /captures/:id/invite. M7a adds the
  * review routes: review options, start review, send turn (an NDJSON stream), get review, save, and
- * POST /captures/:id/retry-preparation (not yet in `ROUTES`). Every other `ROUTES` entry (the record view and edits,
- * evidence lookup, frame images) answers 501 until M7b mounts it.
+ * POST /captures/:id/retry-preparation. M7b adds the record view and its edits, evidence lookup, frame images and
+ * evidence deletion, so every `ROUTES` entry is mounted; one whose module is not passed to `serve` answers 501.
  *
  * Accepted limit: the token is in the HTML of GET /app/, so any local process or user that can reach 127.0.0.1:<port>
  * can read it, even though the token file is 0600. The checks above stop web pages and DNS rebinding, not local code.
@@ -347,17 +347,6 @@ function ndjson(events: AsyncIterable<TurnEvent>, cors: Record<string, string>):
   return new Response(body, { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", ...SECURITY_HEADERS, ...cors } });
 }
 
-/** `POST /captures/:captureId/retry-preparation`. Not in `ROUTES` yet: wire.ts is frozen for this PR. */
-function matchLocal(method: string, pathname: string): { readonly name: string; readonly params: Record<string, string> } | null {
-  const m = method === "POST" ? /^\/captures\/([^/]+)\/retry-preparation$/.exec(pathname) : null;
-  if (!m) return null;
-  try {
-    return { name: "retryPreparation", params: { captureId: decodeURIComponent(m[1]!) } };
-  } catch {
-    return null;
-  }
-}
-
 async function mounted(name: string, matched: { readonly params: Record<string, string> }, req: Request, opts: ServeOptions, port: number, cors: Record<string, string>, outcomes: Map<ReviewId, ReviewSaveState>): Promise<Response | null> {
   const { evidence, reviews, record, preparation, segmentation } = opts.modules;
   const captureId = matched.params.captureId as CaptureId | undefined;
@@ -429,7 +418,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
           return !prep.finished || prep.supportedCount === 0;
         });
         if (stuck.length > 0) preparation.retry(captureId!, stuck.map((rev) => rev.id));
-        return new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...cors } });
+        return noContent(cors);
       }
       case "record": {
         if (!record) return null;
@@ -515,7 +504,7 @@ async function handle(req: Request, opts: ServeOptions, auth: AuthConfig, outcom
 
   // Bun normalises `..` out of req.url before we see it, so a traversal aimed past /app/ arrives as an unrouted path;
   // answering 404 before the token check keeps it a 404 (and reveals nothing: ROUTES is public).
-  const matched = matchRoute(req.method, path) ?? matchLocal(req.method, path);
+  const matched = matchRoute(req.method, path);
   const v = authorize(req.headers, auth, { requireToken: matched !== null });
   if (!v.ok) return failure(v.status, v.status === 401 ? "unauthorized" : "forbidden");
   const cors = corsHeaders(req.headers.get("origin"), v.origin);
