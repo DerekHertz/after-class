@@ -20,7 +20,7 @@ import type {
   AssessableClaim, Correction, DetourState, EvidenceBundle, FrozenScope, LearnerActKind, Observation, ReviewPhase, ReviewState, Turn,
   TutorMove, TutorMoveKind,
 } from "../../shared/domain";
-import { Material } from "../../shared/time";
+import { Material, contains } from "../../shared/time";
 import { ProviderError } from "../providers/memo";
 import type { Task } from "../providers/memo";
 import type { ClaudeCli, ClaudeRequest } from "../providers/claude";
@@ -304,7 +304,7 @@ function evidenceInScope(ids: readonly EvidenceId[], input: TutorInput): Verdict
   const inScope = new Set<EvidenceId>();
   for (const p of input.evidence.passages) if (Material.covers(scope, p.sourceId, p.interval)) inScope.add(p.id);
   for (const f of input.evidence.frames) {
-    if (Material.get(scope, f.sourceId).intervals().some((i) => i.start <= f.mediaS && f.mediaS < i.end)) inScope.add(f.id);
+    if (Material.get(scope, f.sourceId).intervals().some((i) => contains(i, f.mediaS))) inScope.add(f.id);
   }
   const outside = ids.filter((id) => !inScope.has(id));
   return outside.length === 0 ? OK : no(`evidence outside the review scope: ${outside.join(", ")}`);

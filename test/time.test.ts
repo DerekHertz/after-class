@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SourceId } from "../src/shared/ids";
-import { interval, IntervalSet, Material, media } from "../src/shared/time";
+import { clip, contains, interval, IntervalSet, isEmpty, Material, media, overlaps } from "../src/shared/time";
 import type { Interval } from "../src/shared/time";
 
 function prng(seed: number): () => number {
@@ -175,5 +175,63 @@ describe("Material", () => {
     expect(Material.covers(m, s1, interval(2, 8))).toBe(true);
     expect(Material.covers(m, s2, interval(2, 8))).toBe(false);
     expect(Material.covers(m, s1, interval(8, 12))).toBe(false);
+  });
+});
+
+describe("half-open interval helpers", () => {
+  const CASES = 2000;
+  const grid = (rand: () => number): Interval => {
+    const a = Math.floor(rand() * 20);
+    return interval(a * CELL, (a + 1 + Math.floor(rand() * 8)) * CELL);
+  };
+
+  test("an interval contains its start and not its end", () => {
+    const rand = prng(11);
+    for (let r = 0; r < CASES; r++) {
+      const i = grid(rand);
+      expect(contains(i, i.start)).toBe(true);
+      expect(contains(i, i.end)).toBe(false);
+      expect(contains(i, (i.start + i.end) / 2)).toBe(true);
+      expect(contains(i, i.start - CELL)).toBe(false);
+      expect(contains(i, i.end + CELL)).toBe(false);
+    }
+  });
+
+  test("overlap is symmetric, reflexive for non-empty intervals, and false for abutting ones", () => {
+    const rand = prng(12);
+    for (let r = 0; r < CASES; r++) {
+      const a = grid(rand);
+      const b = grid(rand);
+      expect(overlaps(a, b)).toBe(overlaps(b, a));
+      expect(overlaps(a, a)).toBe(true);
+      const next = interval(a.end, a.end + (1 + Math.floor(rand() * 5)) * CELL);
+      expect(overlaps(a, next)).toBe(false);
+      expect(overlaps(next, a)).toBe(false);
+      expect(overlaps(a, b)).toBe([...cellsOf(a)].some((c) => cellsOf(b).has(c)));
+    }
+  });
+
+  test("clip is a subset of both inputs and agrees with overlaps", () => {
+    const rand = prng(13);
+    for (let r = 0; r < CASES; r++) {
+      const a = grid(rand);
+      const b = grid(rand);
+      const c = clip(a, b);
+      expect(c !== null).toBe(overlaps(a, b));
+      expect(c).toEqual(clip(b, a));
+      if (c === null) continue;
+      expect(isEmpty(c)).toBe(false);
+      expect(c.start >= a.start && c.end <= a.end && c.start >= b.start && c.end <= b.end).toBe(true);
+      expect(contains(a, c.start) && contains(b, c.start)).toBe(true);
+      expect(contains(c, c.end)).toBe(false);
+      expect([...cellsOf(c)].sort()).toEqual([...cellsOf(a)].filter((x) => cellsOf(b).has(x)).sort());
+    }
+  });
+
+  test("isEmpty is true for zero-length, inverted and NaN spans only", () => {
+    expect(isEmpty({ start: 3, end: 3 })).toBe(true);
+    expect(isEmpty({ start: 4, end: 3 })).toBe(true);
+    expect(isEmpty({ start: 3, end: Number.NaN })).toBe(true);
+    expect(isEmpty({ start: 3, end: 3.5 })).toBe(false);
   });
 });

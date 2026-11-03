@@ -10,7 +10,7 @@ import type { CaptureId, EvidenceId, SourceId } from "../../shared/ids";
 import type {
   AdRecord, CaptureFact, CaptureStatus, CaptureView, Channel, ChannelHealth, Frame, Gap, GapReason, Passage, Seq, Source, TranscriptSegment,
 } from "../../shared/domain";
-import { IntervalSet, Material, interval } from "../../shared/time";
+import { IntervalSet, Material, contains, interval, isEmpty, overlaps } from "../../shared/time";
 import type { Interval } from "../../shared/time";
 import type { WatchedPassage } from "./index";
 
@@ -41,7 +41,7 @@ export function durationLookup(facts: readonly CaptureFact[]): (sourceId: Source
  * Implausible spans are reported as `implausible_span` gaps, never silently dropped.
  */
 export function spanPlausible(span: SpanFact, sourceDurationS: number | null): boolean {
-  if (!(span.end > span.start) || !(span.rate > 0)) return false;
+  if (isEmpty(span) || !(span.rate > 0)) return false;
   if (sourceDurationS !== null && span.end > sourceDurationS + 1) return false;
   return span.end - span.start <= (span.rate * span.wallDurationMs) / 1000 * 1.25 + 1.5;
 }
@@ -116,7 +116,7 @@ export function clipToWatched(
   const set = Material.get(watched, sourceId);
   for (const seg of segments) {
     const span: Interval = { start: seg.start, end: seg.end };
-    if (!(seg.end > seg.start)) continue;
+    if (isEmpty(seg)) continue;
     if (set.covers(span)) {
       const id = stableId("ev", transcriptRevId, seg.start, seg.end);
       if (seen.has(id)) continue;
@@ -196,7 +196,7 @@ export function deriveGaps(facts: readonly CaptureFact[], watched: Material, isF
   const spans = classifySpans(sorted, durationLookup(sorted));
   const gaps: Gap[] = [];
   const add = (sourceId: SourceId, i: Interval, channel: Channel, reason: GapReason) => {
-    if (i.end > i.start) gaps.push({ sourceId, interval: i, channel, reason });
+    if (!isEmpty(i)) gaps.push({ sourceId, interval: i, channel, reason });
   };
 
   for (const s of spans) {
@@ -233,7 +233,7 @@ export function deriveGaps(facts: readonly CaptureFact[], watched: Material, isF
       if (s.verdict !== "counted") continue;
       if (episode.videoId !== null && episode.videoId !== s.fact.videoId) continue;
       const at = episode.atMediaS;
-      const holdsFailure = at !== null && s.fact.start <= at && at < s.fact.end;
+      const holdsFailure = at !== null && contains(s.fact, at);
       if (!holdsFailure && !(s.fact.clientSeq > episode.from && s.fact.clientSeq < episode.until)) continue;
       const start = holdsFailure ? at : s.fact.start;
       add(s.sourceId, { start: start as Interval["start"], end: s.fact.end }, episode.channel, episode.stalled && episode.channel === "frames" ? "frame_stall" : "channel_failed");
@@ -309,7 +309,7 @@ export type Projection = {
 const NEARBY_S = 15;
 
 function holdsPoint(set: IntervalSet, p: number): boolean {
-  return set.intervals().some((i) => i.start <= p && p < i.end);
+  return set.intervals().some((i) => contains(i, p));
 }
 
 export function foldCapture(captureId: CaptureId, stored: readonly StoredFact[]): Projection {
@@ -423,7 +423,7 @@ export function foldCapture(captureId: CaptureId, stored: readonly StoredFact[])
 function firstCover(target: Interval, counted: readonly ClassifiedSpan[]): ClassifiedSpan | null {
   let acc = IntervalSet.empty;
   for (const s of counted) {
-    if (s.fact.end <= target.start || s.fact.start >= target.end) continue;
+    if (!overlaps(s.fact, target)) continue;
     acc = acc.union(IntervalSet.of([spanInterval(s.fact)]));
     if (acc.covers(target)) return s;
   }

@@ -25,8 +25,33 @@ export function interval(start: number, end: number): Interval {
   return { start: media(start), end: media(end) };
 }
 
-function length(i: Interval): number {
+/** Anything with a start and end in media seconds, such as a span or transcript segment. */
+export type Span = { readonly start: number; readonly end: number };
+
+function length(i: Span): number {
   return i.end - i.start;
+}
+
+/** No point lies inside. True for `end <= start` and for NaN bounds, which is why `interval()` rejects them. */
+export function isEmpty(i: Span): boolean {
+  return !(i.end > i.start);
+}
+
+/** Half-open: a point at `start` is inside, a point at `end` is not. */
+export function contains(i: Span, point: number): boolean {
+  return i.start <= point && point < i.end;
+}
+
+/** Half-open: spans that only abut (`a.end === b.start`) do not overlap. Symmetric. Meaningful for non-empty spans. */
+export function overlaps(a: Span, b: Span): boolean {
+  return a.start < b.end && b.start < a.end;
+}
+
+/** The part of `a` inside `b`, or null when the two share no point. */
+export function clip(a: Interval, b: Interval): Interval | null {
+  const start = Math.max(a.start, b.start);
+  const end = Math.min(a.end, b.end);
+  return end > start ? { start: start as MediaSeconds, end: end as MediaSeconds } : null;
 }
 
 /**
@@ -40,7 +65,7 @@ export class IntervalSet {
   static readonly empty: IntervalSet = new IntervalSet([]);
 
   static of(intervals: Iterable<Interval>): IntervalSet {
-    const sorted = [...intervals].filter((i) => i.end > i.start).sort((a, b) => a.start - b.start);
+    const sorted = [...intervals].filter((i) => !isEmpty(i)).sort((a, b) => a.start - b.start);
     const merged: Interval[] = [];
     for (const i of sorted) {
       const last = merged[merged.length - 1];
@@ -72,9 +97,8 @@ export class IntervalSet {
     while (a < this.parts.length && b < other.parts.length) {
       const x = this.parts[a]!;
       const y = other.parts[b]!;
-      const start = Math.max(x.start, y.start);
-      const end = Math.min(x.end, y.end);
-      if (end > start) out.push({ start: start as MediaSeconds, end: end as MediaSeconds });
+      const shared = clip(x, y);
+      if (shared) out.push(shared);
       if (x.end < y.end) a++;
       else b++;
     }
@@ -101,13 +125,13 @@ export class IntervalSet {
 
   /** True when every point of `i` is inside this set. */
   covers(i: Interval): boolean {
-    if (!(i.end > i.start)) return false;
+    if (isEmpty(i)) return false;
     return this.parts.some((p) => p.start <= i.start && i.end <= p.end);
   }
 
   /** Fraction of `i` inside this set, 0..1. */
   overlapFraction(i: Interval): number {
-    if (!(i.end > i.start)) return 0;
+    if (isEmpty(i)) return 0;
     return this.intersect(IntervalSet.of([i])).duration() / length(i);
   }
 

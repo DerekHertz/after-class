@@ -4,7 +4,7 @@
 import { stableId } from "../../shared/ids";
 import type { CaptureId, EvidenceId, WindowId } from "../../shared/ids";
 import type { BoundaryJudgment, BoundaryWindow, ChunkProvenance, ChunkRevision, NonEmpty, Passage, Route, Seq, Verdict } from "../../shared/domain";
-import { Material } from "../../shared/time";
+import { Material, contains } from "../../shared/time";
 import type { WatchOrder } from "../evidence";
 import type { SegmentationConfig } from ".";
 
@@ -56,7 +56,7 @@ export function buildWindows(captureId: CaptureId, order: WatchOrder, cfg: Segme
     const contextIds = passages.slice(contextFrom, from).map((p) => p.id);
 
     const frameIds = order.frameCandidates
-      .filter((f) => !usedFrames.has(f.id) && Material.get(newMaterial, f.sourceId).intervals().some((i) => i.start <= f.mediaS && f.mediaS < i.end))
+      .filter((f) => !usedFrames.has(f.id) && Material.get(newMaterial, f.sourceId).intervals().some((i) => contains(i, f.mediaS)))
       .reverse()
       .slice(0, cfg.maxFramesPerWindow)
       .map((f) => f.id);
