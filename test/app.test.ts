@@ -16,6 +16,7 @@ import type { Api } from "../src/app/api";
 import { OptionsView } from "../src/app/capture";
 import type { AppApi } from "../src/app/api";
 import { createReviewController } from "../src/app/controller";
+import type { SessionState } from "../src/app/controller";
 import {
   availableActions, conversationLines, currentEvidenceIds, estimateText, formatClock, inspectBundle, liveText, noteView, observationRow,
   optionsScreen, parseRoute, reduceLive, routePath, softTargetPrompt, startLive, toAct, unansweredLearnerTurn, usageRows,
@@ -23,7 +24,7 @@ import {
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { StreamError, ndjson, tutorEvents } from "../src/app/ndjson";
 import { UsageTable } from "../src/app/record";
-import { UndeliveredNote } from "../src/app/review";
+import { SaveBanner, UndeliveredNote } from "../src/app/review";
 import { createSpeechInput, createSynthSpeaker } from "../src/app/speech";
 import type { RecognitionLike, Speaker } from "../src/app/speech";
 import { BundleInspector, EvidencePane } from "../src/app/ui";
@@ -676,6 +677,30 @@ async function* events(...list: TurnEvent[]): AsyncGenerator<TurnEvent> {
 
 const answer: LearnerAct = { kind: "answer", text: "An ordering of events.", modality: "speech" };
 
+describe("save banner", () => {
+  const session = (o: Partial<SessionState>): SessionState => ({
+    view: parsedReview(), loadError: null, live: null, unsent: [], sendError: null, saving: false, saveError: null, savedSummary: null, storageDegraded: false, ...o,
+  });
+  const banner = (o: Partial<SessionState>) => renderToStaticMarkup(createElement(SaveBanner, { state: session(o), onRetry: () => {}, reviewId }));
+
+  test("it says Saved only when the backend reports the review saved", () => {
+    expect(banner({ view: parsedReview({ saved: "saved" }) })).toContain("Saved.");
+    expect(banner({ view: parsedReview({ saved: "unsaved" }) })).not.toContain("Saved");
+    expect(banner({ view: parsedReview({ saved: "save_pending" }) })).not.toContain("Saved.");
+    expect(banner({ saveError: "offline" })).toContain("not saved yet: offline");
+  });
+
+  test("degraded local storage is stated, with the consequence, whatever the save state; healthy storage claims nothing about it", () => {
+    for (const saved of ["unsaved", "saved", "save_pending"] as const) {
+      const out = banner({ storageDegraded: true, view: parsedReview({ saved }) });
+      expect(out).toContain("not keeping your unsent messages");
+      expect(out).toContain("reload");
+    }
+    expect(banner({ storageDegraded: true, saveError: "offline" })).not.toContain("kept on this computer");
+    expect(banner({ saveError: "offline" })).not.toContain("not keeping your unsent messages");
+  });
+});
+
 describe("review session controller", () => {
   test("a sent turn is kept until the backend stores it, its sentences are spoken, and the view is refreshed", async () => {
     let keptWhileStreaming = -1;
@@ -892,6 +917,19 @@ describe("review session controller", () => {
     const [, discard] = findElements(UndeliveredNote({ ...base, onDiscard: () => discarded++ }), (e) => e.type === "button");
     (discard!.props as { onClick: () => void }).onClick();
     expect(discarded).toBe(1);
+  });
+
+  test("the session says when local storage is degraded, and not before", async () => {
+    const h = setup({ sendTurn: ({ turnId }) => events({ type: "learner_turn_stored", turnId }, { type: "turn_complete", turnId }) });
+    await h.controller.load();
+    expect(h.controller.getState().storageDegraded).toBe(false);
+
+    const degraded = { ...createMemoryUnsent(), degraded: true };
+    const api = { review: async () => parsedReview() } as unknown as Api;
+    const speaker: Speaker = { beginTurn() {}, speak() {}, stop() {} };
+    const controller = createReviewController({ api, reviewId, speaker, unsent: degraded });
+    await controller.load();
+    expect(controller.getState().storageDegraded).toBe(true);
   });
 
   test("discarding with nothing unsent does nothing, and never touches a turn that is streaming", async () => {

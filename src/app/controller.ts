@@ -31,6 +31,8 @@ export type SessionState = {
   readonly loadError: string | null;
   readonly live: Live | null;
   readonly unsent: readonly UnsentTurn[];
+  /** The browser would not keep unsent turns (IndexedDB missing, blocked or failing): they live in this page only. */
+  readonly storageDegraded: boolean;
   /** Why the last `send` was refused, or null. */
   readonly sendError: string | null;
   readonly saving: boolean;
@@ -72,7 +74,7 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
   const { api, reviewId, speaker, unsent } = deps;
   const mint = deps.mintTurnId ?? (() => randomId("turn"));
   const now = deps.nowMs ?? Date.now;
-  let state: SessionState = { view: null, loadError: null, live: null, unsent: [], sendError: null, saving: false, saveError: null, savedSummary: null };
+  let state: SessionState = { view: null, loadError: null, live: null, unsent: [], storageDegraded: false, sendError: null, saving: false, saveError: null, savedSummary: null };
   const listeners = new Set<() => void>();
   let streaming = false;
 
@@ -91,7 +93,8 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
   }
 
   async function refreshUnsent(): Promise<void> {
-    set({ unsent: await unsent.forReview(reviewId) });
+    const turns = await unsent.forReview(reviewId);
+    set({ unsent: turns, storageDegraded: unsent.degraded });
   }
 
   /** One turn at a time, claimed before the first await so a double click cannot start two. */
