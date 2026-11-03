@@ -635,6 +635,101 @@ describe("unsent turns", () => {
   });
 });
 
+type FakeTx = { oncomplete: (() => void) | null; onerror: (() => void) | null; onabort: (() => void) | null; error: unknown };
+
+/** An IndexedDB whose open and transactions the test releases by hand. Requests succeed on the next tick, as in a browser. */
+function fakeIdb(opts: { opens?: boolean } = {}) {
+  const rows = new Map<string, unknown>();
+  const txs: FakeTx[] = [];
+  const db = {
+    close() {},
+    transaction() {
+      const tx: FakeTx = { oncomplete: null, onerror: null, onabort: null, error: null };
+      txs.push(tx);
+      const request = <T,>(result: T, apply: () => void) => {
+        const r: { result: T; error: unknown; onsuccess: (() => void) | null; onerror: (() => void) | null } = { result, error: null, onsuccess: null, onerror: null };
+        queueMicrotask(() => {
+          apply();
+          r.onsuccess?.();
+        });
+        return r;
+      };
+      return Object.assign(tx, {
+        objectStore: () => ({
+          put: (v: { turnId: string }) => request(undefined, () => void rows.set(v.turnId, v)),
+          delete: (k: string) => request(undefined, () => void rows.delete(k)),
+          getAll: () => request([...rows.values()], () => {}),
+        }),
+      });
+    },
+  };
+  const factory = {
+    open() {
+      const r: { result: unknown; error: unknown; onsuccess: (() => void) | null; onerror: (() => void) | null; onupgradeneeded: (() => void) | null; onblocked: (() => void) | null } =
+        { result: { ...db, createObjectStore() {} }, error: null, onsuccess: null, onerror: null, onupgradeneeded: null, onblocked: null };
+      if (opts.opens !== false) queueMicrotask(() => r.onsuccess?.());
+      return r;
+    },
+  } as unknown as IDBFactory;
+  return { factory, rows, txs, complete: (i = txs.length - 1) => txs[i]!.oncomplete?.(), abort: (i = txs.length - 1) => { txs[i]!.error = new Error("QuotaExceededError"); txs[i]!.onabort?.(); } };
+}
+
+describe("IndexedDB unsent turns", () => {
+  const turn = { turnId: tid("idb1"), reviewId, act: { kind: "skip" } as LearnerAct, createdAtMs: 1 };
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+
+  test("a write resolves when its transaction completes, not when the request succeeds", async () => {
+    const idb = fakeIdb();
+    const store = createIndexedDbUnsent(idb.factory, 1000);
+    let done = false;
+    const put = store.put(turn).then(() => (done = true));
+    await tick();
+    expect(idb.rows.has(turn.turnId)).toBe(true);
+    expect(done).toBe(false);
+    idb.complete();
+    await put;
+    expect(store.degraded).toBe(false);
+  });
+
+  test("a transaction that aborts (quota, a closing database) degrades the store and loses nothing already accepted", async () => {
+    const idb = fakeIdb();
+    const store = createIndexedDbUnsent(idb.factory, 1000);
+    const put = store.put(turn);
+    await tick();
+    idb.abort();
+    await put;
+    expect(store.degraded).toBe(true);
+    expect((await store.forReview(reviewId)).map((t) => t.turnId)).toEqual([turn.turnId]);
+  });
+
+  test("a blocked open cannot hang the app: it times out into memory", async () => {
+    const store = createIndexedDbUnsent(fakeIdb({ opens: false }).factory, 20);
+    await store.put(turn);
+    expect(store.degraded).toBe(true);
+    expect((await store.forReview(reviewId)).map((t) => t.turnId)).toEqual([turn.turnId]);
+  });
+
+  test("a browser whose indexedDB getter throws still gets a working, degraded store", async () => {
+    Object.defineProperty(globalThis, "indexedDB", { get() { throw new Error("SecurityError"); }, configurable: true });
+    try {
+      const store = createIndexedDbUnsent();
+      await store.put(turn);
+      expect(store.degraded).toBe(true);
+      expect((await store.forReview(reviewId)).map((t) => t.turnId)).toEqual([turn.turnId]);
+    } finally {
+      delete (globalThis as { indexedDB?: unknown }).indexedDB;
+    }
+  });
+
+  test("a transaction that never finishes times out into memory", async () => {
+    const store = createIndexedDbUnsent(fakeIdb().factory, 20);
+    await store.put(turn);
+    expect(store.degraded).toBe(true);
+    await store.remove(turn.turnId);
+    expect(await store.forReview(reviewId)).toEqual([]);
+  });
+});
+
 // ───────────────────────────── Session controller ───────────────────────────
 
 type SendCall = { readonly turnId: TurnId; readonly act: LearnerAct };
