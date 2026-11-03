@@ -26,13 +26,15 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import { parseId } from "../shared/ids";
 import type { IdKind } from "../shared/ids";
-import type { CaptureId, ReviewId } from "../shared/ids";
-import type { FrozenScope, ReviewSaveState, ReviewView, StartResult, TurnEvent } from "../shared/domain";
+import type { CaptureId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, SourceId } from "../shared/ids";
+import type { EvidenceBundle, Frame, FrozenScope, Passage, ReviewSaveState, ReviewView, StartResult, TurnEvent } from "../shared/domain";
 import { Material } from "../shared/time";
+import type { Interval } from "../shared/time";
 import {
-  BadRequest, ROUTES, matchRoute, parseIngestBatch, parseInviteAnswerRequest, parseStartReviewRequest, parseTurnRequest,
+  BadRequest, ROUTES, matchRoute, parseDisputeResolutionRequest, parseEvidenceDeleteRequest, parseIngestBatch, parseInviteAnswerRequest,
+  parseLinkDecisionRequest, parseNoteEditRequest, parseObservationOverrideRequest, parseStartReviewRequest, parseTurnRequest,
 } from "../shared/wire";
-import type { EvidenceStore } from "./evidence";
+import type { EvidenceStore, EvidenceStoreWithProbe } from "./evidence";
 import type { Preparation } from "./preparation";
 import type { Reviews } from "./review";
 import type { LearningRecord } from "./record";
@@ -88,7 +90,8 @@ export type ServeOptions = {
    * `record`, `preparation` and `segmentation` are optional until main.ts passes them: a route that needs one answers
    * 501 without it, and a review's `saved` reads "unsaved". M7b widens this to every module.
    */
-  readonly modules: Pick<Modules, "ledger" | "evidence" | "reviews"> & Partial<Pick<Modules, "record" | "preparation" | "segmentation">>;
+  readonly modules: Pick<Modules, "ledger" | "reviews"> & { readonly evidence: EvidenceStore & Pick<EvidenceStoreWithProbe, "watchedMaterial"> }
+    & Partial<Pick<Modules, "record" | "preparation" | "segmentation">>;
   /** `port` 0 binds a free port (tests); the Host check then uses the bound port. */
   readonly auth: AuthConfig;
   /** Directory holding the bundled review app (scripts/build-app.ts writes dist/app). */
@@ -276,6 +279,37 @@ function savedOf(record: LearningRecord | undefined, outcomes: Map<ReviewId, Rev
   return { saved: exists || seen === "saved" ? "saved" : (seen ?? "unsaved"), observations: rec.observations };
 }
 
+const noContent = (cors: Record<string, string>) => new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...cors } });
+
+/** Validates the query string against a route's schema; a repeated key is ambiguous, so it is refused too. */
+function parseQuery(name: keyof typeof ROUTES, url: URL): any {
+  const keys = [...url.searchParams.keys()];
+  if (new Set(keys).size !== keys.length) throw new BadRequest("a query key is repeated");
+  const parsed = ROUTES[name].query?.safeParse(Object.fromEntries(url.searchParams));
+  if (!parsed?.success) throw new BadRequest("invalid query");
+  return parsed.data;
+}
+
+/** The wire form of a bundle: `Material` as canonical rows. */
+const wireBundle = (b: EvidenceBundle) => ({ ...b, material: Material.canonical(b.material) });
+
+/**
+ * `ids` has no material of its own, so the one sent back is what the passages found cover. Ids that are unknown or
+ * deleted by the user are left out; the record's `unavailableEvidence` is what tells the learner a citation is gone.
+ */
+function evidenceByIds(evidence: EvidenceStore, ids: readonly EvidenceId[]): EvidenceBundle {
+  const passages: Passage[] = [];
+  const frames: Frame[] = [];
+  const covered = new Map<SourceId, Interval[]>();
+  for (const e of evidence.get(ids).values()) {
+    if (e.kind === "passage") {
+      passages.push(e);
+      covered.set(e.sourceId, [...(covered.get(e.sourceId) ?? []), e.interval]);
+    } else if (e.kind === "frame") frames.push(e);
+  }
+  return { material: Material.of(covered), passages, frames, gaps: [], ads: [] };
+}
+
 const encoder = new TextEncoder();
 
 /**
@@ -328,6 +362,9 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
   const { evidence, reviews, record, preparation, segmentation } = opts.modules;
   const captureId = matched.params.captureId as CaptureId | undefined;
   const reviewId = matched.params.reviewId as ReviewId | undefined;
+  const noteId = matched.params.noteId as NoteId | undefined;
+  const linkId = matched.params.linkId as LinkId | undefined;
+  const observationId = matched.params.observationId as ObservationId | undefined;
   try {
     switch (name) {
       case "ingest": {
@@ -393,6 +430,63 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
         });
         if (stuck.length > 0) preparation.retry(captureId!, stuck.map((rev) => rev.id));
         return new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...cors } });
+      }
+      case "record": {
+        if (!record) return null;
+        const { reviewId: only } = parseQuery("record", new URL(req.url)) as { reviewId?: ReviewId };
+        return reply("record", record.view(only === undefined ? {} : { reviewId: only }), cors);
+      }
+      case "editNote": {
+        if (!record) return null;
+        const { text } = parseNoteEditRequest(await readJson(req));
+        if (!record.view({}).notes.some((n) => n.id === noteId)) return failure(404, "unknown note", cors);
+        record.editNote(noteId!, text);
+        return noContent(cors);
+      }
+      case "deleteNote": {
+        if (!record) return null;
+        if (!record.view({}).notes.some((n) => n.id === noteId)) return failure(404, "unknown note", cors);
+        record.deleteNote(noteId!);
+        return noContent(cors);
+      }
+      case "decideLink": {
+        if (!record) return null;
+        const { decision } = parseLinkDecisionRequest(await readJson(req));
+        if (!record.view({}).links.some((l) => l.id === linkId)) return failure(404, "unknown link", cors);
+        record.decideLink(linkId!, decision);
+        return noContent(cors);
+      }
+      case "resolveDispute": {
+        if (!record) return null;
+        const { outcome } = parseDisputeResolutionRequest(await readJson(req));
+        if (!record.view({}).observations.some((o) => o.id === observationId)) return failure(404, "unknown observation", cors);
+        record.resolveDispute(observationId!, outcome);
+        return noContent(cors);
+      }
+      case "overrideObservation": {
+        if (!record) return null;
+        const { status } = parseObservationOverrideRequest(await readJson(req));
+        if (!record.view({}).observations.some((o) => o.id === observationId)) return failure(404, "unknown observation", cors);
+        record.overrideObservation(observationId!, status);
+        return noContent(cors);
+      }
+      case "evidence": {
+        const q = parseQuery("evidence", new URL(req.url)) as { material: Material } | { ids: EvidenceId[] } | { captureId: CaptureId };
+        const bundle =
+          "material" in q ? evidence.bundle(q.material)
+          : "ids" in q ? evidenceByIds(evidence, q.ids)
+          : evidence.bundle(evidence.watchedMaterial(q.captureId));
+        return replyWire("evidence", wireBundle(bundle), cors);
+      }
+      case "frameImage": {
+        const bytes = evidence.frameBytes(matched.params.evidenceId as EvidenceId);
+        if (bytes === null) return failure(404, "unknown frame", cors);
+        return new Response(bytes as Uint8Array<ArrayBuffer>, { headers: { "Content-Type": "image/jpeg", "Cache-Control": "no-store", ...SECURITY_HEADERS, ...cors } });
+      }
+      case "deleteEvidence": {
+        const { evidenceIds } = parseEvidenceDeleteRequest(await readJson(req));
+        evidence.deleteByUser(evidenceIds, crypto.randomUUID());
+        return noContent(cors);
       }
       default:
         return null;

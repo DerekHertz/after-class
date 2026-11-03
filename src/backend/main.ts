@@ -391,7 +391,7 @@ export async function main(options: MainOptions = {}): Promise<Running> {
   );
 
   // The scheduler is the only holder of these; http gets the same store with ingest registering the capture first.
-  const served: EvidenceStore = {
+  const served: EvidenceStoreWithProbe = {
     ...evidence,
     ingest(batch) {
       captures.add(batch.captureId);
