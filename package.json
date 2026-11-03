@@ -6,7 +6,8 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "dev": "bun run src/backend/main.ts",
-    "build:ext": "bun run scripts/build-extension.ts"
+    "build:ext": "bun run scripts/build-extension.ts",
+    "build:app": "bun run scripts/build-app.ts"
   },
   "dependencies": {
     "react": "19.3.1",

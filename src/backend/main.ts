@@ -1,16 +1,443 @@
 /**
- * Composition root (W10, composition phase). The only file that knows every module.
+ * Composition root (M6). The only file that knows every module.
  *
- *   keys      ~/.config/afterclass/keys.env (0600; refuse to start if wider) → TYPESAFE_API_KEY
- *   data      ./data/afterclass.sqlite, ./data/frames/
- *   mode      AFTERCLASS_MODE=live | replay  (replay: memo misses throw; no provider is constructed)
+ *   keys     ~/.config/afterclass/keys.env, mode 0600 or the backend refuses to start. Only this file reads it; the
+ *            value of TYPESAFE_API_KEY goes to the Jev client and nowhere else (not a log line, not a response, not a child env).
+ *   token    ~/.config/afterclass/pairing-token (0600), created on first boot, printed with "listening on 127.0.0.1:<port>".
+ *   data     $AFTERCLASS_DATA (default ./data): afterclass.sqlite, frames/
+ *   mode     AFTERCLASS_MODE=live | replay. Unset: live when a keys file exists, replay otherwise.
  *
- * Wiring order: db → memo → ledger → providers/tasks → evidence → segmentation
- * → preparation → reviews → record → scheduler → Bun.serve.
- * Every fact write calls scheduler.pump(); a 24 h timer runs evidence.sweepExpired.
+ * Replay mode builds no Jev client and no `claude` adapter. Its providers refuse every call, and the memo is in replay
+ * mode, so a lookup that misses throws ReplayMiss before any task runs: nothing opens a socket or spawns a process,
+ * and nothing is recorded in the ledger. A caller may inject recorded or fake tasks (`options.tasks`); those are the
+ * only way work runs in replay mode, and they are refused in live mode.
+ *
+ * Wiring order: db → memo → ledger → evidence → segmentation → preparation → reviews → record → scheduler → serve.
+ * Every fact write schedules scheduler.pump(); a 24 h timer runs evidence.sweepExpired.
  */
-export async function main(): Promise<void> {
-  throw new Error("not implemented");
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import { buildApp } from "../../scripts/build-app";
+import type { CaptureId, EvidenceId } from "../shared/ids";
+import type { AssessableClaim, BoundaryJudgment, BoundaryWindow, Evidence, Frame, Passage, Verdict } from "../shared/domain";
+import { openDb } from "./db";
+import type { Db } from "./db";
+import { createMemo, ProviderError } from "./providers/memo";
+import type { Memo, MemoMode, Task } from "./providers/memo";
+import { createLedger } from "./providers/ledger";
+import type { Ledger } from "./providers/ledger";
+import { createJevClient } from "./providers/jev";
+import type { JevClient } from "./providers/jev";
+import { createClaudeCli } from "./providers/claude";
+import type { ClaudeCli, SpawnFn } from "./providers/claude";
+import { boundaryTask, claimSupportTask, frameChangeTask } from "./providers/jev-tasks";
+import type { BoundaryInput, FrameChangeInput } from "./providers/jev-tasks";
+import { createEvidence } from "./evidence";
+import type { EvidenceStore, EvidenceStoreWithProbe } from "./evidence";
+import { SEGMENTATION_DEFAULTS, createSegmentation } from "./segmentation";
+import type { Segmentation } from "./segmentation";
+import { createPreparation } from "./preparation";
+import type { Preparation } from "./preparation";
+import { interpretTask, resourceSearchTask, reviseTask } from "./preparation/tasks";
+import type { FrameBytes, PreparationTasks } from "./preparation/tasks";
+import { createReviews } from "./review";
+import type { Reviews } from "./review";
+import { tutorTask, wrapUpTask } from "./review/tutor";
+import type { TutorInput, TutorOutput, WrapUpInput, WrapUpOutput } from "./review/tutor";
+import { createRecord } from "./record";
+import type { LearningRecord } from "./record";
+import { DEFAULT_LIMITS, createScheduler } from "./scheduler";
+import type { Scheduler, WorkItem } from "./scheduler";
+import { DEFAULT_PORT, serve } from "./http";
+
+const ROOT = resolve(import.meta.dir, "../..");
+const RETENTION_DAYS = 30;
+
+export type Mode = "live" | "replay";
+
+/** Every task the product runs, bound to a provider. Tests inject fakes; replay mode otherwise binds refusing providers. */
+export type TaskSet = {
+  readonly boundary: Task<BoundaryInput, BoundaryJudgment>;
+  readonly frameChange: Task<FrameChangeInput, Verdict>;
+  readonly preparation: PreparationTasks;
+  readonly tutor: Task<TutorInput, TutorOutput>;
+  readonly wrapUp: Task<WrapUpInput, WrapUpOutput>;
+};
+
+export type Env = Readonly<Record<string, string | undefined>>;
+
+export type MainOptions = {
+  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_EXTENSION_ID. */
+  readonly env?: Env;
+  /** Holds keys.env and pairing-token. Defaults to ~/.config/afterclass. */
+  readonly configDir?: string;
+  /** Overrides AFTERCLASS_PORT; 0 binds a free port. */
+  readonly port?: number;
+  /** Replay mode only: recorded or fake tasks. They replace the providers, so the memo may run them. */
+  readonly tasks?: TaskSet;
+  /** Where the review app is built and served from. Default <repo>/dist/app. */
+  readonly appDir?: string;
+  /** False skips the app build (tests that do not serve the app). */
+  readonly buildApp?: boolean;
+  /** Live mode seams, so a test can watch the wiring without a network or a process. */
+  readonly fetch?: typeof fetch;
+  readonly spawn?: SpawnFn;
+  readonly claudeBin?: string;
+  readonly log?: (text: string) => void;
+  readonly error?: (text: string) => void;
+};
+
+export type Modules = {
+  readonly evidence: EvidenceStoreWithProbe;
+  readonly segmentation: Segmentation;
+  readonly preparation: Preparation;
+  readonly reviews: Reviews;
+  readonly record: LearningRecord;
+  readonly ledger: Ledger;
+  readonly memo: Memo;
+  readonly scheduler: Scheduler;
+  readonly db: Db;
+};
+
+export type Running = {
+  readonly mode: Mode;
+  readonly port: number;
+  readonly token: string;
+  readonly modules: Modules;
+  stop(): Promise<void>;
+};
+
+// ───────────────────────────── secrets and files ─────────────────────────────
+
+/** A file holding a secret must be a regular file, ours, and exactly 0600. The message never contains file contents. */
+function assertPrivateFile(path: string, what: string): void {
+  const st = statSync(path);
+  if (!st.isFile()) throw new Error(`${what} ${path} is not a regular file; refusing to start`);
+  const mode = st.mode & 0o777;
+  if (mode !== 0o600) throw new Error(`${what} ${path} has mode ${mode.toString(8).padStart(4, "0")}, not 0600; run chmod 600 on it. Refusing to start`);
+  if (typeof process.getuid === "function" && st.uid !== process.getuid()) throw new Error(`${what} ${path} is owned by another user; refusing to start`);
 }
 
-if (import.meta.main) await main();
+/** The one secret the backend reads from keys.env. Anything else in the file is ignored, never forwarded. */
+export type Keys = { readonly TYPESAFE_API_KEY?: string };
+
+export function readKeys(path: string): Keys {
+  assertPrivateFile(path, "keys file");
+  const out: { TYPESAFE_API_KEY?: string } = {};
+  for (const raw of readFileSync(path, "utf8").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq < 0) continue;
+    const name = line.slice(0, eq).replace(/^export\s+/, "").trim();
+    if (name !== "TYPESAFE_API_KEY") continue;
+    const value = line.slice(eq + 1).trim().replace(/^(["'])(.*)\1$/, "$2");
+    if (value !== "") out.TYPESAFE_API_KEY = value;
+  }
+  return out;
+}
+
+export function loadPairingToken(path: string): string {
+  mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
+  if (!existsSync(path)) {
+    try {
+      writeFileSync(path, `${randomBytes(32).toString("base64url")}\n`, { mode: 0o600, flag: "wx" });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+  }
+  assertPrivateFile(path, "pairing token file");
+  const token = readFileSync(path, "utf8").trim();
+  if (token === "") throw new Error(`pairing token file ${path} is empty; delete it to mint a new token. Refusing to start`);
+  return token;
+}
+
+export function resolveMode(requested: string | undefined, keysFileExists: boolean): Mode {
+  if (requested === undefined || requested === "") return keysFileExists ? "live" : "replay";
+  if (requested === "live" || requested === "replay") return requested;
+  throw new Error(`AFTERCLASS_MODE must be "live" or "replay", got "${requested}"`);
+}
+
+// ───────────────────────────── providers and tasks ─────────────────────────────
+
+const refused = (what: string) => new ProviderError(`replay mode: a live ${what} call was refused`, null, false);
+
+/** Replay mode's providers. They exist so a task can still be built; any call to them is a bug and says so. */
+const refusingJev: JevClient = { ask: () => Promise.reject(refused("Jev")) };
+const refusingClaude: ClaudeCli = {
+  structured: () => Promise.reject(refused("Claude")),
+  streamText: () => Promise.reject(refused("Claude")),
+};
+
+function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameBytes): TaskSet {
+  return {
+    boundary: boundaryTask(jev),
+    frameChange: frameChangeTask(jev),
+    preparation: {
+      interpret: interpretTask(claude, frameBytes),
+      revise: reviseTask(claude, frameBytes),
+      checkClaim: claimSupportTask(jev),
+      searchResources: resourceSearchTask(claude),
+    },
+    tutor: tutorTask(claude),
+    wrapUp: wrapUpTask(claude),
+  };
+}
+
+const parsePort = (text: string | undefined): number | null => {
+  if (text === undefined || text === "") return null;
+  const n = Number(text);
+  if (!Number.isInteger(n) || n < 0 || n > 65535) throw new Error(`AFTERCLASS_PORT must be an integer from 0 to 65535, got "${text}"`);
+  return n;
+};
+
+// ───────────────────────────── composition ─────────────────────────────
+
+export async function main(options: MainOptions = {}): Promise<Running> {
+  const env = options.env ?? process.env;
+  const log = options.log ?? ((text: string) => console.log(text));
+  const logError = options.error ?? ((text: string) => console.error(text));
+
+  const configDir = options.configDir ?? join(homedir(), ".config", "afterclass");
+  const keysPath = join(configDir, "keys.env");
+  const keysFile = existsSync(keysPath);
+  const mode = resolveMode(env.AFTERCLASS_MODE, keysFile);
+  if (options.tasks && mode !== "replay") throw new Error("injected tasks are accepted only in replay mode");
+  if (mode === "live" && !keysFile) throw new Error(`AFTERCLASS_MODE=live needs ${keysPath}`);
+
+  // Everything that can refuse to start runs before a file is created or a port is bound.
+  const apiKey = mode === "live" ? readKeys(keysPath).TYPESAFE_API_KEY : undefined;
+  if (mode === "live" && apiKey === undefined) throw new Error(`${keysPath} has no TYPESAFE_API_KEY; refusing to start`);
+  const token = loadPairingToken(join(configDir, "pairing-token"));
+  const port = options.port ?? parsePort(env.AFTERCLASS_PORT) ?? DEFAULT_PORT;
+  const extensionId = env.AFTERCLASS_EXTENSION_ID ?? "";
+
+  const dataDir = resolve(env.AFTERCLASS_DATA ?? "data");
+  mkdirSync(dataDir, { recursive: true });
+  const db = openDb(join(dataDir, "afterclass.sqlite"));
+
+  // evidence is created after the tasks that need its bytes; the tasks only read it when a call runs
+  const frameBytes: FrameBytes = (id) => evidence.frameBytes(id);
+  const liveTasks = (): TaskSet => {
+    const claudeCwd = join(dataDir, "claude-cwd");
+    mkdirSync(claudeCwd, { recursive: true });
+    // Neither provider key may reach the child: claude -p bills the subscription login, and the Jev key is not its business.
+    const { TYPESAFE_API_KEY: _jevKey, ...childEnv } = env;
+    return buildTasks(
+      createJevClient({ apiKey: apiKey!, ...(options.fetch ? { fetch: options.fetch } : {}) }),
+      createClaudeCli({ bin: options.claudeBin ?? "claude", cwd: claudeCwd, maxConcurrent: DEFAULT_LIMITS.claude, env: childEnv, ...(options.spawn ? { spawn: options.spawn } : {}) }),
+      frameBytes,
+    );
+  };
+  const tasks: TaskSet = options.tasks ?? (mode === "live" ? liveTasks() : buildTasks(refusingJev, refusingClaude, frameBytes));
+
+  // Injected tasks make no live call, so the memo may run them. Without them, replay never runs a task at all.
+  const memoMode: MemoMode = mode === "replay" && !options.tasks ? "replay" : "live";
+  const memo = createMemo(db, memoMode);
+  const ledger = createLedger(db);
+
+  let alive = true;
+  let scheduler: Scheduler | null = null;
+  /** After the current synchronous work, so a pump never runs inside the transaction that wrote the fact. */
+  const pump = () =>
+    queueMicrotask(() => {
+      if (!alive) return;
+      try {
+        scheduler?.pump();
+      } catch (e) {
+        reportOnce("pump", e);
+      }
+    });
+  const reported = new Set<string>();
+  function reportOnce(where: string, error: unknown): void {
+    const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    const line = `${where}: ${message}`;
+    if (reported.has(line)) return;
+    reported.add(line);
+    logError(`backend: ${line}`);
+  }
+
+  const evidence: EvidenceStoreWithProbe = createEvidence(db, dataDir, {
+    lookupFrameChange: (input) => memo.lookup(tasks.frameChange, input),
+    // The first frame of a source has nothing to compare with: evidence keeps it without a call, and so does this.
+    runFrameChange: (input, signal) => (input.before === null ? Promise.resolve(null) : memo.run(tasks.frameChange, input, { signal })),
+    frameChangeKey: (input) => memo.key(tasks.frameChange, input),
+    onChange: pump,
+  });
+
+  const passageOf = (e: Evidence | { readonly kind: "deleted" } | undefined): e is Passage => e?.kind === "passage";
+  const frameOf = (e: Evidence | { readonly kind: "deleted" } | undefined): e is Frame => e?.kind === "frame";
+
+  function boundaryInput(window: BoundaryWindow): BoundaryInput {
+    const found = evidence.get([...window.newPassages, ...window.contextPassages, ...window.frames]);
+    const passages = (ids: readonly EvidenceId[]) => ids.map((id) => found.get(id)).filter(passageOf);
+    return {
+      window,
+      newPassages: passages(window.newPassages),
+      contextPassages: passages(window.contextPassages),
+      frames: window.frames.map((id) => found.get(id)).filter(frameOf).map((frame) => ({
+        frame,
+        bytes: () => {
+          const bytes = evidence.frameBytes(frame.id);
+          if (bytes === null) throw new ProviderError(`frame bytes unavailable for ${frame.id}`, null, false);
+          return bytes;
+        },
+      })),
+    };
+  }
+
+  const segmentation = createSegmentation(
+    db,
+    {
+      watchOrder: evidence.watchOrder,
+      lookupBoundary: (input) => memo.lookup(tasks.boundary, input),
+      boundaryInput,
+      nextSeq: () => db.nextSeq(),
+    },
+    SEGMENTATION_DEFAULTS,
+  );
+
+  const preparationBase = createPreparation(db, {
+    chunk: segmentation.revision,
+    currentChunks: segmentation.current,
+    bundle: evidence.bundle,
+    lookup: memo.lookup,
+    run: (task, input, signal) => memo.run(task, input, { signal }),
+    clearFailures: memo.clearFailures,
+    tasks: tasks.preparation,
+    frameBytes: evidence.frameBytes,
+  });
+  // Stop early is a fact that cancels work by derivation; the pump is what aborts what is already running.
+  const preparation: Preparation = { ...preparationBase, stopEarly: (captureId, ids) => {
+    const seq = preparationBase.stopEarly(captureId, ids);
+    pump();
+    return seq;
+  }, retry: (captureId, ids) => {
+    const seq = preparationBase.retry(captureId, ids);
+    pump();
+    return seq;
+  } };
+
+  const reviews = createReviews(db, {
+    currentChunks: segmentation.current,
+    chunkHistory: segmentation.history,
+    prep: preparation.prep,
+    stopEarly: preparation.stopEarly,
+    assessableIn: preparation.assessableIn,
+    claimsIn: preparation.claimsIn,
+    bundle: evidence.bundle,
+    watchedSeconds: (captureId) => evidence.captureView(captureId).watchedSeconds,
+    runTutor: (input, streamTo, signal) => memo.run(tasks.tutor, input, { signal, streamTo }),
+    clearFailures: memo.clearFailures,
+    runWrapUp: (input) => memo.run(tasks.wrapUp, input),
+    nextSeq: () => db.nextSeq(),
+  });
+
+  /** The claims usable now (R3, R7) inside the review's frozen material, not the ones it started with. */
+  function usableNow(reviewId: Parameters<LearningRecord["save"]>[0]): readonly AssessableClaim[] {
+    const { captureId, scope } = reviews.view(reviewId);
+    const bundle = evidence.bundle(scope.material);
+    const inScope = new Set<EvidenceId>([...bundle.passages.map((p) => p.id), ...bundle.frames.map((f) => f.id)]);
+    return preparation.assessableIn(captureId, scope.material).filter((c) => c.evidence.every((e) => inScope.has(e)));
+  }
+
+  const record = createRecord(db, {
+    turns: (reviewId) => reviews.view(reviewId).turns,
+    claims: usableNow,
+    async wrapUp(reviewId) {
+      const turns = reviews.view(reviewId).turns;
+      const threads = [...new Set(turns.flatMap((t) => (t.actor === "tutor" && t.move.kind === "ask_main" ? [t.move.threadId] : [])))];
+      const result = await memo.run(tasks.wrapUp, { turns, claims: usableNow(reviewId), threads });
+      if (result.kind === "hit") return result.value;
+      throw new Error(result.kind === "failed" ? `wrap-up failed: ${result.lastError}` : `wrap-up ${result.kind}`);
+    },
+    snapshotEvidenceInTx: evidence.snapshotInTx,
+    links: preparation.linkSuggestions,
+  });
+
+  // Every capture that may still have work: those on disk now, plus any ingested since. A stopped capture keeps preparing.
+  const captures = new Set<CaptureId>(db.sql.query<{ capture_id: string }, []>("SELECT DISTINCT capture_id FROM capture_facts").all().map((r) => r.capture_id as CaptureId));
+
+  const perCapture = (where: string, items: (captureId: CaptureId) => readonly WorkItem[]) => (): readonly WorkItem[] =>
+    [...captures].flatMap((captureId) => {
+      try {
+        return items(captureId);
+      } catch (e) {
+        reportOnce(`${where} ${captureId}`, e);
+        return [];
+      }
+    });
+
+  scheduler = createScheduler(
+    [
+      perCapture("segmentation", (captureId) =>
+        segmentation.sync(captureId).demand.map((input): WorkItem => ({
+          key: memo.key(tasks.boundary, input),
+          purpose: "boundary",
+          provider: "jev",
+          run: (signal) => memo.run(tasks.boundary, input, { signal }),
+        })),
+      ),
+      perCapture("frame demand", evidence.frameDemand),
+      perCapture("preparation", preparation.demand),
+    ],
+    DEFAULT_LIMITS,
+    {
+      sweep: { run: () => void evidence.sweepExpired(Date.now(), RETENTION_DAYS) },
+      onError: reportOnce,
+    },
+  );
+
+  // The scheduler is the only holder of these; http gets the same store with ingest registering the capture first.
+  const served: EvidenceStore = {
+    ...evidence,
+    ingest(batch) {
+      captures.add(batch.captureId);
+      return evidence.ingest(batch);
+    },
+  };
+
+  const appDir = resolve(options.appDir ?? join(ROOT, "dist", "app"));
+  if (options.buildApp !== false) {
+    try {
+      await buildApp(appDir);
+    } catch (e) {
+      logError(`backend: the review app was not built, so /app/ answers 503: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  const server = serve({ modules: { ledger, evidence: served, reviews }, auth: { port, extensionId, token }, appDir });
+  const boundPort = server.port as number;
+
+  if (extensionId === "") logError("backend: AFTERCLASS_EXTENSION_ID is not set, so the extension's requests are refused (403) until it is");
+  log(
+    mode === "live"
+      ? "mode: live (Jev with the key from keys.env; Claude through claude -p on your login)"
+      : `mode: replay (${keysFile ? "AFTERCLASS_MODE=replay" : "no keys file"}: Jev unavailable, Claude unavailable, every live call is refused)`,
+  );
+  log(`listening on 127.0.0.1:${boundPort}\npairing token: ${token}`);
+
+  pump();
+
+  return {
+    mode,
+    port: boundPort,
+    token,
+    modules: { evidence, segmentation, preparation, reviews, record, ledger, memo, scheduler, db },
+    async stop() {
+      alive = false;
+      await scheduler?.stop();
+      await server.stop(true);
+      db.close();
+    },
+  };
+}
+
+if (import.meta.main) {
+  const running = await main();
+  const shutdown = () => void running.stop().then(() => process.exit(0));
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+}
