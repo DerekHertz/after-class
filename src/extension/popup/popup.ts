@@ -11,6 +11,8 @@ import { isWatchUrl } from "../worker/control";
 import type { PopupRequest, TabCaptureState } from "../worker/service-worker";
 
 export type PopupAction = "start" | "pause" | "resume" | "stop";
+/** What a Retry button re-does: the Start request, the content script's observers, or the transcript read. */
+export type PopupRetry = "start" | "observe" | "transcript";
 
 export type PopupView = {
   readonly headline: string;
@@ -23,6 +25,9 @@ export type PopupView = {
   readonly health: readonly { readonly label: string; readonly text: string; readonly tone: "ok" | "warn" | "bad" | "neutral" }[];
   readonly watched: string | null;
   readonly invite: InviteState;
+  /** Review now is always first; Later, Wait and Stop early join it while an invite is invited or waiting. */
+  readonly inviteAnswers: readonly InviteAnswer[];
+  readonly retries: readonly PopupRetry[];
   readonly problem: string | null;
   /** Facts the backend refused and the outbox set aside; each is a logged gap, shown so it is never silent. */
   readonly deadLetters: string | null;
@@ -41,7 +46,7 @@ function formatSeconds(s: number): string {
   return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min ${Math.round(s % 60)} s`;
 }
 
-export function describePopup(state: TabCaptureState | null, tab: { readonly url: string | undefined }): PopupView {
+export function describePopup(state: TabCaptureState | null, tab: { readonly url: string | undefined }, opts: { readonly startFailed?: boolean } = {}): PopupView {
   const onWatch = isWatchUrl(tab.url);
   const capture = state?.lastAck?.capture ?? null;
   const source = capture?.sources.find((s) => s.id === capture.currentSourceId) ?? null;
@@ -70,6 +75,20 @@ export function describePopup(state: TabCaptureState | null, tab: { readonly url
 
   const problem = state?.lastError ? `Backend: ${state.lastError}${state.uploadBacklog > 0 ? ` (${state.uploadBacklog} facts waiting)` : ""}` : null;
 
+  const retries: PopupRetry[] = [];
+  if (opts.startFailed && onWatch && (state === null || state.state === "stopped")) {
+    retries.push("start");
+    actions = actions.filter((a) => a !== "start");
+  }
+  const live = state !== null && state.state !== "stopped";
+  const failing = (channels: readonly string[]) => (capture?.health ?? []).some((x) => channels.includes(x.channel) && (x.health === "failed" || x.health === "stalled"));
+  const offerTranscription = capture?.transcript === "unavailable_offer_asr" && source !== null;
+  if (live && failing(["frames", "playback"])) retries.push("observe");
+  if (live && !offerTranscription && failing(["transcript"])) retries.push("transcript");
+
+  const invite: InviteState = state?.lastAck?.invite ?? { state: "none" };
+  const inviteAnswers: InviteAnswer[] = invite.state === "invited" || invite.state === "waiting" ? ["review_now", "later", "wait", "stop_early"] : ["review_now"];
+
   const dead = state?.deadLetters;
   const deadLetters = dead && dead.count > 0 ? `${dead.count} ${dead.count === 1 ? "fact was" : "facts were"} refused by the backend and set aside, logged as a gap${dead.latestReason ? ` (latest: ${dead.latestReason})` : ""}` : null;
 
@@ -80,10 +99,12 @@ export function describePopup(state: TabCaptureState | null, tab: { readonly url
     hint,
     source: source ? { title: source.title, channel: source.channelName, videoId: source.videoId } : null,
     captions: capture ? CAPTION_TEXT[capture.transcript] : state ? "Waiting for the backend" : "",
-    offerTranscription: capture?.transcript === "unavailable_offer_asr" && source !== null,
+    offerTranscription,
     health,
     watched: capture && capture.watchedSeconds > 0 ? formatSeconds(capture.watchedSeconds) : null,
-    invite: state?.lastAck?.invite ?? { state: "none" },
+    invite,
+    inviteAnswers,
+    retries,
     problem,
     deadLetters,
   };
@@ -102,12 +123,15 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: { class?: strin
 }
 
 const ACTION_LABEL: Readonly<Record<PopupAction, string>> = { start: "Start capture", pause: "Pause", resume: "Resume", stop: "Stop" };
+const ANSWER_LABEL: Readonly<Record<InviteAnswer, string>> = { review_now: "Review now", later: "Later", wait: "Wait", stop_early: "Stop early" };
+const RETRY_LABEL: Readonly<Record<PopupRetry, string>> = { start: "Retry start", observe: "Retry frames and playback", transcript: "Retry captions" };
 const POLL_MS = 1500;
 
 export function renderPopup(root: HTMLElement, send: (req: PopupRequest) => Promise<TabCaptureState | null>, tab: { readonly id: number; readonly url: string | undefined }): () => void {
   let state: TabCaptureState | null = null;
   let error: string | null = null;
   let busy = false;
+  let startFailed = false;
   let lastDrawn = "";
 
   async function request(req: PopupRequest): Promise<void> {
@@ -115,24 +139,27 @@ export function renderPopup(root: HTMLElement, send: (req: PopupRequest) => Prom
     try {
       state = await send(req);
       error = null;
+      if (req.type === "start") startFailed = false;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
+      if (req.type === "start") startFailed = true;
     }
     busy = false;
     draw();
   }
 
   const act = (type: PopupAction) => () => void request({ type, tabId: tab.id });
+  const retry = (r: PopupRetry) => () => void request(r === "start" ? { type: "start", tabId: tab.id } : r === "observe" ? { type: "retry_observe", tabId: tab.id } : { type: "retry_transcript", tabId: tab.id });
   const answer = (a: InviteAnswer) => () => void request({ type: "invite_answer", tabId: tab.id, answer: a });
 
   function draw(): void {
-    const v = describePopup(state, tab);
+    const v = describePopup(state, tab, { startFailed });
     const signature = JSON.stringify([v, error, busy]);
     if (signature === lastDrawn) return;
     lastDrawn = signature;
 
-    const inviteButtons = (primary: boolean) =>
-      h("div", { class: "row" }, h("button", { text: "Review now", class: primary ? "primary" : "", onclick: answer("review_now") }), ...(primary ? [h("button", { text: "Later", onclick: answer("later") }), h("button", { text: "Wait", onclick: answer("wait") }), h("button", { text: "Stop early", onclick: answer("stop_early") })] : []));
+    const inviteButtons = () => h("div", { class: "row" }, ...v.inviteAnswers.map((a) => h("button", { text: ANSWER_LABEL[a], class: a === "review_now" && v.invite.state === "invited" ? "primary" : "", onclick: answer(a) })));
+    const retryButtons = v.retries.length === 0 ? null : h("div", { class: "row" }, ...v.retries.map((r) => h("button", { text: RETRY_LABEL[r], disabled: busy, onclick: retry(r) })));
 
     const details = h("dl");
     const add = (label: string, text: string, tone = "neutral") => details.append(h("dt", { text: label }), h("dd", { text, data: { tone } }));
@@ -143,9 +170,9 @@ export function renderPopup(root: HTMLElement, send: (req: PopupRequest) => Prom
 
     const invite =
       v.invite.state === "invited"
-        ? h("div", { class: "invite" }, h("div", { text: "A review is ready. Start now, or keep watching?" }), inviteButtons(true))
+        ? h("div", { class: "invite" }, h("div", { text: "A review is ready. Start now, or keep watching?" }), inviteButtons())
         : v.invite.state === "waiting"
-          ? h("div", { class: "note", text: "Processing before your review. Review now still works." })
+          ? h("div", { class: "note", text: "Processing before your review. Review now still works, and you can stop early." })
           : v.invite.state === "later"
             ? h("div", { class: "note", text: "Review postponed. You will be invited at the next stopping point." })
             : null;
@@ -171,7 +198,8 @@ export function renderPopup(root: HTMLElement, send: (req: PopupRequest) => Prom
           )
         : null,
       invite,
-      v.invite.state === "invited" ? null : inviteButtons(false),
+      v.invite.state === "invited" ? null : inviteButtons(),
+      retryButtons,
       v.problem ? h("div", { class: "error", text: v.problem }) : null,
       v.deadLetters ? h("div", { class: "error", text: v.deadLetters }) : null,
       error ? h("div", { class: "error", text: error }) : null,

@@ -467,6 +467,29 @@ describe("popup view", () => {
     expect(v.captions).toBe("Waiting for the backend");
   });
 
+  test("Later, Wait and Stop early are offered whenever an invite is invited or waiting, and Review now always", () => {
+    const answers = (invite: IngestAck["invite"]) => describePopup(withAck(state(), {}, invite), watch).inviteAnswers;
+    expect(answers({ state: "invited", atChunk: "crv_x" as never })).toEqual(["review_now", "later", "wait", "stop_early"]);
+    expect(answers({ state: "waiting" } as IngestAck["invite"])).toEqual(["review_now", "later", "wait", "stop_early"]);
+    expect(answers({ state: "none" })).toEqual(["review_now"]);
+    expect(answers({ state: "later" } as IngestAck["invite"])).toEqual(["review_now"]);
+    expect(describePopup(null, home).inviteAnswers).toEqual(["review_now"]);
+  });
+
+  test("a failed Start offers Retry in place of Start", () => {
+    expect(describePopup(null, watch, { startFailed: true })).toMatchObject({ actions: [], retries: ["start"] });
+    expect(describePopup(null, watch).retries).toEqual([]);
+  });
+
+  test("a failed or stalled frame or playback channel offers a re-attach, a failed transcript channel offers a re-read", () => {
+    const health = (channel: string, h: string) => ({ health: [{ channel, health: h, detail: "x" }] });
+    expect(describePopup(withAck(state(), health("frames", "failed")), watch).retries).toEqual(["observe"]);
+    expect(describePopup(withAck(state(), health("playback", "stalled")), watch).retries).toEqual(["observe"]);
+    expect(describePopup(withAck(state(), health("transcript", "failed")), watch).retries).toEqual(["transcript"]);
+    expect(describePopup(withAck(state(), health("frames", "ok")), watch).retries).toEqual([]);
+    expect(describePopup(withAck(state({ state: "stopped" }), health("frames", "failed")), watch).retries).toEqual([]);
+  });
+
   test("facts the backend refused are shown with a count and the reason, never silent", () => {
     expect(describePopup(state(), watch).deadLetters).toBeNull();
     const v = describePopup(state({ deadLetters: { count: 2, latestReason: "transcript fact: backend rejected the batch (HTTP 400)" } }), watch);
