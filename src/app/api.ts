@@ -21,7 +21,7 @@ import type {
 } from "../shared/domain";
 import type { Material } from "../shared/time";
 import type { TutorStreamEvent } from "../shared/wire";
-import { parseStartReviewRequest, parseTurnRequest } from "../shared/wire";
+import { ROUTES, parseStartReviewRequest, parseTurnRequest, routeUrl } from "../shared/wire";
 import {
   captureResponsez, encodeMaterial, evidenceBundlez, recordViewz, reviewOptionsz, reviewViewz, saveResultz, startResultz, usageSummaryz,
 } from "./decode";
@@ -55,6 +55,8 @@ export type AppApi = Api & {
   resolveDispute(id: ObservationId, outcome: "learner_was_right" | "it_was_my_gap"): Promise<void>;
   overrideObservation(id: ObservationId, status: ObservationStatus): Promise<void>;
   deleteEvidence(ids: readonly EvidenceId[]): Promise<void>;
+  /** Re-queues the capture's unfinished chunks and those with no supported claim. */
+  retryPreparation(captureId: CaptureId): Promise<void>;
 };
 
 export class ApiError extends Error {
@@ -133,6 +135,7 @@ export function createApi(token: string, options: ApiOptions = {}): AppApi {
     decideLink: (id, decision) => command("POST", `/record/links/${enc(id)}`, { decision }),
     resolveDispute: (id, outcome) => command("POST", `/record/observations/${enc(id)}/dispute-resolution`, { outcome }),
     overrideObservation: (id, status) => command("POST", `/record/observations/${enc(id)}/override`, { status }),
+    retryPreparation: (captureId) => command(ROUTES.retryPreparation.method, routeUrl(ROUTES.retryPreparation, { captureId })),
     deleteEvidence: (ids) => command("POST", "/record/evidence/delete", { evidenceIds: ids }),
   };
 }

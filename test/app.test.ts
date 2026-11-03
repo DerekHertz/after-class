@@ -13,7 +13,7 @@ import type { ReviewId, TurnId } from "../src/shared/ids";
 import { Material, interval } from "../src/shared/time";
 import { ApiError, createApi, evidenceParams } from "../src/app/api";
 import type { Api } from "../src/app/api";
-import { OptionsView } from "../src/app/capture";
+import { OptionsView, checkAgain } from "../src/app/capture";
 import type { AppApi } from "../src/app/api";
 import { createReviewController } from "../src/app/controller";
 import type { SessionState } from "../src/app/controller";
@@ -199,6 +199,13 @@ describe("createApi", () => {
     expect(calls[0]).toMatchObject({ method: "POST", url: `/captures/${captureId}/reviews`, body: { reviewId, choice: "stop_early" } });
   });
 
+  test("retryPreparation posts to the retry-preparation route with no body and accepts 204", async () => {
+    const { calls, fetchFn } = fakeFetch(() => new Response(null, { status: 204 }));
+    await createApi("t", { fetch: fetchFn }).retryPreparation(captureId);
+    expect(calls[0]).toMatchObject({ method: "POST", url: `/captures/${captureId}/retry-preparation`, body: undefined });
+    expect(calls[0]!.headers.get("authorization")).toBe("Bearer t");
+  });
+
   test("sendTurn validates the act locally, then streams validated events", async () => {
     const turnId = randomId("turn");
     const { calls, fetchFn } = fakeFetch(() => new Response(streamOf(line({ type: "learner_turn_stored", turnId }), line(sentence("Good.")), line({ type: "turn_complete", turnId }))));
@@ -325,6 +332,22 @@ describe("review options screens", () => {
     expect(button.map((b) => (b.props as { children?: unknown }).children)).toEqual(["Check again"]);
     (button[0]!.props as { onClick: () => void }).onClick();
     expect(retried).toBe(1);
+  });
+
+  test("Check again asks the backend to retry preparation, then reloads the options; a failed retry is reported and still reloads", async () => {
+    const order: string[] = [];
+    const api = { retryPreparation: async (id: string) => void order.push(`retry ${id}`) } as unknown as AppApi;
+    const errors: (string | null)[] = [];
+    await checkAgain(api, captureId, { reload: () => order.push("reload"), onError: (m) => errors.push(m) });
+    expect(order).toEqual([`retry ${captureId}`, "reload"]);
+    expect(errors).toEqual([null]);
+
+    order.length = 0;
+    errors.length = 0;
+    const failing = { retryPreparation: async () => { throw new ApiError("backend down", 503); } } as unknown as AppApi;
+    await checkAgain(failing, captureId, { reload: () => order.push("reload"), onError: (m) => errors.push(m) });
+    expect(order).toEqual(["reload"]);
+    expect(errors).toEqual([null, "backend down"]);
   });
 
   test("an unverified claim shows the evidence it cited, in the evidence pane", () => {

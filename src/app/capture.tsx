@@ -116,6 +116,21 @@ function Offers({ offers, busy, onStart }: { readonly offers: readonly StartOffe
   );
 }
 
+/** "Check again": ask the backend to re-queue preparation, then look at the options once more even if that ask failed. */
+export async function checkAgain(
+  api: AppApi,
+  captureId: CaptureId,
+  hooks: { readonly reload: () => void; readonly onError: (message: string | null) => void },
+): Promise<void> {
+  hooks.onError(null);
+  try {
+    await api.retryPreparation(captureId);
+  } catch (e) {
+    hooks.onError(e instanceof Error ? e.message : String(e));
+  }
+  hooks.reload();
+}
+
 export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readonly captureId: CaptureId }) {
   const capture = useAsync(() => api.captureView(captureId), [api, captureId]);
   const options = useAsync(() => api.reviewOptions(captureId), [api, captureId]);
@@ -183,7 +198,11 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
           screen={optionsScreen(shown, titles, videos)}
           busy={starting}
           onStart={start}
-          onRetry={() => { setRefused(null); options.reload(); }}
+          onRetry={() => {
+            setRefused(null);
+            setStarting(true);
+            void checkAgain(api, captureId, { reload: options.reload, onError: setStartError }).finally(() => setStarting(false));
+          }}
           api={api}
           titles={titles}
         />
