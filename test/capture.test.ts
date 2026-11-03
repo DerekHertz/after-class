@@ -370,7 +370,7 @@ describe("playback tracker spans", () => {
     expect(b!.start).toBeGreaterThanOrEqual(10);
   });
 
-  test("a navigation that changes the id without any video event still never relabels a span", () => {
+  test("a navigation that changes the id without any video event never relabels a span or opens one on the old stream", () => {
     const r = rig();
     r.tracker.setObserving(true);
     r.start();
@@ -378,8 +378,56 @@ describe("playback tracker spans", () => {
     r.setVideoId(VID2);
     r.play(2);
     r.pause();
-    const spans = r.spans();
-    expect(spans.map((s) => s.videoId)).toEqual([VID, VID2]);
+    expect(r.spans().map((s) => s.videoId)).toEqual([VID]);
+  });
+
+  test("after an id change, the old stream's time is never a span under the new id", () => {
+    const r = rig();
+    r.tracker.setObserving(true);
+    r.start();
+    r.play(3);
+    r.setVideoId(VID2);
+    r.play(2); // still the old stream, 103 to 105
+    r.video.currentTime = 0;
+    r.video.dispatchEvent(new Event("emptied"));
+    r.video.dispatchEvent(new Event("loadstart"));
+    r.play(3);
+    r.pause();
+    const forNew = r.spans().filter((s) => s.videoId === VID2);
+    expect(forNew.length).toBe(1);
+    expect(forNew[0]!.start).toBeLessThan(1);
+    expect(forNew[0]!.end).toBeCloseTo(3, 5);
+    expect(forNew.some((s) => s.end > 103 && s.start < 105)).toBe(false);
+  });
+
+  test("a seek after an id change proves the stream moved on", () => {
+    const r = rig();
+    r.tracker.setObserving(true);
+    r.start();
+    r.play(2);
+    r.setVideoId(VID2);
+    r.play(1);
+    r.seek(300);
+    r.play(2);
+    r.pause();
+    const forNew = r.spans().filter((s) => s.videoId === VID2);
+    expect(forNew.length).toBe(1);
+    expect(forNew[0]!.start).toBeGreaterThanOrEqual(300);
+  });
+
+  test("a currentTime back near 0 after an id change proves the stream moved on", () => {
+    const r = rig();
+    r.tracker.setObserving(true);
+    r.start();
+    r.play(2);
+    r.setVideoId(VID2);
+    r.play(1);
+    r.video.currentTime = 0;
+    r.play(2);
+    r.pause();
+    const forNew = r.spans().filter((s) => s.videoId === VID2);
+    expect(forNew.length).toBe(1);
+    expect(forNew[0]!.start).toBeLessThan(1);
   });
 
   test("dispose closes the span and stops listening", () => {

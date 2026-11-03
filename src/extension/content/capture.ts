@@ -36,6 +36,7 @@ const SPAN_MIN_S = 0.25;
 const SPAN_FLUSH_S = 5;
 const JUMP_SLACK_S = 1.5;
 const BACKWARD_SLACK_S = 0.05;
+const NEW_STREAM_NEAR_START_S = 2;
 
 /**
  * R2: "Ad time never becomes evidence."
@@ -90,6 +91,13 @@ export type PlaybackState = {
   readonly ad: AdRun | null;
   /** Last content time seen outside an ad; where an ad interrupted. */
   readonly content: { readonly videoId: string; readonly t: number } | null;
+  /**
+   * The id the <video> is believed to be playing. `staleT` is set when the id
+   * changed with no sign the stream did: YouTube flips the id before the element
+   * swaps streams, so until a reset the element still plays the OLD video.
+   * It holds that old stream's last time (Infinity when unknown).
+   */
+  readonly stream: { readonly videoId: string; readonly staleT: number | null } | null;
 };
 
 /** What the <video> and its player said at one instant. Everything the step needs, nothing it must fetch. */
@@ -112,7 +120,7 @@ export type PlaybackEvent =
   | { readonly type: "reset" }
   | { readonly type: "observing"; readonly on: boolean; readonly wallMs: number };
 
-export const initialPlayback: PlaybackState = { observing: false, open: null, ad: null, content: null };
+export const initialPlayback: PlaybackState = { observing: false, open: null, ad: null, content: null, stream: null };
 
 function spanFact(o: OpenSpan): SpanBody | null {
   if (o.last - o.start < SPAN_MIN_S) return null;
@@ -154,14 +162,14 @@ function reopen(o: OpenSpan, s: PlaybackSample): OpenSpan {
  */
 export function stepPlayback(st: PlaybackState, ev: PlaybackEvent): { readonly state: PlaybackState; readonly facts: readonly CaptureFactBody[] } {
   const facts: CaptureFactBody[] = [];
-  let { observing, open, ad, content } = st;
+  let { observing, open, ad, content, stream } = st;
 
   const closeOpen = () => {
     const f = open === null ? null : spanFact(open);
     if (f !== null) facts.push(f);
     open = null;
   };
-  const done = () => ({ state: { observing, open, ad, content }, facts });
+  const done = () => ({ state: { observing, open, ad, content, stream }, facts });
 
   if (ev.type === "observing") {
     if (ev.on === observing) return done();
@@ -170,11 +178,13 @@ export function stepPlayback(st: PlaybackState, ev: PlaybackEvent): { readonly s
     observing = ev.on;
     ad = null;
     content = null;
+    stream = null;
     return done();
   }
   if (!observing) return done();
   if (ev.type === "reset") {
     closeOpen();
+    stream = null; // the next tick's id belongs to the stream that just loaded
     return done();
   }
 
@@ -194,9 +204,19 @@ export function stepPlayback(st: PlaybackState, ev: PlaybackEvent): { readonly s
     ad = null;
   }
 
+  if (s.videoId !== "") {
+    if (stream === null) stream = { videoId: s.videoId, staleT: null };
+    else if (stream.videoId !== s.videoId) {
+      const prev = stream.videoId;
+      const old = [content, open === null ? null : { videoId: open.videoId, t: open.last }].find((c) => c !== null && c.videoId === prev);
+      stream = { videoId: s.videoId, staleT: old?.t ?? Number.POSITIVE_INFINITY };
+    }
+    if (stream.staleT !== null && (s.seeking || (s.t <= NEW_STREAM_NEAR_START_S && s.t < stream.staleT))) stream = { videoId: s.videoId, staleT: null };
+  }
+
   if (open !== null && open.videoId !== s.videoId) closeOpen();
   if (content !== null && content.videoId !== s.videoId) content = null;
-  if (s.videoId === "" || !s.ready || s.seeking) {
+  if (s.videoId === "" || !s.ready || s.seeking || (stream !== null && stream.staleT !== null)) {
     closeOpen();
     return done();
   }

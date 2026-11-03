@@ -533,7 +533,7 @@ describe("decode-stall baseline", () => {
 
 describe("default ad probe", () => {
   type Doc = { querySelector(sel: string): unknown };
-  const g = globalThis as unknown as { document?: Doc };
+  const g = globalThis as unknown as { document?: Doc | undefined };
 
   /** The four-argument call a caller makes, with only pixels and timers injected. */
   async function emitsFramesWith(page: { player: { adClass: boolean } | null }): Promise<number> {
