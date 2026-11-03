@@ -16,9 +16,8 @@
 import type { CaptureId } from "../../shared/ids";
 import type { CaptureFactBody, InviteAnswer, InviteState } from "../../shared/domain";
 import type { IngestAck } from "../../shared/wire";
-import type { ContentSignal, ControlMessage } from "../content/capture";
-import { acceptsFact, badgeFor, isWatchUrl, safeReviewUrl, transition } from "./control";
-import type { ControlEvent, DeadLetterSummary, OptionsRequest, PopupRequest, TabCaptureState } from "./control";
+import { FLUSH_TIMEOUT_MS, acceptsFact, badgeFor, closingSpanGap, isWatchUrl, safeReviewUrl, transition } from "./control";
+import type { ControlEvent, DeadLetterSummary, FromContent, OptionsRequest, PopupRequest, TabCaptureState, ToContent } from "./control";
 import { classifyStatus, createFlusher, createIdbOutbox, isIngestAck } from "./outbox";
 import type { FlushOutcome, Transport } from "./outbox";
 
@@ -65,7 +64,7 @@ function renderBadge(tabId: number, state: TabCaptureState | null): void {
   void chrome.action.setBadgeBackgroundColor({ tabId, color });
 }
 
-function post(tabId: number, msg: ControlMessage): void {
+function post(tabId: number, msg: ToContent): void {
   try {
     ports.get(tabId)?.postMessage(msg);
   } catch {
@@ -153,18 +152,55 @@ export function enqueueFact(tabId: number, body: CaptureFactBody): Promise<void>
   });
 }
 
-/** Applies a control event, persists its control fact, and tells the content script whether to observe. */
-function applyEvent(tabId: number, event: ControlEvent): Promise<TabCaptureState | null> {
+const flushWaiters = new Map<number, Set<() => void>>();
+
+/** Why a closing span could not be had, or null when the content script flushed it. */
+async function requestFlush(tabId: number): Promise<string | null> {
+  const port = ports.get(tabId);
+  if (!port) return "the page was already gone";
+  return new Promise((resolve) => {
+    const waiters = flushWaiters.get(tabId) ?? new Set<() => void>();
+    flushWaiters.set(tabId, waiters);
+    const finish = (why: string | null) => {
+      clearTimeout(timer);
+      waiters.delete(onFlushed);
+      resolve(why);
+    };
+    const onFlushed = () => finish(null);
+    const timer = setTimeout(() => finish(`the page did not answer within ${FLUSH_TIMEOUT_MS} ms`), FLUSH_TIMEOUT_MS);
+    waiters.add(onFlushed);
+    try {
+      port.postMessage({ type: "flush" } satisfies ToContent);
+    } catch {
+      ports.delete(tabId);
+      finish("the page was already gone");
+    }
+  });
+}
+
+/**
+ * Applies a control event, persists its control fact, and tells the content script whether to observe.
+ * R1: "Evidence only comes from intervals I actually watched while capture was on." The span the page is
+ * still holding when capture stops is such an interval, so the worker asks for it before the pause or stop
+ * fact is written (while the gate still accepts it). If it cannot be had, the control fact still goes
+ * in and a gap is logged ahead of it, never a silent loss.
+ */
+async function applyEvent(tabId: number, event: ControlEvent): Promise<TabCaptureState | null> {
+  let gap: string | null = null;
+  if (event.kind === "pause" || event.kind === "stop" || event.kind === "left_watch_page" || event.kind === "tab_closed") {
+    if ((await readState(tabId))?.state === "capturing") gap = event.kind === "tab_closed" ? "the tab was closed" : await requestFlush(tabId);
+  }
   return serialized(async () => {
     const tabs = await loadTabs();
     const { next, fact } = transition(tabs[tabId] ?? null, event);
     if (next === null) return null;
     tabs[tabId] = next;
+    if (fact && gap !== null) await appendIn(tabs, tabId, closingSpanGap(gap));
     if (fact) await appendIn(tabs, tabId, fact);
     await saveTabs(tabs);
     const saved = tabs[tabId]!;
     renderBadge(tabId, saved);
-    post(tabId, { type: "observe", on: saved.state === "capturing" });
+    post(tabId, { type: "observe", on: saved.state === "capturing", captureId: saved.captureId });
     if (fact) void flusher.flush(saved.captureId);
     return saved;
   });
@@ -187,12 +223,16 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onDisconnect.addListener(() => {
     if (ports.get(tabId) === port) ports.delete(tabId);
   });
-  port.onMessage.addListener((msg: CaptureFactBody | ContentSignal) => void onContentMessage(tabId, msg));
-  void readState(tabId).then((s) => post(tabId, { type: "observe", on: s?.state === "capturing" }));
+  port.onMessage.addListener((msg: FromContent) => void onContentMessage(tabId, msg));
+  void readState(tabId).then((s) => post(tabId, { type: "observe", on: s?.state === "capturing", captureId: s?.captureId ?? null }));
 });
 
-async function onContentMessage(tabId: number, msg: CaptureFactBody | ContentSignal): Promise<void> {
+async function onContentMessage(tabId: number, msg: FromContent): Promise<void> {
   if ("type" in msg) {
+    if (msg.type === "flushed") {
+      for (const wake of [...(flushWaiters.get(tabId) ?? [])]) wake();
+      return;
+    }
     await applyEvent(tabId, { kind: msg.type });
     return;
   }
@@ -275,8 +315,15 @@ async function handlePopup(req: PopupRequest): Promise<WorkerResponse> {
       await enqueueFact(req.tabId, { kind: "transcription_choice", videoId: req.videoId, choice: req.choice });
       return { state: await readState(req.tabId) };
     case "retry_transcript":
+      await ensureContentScript(req.tabId);
       post(req.tabId, { type: "read_transcript" });
       return { state: await readState(req.tabId) };
+    case "retry_observe": {
+      await ensureContentScript(req.tabId);
+      const state = await readState(req.tabId);
+      post(req.tabId, { type: "observe", on: state?.state === "capturing", captureId: state?.captureId ?? null });
+      return { state };
+    }
   }
 }
 

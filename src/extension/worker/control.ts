@@ -6,6 +6,7 @@ import { randomId } from "../../shared/ids";
 import type { CaptureId } from "../../shared/ids";
 import type { CaptureFactBody, ControlReason, InviteAnswer } from "../../shared/domain";
 import type { IngestAck } from "../../shared/wire";
+import type { ContentSignal } from "../content/capture";
 
 export type TabCaptureState = {
   readonly tabId: number;
@@ -28,7 +29,31 @@ export type PopupRequest =
   | { readonly type: "status"; readonly tabId: number }
   | { readonly type: "invite_answer"; readonly tabId: number; readonly answer: InviteAnswer }
   | { readonly type: "transcription_choice"; readonly tabId: number; readonly videoId: string; readonly choice: "accept_asr" | "continue_with_gap" }
-  | { readonly type: "retry_transcript"; readonly tabId: number };
+  | { readonly type: "retry_transcript"; readonly tabId: number }
+  /** Frame or playback channel failed: re-attach the content script if needed and send the observe state again. */
+  | { readonly type: "retry_observe"; readonly tabId: number };
+
+/**
+ * Worker to content script. `captureId` is the capture the tab is in, so the content script can tell a
+ * pause/resume (same capture, nothing to redo) from a stop/start (new capture, transcript needed again).
+ * `flush` asks it to close its open span and answer `flushed`, so the closing span reaches the worker
+ * before the pause or stop fact does.
+ */
+export type ToContent =
+  | { readonly type: "observe"; readonly on: boolean; readonly captureId: CaptureId | null }
+  | { readonly type: "read_transcript" }
+  | { readonly type: "flush" };
+
+/** Content script to worker, besides fact bodies. Same port, so a `flushed` always follows the spans sent before it. */
+export type FromContent = CaptureFactBody | ContentSignal | { readonly type: "flushed" };
+
+/** How long the worker waits for the content script's closing span before pausing without it. */
+export const FLUSH_TIMEOUT_MS = 1000;
+
+/** The visible gap when a closing span could not be had; the backend turns a failed playback channel into a gap. */
+export function closingSpanGap(why: string): CaptureFactBody {
+  return { kind: "channel", channel: "playback", health: "failed", videoId: null, atMediaS: null, detail: `the last seconds before the pause or stop were not captured: ${why}`.slice(0, 500) };
+}
 
 /** Options page → worker. */
 export type OptionsRequest = { readonly type: "test_backend" };
