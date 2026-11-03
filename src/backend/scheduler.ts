@@ -145,7 +145,13 @@ export function createScheduler(
   function start(item: WorkItem): void {
     const controller = new AbortController();
     const startedAtMs = now();
-    const done = (async () => {
+    let finish: () => void = () => {};
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    // registered before run so a run that throws synchronously still gets its slot freed by the finally below
+    running.set(item.key, { key: item.key, purpose: item.purpose, provider: item.provider, startedAtMs, controller, done });
+    void (async () => {
       try {
         await item.run(controller.signal);
         if (!controller.signal.aborted) {
@@ -160,10 +166,10 @@ export function createScheduler(
         }
       } finally {
         running.delete(item.key);
+        finish();
         if (!stopped) schedulePump();
       }
     })();
-    running.set(item.key, { key: item.key, purpose: item.purpose, provider: item.provider, startedAtMs, controller, done });
   }
 
   function schedulePump(): void {

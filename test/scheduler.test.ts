@@ -436,6 +436,26 @@ describe("scheduler: failures", () => {
   });
 });
 
+describe("scheduler: a run that throws before returning a promise", () => {
+  test("frees its provider slot and is reported", async () => {
+    const bad: WorkItem = {
+      key: k("sync-bad"),
+      purpose: "claim_check",
+      provider: "jev",
+      run: () => {
+        throw new Error("sync");
+      },
+    };
+    const clock = fakeClock();
+    const errors: string[] = [];
+    const scheduler = createScheduler([() => [bad]], { jev: 1, claude: 1 }, { now: clock.now, timers: clock.timers, cooldownMs: 1000, onError: (where) => errors.push(where) });
+    scheduler.pump();
+    await flush();
+    expect(errors).toEqual(["sync-bad"]);
+    expect(scheduler.inflight()).toEqual([]);
+  });
+});
+
 describe("scheduler: estimateSeconds", () => {
   async function complete(w: ReturnType<typeof world>, scheduler: ReturnType<typeof setup>["scheduler"], clock: ReturnType<typeof fakeClock>, n: number, purpose: Purpose, provider: Provider, takesMs: number, prefix: string) {
     for (let i = 0; i < n; i++) {
