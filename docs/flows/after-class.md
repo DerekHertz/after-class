@@ -1,6 +1,6 @@
 # After Class flow
 
-Status: in review. Sections are approved one at a time. Nothing here is formally checked yet.
+Status: approved. The [TLC] rules are checked by the TLA+ models in `model/` (run `model/check.sh`).
 
 ## Acceptance lectures (approved 2026-11-03)
 
@@ -116,7 +116,7 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 [user] Inspect, edit, accept/correct links, revisit, delete.
 ```
 
-Flow sections A–D approved as a whole on 2026-11-03. The first TLC run broke R3, R4, R7, R8, R14 and R16; Derek approved the six flow fixes marked "TLC fix" above on 2026-11-03 (rules unchanged). The re-check held 10 of 11 rules; R14 broke on a second path (a dispute Derek settles), and Derek approved the "second path" line the same day. Final re-check pending.
+Flow sections A–D approved as a whole on 2026-11-03. The first TLC run broke R3, R4, R7, R8, R14 and R16; Derek approved the six flow fixes marked "TLC fix" above on 2026-11-03 (rules unchanged). The re-check held 10 of 11 rules; R14 broke on a second path (a dispute Derek settles), and Derek approved the "second path" line the same day. The final re-check (2026-11-03) holds all 11 [TLC] rules, and each of the 16 mutants breaks its rule.
 
 ## Rules (approved by Derek, 2026-11-03)
 
