@@ -407,6 +407,17 @@ CREATE TABLE saved_reviews (
 -- R3: whether every claim the thread asked about was still assessable when the review was saved.
 ALTER TABLE observations ADD COLUMN assessable INTEGER NOT NULL DEFAULT 1 CHECK (assessable IN (0, 1));`,
     },
+    {
+      id: "003-save-failures",
+      sql: `
+-- A save that failed and has not succeeded since: what "save_pending" means, kept so a restart does not forget it.
+-- A review is saved when saved_reviews has its row, whatever this table says.
+CREATE TABLE save_failures (
+  review_id TEXT PRIMARY KEY,
+  error TEXT NOT NULL,
+  failed_ms INTEGER NOT NULL
+) STRICT;`,
+    },
   ],
 };
 

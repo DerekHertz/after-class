@@ -1364,6 +1364,20 @@ describe("the evidence routes", () => {
   });
 });
 
+describe("ReviewView.saved is the persisted save state", () => {
+  test("it reads the record's tables, not this process's memory: a failure marker or a saved row from before a restart shows", async () => {
+    const rig = reviewRig();
+    const reviewId = await startedIn(rig);
+    expect((await rig.view(reviewId)).body.saved).toBe("unsaved");
+    rig.db.sql.run("INSERT INTO save_failures (review_id, error, failed_ms) VALUES (?, 'earlier run', 0)", [reviewId]);
+    expect((await rig.view(reviewId)).body.saved).toBe("save_pending");
+    rig.db.sql.run("INSERT INTO saved_reviews (review_id, bundle_hash, saved_ms) VALUES (?, 'h', 0)", [reviewId]);
+    const view = await rig.view(reviewId);
+    reviewViewResponse.parse(view.body);
+    expect(view.body.saved).toBe("saved");
+  });
+});
+
 describe("POST /captures/:id/retry-preparation", () => {
   test("retries the chunks that are unfinished or have no supported claim, and none that are fine; answers 204", async () => {
     const rig = reviewRig();

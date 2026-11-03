@@ -15,7 +15,9 @@
  * transaction, skipping tombstoned notes. A failed save keeps its bundle as
  * the pending save, and the retry writes that bundle verbatim. Across a
  * restart the pending bundle is rebuilt from durable inputs (turns, the
- * wrap-up memo), which gives the same bundle. Pending = no saved_reviews row.
+ * wrap-up memo), which gives the same bundle. Saved = a saved_reviews row;
+ * pending = a failed save with no success since (save_failures), which a
+ * restart keeps; a review with neither is unsaved.
  * While a review has no saved_reviews row, db.ts triggers hold its capture's
  * raw evidence (R16, pending saves count as citing).
  *
@@ -25,7 +27,7 @@
  */
 import type { ConceptId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, ThreadId } from "../../shared/ids";
 import type {
-  AssessableClaim, DeletedEvidence, DisputeState, LinkDecision, NoteSegment, Observation, ObservationStatus, RecordView, SaveResult,
+  AssessableClaim, DeletedEvidence, DisputeState, LinkDecision, NoteSegment, Observation, ObservationStatus, RecordView, ReviewSaveState, SaveResult,
   SubjectLinkSuggestion, ThreadFacts, Turn,
 } from "../../shared/domain";
 import type { WrapUpOutput } from "../review/tutor";
@@ -38,6 +40,11 @@ export type { RecordBundle } from "./core";
 
 export type LearningRecord = {
   save(reviewId: ReviewId): Promise<SaveResult>;
+  /**
+   * Persisted, so it survives a restart: "saved" once saved_reviews has the review, "save_pending" if a save failed and
+   * none has succeeded since, else "unsaved".
+   */
+  saveState(reviewId: ReviewId): ReviewSaveState;
   view(filter: { readonly reviewId?: ReviewId; readonly conceptId?: ConceptId }): RecordView;
   editNote(id: NoteId, text: string): void;
   /** Tombstone in note_deletions; the snapshot it cited becomes sweepable (R16 trigger). */
@@ -93,6 +100,13 @@ export function createRecord(db: Db, deps: {
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
        ON CONFLICT (id) DO UPDATE SET evidence_json = excluded.evidence_json, rationale = excluded.rationale`,
     ),
+    savedAt: db.sql.query<{ n: number }, [string]>(`SELECT COUNT(*) AS n FROM saved_reviews WHERE review_id = ?`),
+    failedAt: db.sql.query<{ n: number }, [string]>(`SELECT COUNT(*) AS n FROM save_failures WHERE review_id = ?`),
+    markFailed: db.sql.query(
+      `INSERT INTO save_failures (review_id, error, failed_ms) VALUES (?1, ?2, ?3)
+       ON CONFLICT (review_id) DO UPDATE SET error = excluded.error, failed_ms = excluded.failed_ms`,
+    ),
+    clearFailed: db.sql.query(`DELETE FROM save_failures WHERE review_id = ?`),
     markSaved: db.sql.query(
       `INSERT INTO saved_reviews (review_id, bundle_hash, saved_ms) VALUES (?1, ?2, ?3)
        ON CONFLICT (review_id) DO UPDATE SET bundle_hash = excluded.bundle_hash, saved_ms = excluded.saved_ms`,
@@ -171,8 +185,19 @@ export function createRecord(db: Db, deps: {
       deps.snapshotEvidenceInTx([...cited].filter((id) => !deleted.has(id)).sort());
       // Last, so the R16 hold on raw evidence lifts only once the snapshots exist.
       q.markSaved.run(reviewId, b.hash, ms);
+      q.clearFailed.run(reviewId);
       return { kind: "saved", notes, observations: b.observations.length, links: b.links.length } as const;
     });
+  }
+
+  /** Outside the failed transaction, so it outlives the rollback. If even this cannot be written, the save still reports its failure. */
+  function noteFailure(reviewId: ReviewId, error: string): SaveResult {
+    try {
+      q.markFailed.run(reviewId, error, now());
+    } catch {
+      // the caller's retry is what matters; the marker is only a restart's memory of it
+    }
+    return { kind: "save_failed", error, retryable: true };
   }
 
   async function save(reviewId: ReviewId): Promise<SaveResult> {
@@ -180,7 +205,7 @@ export function createRecord(db: Db, deps: {
     try {
       bundle = await bundleFor(reviewId);
     } catch (err) {
-      return { kind: "save_failed", error: errorMessage(err), retryable: true };
+      return noteFailure(reviewId, errorMessage(err));
     }
     try {
       const result = write(reviewId, bundle);
@@ -188,8 +213,13 @@ export function createRecord(db: Db, deps: {
       return result;
     } catch (err) {
       pending.set(reviewId, bundle);
-      return { kind: "save_failed", error: errorMessage(err), retryable: true };
+      return noteFailure(reviewId, errorMessage(err));
     }
+  }
+
+  function saveState(reviewId: ReviewId): ReviewSaveState {
+    if (q.savedAt.get(reviewId)!.n > 0) return "saved";
+    return q.failedAt.get(reviewId)!.n > 0 ? "save_pending" : "unsaved";
   }
 
   function view(filter: { readonly reviewId?: ReviewId; readonly conceptId?: ConceptId }): RecordView {
@@ -254,6 +284,7 @@ export function createRecord(db: Db, deps: {
 
   return {
     save,
+    saveState,
     view,
     editNote: (id, text) => void q.editNote.run(id, text, now()),
     deleteNote: (id) => void q.deleteNote.run(id, now()),

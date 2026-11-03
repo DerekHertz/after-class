@@ -267,16 +267,10 @@ function reviewOf(reviews: Reviews, reviewId: ReviewId): ReviewView | null {
   }
 }
 
-/**
- * The record keeps no save state to ask, so `saved` is: a saved record exists for the review (notes, observations or
- * links), or this process saw the save succeed; failing that, "save_pending" if this process saw it fail.
- */
-function savedOf(record: LearningRecord | undefined, outcomes: Map<ReviewId, ReviewSaveState>, reviewId: ReviewId): { readonly saved: ReviewSaveState; readonly observations: ReviewView["observations"] } {
+/** What the record holds for a review: its persisted save state and its observations. Without a record, nothing is saved. */
+function savedOf(record: LearningRecord | undefined, reviewId: ReviewId): { readonly saved: ReviewSaveState; readonly observations: ReviewView["observations"] } {
   if (!record) return { saved: "unsaved", observations: [] };
-  const rec = record.view({ reviewId });
-  const exists = rec.notes.length + rec.observations.length + rec.links.length > 0;
-  const seen = outcomes.get(reviewId);
-  return { saved: exists || seen === "saved" ? "saved" : (seen ?? "unsaved"), observations: rec.observations };
+  return { saved: record.saveState(reviewId), observations: record.view({ reviewId }).observations };
 }
 
 const noContent = (cors: Record<string, string>) => new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...cors } });
@@ -347,7 +341,7 @@ function ndjson(events: AsyncIterable<TurnEvent>, cors: Record<string, string>):
   return new Response(body, { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", ...SECURITY_HEADERS, ...cors } });
 }
 
-async function mounted(name: string, matched: { readonly params: Record<string, string> }, req: Request, opts: ServeOptions, port: number, cors: Record<string, string>, outcomes: Map<ReviewId, ReviewSaveState>): Promise<Response | null> {
+async function mounted(name: string, matched: { readonly params: Record<string, string> }, req: Request, opts: ServeOptions, port: number, cors: Record<string, string>): Promise<Response | null> {
   const { evidence, reviews, record, preparation, segmentation } = opts.modules;
   const captureId = matched.params.captureId as CaptureId | undefined;
   const reviewId = matched.params.reviewId as ReviewId | undefined;
@@ -401,15 +395,13 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
       case "review": {
         const view = reviewOf(reviews, reviewId!);
         if (!view) return failure(404, "unknown review", cors);
-        const { saved, observations } = savedOf(record, outcomes, reviewId!);
+        const { saved, observations } = savedOf(record, reviewId!);
         return replyWire("review", { ...view, scope: wireScope(view.scope), observations: [...view.observations, ...observations], saved }, cors);
       }
       case "save": {
         if (!record) return null;
         if (!reviewOf(reviews, reviewId!)) return failure(404, "unknown review", cors);
-        const result = await record.save(reviewId!);
-        outcomes.set(reviewId!, result.kind === "saved" ? "saved" : "save_pending");
-        return reply("save", result, cors);
+        return reply("save", await record.save(reviewId!), cors);
       }
       case "retryPreparation": {
         if (!preparation || !segmentation) return null;
@@ -486,7 +478,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
   }
 }
 
-async function handle(req: Request, opts: ServeOptions, auth: AuthConfig, outcomes: Map<ReviewId, ReviewSaveState>): Promise<Response> {
+async function handle(req: Request, opts: ServeOptions, auth: AuthConfig): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
 
@@ -515,12 +507,11 @@ async function handle(req: Request, opts: ServeOptions, auth: AuthConfig, outcom
   }
 
   if (matched.name === "usage") return json(200, opts.modules.ledger.summary(), cors);
-  return (await mounted(matched.name, matched, req, opts, auth.port, cors, outcomes)) ?? failure(501, "not implemented", cors);
+  return (await mounted(matched.name, matched, req, opts, auth.port, cors)) ?? failure(501, "not implemented", cors);
 }
 
 export function serve(opts: ServeOptions): Bun.Server<undefined> {
   let auth = opts.auth;
-  const outcomes = new Map<ReviewId, ReviewSaveState>();
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: opts.auth.port,
@@ -529,7 +520,7 @@ export function serve(opts: ServeOptions): Bun.Server<undefined> {
     maxRequestBodySize: opts.maxBodyBytes ?? MAX_BODY_BYTES,
     async fetch(req) {
       try {
-        return await handle(req, opts, auth, outcomes);
+        return await handle(req, opts, auth);
       } catch {
         return failure(500, "internal error");
       }
