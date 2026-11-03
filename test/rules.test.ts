@@ -37,11 +37,7 @@ describe("Derek's rules are quoted verbatim", () => {
 
 describe("Derek's rules", () => {
   test.todo("R3 a header with a non-assessable claim id is rejected before any word streams; assessable() returns null unless supported_by_check (W8: validateMove; W6: assessable)");
-  test.todo("R5 answering Later leaves preparation.demand() identical (W7 + W6)");
   test.todo("R6 options() is ready with resource search pending or failed (W7)");
-  test.todo("R7 corrections() never adds material; the reviews row rejects UPDATE (W7)");
   test.todo("R8 a hit stored after the stop-early Seq leaves the claim dropped; an outdated input key is never selected; save never writes note_edits (W6, W8)");
-  test.todo("R9 start() leaves CaptureView.status unchanged; a stop control fact leaves ReviewView.state.phase unchanged (W7 + W3)");
-  test.todo("R10 start() with zero assessable claims returns nothing_to_review and writes no review row (W7)");
   test.todo("R15 save twice ⇒ identical row counts and IDs; a resent turn or start with the same app-minted id inserts nothing (W8, W7)");
 });
