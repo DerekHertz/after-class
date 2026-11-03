@@ -770,6 +770,30 @@ describe("claude structured", () => {
     expect(calls[0]!.signals).toEqual([undefined]);
   });
 
+  test("a real child that has exited gets no late kill while its pipes are still draining", async () => {
+    const kills: (NodeJS.Signals | undefined)[] = [];
+    // The shell prints the envelope and exits at once, but its background sleep holds stdout open for 400ms, well past the 100ms timeout.
+    const script = `printf '%s' "$ENVELOPE"; sleep 0.4 &`;
+    const spawn: SpawnFn = (_argv, opts) => {
+      const child = Bun.spawn(["/bin/sh", "-c", script], { cwd: opts.cwd, env: { ...opts.env, ENVELOPE: JSON.stringify(successEnvelope) }, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      const proc = child as unknown as ClaudeProcess;
+      return {
+        stdin: proc.stdin,
+        stdout: proc.stdout,
+        stderr: proc.stderr,
+        exited: proc.exited,
+        kill(signal) {
+          kills.push(signal);
+          child.kill(signal);
+        },
+      };
+    };
+    const claude = createClaudeCli({ bin: "/bin/sh", cwd: "/tmp", maxConcurrent: 1, spawn });
+    const { output } = await claude.structured(req({ timeoutMs: 100 }), Out, NEVER);
+    expect(output.concepts).toHaveLength(2);
+    expect(kills.length).toBe(0);
+  });
+
   test("an already-aborted signal never spawns", async () => {
     const { claude, calls } = cli({ stdout: [JSON.stringify(successEnvelope)] });
     const c = new AbortController();
