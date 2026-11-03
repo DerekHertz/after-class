@@ -8,11 +8,14 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildApp } from "../scripts/build-app";
-import { authorize, serve } from "../src/backend/http";
+import { MAX_BODY_BYTES, authorize, serve } from "../src/backend/http";
 import type { AuthConfig } from "../src/backend/http";
+import { createEvidence } from "../src/backend/evidence";
 import { createLedger } from "../src/backend/providers/ledger";
+import type { Reviews } from "../src/backend/review";
+import type { InviteAnswer, InviteState } from "../src/shared/domain";
 import { stableId } from "../src/shared/ids";
-import { ROUTES } from "../src/shared/wire";
+import { ROUTES, captureResponse, ingestAckResponse } from "../src/shared/wire";
 import { testDb } from "./fakes";
 
 const TOKEN = "tok-9f3a1c77e0b24d5aa8c1";
@@ -45,10 +48,37 @@ function fixtureApp(): string {
   return dir;
 }
 
-function start(appDir = fixtureApp()) {
-  const server = serve({ modules: { ledger: createLedger(testDb()) }, auth: { port: 0, extensionId: EXT_ID, token: TOKEN }, appDir });
+/** The real evidence module on an in-memory db; reviews is a fake whose invite state a test sets. */
+function world() {
+  const db = testDb();
+  const dir = scratchDir("afterclass-data-");
+  const evidence = createEvidence(db, dir, {
+    lookupFrameChange: (input) => ({ kind: "missing", key: stableId("key", input.after.frame.id) }),
+    runFrameChange: async () => undefined,
+    frameChangeKey: (input) => stableId("key", input.after.frame.id),
+    onChange: () => {},
+  });
+  const invite = { state: { state: "none" } as InviteState, answers: [] as InviteAnswer[] };
+  const reviews = {
+    invite: () => invite.state,
+    answerInvite: (_: unknown, a: InviteAnswer) => {
+      invite.answers.push(a);
+      if (a === "later") invite.state = { state: "later" };
+      return invite.state;
+    },
+  } as unknown as Reviews;
+  const stored = () => db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM capture_facts").get()!.n;
+  return { db, evidence, reviews, invite, stored };
+}
+
+function start(appDir = fixtureApp(), extra: { maxBodyBytes?: number } = {}) {
+  const w = world();
+  const server = serve({
+    modules: { ledger: createLedger(w.db), evidence: w.evidence, reviews: w.reviews },
+    auth: { port: 0, extensionId: EXT_ID, token: TOKEN }, appDir, ...extra,
+  });
   servers.push(server);
-  return { server, port: server.port as number, base: `http://127.0.0.1:${server.port}` };
+  return { server, port: server.port as number, base: `http://127.0.0.1:${server.port}`, ...w };
 }
 
 type Raw = { status: number; headers: Headers; body: string };
@@ -183,10 +213,10 @@ describe("health and the API", () => {
   test("other ROUTES are 501 after auth and id validation; bad ids are 400; unknown paths are 404", async () => {
     const { base } = start();
     expect((await fetch(`${base}/captures/${CAP}`)).status).toBe(401);
-    expect((await fetch(`${base}/captures/${CAP}`, { headers: bearer })).status).toBe(501);
+    expect((await fetch(`${base}/captures/${CAP}/review-options`, { headers: bearer })).status).toBe(501);
     expect((await fetch(`${base}/captures/not-an-id`, { headers: bearer })).status).toBe(400);
     expect((await fetch(`${base}/reviews/${CAP}`, { headers: bearer })).status).toBe(400);
-    expect((await fetch(`${base}/ingest`, { method: "POST", headers: bearer, body: "{}" })).status).toBe(501);
+    expect((await fetch(`${base}/reviews/${stableId("rvw", "x")}`, { headers: bearer })).status).toBe(501);
     expect((await fetch(`${base}/nope`, { headers: bearer })).status).toBe(404);
     expect((await fetch(`${base}/usage`, { method: "POST", headers: bearer })).status).toBe(404);
   });
@@ -309,4 +339,161 @@ describe("the review app under /app", () => {
     expect(js.status).toBe(200);
     expect(await js.text()).not.toContain(TOKEN);
   }, 60_000);
+});
+
+// ───────────────────────────── M4: ingest ─────────────────────────────
+
+const VIDEO = "dQw4w9WgXcQ";
+const JSON_HEADERS = { ...bearer, "Content-Type": "application/json" };
+
+/** A wire fact stream with consecutive clientSeqs from `from`: start, source, then one watched span per further seq. */
+function wireFacts(from: number, count: number): Record<string, unknown>[] {
+  return Array.from({ length: count }, (_, i) => {
+    const clientSeq = from + i;
+    const wallMs = 1000 + clientSeq;
+    if (clientSeq === 0) return { kind: "control", action: "start", reason: "user", clientSeq, wallMs };
+    if (clientSeq === 1) return { kind: "source", videoId: VIDEO, title: "Lecture", channelName: "Prof", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", durationS: 6000, clientSeq, wallMs };
+    const start = (clientSeq - 2) * 5;
+    return { kind: "span", videoId: VIDEO, start, end: start + 5, rate: 1, tabVisible: true, wallDurationMs: 5000, clientSeq, wallMs };
+  });
+}
+
+const post = (base: string, path: string, body: unknown, headers: Record<string, string> = JSON_HEADERS) =>
+  fetch(`${base}${path}`, { method: "POST", headers, body: typeof body === "string" ? body : JSON.stringify(body) });
+
+const ingest = (base: string, facts: unknown[], captureId: string = CAP) => post(base, "/ingest", { captureId, facts });
+
+type Ack = { ackedThroughSeq: number; invite: InviteState; capture: { captureId: string; watchedSeconds: number }; reviewAppUrl: string };
+const ackOf = async (r: Response) => (await r.json()) as Ack;
+
+describe("POST /ingest", () => {
+  test("stores a fact stream and acks through its last contiguous seq, in the route's schema", async () => {
+    const { base, invite, stored } = start();
+    invite.state = { state: "invited", atChunk: stableId("crv", "c1") };
+    const r = await ingest(base, wireFacts(0, 6));
+    expect(r.status).toBe(200);
+    const ack = ingestAckResponse.parse(await r.json());
+    expect(ack).toMatchObject({ ackedThroughSeq: 5, invite: { state: "invited" }, capture: { captureId: CAP, status: { state: "capturing" }, watchedSeconds: 20 } });
+    expect(ack.reviewAppUrl).toBe(`${base}/app/capture/${CAP}`);
+    expect(stored()).toBe(6);
+  });
+
+  test('R15: "Retrying a save never creates a duplicate record." A resent batch changes nothing', async () => {
+    const { base, evidence, stored } = start();
+    const facts = wireFacts(0, 8);
+    const first = await ackOf(await ingest(base, facts));
+    const bundle = evidence.captureBundle(CAP);
+    expect(stored()).toBe(8);
+    expect(await ackOf(await ingest(base, facts))).toEqual(first);
+    expect(stored()).toBe(8);
+    expect(evidence.captureBundle(CAP)).toEqual(bundle);
+    // a partly overlapping resend stores only the new facts
+    const overlapping = await ackOf(await ingest(base, wireFacts(4, 6)));
+    expect(overlapping).toMatchObject({ ackedThroughSeq: 9, capture: { watchedSeconds: 40 } });
+    expect(stored()).toBe(10);
+  });
+
+  test("an empty facts array is a heartbeat: ack -1 before anything arrives, then unchanged", async () => {
+    const { base, stored } = start();
+    const hb = await ingest(base, []);
+    expect(hb.status).toBe(200);
+    expect(await hb.json()).toMatchObject({ ackedThroughSeq: -1, invite: { state: "none" }, capture: { captureId: CAP, watchedSeconds: 0 } });
+    expect(stored()).toBe(0);
+    await ingest(base, wireFacts(0, 3));
+    expect((await ackOf(await ingest(base, []))).ackedThroughSeq).toBe(2);
+    expect(stored()).toBe(3);
+  });
+
+  test("ack is -1 when seq 0 has not arrived, and stalls at a gap until the gap is filled", async () => {
+    const { base, stored } = start();
+    expect((await ackOf(await ingest(base, wireFacts(1, 3)))).ackedThroughSeq).toBe(-1);
+    expect((await ackOf(await ingest(base, wireFacts(0, 1)))).ackedThroughSeq).toBe(3);
+    // 4 and 5 are missing; 6 and 7 arrive anyway, are stored, and are not acked past the gap
+    expect((await ackOf(await ingest(base, wireFacts(6, 2)))).ackedThroughSeq).toBe(3);
+    expect(stored()).toBe(6);
+    expect((await ackOf(await ingest(base, wireFacts(4, 2)))).ackedThroughSeq).toBe(7);
+  });
+
+  test("a batch with a fact for another capture is 400 and stores nothing, not even its good facts", async () => {
+    const { base, stored } = start();
+    const facts = wireFacts(0, 4);
+    facts[2] = { ...facts[2]!, captureId: stableId("cap", "someone-else") };
+    const r = await ingest(base, facts);
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as { error: string }).error).toContain("different capture");
+    expect(stored()).toBe(0);
+    // a per-fact captureId that matches the batch is fine
+    expect((await ingest(base, wireFacts(0, 2).map((f) => ({ ...f, captureId: CAP })))).status).toBe(200);
+    expect(stored()).toBe(2);
+  });
+
+  test("malformed bodies are 400 and store nothing: not JSON, bad capture id, bad fact, too many facts", async () => {
+    const { base, stored } = start();
+    expect((await post(base, "/ingest", "{nope")).status).toBe(400);
+    expect((await ingest(base, wireFacts(0, 2), "cap_nope")).status).toBe(400);
+    expect((await ingest(base, [...wireFacts(0, 2), { kind: "span", clientSeq: 2, wallMs: 1 }])).status).toBe(400);
+    expect((await ingest(base, wireFacts(0, 501))).status).toBe(400);
+    expect(stored()).toBe(0);
+  });
+
+  test("a body over the limit is 413 and stores nothing; the default holds a 500-fact batch with room to spare", async () => {
+    const small = start(fixtureApp(), { maxBodyBytes: 4096 });
+    const big = wireFacts(0, 200);
+    expect(JSON.stringify({ captureId: CAP, facts: big }).length).toBeGreaterThan(4096);
+    expect((await ingest(small.base, big)).status).toBe(413);
+    expect(small.stored()).toBe(0);
+
+    const { base, stored } = start();
+    const batch = wireFacts(0, 500);
+    expect(JSON.stringify({ captureId: CAP, facts: batch }).length).toBeLessThan(MAX_BODY_BYTES / 16);
+    expect((await ingest(base, batch)).status).toBe(200);
+    expect(stored()).toBe(500);
+  });
+
+  test("a bad or missing token is 401 and stores nothing; a page Origin is 403", async () => {
+    const { base, stored } = start();
+    const body = { captureId: CAP, facts: wireFacts(0, 2) };
+    expect((await post(base, "/ingest", body, { "Content-Type": "application/json" })).status).toBe(401);
+    expect((await post(base, "/ingest", body, { Authorization: "Bearer nope" })).status).toBe(401);
+    expect((await post(base, "/ingest", body, { ...bearer, Origin: PAGE })).status).toBe(403);
+    expect(stored()).toBe(0);
+  });
+
+  test("ingest latency for a 500-fact batch (logged, not asserted)", async () => {
+    const { base } = start();
+    const times: number[] = [];
+    for (let run = 0; run < 10; run++) {
+      const t0 = performance.now();
+      const r = await ingest(base, wireFacts(0, 500), stableId("cap", `lat-${run}`));
+      times.push(performance.now() - t0);
+      expect(r.status).toBe(200);
+    }
+    times.sort((a, b) => a - b);
+    console.log(`ingest 500 facts: median ${times[5]!.toFixed(1)} ms, max ${times[9]!.toFixed(1)} ms`);
+  });
+});
+
+describe("GET /captures/:id and the invite answer", () => {
+  test("GET /captures/:id answers capture and invite in the route's schema, empty for a capture with no facts", async () => {
+    const { base } = start();
+    const empty = await fetch(`${base}/captures/${CAP}`, { headers: bearer });
+    expect(empty.status).toBe(200);
+    expect(await empty.json()).toMatchObject({ capture: { captureId: CAP, sources: [], watchedSeconds: 0 }, invite: { state: "none" } });
+    await ingest(base, wireFacts(0, 4));
+    const body = captureResponse.parse(await (await fetch(`${base}/captures/${CAP}`, { headers: bearer })).json());
+    expect(body).toMatchObject({ capture: { watchedSeconds: 10, sources: [{ videoId: VIDEO }] } });
+    expect((await fetch(`${base}/captures/${CAP}`)).status).toBe(401);
+  });
+
+  test("POST /captures/:id/invite answers the new InviteState and rejects an answer that is not one", async () => {
+    const { base, invite } = start();
+    const r = await post(base, `/captures/${CAP}/invite`, { answer: "later" });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ state: "later" });
+    expect(invite.answers).toEqual(["later"]);
+    expect((await post(base, `/captures/${CAP}/invite`, { answer: "maybe" })).status).toBe(400);
+    expect((await post(base, `/captures/${CAP}/invite`, "{")).status).toBe(400);
+    expect((await post(base, "/captures/not-an-id/invite", { answer: "later" })).status).toBe(400);
+    expect(invite.answers).toEqual(["later"]);
+  });
 });

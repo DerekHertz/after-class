@@ -12,11 +12,11 @@
  *
  * Mounted (M3): GET /health (Host and Origin only), GET /usage, GET /app/* (the bundle from scripts/build-app.ts,
  * Host and Origin only, because a navigation cannot carry a header; the token rides in the HTML's
- * <meta name="afterclass-token">). Every other `ROUTES` entry answers 501 until M4 and M7 mount it.
+ * <meta name="afterclass-token">). M4 adds POST /ingest, GET /captures/:id and POST /captures/:id/invite. Every other
+ * `ROUTES` entry answers 501 until M7 mounts it.
  *
  * Accepted limit: the token is in the HTML of GET /app/, so any local process or user that can reach 127.0.0.1:<port>
  * can read it, even though the token file is 0600. The checks above stop web pages and DNS rebinding, not local code.
- * Before M4 mounts /ingest, set an explicit maxRequestBodySize (Bun's default is 128 MB).
  * Not yet: GET /events (SSE), GET /trace/captures/:id, GET /memo/:key.
  */
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -24,7 +24,8 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import { parseId } from "../shared/ids";
 import type { IdKind } from "../shared/ids";
-import { matchRoute } from "../shared/wire";
+import type { CaptureId } from "../shared/ids";
+import { BadRequest, ROUTES, matchRoute, parseIngestBatch, parseInviteAnswerRequest } from "../shared/wire";
 import type { EvidenceStore } from "./evidence";
 import type { Reviews } from "./review";
 import type { LearningRecord } from "./record";
@@ -75,15 +76,25 @@ export function authorize(headers: Headers, expected: AuthConfig, opts: { readon
 }
 
 export type ServeOptions = {
-  /** M3 reads only the ledger; M4 and M7 widen this to every module. */
-  readonly modules: Pick<Modules, "ledger">;
+  /** M4 reads the ledger, evidence and the invite state; M7 widens this to every module. */
+  readonly modules: Pick<Modules, "ledger" | "evidence" | "reviews">;
   /** `port` 0 binds a free port (tests); the Host check then uses the bound port. */
   readonly auth: AuthConfig;
   /** Directory holding the bundled review app (scripts/build-app.ts writes dist/app). */
   readonly appDir: string;
+  /** Largest request body the server reads; Bun answers 413 beyond it. Defaults to `MAX_BODY_BYTES`. */
+  readonly maxBodyBytes?: number;
 };
 
 export const DEFAULT_PORT = 4317;
+
+/**
+ * 16 MiB. The extension caps a batch at 8 MiB (`BATCH_MAX_BYTES`) but always sends at least one fact, and the wire
+ * schema allows a single frame fact of 8 MiB of base64; 16 MiB holds either with 2x margin for JSON overhead. A full
+ * 500-fact batch of small facts is well under 1 MiB. Bun's default (128 MiB) would let any local process make the
+ * backend buffer a hundred megabytes before the token is even checked.
+ */
+export const MAX_BODY_BYTES = 16 * 1024 * 1024;
 
 /** Path parameter name → id kind, so `matchRoute` (which does not validate) never hands a raw string to a module. */
 const PARAM_KIND = {
@@ -190,6 +201,79 @@ function preflight(req: Request, auth: AuthConfig): Response {
   });
 }
 
+/** Reads a JSON body; a body that is not JSON is the caller's fault (400), not ours. */
+async function readJson(req: Request): Promise<unknown> {
+  try {
+    return JSON.parse(await req.text());
+  } catch {
+    throw new BadRequest("body is not JSON");
+  }
+}
+
+/**
+ * The wire schema carries one captureId per batch and strips any per-fact captureId, so a fact aimed at another
+ * capture would otherwise be silently re-labelled into this one. Refuse the whole batch before anything is stored.
+ */
+function assertNoForeignFacts(raw: unknown): void {
+  if (typeof raw !== "object" || raw === null) return;
+  const { captureId, facts } = raw as { captureId?: unknown; facts?: unknown };
+  if (!Array.isArray(facts)) return;
+  for (const f of facts) {
+    if (typeof f === "object" && f !== null && "captureId" in f && (f as { captureId: unknown }).captureId !== captureId) {
+      throw new BadRequest("a fact belongs to a different capture than the batch");
+    }
+  }
+}
+
+/** Parses a response through its `ROUTES` schema, so a module that drifts from the wire contract is a 500, never a bad reply. */
+const reply = (name: keyof typeof ROUTES, body: unknown, cors: Record<string, string>): Response => {
+  const r = ROUTES[name].reply;
+  return json(200, r.kind === "json" ? r.schema.parse(body) : body, cors);
+};
+
+async function mounted(name: string, matched: { readonly params: Record<string, string> }, req: Request, opts: ServeOptions, port: number, cors: Record<string, string>): Promise<Response | null> {
+  const { evidence, reviews } = opts.modules;
+  const captureId = matched.params.captureId as CaptureId | undefined;
+  try {
+    switch (name) {
+      case "ingest": {
+        const raw = await readJson(req);
+        assertNoForeignFacts(raw);
+        const batch = parseIngestBatch(raw);
+        let ackedThroughSeq: number;
+        try {
+          ({ ackedThroughSeq } = evidence.ingest(batch));
+        } catch (e) {
+          // evidence checks every fact before it stores any, so this refusal leaves nothing behind.
+          if (e instanceof RangeError) throw new BadRequest(e.message);
+          throw e;
+        }
+        return reply(
+          "ingest",
+          {
+            ackedThroughSeq,
+            invite: reviews.invite(batch.captureId),
+            capture: evidence.captureView(batch.captureId),
+            reviewAppUrl: `http://127.0.0.1:${port}/app/capture/${batch.captureId}`,
+          },
+          cors,
+        );
+      }
+      case "captureView":
+        return reply("captureView", { capture: evidence.captureView(captureId!), invite: reviews.invite(captureId!) }, cors);
+      case "answerInvite": {
+        const { answer } = parseInviteAnswerRequest(await readJson(req));
+        return reply("answerInvite", reviews.answerInvite(captureId!, answer), cors);
+      }
+      default:
+        return null;
+    }
+  } catch (e) {
+    if (e instanceof BadRequest) return failure(400, e.message, cors);
+    throw e;
+  }
+}
+
 async function handle(req: Request, opts: ServeOptions, auth: AuthConfig): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
@@ -218,12 +302,8 @@ async function handle(req: Request, opts: ServeOptions, auth: AuthConfig): Promi
     if (kind === undefined || parseId(kind, value) === null) return failure(400, `invalid ${name}`, cors);
   }
 
-  switch (matched.name) {
-    case "usage":
-      return json(200, opts.modules.ledger.summary(), cors);
-    default:
-      return failure(501, "not implemented", cors);
-  }
+  if (matched.name === "usage") return json(200, opts.modules.ledger.summary(), cors);
+  return (await mounted(matched.name, matched, req, opts, auth.port, cors)) ?? failure(501, "not implemented", cors);
 }
 
 export function serve(opts: ServeOptions): Bun.Server<undefined> {
@@ -231,6 +311,7 @@ export function serve(opts: ServeOptions): Bun.Server<undefined> {
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: opts.auth.port,
+    maxRequestBodySize: opts.maxBodyBytes ?? MAX_BODY_BYTES,
     async fetch(req) {
       try {
         return await handle(req, opts, auth);
