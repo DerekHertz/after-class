@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>After Class options</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 34rem; margin: 2rem auto; padding: 0 1rem; }
+  input { width: 100%; box-sizing: border-box; padding: 6px 8px; font: inherit; }
+  .row { display: flex; gap: 8px; margin: 10px 0; }
+  button { font: inherit; padding: 6px 12px; }
+  #result { min-height: 1.5em; }
+  code { font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>After Class</h1>
+<p>Paste the pairing token that <code>bun run dev</code> prints. It is kept in this extension only and sent only to the local backend at <code>127.0.0.1:4317</code>.</p>
+<label for="token">Pairing token</label>
+<input id="token" type="password" autocomplete="off" spellcheck="false">
+<div class="row"><button id="save">Save and test</button></div>
+<p id="result" role="status"></p>
+<script type="module" src="options.js"></script>
+</body>
+</html>
