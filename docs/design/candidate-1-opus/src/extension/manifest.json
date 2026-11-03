@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "After Class",
+  "version": "0.1.0",
+  "description": "Explicit, visible capture of YouTube lectures for After Class reviews.",
+  "permissions": ["storage", "unlimitedStorage", "tabs"],
+  "host_permissions": ["https://www.youtube.com/*", "http://localhost:4317/*", "http://127.0.0.1:4317/*"],
+  "background": { "service_worker": "worker.js", "type": "module" },
+  "action": { "default_popup": "popup.html", "default_title": "After Class" },
+  "options_page": "options.html",
+  "content_scripts": [
+    { "matches": ["https://www.youtube.com/*"], "js": ["main-world.js"], "run_at": "document_start", "world": "MAIN" },
+    { "matches": ["https://www.youtube.com/*"], "js": ["content.js"], "run_at": "document_idle" }
+  ]
+}

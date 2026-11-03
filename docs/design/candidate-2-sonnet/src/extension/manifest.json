@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "After Class",
+  "version": "0.1.0",
+  "description": "Captures what you watch (with your explicit start) for a source-grounded review.",
+  "permissions": ["storage", "unlimitedStorage", "alarms", "tabs"],
+  "host_permissions": ["https://www.youtube.com/*", "http://localhost:4417/*", "http://127.0.0.1:4417/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_popup": "popup.html" },
+  "options_page": "options.html",
+  "content_scripts": [
+    { "matches": ["https://www.youtube.com/*"], "js": ["content.js"], "run_at": "document_idle" },
+    { "matches": ["https://www.youtube.com/*"], "js": ["caption-hook.js"], "run_at": "document_start", "world": "MAIN" }
+  ]
+}
