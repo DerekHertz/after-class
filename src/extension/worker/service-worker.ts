@@ -11,61 +11,293 @@
  *
  * Control state is in chrome.storage.session (survives SW restarts, not browser
  * restarts: a browser restart ends capture, which is the visible, honest outcome).
+ * The policy itself is in control.ts and the upload loop in outbox.ts, both pure.
  */
 import type { CaptureId } from "../../shared/ids";
-import type { CaptureFactBody, ControlReason, InviteAnswer, InviteState } from "../../shared/domain";
+import type { CaptureFactBody, InviteAnswer, InviteState } from "../../shared/domain";
 import type { IngestAck } from "../../shared/wire";
+import type { ContentSignal, ControlMessage } from "../content/capture";
+import { acceptsFact, badgeFor, isWatchUrl, safeReviewUrl, transition } from "./control";
+import type { ControlEvent, OptionsRequest, PopupRequest, TabCaptureState } from "./control";
+import { classifyStatus, createFlusher, createIdbOutbox, isIngestAck } from "./outbox";
+import type { FlushOutcome, Transport } from "./outbox";
 
-export type TabCaptureState = {
-  readonly tabId: number;
-  readonly captureId: CaptureId; // randomId("cap"), minted once on Start
-  readonly state: "capturing" | "paused" | "stopped";
-  readonly pauseReason: ControlReason | null;
-  readonly nextClientSeq: number;
-  readonly lastAck: IngestAck | null;
-  readonly uploadBacklog: number;
-  readonly lastError: string | null;
+export { transition } from "./control";
+export type { PopupRequest, TabCaptureState } from "./control";
+
+const BACKEND = "http://127.0.0.1:4317";
+const TOKEN_KEY = "pairingToken";
+const TABS_KEY = "tabs";
+const FLUSH_ALARM = "afterclass-flush";
+const HEARTBEAT_MIN_MS = 3000;
+
+export type WorkerResponse = { readonly state: TabCaptureState | null; readonly error?: string };
+
+const store = createIdbOutbox();
+const ports = new Map<number, chrome.runtime.Port>();
+const lastHeartbeat = new Map<number, number>();
+
+// ───────────────────────────── State (chrome.storage.session) ───────────────
+
+type Tabs = Record<string, TabCaptureState>;
+
+async function loadTabs(): Promise<Tabs> {
+  return ((await chrome.storage.session.get(TABS_KEY))[TABS_KEY] as Tabs | undefined) ?? {};
+}
+
+const saveTabs = (tabs: Tabs) => chrome.storage.session.set({ [TABS_KEY]: tabs });
+
+let chain: Promise<unknown> = Promise.resolve();
+/** MV3 events interleave, so every read-modify-write of control state runs one at a time. */
+function serialized<T>(fn: () => Promise<T>): Promise<T> {
+  const run = chain.then(fn, fn);
+  chain = run.catch(() => {});
+  return run;
+}
+
+async function readState(tabId: number): Promise<TabCaptureState | null> {
+  return (await loadTabs())[tabId] ?? null;
+}
+
+function renderBadge(tabId: number, state: TabCaptureState | null): void {
+  const { text, color } = badgeFor(state);
+  void chrome.action.setBadgeText({ tabId, text });
+  void chrome.action.setBadgeBackgroundColor({ tabId, color });
+}
+
+function post(tabId: number, msg: ControlMessage): void {
+  try {
+    ports.get(tabId)?.postMessage(msg);
+  } catch {
+    ports.delete(tabId);
+  }
+}
+
+// ───────────────────────────── Backend ──────────────────────────────────────
+
+async function pairingToken(): Promise<string | null> {
+  const t = (await chrome.storage.local.get(TOKEN_KEY))[TOKEN_KEY];
+  return typeof t === "string" && t !== "" ? t : null;
+}
+
+async function backendFetch(method: "GET" | "POST", path: string, body?: unknown): Promise<{ readonly ok: true; readonly json: unknown } | { readonly ok: false; readonly retryable: boolean; readonly error: string }> {
+  const token = await pairingToken();
+  if (token === null) return { ok: false, retryable: false, error: "no pairing token: paste it in After Class options" };
+  try {
+    const res = await fetch(`${BACKEND}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) return { ok: false, ...classifyStatus(res.status) };
+    return { ok: true, json: await res.json().catch(() => null) };
+  } catch {
+    return { ok: false, retryable: true, error: "backend unreachable" };
+  }
+}
+
+const transport: Transport = async (captureId, facts) => {
+  const r = await backendFetch("POST", "/ingest", { captureId, facts });
+  if (!r.ok) return r;
+  return isIngestAck(r.json) ? { ok: true, ack: r.json } : { ok: false, retryable: false, error: "backend sent an unexpected acknowledgement" };
 };
 
-export type PopupRequest =
-  | { readonly type: "start"; readonly tabId: number }
-  | { readonly type: "pause" | "resume" | "stop"; readonly tabId: number }
-  | { readonly type: "status"; readonly tabId: number }
-  | { readonly type: "invite_answer"; readonly tabId: number; readonly answer: InviteAnswer }
-  | { readonly type: "transcription_choice"; readonly tabId: number; readonly videoId: string; readonly choice: "accept_asr" | "continue_with_gap" };
+const flusher = createFlusher({
+  store,
+  transport,
+  schedule: (fn, ms) => void setTimeout(fn, ms),
+  onOutcome: (captureId, outcome) => void serialized(() => applyOutcome(captureId, outcome)),
+});
 
-/**
- * Pure control transition. One table, unit-tested; the only place auto-pause policy lives.
- *   start  : none → capturing (new captureId)
- *   pause  : capturing → paused(reason)
- *   resume : paused → capturing
- *   left_watch_page : capturing → paused("left_watch_page")
- *   returned_to_watch_page : no-op; capture waits for Derek to resume (SYNTHESIS open question 1)
- *   stop / tab_closed : capturing|paused → stopped
- * Returns the control fact to emit, or null if the request is a no-op.
- */
-export function transition(
-  current: TabCaptureState | null,
-  event: { readonly kind: "start" | "pause" | "resume" | "stop" } | { readonly kind: "left_watch_page" | "returned_to_watch_page" | "tab_closed" },
-): { readonly next: TabCaptureState | null; readonly fact: CaptureFactBody | null } {
-  throw new Error("not implemented");
+async function applyOutcome(captureId: CaptureId, outcome: FlushOutcome): Promise<void> {
+  const tabs = await loadTabs();
+  for (const [id, s] of Object.entries(tabs)) {
+    if (s.captureId !== captureId) continue;
+    const next: TabCaptureState = { ...s, lastAck: outcome.ack ?? s.lastAck, uploadBacklog: outcome.remaining, lastError: outcome.error };
+    tabs[id] = next;
+    renderBadge(s.tabId, next);
+  }
+  await saveTabs(tabs);
+}
+
+export const flushOutbox = async (captureId: CaptureId): Promise<IngestAck | null> => (await flusher.flush(captureId)).ack;
+
+// ───────────────────────────── Facts ────────────────────────────────────────
+
+async function appendIn(tabs: Tabs, tabId: number, body: CaptureFactBody): Promise<void> {
+  const s = tabs[tabId];
+  if (!s) return;
+  const fact = await store.append(s.captureId, body, Date.now());
+  tabs[tabId] = { ...s, nextClientSeq: fact.clientSeq + 1, uploadBacklog: s.uploadBacklog + 1 };
 }
 
 /** Stamp clientSeq, persist to the IndexedDB outbox, schedule flush. */
 export function enqueueFact(tabId: number, body: CaptureFactBody): Promise<void> {
-  throw new Error("not implemented");
+  return serialized(async () => {
+    const tabs = await loadTabs();
+    await appendIn(tabs, tabId, body);
+    await saveTabs(tabs);
+    const s = tabs[tabId];
+    if (s) void flusher.flush(s.captureId);
+  });
 }
+
+/** Applies a control event, persists its control fact, and tells the content script whether to observe. */
+function applyEvent(tabId: number, event: ControlEvent): Promise<TabCaptureState | null> {
+  return serialized(async () => {
+    const tabs = await loadTabs();
+    const { next, fact } = transition(tabs[tabId] ?? null, event);
+    if (next === null) return null;
+    tabs[tabId] = next;
+    if (fact) await appendIn(tabs, tabId, fact);
+    await saveTabs(tabs);
+    const saved = tabs[tabId]!;
+    renderBadge(tabId, saved);
+    post(tabId, { type: "observe", on: saved.state === "capturing" });
+    if (fact) void flusher.flush(saved.captureId);
+    return saved;
+  });
+}
+
+// ───────────────────────────── Content scripts ──────────────────────────────
+
+async function ensureContentScript(tabId: number): Promise<void> {
+  if (ports.has(tabId)) return;
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["main-world.js"], world: "MAIN" });
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+  for (let i = 0; i < 20 && !ports.has(tabId); i++) await new Promise((r) => setTimeout(r, 100));
+  if (!ports.has(tabId)) throw new Error("could not attach to the page: reload the YouTube tab and try again");
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  const tabId = port.sender?.tab?.id;
+  if (port.name !== "capture" || tabId === undefined || port.sender?.id !== chrome.runtime.id) return;
+  ports.set(tabId, port);
+  port.onDisconnect.addListener(() => {
+    if (ports.get(tabId) === port) ports.delete(tabId);
+  });
+  port.onMessage.addListener((msg: CaptureFactBody | ContentSignal) => void onContentMessage(tabId, msg));
+  void readState(tabId).then((s) => post(tabId, { type: "observe", on: s?.state === "capturing" }));
+});
+
+async function onContentMessage(tabId: number, msg: CaptureFactBody | ContentSignal): Promise<void> {
+  if ("type" in msg) {
+    await applyEvent(tabId, { kind: msg.type });
+    return;
+  }
+  await serialized(async () => {
+    const tabs = await loadTabs();
+    if (!acceptsFact(tabs[tabId] ?? null, msg)) return;
+    await appendIn(tabs, tabId, msg);
+    await saveTabs(tabs);
+    void flusher.flush(tabs[tabId]!.captureId);
+  });
+}
+
+// A full page navigation destroys the content script, so the tab URL is the second detector.
+chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if (change.url === undefined || isWatchUrl(change.url)) return;
+  void applyEvent(tabId, { kind: "left_watch_page" });
+});
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void applyEvent(tabId, { kind: "tab_closed" });
+  ports.delete(tabId);
+});
+
+// ───────────────────────────── Popup requests ───────────────────────────────
 
 /**
- * Upload pending facts in clientSeq order, ≤ 500 per batch (frames counted by bytes, ≤ 8 MiB).
- * On 2xx: delete through ack.ackedThroughSeq, store ack (invite → badge + popup).
- * On failure: exponential backoff 1 s → 30 s; health shows "backend unreachable".
+ * Answer an invite. Review now opens the review app tab and never touches capture state.
+ * R9: "Starting a review doesn't stop capture, and stopping capture doesn't end a review."
+ * Every answer is also posted to the backend, which records it as a fact.
  */
-export function flushOutbox(captureId: CaptureId): Promise<IngestAck | null> {
-  throw new Error("not implemented");
+export async function answerInvite(tabId: number, answer: InviteAnswer): Promise<InviteState> {
+  const state = await readState(tabId);
+  if (answer === "review_now" || answer === "stop_early") await chrome.tabs.create({ url: safeReviewUrl(state?.lastAck?.reviewAppUrl, `${BACKEND}/app/`) });
+  const current: InviteState = state?.lastAck?.invite ?? { state: "none" };
+  if (state === null || (answer === "review_now" && current.state !== "invited")) return current;
+  const r = await backendFetch("POST", `/captures/${state.captureId}/invite`, { answer });
+  if (!r.ok) throw new Error(r.error);
+  const s = (r.json as { state?: unknown } | null)?.state;
+  return s === "none" || s === "invited" || s === "later" || s === "waiting" ? (r.json as InviteState) : current;
 }
 
-/** Answer an invite: Review now opens the review app tab; the others are facts for the backend. */
-export function answerInvite(tabId: number, answer: InviteAnswer): Promise<InviteState> {
-  throw new Error("not implemented");
+async function ensureWatchPage(tabId: number): Promise<void> {
+  const tab = await chrome.tabs.get(tabId);
+  if (!isWatchUrl(tab.url)) throw new Error("open a YouTube video page (youtube.com/watch) first");
 }
+
+async function handlePopup(req: PopupRequest): Promise<WorkerResponse> {
+  switch (req.type) {
+    case "start":
+    case "resume": {
+      await ensureWatchPage(req.tabId);
+      await ensureContentScript(req.tabId);
+      return { state: await applyEvent(req.tabId, req.type === "start" ? { kind: "start", tabId: req.tabId } : { kind: "resume" }) };
+    }
+    case "pause":
+    case "stop":
+      return { state: await applyEvent(req.tabId, { kind: req.type }) };
+    case "status": {
+      const state = await readState(req.tabId);
+      if (state === null) return { state };
+      const now = Date.now();
+      if (now - (lastHeartbeat.get(req.tabId) ?? 0) >= HEARTBEAT_MIN_MS) {
+        lastHeartbeat.set(req.tabId, now);
+        void flusher.flush(state.captureId, { heartbeat: true });
+      }
+      return { state: { ...state, uploadBacklog: await store.backlog(state.captureId) } };
+    }
+    case "invite_answer": {
+      const invite = await answerInvite(req.tabId, req.answer);
+      return { state: await serialized(async () => {
+        const tabs = await loadTabs();
+        const s = tabs[req.tabId];
+        if (!s?.lastAck) return s ?? null;
+        tabs[req.tabId] = { ...s, lastAck: { ...s.lastAck, invite } };
+        await saveTabs(tabs);
+        renderBadge(req.tabId, tabs[req.tabId]!);
+        return tabs[req.tabId]!;
+      }) };
+    }
+    case "transcription_choice":
+      await enqueueFact(req.tabId, { kind: "transcription_choice", videoId: req.videoId, choice: req.choice });
+      return { state: await readState(req.tabId) };
+    case "retry_transcript":
+      post(req.tabId, { type: "read_transcript" });
+      return { state: await readState(req.tabId) };
+  }
+}
+
+async function handleOptions(_req: OptionsRequest): Promise<{ readonly ok: boolean; readonly detail: string }> {
+  const r = await backendFetch("GET", "/usage");
+  if (r.ok) {
+    void recover();
+    return { ok: true, detail: "connected" };
+  }
+  return { ok: false, detail: r.error };
+}
+
+chrome.runtime.onMessage.addListener((msg: PopupRequest | OptionsRequest, sender, sendResponse) => {
+  if (sender.id !== chrome.runtime.id || sender.tab !== undefined) return false;
+  const work = msg.type === "test_backend" ? handleOptions(msg) : handlePopup(msg).catch((e: unknown): WorkerResponse => ({ state: null, error: e instanceof Error ? e.message : String(e) }));
+  void work.then(sendResponse);
+  return true;
+});
+
+// ───────────────────────────── Lifecycle ────────────────────────────────────
+
+/** Re-send anything the outbox still holds, e.g. after a browser restart or an outage. */
+async function recover(): Promise<void> {
+  for (const captureId of await store.captureIds()) void flusher.flush(captureId);
+}
+
+// The pairing token must stay out of reach of content scripts.
+void chrome.storage.local.setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" }).catch(() => {});
+void chrome.alarms.create(FLUSH_ALARM, { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name === FLUSH_ALARM) void recover();
+});
+chrome.runtime.onStartup.addListener(() => void recover());
+void recover();
