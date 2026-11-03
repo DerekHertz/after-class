@@ -430,7 +430,7 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     }
     const turns = loadTurns(reviewId);
     const { claims, evidence } = grounding(review, state, turns);
-    const allowed = [...kit.allowedMoves(state)];
+    const allowed = [...kit.allowedMoves(state, { turns, claims })];
     if (allowed.length === 0) return null;
     return { state, allowed, scope: review.scope, claims, evidence, turns, priorObservations: [], repairNote };
   }
