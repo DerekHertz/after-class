@@ -198,6 +198,7 @@ function tutorHarness(db: Db, script: Script) {
   return {
     calls: base.calls as unknown as TutorInput[],
     runTutor: (input: TutorInput, streamTo: (d: string) => void, signal: AbortSignal) => memo.run(task, input, { signal, streamTo }),
+    clearFailures: memo.clearFailures,
   };
 }
 
@@ -211,7 +212,7 @@ function rig(script: Script = () => fail("no tutor scripted"), config: { softTar
   const tutor = tutorHarness(db, script);
   let t = 1_000_000;
   const clock = { advance: (ms: number) => (t += ms) };
-  const reviews: Reviews = createReviews(db, { ...world.deps, runTutor: tutor.runTutor }, { tutor: kit, now: () => t, ...config });
+  const reviews: Reviews = createReviews(db, { ...world.deps, runTutor: tutor.runTutor, clearFailures: tutor.clearFailures }, { tutor: kit, now: () => t, ...config });
   return { db, world, tutor, reviews, clock, capture: world.captureId };
 }
 
@@ -586,7 +587,7 @@ describe("R7 scope never grows (the TLC counterexample)", () => {
 
   test("a dependency that ignores the material it was given still cannot add material", async () => {
     const x = counterexample();
-    const leaky = createReviews(x.db, { ...x.world.deps, assessableIn: (_, __) => x.world.deps.assessableIn(x.capture, x.moved.material), runTutor: x.tutor.runTutor }, { tutor: kit });
+    const leaky = createReviews(x.db, { ...x.world.deps, assessableIn: (_, __) => x.world.deps.assessableIn(x.capture, x.moved.material), runTutor: x.tutor.runTutor, clearFailures: x.tutor.clearFailures }, { tutor: kit });
     await collect(leaky.turn(x.reviewId, randomId("turn"), answer()));
     expect(x.tutor.calls[0]!.claims.map((c) => c.id)).toEqual([x.old]);
     expect(leaky.view(x.reviewId).state.corrections).toEqual([]);
@@ -603,7 +604,7 @@ describe("R7 scope never grows (the TLC counterexample)", () => {
     const t = tutorHarness(x.db, (input) =>
       reply({ kind: "disclose_correction", correctionId: input.state.corrections[0]!.id, threadIds: [], evidence: [] }, "I need to correct something."),
     );
-    const reviews = createReviews(x.db, { ...x.world.deps, runTutor: t.runTutor }, { tutor: kit });
+    const reviews = createReviews(x.db, { ...x.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit });
     const events = await collect(reviews.turn(x.reviewId, randomId("turn"), answer()));
     expect(t.calls[0]!.allowed).toEqual(["disclose_correction"]);
     expect(events.find((e) => e.type === "turn_failed")).toBeUndefined();
@@ -620,7 +621,7 @@ describe("turn", () => {
     const r = startedRig();
     const move = askMain(r.claim);
     const t = tutorHarness(r.db, () => reply(move, "What is the main idea? Say it in your own words."));
-    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor }, { tutor: kit, now: () => 1 });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit, now: () => 1 });
     const turnId = randomId("turn");
     const events = await collect(reviews.turn(r.reviewId, turnId, answer()));
 
@@ -645,7 +646,7 @@ describe("turn", () => {
       seenDuringCall = r.reviews.view(reviewId).turns;
       return reply({ kind: "wrap_up" }, "Done.");
     });
-    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor }, { tutor: kit });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit });
     started(reviews.start(r.capture, "prepared_only", reviewId));
     await collect(reviews.turn(reviewId, randomId("turn"), answer("my answer")));
     expect(seenDuringCall.map((x) => x.actor)).toEqual(["learner"]);
@@ -654,7 +655,7 @@ describe("turn", () => {
   test("idempotent on turnId: a resend appends nothing, replays the reply, and pays for no second call", async () => {
     const r = startedRig();
     const t = tutorHarness(r.db, () => reply(askMain(r.claim), "First question. Second part."));
-    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor }, { tutor: kit });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit });
     const turnId = randomId("turn");
     const first = await collect(reviews.turn(r.reviewId, turnId, answer()));
     const again = await collect(reviews.turn(r.reviewId, turnId, answer()));
@@ -667,23 +668,36 @@ describe("turn", () => {
     expect(types(again).at(-1)).toBe("turn_complete");
   });
 
-  test("a failed model call keeps the learner turn; resending the same turnId then completes it", async () => {
+  test("a failed model call keeps the learner turn; resending the same turnId calls the model once more and completes it", async () => {
     let healthy = false;
     const r = startedRig();
     const t = tutorHarness(r.db, (): FakeStep<TutorOutput> => (healthy ? reply(askMain(r.claim), "Try this.") : fail("boom")));
-    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor }, { tutor: kit });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit });
     const turnId = randomId("turn");
     const failed = await collect(reviews.turn(r.reviewId, turnId, answer("kept")));
     expect(failed.at(-1)).toMatchObject({ type: "turn_failed", retryable: true });
+    expect(t.calls).toHaveLength(1);
     expect(turnRows(r.db, "learner")).toBe(1);
     expect(turnRows(r.db, "tutor")).toBe(0);
 
     healthy = true;
-    r.db.sql.run("DELETE FROM memo_failures");
     const retried = await collect(reviews.turn(r.reviewId, turnId, answer("kept")));
     expect(types(retried).at(-1)).toBe("turn_complete");
+    expect(t.calls).toHaveLength(2);
     expect(turnRows(r.db, "learner")).toBe(1);
     expect(turnRows(r.db, "tutor")).toBe(1);
+  });
+
+  test("a resend that fails again is retryable again, one model call per send", async () => {
+    const r = startedRig();
+    const t = tutorHarness(r.db, () => fail("still down"));
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit });
+    const turnId = randomId("turn");
+    for (let send = 1; send <= 3; send++) {
+      const events = await collect(reviews.turn(r.reviewId, turnId, answer()));
+      expect(events.at(-1)).toMatchObject({ type: "turn_failed", retryable: true });
+      expect(t.calls).toHaveLength(send);
+    }
   });
 
   test("an invalid header is aborted before anything is spoken, then repaired once", async () => {
@@ -692,7 +706,7 @@ describe("turn", () => {
     const t = tutorHarness(r.db, (input) =>
       input.repairNote === null ? reply(askMain(notAssessable), "SPOKEN-WITHOUT-LEAVE. More words.") : reply(askMain(r.claim), "A valid question."),
     );
-    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor }, { tutor: kit });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit });
     const events = await collect(reviews.turn(r.reviewId, randomId("turn"), answer()));
 
     expect(t.calls.map((c) => c.repairNote)).toEqual([null, "claim is not assessable"]);
@@ -705,7 +719,7 @@ describe("turn", () => {
   test("an invalid header that never repairs falls back to a code-authored move, never a stuck review", async () => {
     const r = startedRig();
     const t = tutorHarness(r.db, () => reply({ kind: "propose_detour", topic: "x", reason: "y", needsResource: null }, "Let us detour."));
-    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor }, { tutor: kit });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit });
     const events = await collect(reviews.turn(r.reviewId, randomId("turn"), answer()));
 
     expect(t.calls).toHaveLength(2);
@@ -719,10 +733,21 @@ describe("turn", () => {
     const r = startedRig();
     let call = 0;
     const t = tutorHarness(r.db, () => (++call === 1 ? reply(askMain(r.claim), "Question one.") : reply({ kind: "detour_step" }, "Nope.")));
-    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor }, { tutor: kit });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit });
     await collect(reviews.turn(r.reviewId, randomId("turn"), answer("first")));
     const events = await collect(reviews.turn(r.reviewId, randomId("turn"), answer("second")));
     expect(events.find((e) => e.type === "move")).toMatchObject({ move: { kind: "close_thread", threadId: THREAD } });
+  });
+
+  test("with no fallback move and both invalid outputs stored, turn_failed says a resend will not help", async () => {
+    const r = startedRig();
+    r.world.claims.get(r.claim)!.status = "unverified";
+    const t = tutorHarness(r.db, () => reply({ kind: "wrap_up" }, "Bye."));
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit });
+    const turnId = randomId("turn");
+    expect((await collect(reviews.turn(r.reviewId, turnId, answer()))).at(-1)).toMatchObject({ type: "turn_failed", retryable: false });
+    await collect(reviews.turn(r.reviewId, turnId, answer()));
+    expect(t.calls).toHaveLength(2);
   });
 
   test("a paused review stores the learner's act and calls no model", async () => {
@@ -745,7 +770,7 @@ describe("soft time target", () => {
     let call = 0;
     const r = startedRig(undefined, { softTargetS });
     const t = tutorHarness(r.db, () => (++call === 1 ? reply(askMain(r.claim), "Question.") : reply({ kind: "close_thread", threadId: THREAD }, "Good enough.")));
-    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor }, { tutor: kit, softTargetS, now: () => r.clock.advance(0) });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit, softTargetS, now: () => r.clock.advance(0) });
     await collect(reviews.turn(r.reviewId, randomId("turn"), answer("a")));
     r.clock.advance(elapsedMs);
     const events = await collect(reviews.turn(r.reviewId, randomId("turn"), answer("b")));
@@ -772,7 +797,7 @@ describe("R9 review and capture are independent", () => {
     r.world.close(0, 0, 300);
     const claim = r.world.claim(1, 10, 20);
     const t = tutorHarness(r.db, () => reply(askMain(claim), "Question."));
-    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor }, { tutor: kit });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit });
 
     expect(r.world.captureState).toBe("capturing");
     const reviewId = randomId("rvw");

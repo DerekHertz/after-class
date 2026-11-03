@@ -20,7 +20,7 @@ import type {
 import { Material } from "../../shared/time";
 import { asSeq } from "../db";
 import type { Db } from "../db";
-import type { Lookup } from "../providers/memo";
+import type { Lookup, Memo } from "../providers/memo";
 import { allowedMoves, parseMoveHeader, reviewState, validateMove } from "./tutor";
 import type { TutorInput, TutorOutput, WrapUpInput, WrapUpOutput } from "./tutor";
 import {
@@ -85,6 +85,8 @@ export type ReviewsDeps = {
   bundle(material: Material): EvidenceBundle;
   watchedSeconds(captureId: CaptureId): number;
   runTutor(input: TutorInput, streamTo: (delta: string) => void, signal: AbortSignal): Promise<Lookup<TutorOutput>>;
+  /** The memo's: a resend clears the stored terminal failure of its tutor call so the model is asked again. */
+  clearFailures: Memo["clearFailures"];
   runWrapUp(input: WrapUpInput): Promise<Lookup<WrapUpOutput>>;
   nextSeq(): Seq;
 };
@@ -95,7 +97,8 @@ type Stored = { readonly captureId: CaptureId; readonly scope: FrozenScope; read
 
 type Attempt =
   | { readonly kind: "spoken"; readonly move: TutorMove; readonly say: string }
-  | { readonly kind: "invalid"; readonly why: string }
+  /** `stored`: the memo holds this invalid output, so a resend replays it instead of asking the model again. */
+  | { readonly kind: "invalid"; readonly why: string; readonly stored: boolean }
   | { readonly kind: "failed"; readonly error: string };
 
 type Settled = { readonly ok: true; readonly lookup: Lookup<TutorOutput> } | { readonly ok: false; readonly error: string };
@@ -299,7 +302,18 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
    * One model call. Deltas are held back until the header is valid, so an
    * invalid header aborts the call before anything is yielded.
    */
-  async function* attempt(reviewId: ReviewId, turnId: TurnId, input: TutorInput): AsyncGenerator<TurnEvent, Attempt> {
+  /**
+   * A terminal failure stored before this request began answered an earlier send,
+   * not this one, so a resend clears it and asks the model once more.
+   */
+  async function runTutor(input: TutorInput, onDelta: (d: string) => void, signal: AbortSignal, asOf: Seq): Promise<Lookup<TutorOutput>> {
+    const lookup = await deps.runTutor(input, onDelta, signal);
+    if (lookup.kind !== "failed" || lookup.atSeq > asOf) return lookup;
+    deps.clearFailures([lookup.key]);
+    return deps.runTutor(input, onDelta, signal);
+  }
+
+  async function* attempt(reviewId: ReviewId, turnId: TurnId, input: TutorInput, asOf: Seq): AsyncGenerator<TurnEvent, Attempt> {
     const queue: TurnEvent[] = [];
     let wake: (() => void) | null = null;
     const push = (e: TurnEvent) => {
@@ -341,7 +355,7 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     };
 
     let settled: Settled | null = null;
-    deps.runTutor(input, onDelta, ctl.signal).then(
+    runTutor(input, onDelta, ctl.signal, asOf).then(
       (lookup): Settled => ({ ok: true, lookup }),
       (err: unknown): Settled => ({ ok: false, error: err instanceof Error ? err.message : String(err) }),
     ).then((s) => {
@@ -356,8 +370,8 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
       wake = null;
     }
 
-    if (invalid !== null) return { kind: "invalid", why: invalid };
     const result = settled as Settled;
+    if (invalid !== null) return { kind: "invalid", why: invalid, stored: result.ok && result.lookup.kind === "hit" };
     if (!result.ok) return { kind: "failed", error: result.error };
     const lookup = result.lookup;
     if (lookup.kind === "failed") return { kind: "failed", error: lookup.lastError };
@@ -368,7 +382,7 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
       return { kind: "spoken", move: streamedMove ?? lookup.value.move, say: lookup.value.say };
     }
     const verdict = kit.validateMove(lookup.value.move, input);
-    if (!verdict.ok) return { kind: "invalid", why: verdict.why };
+    if (!verdict.ok) return { kind: "invalid", why: verdict.why, stored: true };
     yield { type: "move", turnId: outId, move: lookup.value.move };
     yield* spoken(lookup.value.say);
     return { kind: "spoken", move: lookup.value.move, say: lookup.value.say };
@@ -429,20 +443,23 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
       repairNote: null,
     };
 
-    let outcome = yield* attempt(reviewId, turnId, input);
-    if (outcome.kind === "invalid") outcome = yield* attempt(reviewId, turnId, { ...input, repairNote: outcome.why });
+    const asOf = deps.nextSeq();
+    let outcome = yield* attempt(reviewId, turnId, input, asOf);
+    let replayed = outcome.kind === "invalid" && outcome.stored;
+    if (outcome.kind === "invalid") outcome = yield* attempt(reviewId, turnId, { ...input, repairNote: outcome.why }, asOf);
     if (outcome.kind === "invalid") {
+      replayed &&= outcome.stored;
       const fallback = codeMove(input);
-      if (fallback) {
-        yield { type: "move", turnId: outId, move: fallback.move };
-        yield* spoken(fallback.say);
-        outcome = { kind: "spoken", ...fallback };
-      } else {
-        outcome = { kind: "failed", error: `no valid move: ${outcome.why}` };
+      if (!fallback) {
+        yield { type: "turn_failed", error: `no valid move: ${outcome.why}`, retryable: !replayed };
+        return;
       }
+      yield { type: "move", turnId: outId, move: fallback.move };
+      yield* spoken(fallback.say);
+      outcome = { kind: "spoken", ...fallback };
     }
-    if (outcome.kind !== "spoken") {
-      yield { type: "turn_failed", error: outcome.kind === "failed" ? outcome.error : "invalid move", retryable: true };
+    if (outcome.kind === "failed") {
+      yield { type: "turn_failed", error: outcome.error, retryable: true };
       return;
     }
 
