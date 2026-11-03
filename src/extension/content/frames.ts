@@ -17,6 +17,7 @@
 import { FRAME_BOUNDS } from "../../shared/domain";
 import type { CaptureFactBody, FrameTrigger } from "../../shared/domain";
 import { media } from "../../shared/time";
+import { createAdProbe, findPlayer } from "./capture";
 import type { Emit } from "./capture";
 
 export type FrameSamplerConfig = {
@@ -44,6 +45,7 @@ export type FrameSampler = { setObserving(on: boolean): void; dispose(): void };
 
 /** Media seconds of advance with the tab visible and no frame callback before we call decode stalled. */
 export const STALL_MEDIA_S = 3;
+const STALL_JUMP_SLACK_S = 1.5;
 
 // ───────────────────────────── Pure pixel helpers ───────────────────────────
 
@@ -213,11 +215,24 @@ export function canvasPixels(video: HTMLVideoElement, cfg: FrameSamplerConfig): 
   };
 }
 
+/**
+ * R2: "Ad time never becomes evidence." Looks the player up on every call (YouTube
+ * can swap it on navigation) and fails closed: no player to ask means an ad may be playing.
+ * The sampler has no source duration, so only the DOM signal applies here; callers
+ * who hold the duration inject their own createAdProbe.
+ */
+function defaultAdProbe(video: HTMLVideoElement): () => boolean {
+  return () => {
+    const found = findPlayer();
+    return found === null ? true : createAdProbe(found.player, video, () => null)();
+  };
+}
+
 function browserFrameDeps(video: HTMLVideoElement, cfg: FrameSamplerConfig): FrameDeps {
   return {
     pixels: canvasPixels(video, cfg),
     isHidden: () => document.hidden,
-    adShowing: () => false,
+    adShowing: defaultAdProbe(video),
     every: (ms, fn) => {
       const id = setInterval(fn, ms);
       return () => clearInterval(id);
@@ -251,6 +266,8 @@ export function createFrameSampler(video: HTMLVideoElement, emit: Emit, videoId:
   let fsVideoId = "";
   let health = initialHealth;
   let stallBaseT: number | null = null;
+  let lastCheckT: number | null = null;
+  let epoch = 0; // bumped on every on/off flip, so an encode begun in one capture cannot land in the next
 
   const report = (r: "ok" | "stalled" | "failed" | null, cause: HealthCause, vid: string, atMediaS: number, extra = "") => {
     if (r === null) return;
@@ -275,15 +292,23 @@ export function createFrameSampler(video: HTMLVideoElement, emit: Emit, videoId:
     report(r.report, "readback", vid, atMediaS);
   };
 
+  const resetStall = () => {
+    stallBaseT = null;
+    lastCheckT = null;
+  };
+
   const keepFrame = async (k: FrameKeep, vid: string, t: number, size: { readonly w: number; readonly h: number }) => {
+    const startedIn = epoch;
+    // The encode is async: the world can change between the decision and the bytes.
+    const stale = () => disposed || !observing || epoch !== startedIn || d.isHidden() || d.adShowing();
     let jpegBase64: string;
     try {
       jpegBase64 = await d.pixels.jpegBase64(size.w, size.h);
     } catch (e) {
-      fail("encode", vid, t, `: ${e instanceof Error ? e.message : String(e)}`);
+      if (!stale()) fail("encode", vid, t, `: ${e instanceof Error ? e.message : String(e)}`);
       return;
     }
-    if (disposed) return;
+    if (stale()) return;
     emit({ kind: "frame", videoId: vid, frameId: crypto.randomUUID(), mediaS: media(t), width: size.w, height: size.h, trigger: k.trigger, diff: k.diff, jpegBase64 });
     ok(["size", "encode"], false, vid, t);
   };
@@ -296,10 +321,11 @@ export function createFrameSampler(video: HTMLVideoElement, emit: Emit, videoId:
     }
     if (!observing || vid === "") return;
     if (d.isHidden() || d.adShowing()) {
-      stallBaseT = null;
+      resetStall();
       return;
     }
     stallBaseT = t;
+    lastCheckT = t;
     ok(["tab_hidden", "decode_stalled"], false, vid, t);
     if (video.videoWidth === 0 || video.videoHeight === 0) return; // no picture yet
     if (!shouldSample(fs, t, cfg)) return;
@@ -328,18 +354,24 @@ export function createFrameSampler(video: HTMLVideoElement, emit: Emit, videoId:
     const vid = videoId();
     if (vid === "") return;
     if (video.paused || video.ended || video.seeking || d.adShowing()) {
-      stallBaseT = null;
+      resetStall();
       return;
     }
     const t = video.currentTime;
     if (d.isHidden()) {
-      stallBaseT = null;
+      resetStall();
       fail("tab_hidden", vid, t);
       return;
     }
+    // Playback moves at most rate seconds per 1 s tick; anything else was a seek, so the old baseline says nothing.
+    if (lastCheckT !== null && (t < lastCheckT || t - lastCheckT > Math.max(video.playbackRate, 1) + STALL_JUMP_SLACK_S)) resetStall();
+    lastCheckT = t;
     if (stallBaseT === null) stallBaseT = t;
     else if (t - stallBaseT >= STALL_MEDIA_S) fail("decode_stalled", vid, t);
   };
+
+  video.addEventListener("seeking", resetStall);
+  video.addEventListener("seeked", resetStall);
 
   let handle = 0;
   const loop: VideoFrameRequestCallback = (_now, meta) => {
@@ -354,14 +386,17 @@ export function createFrameSampler(video: HTMLVideoElement, emit: Emit, videoId:
     setObserving(on) {
       if (on === observing) return;
       observing = on;
+      epoch++;
       fs = freshFrameState; // a resumed capture starts with a "first" frame of what is on screen
       fsVideoId = "";
-      stallBaseT = null;
+      resetStall();
     },
     dispose() {
       disposed = true;
       observing = false;
       stopInterval();
+      video.removeEventListener("seeking", resetStall);
+      video.removeEventListener("seeked", resetStall);
       video.cancelVideoFrameCallback(handle);
     },
   };

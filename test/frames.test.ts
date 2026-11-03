@@ -179,7 +179,7 @@ describe("channel health", () => {
 
 type FrameCb = (now: number, meta: { mediaTime: number }) => void;
 
-function rig(opts: { width?: number; height?: number; holdJpeg?: boolean } = {}) {
+function rig(opts: { width?: number; height?: number; holdJpeg?: boolean; failJpeg?: boolean } = {}) {
   const held: (() => void)[] = [];
   const facts: CaptureFactBody[] = [];
   let hidden = false;
@@ -192,10 +192,11 @@ function rig(opts: { width?: number; height?: number; holdJpeg?: boolean } = {})
   const intervals = new Set<() => void>();
   const jpegCalls: { w: number; h: number; screen: Uint8Array }[] = [];
 
-  const video = {
+  const video = Object.assign(new EventTarget(), {
     videoWidth: opts.width ?? 1920,
     videoHeight: opts.height ?? 1080,
     currentTime: 0,
+    playbackRate: 1,
     paused: false,
     ended: false,
     seeking: false,
@@ -206,7 +207,7 @@ function rig(opts: { width?: number; height?: number; holdJpeg?: boolean } = {})
     cancelVideoFrameCallback: () => {
       cb = null;
     },
-  } as unknown as HTMLVideoElement;
+  }) as unknown as HTMLVideoElement;
 
   const sampler = createFrameSampler(video, (f) => facts.push(f), () => current, CFG, {
     pixels: {
@@ -218,6 +219,7 @@ function rig(opts: { width?: number; height?: number; holdJpeg?: boolean } = {})
       jpegBase64: async (w, h) => {
         jpegCalls.push({ w, h, screen });
         if (opts.holdJpeg) await new Promise<void>((res) => held.push(res));
+        if (opts.failJpeg) throw new Error("encode boom");
         return "QUJD";
       },
     },
@@ -248,6 +250,14 @@ function rig(opts: { width?: number; height?: number; holdJpeg?: boolean } = {})
     setAd: (a: boolean) => (ad = a),
     setVideoId: (id: string) => (current = id),
     throwOnRead: (e: Error | null) => (thumbThrows = e),
+    /** A seek between health ticks; `signalled: false` models a jump the element never announced. */
+    seek(to: number, signalled = true) {
+      (video as unknown as { currentTime: number }).currentTime = to;
+      if (signalled) {
+        video.dispatchEvent(new Event("seeking"));
+        video.dispatchEvent(new Event("seeked"));
+      }
+    },
     /** One presented frame at media time t, then let async JPEG encoding finish. */
     async frame(t: number) {
       (video as unknown as { currentTime: number }).currentTime = t;
@@ -443,5 +453,129 @@ describe("frame sampler", () => {
     expect(r.hasCallback()).toBe(false);
     await r.releaseJpegs();
     expect(r.frames()).toEqual([]);
+  });
+
+  test("an encode that finishes after the tab hid drops the frame", async () => {
+    const r = rig({ holdJpeg: true });
+    r.sampler.setObserving(true);
+    await r.frame(0);
+    r.setHidden(true);
+    await r.releaseJpegs();
+    expect(r.frames()).toEqual([]);
+  });
+
+  test("R2: an encode that finishes after an ad started drops the frame", async () => {
+    const r = rig({ holdJpeg: true });
+    r.sampler.setObserving(true);
+    await r.frame(0);
+    r.setAd(true);
+    await r.releaseJpegs();
+    expect(r.frames()).toEqual([]);
+  });
+
+  test("an encode that finishes after capture stopped drops the frame, even if capture resumed", async () => {
+    const r = rig({ holdJpeg: true });
+    r.sampler.setObserving(true);
+    await r.frame(0);
+    r.sampler.setObserving(false);
+    await r.releaseJpegs();
+    expect(r.frames()).toEqual([]);
+
+    r.sampler.setObserving(true);
+    await r.frame(40);
+    r.sampler.setObserving(false);
+    r.sampler.setObserving(true);
+    await r.releaseJpegs();
+    expect(r.frames()).toEqual([]);
+  });
+
+  test("an encode that fails after capture stopped reports nothing", async () => {
+    const r = rig({ holdJpeg: true, failJpeg: true });
+    r.sampler.setObserving(true);
+    await r.frame(0);
+    r.sampler.setObserving(false);
+    await r.releaseJpegs();
+    expect(r.facts.filter((f) => f.kind === "channel" && f.health === "failed")).toEqual([]);
+  });
+});
+
+describe("decode-stall baseline", () => {
+  test("a seek between health ticks is not a decode stall", async () => {
+    const r = rig();
+    r.sampler.setObserving(true);
+    await r.frame(0);
+    r.advanceWithoutFrames(0, 1);
+    r.seek(20);
+    r.advanceWithoutFrames(20, 1);
+    expect(r.channels().filter((c) => c.health === "stalled")).toEqual([]);
+  });
+
+  test("a jump the element never announced is not a decode stall", async () => {
+    const r = rig();
+    r.sampler.setObserving(true);
+    await r.frame(0);
+    r.advanceWithoutFrames(0, 1);
+    r.seek(20, false);
+    r.advanceWithoutFrames(20, 1);
+    expect(r.channels().filter((c) => c.health === "stalled")).toEqual([]);
+  });
+
+  test("a backward seek is not a decode stall either, and a real stall after it is still caught", async () => {
+    const r = rig();
+    r.sampler.setObserving(true);
+    await r.frame(50);
+    r.advanceWithoutFrames(50, 2);
+    r.seek(5);
+    r.advanceWithoutFrames(5, STALL_MEDIA_S + 2);
+    expect(r.channels().filter((c) => c.health === "stalled").length).toBe(1);
+  });
+});
+
+describe("default ad probe", () => {
+  type Doc = { querySelector(sel: string): unknown };
+  const g = globalThis as unknown as { document?: Doc };
+
+  /** The four-argument call a caller makes, with only pixels and timers injected. */
+  async function emitsFramesWith(page: { player: { adClass: boolean } | null }): Promise<number> {
+    const saved = g.document;
+    const facts: CaptureFactBody[] = [];
+    const video = Object.assign(new EventTarget(), { videoWidth: 1920, videoHeight: 1080, currentTime: 0, playbackRate: 1, paused: false, ended: false, seeking: false, duration: 600 });
+    let cb: ((n: number, m: { mediaTime: number }) => void) | null = null;
+    (video as unknown as { requestVideoFrameCallback: unknown }).requestVideoFrameCallback = (f: typeof cb) => ((cb = f), 1);
+    (video as unknown as { cancelVideoFrameCallback: unknown }).cancelVideoFrameCallback = () => {};
+    const player =
+      page.player === null
+        ? null
+        : { classList: { contains: (c: string) => page.player!.adClass && c === "ad-showing" }, querySelector: (sel: string) => (sel.startsWith("video") ? video : null) };
+    g.document = { querySelector: (sel: string) => (sel === "#movie_player" ? player : null) };
+    try {
+      const sampler = createFrameSampler(video as unknown as HTMLVideoElement, (f) => facts.push(f), () => "aaaaaaaaaaa", CFG, {
+        pixels: { thumb: () => board(0), jpegBase64: async () => "QUJD" },
+        isHidden: () => false,
+        every: () => () => {},
+      });
+      sampler.setObserving(true);
+      for (let t = 0; t < 5; t++) {
+        cb!(0, { mediaTime: t });
+        await Promise.resolve();
+        await Promise.resolve();
+      }
+      sampler.dispose();
+    } finally {
+      g.document = saved;
+    }
+    return facts.filter((f) => f.kind === "frame").length;
+  }
+
+  test("R2: with no injected probe, an ad in the real player emits no frames", async () => {
+    expect(await emitsFramesWith({ player: { adClass: true } })).toBe(0);
+  });
+
+  test("R2: with no injected probe and no player to ask, ads are assumed showing", async () => {
+    expect(await emitsFramesWith({ player: null })).toBe(0);
+  });
+
+  test("with no injected probe, a player showing content still yields frames", async () => {
+    expect(await emitsFramesWith({ player: { adClass: false } })).toBeGreaterThan(0);
   });
 });
