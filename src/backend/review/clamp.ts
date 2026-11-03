@@ -98,10 +98,12 @@ export function threadDispute(threadId: ThreadId, turns: readonly Turn[]): Exclu
 }
 
 /**
+ * R3: "A claim can be used to judge my answers only if it passed the evidence check."
  * R12: "If the tutor helped before my answer, it can't count as independent."
  * R13: "A skipped or unanswered question is never counted as understood."
  * R14: "A disputed assessment is never counted as a learning gap unless I resolve it that way."
  *
+ *   a thread claim not assessable at save        → "not_assessed"  (R3, TLC fix: out of assessment until it passes again)
  *   dispute open or unsettled                    → "disputed"      (R14, explicit clamp; the TLC fix)
  *   learner resolved it_was_my_gap:
  *     proposed is a gap status                   → proposed
@@ -114,12 +116,13 @@ export function threadDispute(threadId: ThreadId, turns: readonly Turn[]): Exclu
  *   otherwise                                    → proposed
  * The learner's override is clamped the same way. Returns what it was clamped from, for the audit line.
  */
-export function clampStatus(proposed: ObservationStatus, facts: ThreadFacts, dispute: DisputeState): { readonly status: RecordedStatus; readonly clampedFrom: ObservationStatus | null } {
-  const status = clamped(proposed, facts, dispute);
+export function clampStatus(proposed: ObservationStatus, facts: ThreadFacts, dispute: DisputeState, assessable: boolean): { readonly status: RecordedStatus; readonly clampedFrom: ObservationStatus | null } {
+  const status = clamped(proposed, facts, dispute, assessable);
   return { status, clampedFrom: status === proposed ? null : proposed };
 }
 
-function clamped(proposed: ObservationStatus, facts: ThreadFacts, dispute: DisputeState): RecordedStatus {
+function clamped(proposed: ObservationStatus, facts: ThreadFacts, dispute: DisputeState, assessable: boolean): RecordedStatus {
+  if (!assessable) return "not_assessed";
   if (dispute.kind === "open" || dispute.kind === "unsettled") return "disputed";
   if (dispute.kind === "resolved_by_learner" && dispute.outcome === "it_was_my_gap") return GAP.has(proposed) ? proposed : "unresolved";
   const answeredAt = facts.firstSubstantiveAnswerSeq;

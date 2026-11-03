@@ -46,7 +46,7 @@ const ask = (t: ThreadId, n: number): TutorMove => ({ kind: "ask_main", threadId
 const answer = (text: string): LearnerAct => ({ kind: "answer", text, modality: "speech" });
 const facts = (l: ReturnType<typeof log>, t: ThreadId = T1) => threadFacts(t, l.turns);
 const clamp = (l: ReturnType<typeof log>, proposed: Parameters<typeof clampStatus>[0], t: ThreadId = T1) =>
-  clampStatus(proposed, facts(l, t), threadDispute(t, l.turns)).status;
+  clampStatus(proposed, facts(l, t), threadDispute(t, l.turns), true).status;
 
 describe("R12: help before the answer caps at after_help", () => {
   test.each([
@@ -55,14 +55,14 @@ describe("R12: help before the answer caps at after_help", () => {
     ["correction disclosure", { kind: "disclose_correction", correctionId: "c1", threadIds: [T1], evidence: [] }],
   ] as const)("%s before the first answer", (_, help) => {
     const l = log().tutor(ask(T1, 1)).learner({ kind: "hint_request" }, T1).tutor(help as TutorMove).learner(answer("rows meet"), T1);
-    expect(clampStatus("independent", facts(l), NONE)).toEqual({ status: "after_help", clampedFrom: "independent" });
+    expect(clampStatus("independent", facts(l), NONE, true)).toEqual({ status: "after_help", clampedFrom: "independent" });
     expect(clamp(l, "partial")).toBe("after_help");
     expect(clamp(l, "unresolved")).toBe("unresolved");
   });
 
   test("help after the first answer does not cap", () => {
     const l = log().tutor(ask(T1, 1)).learner(answer("rows meet"), T1).tutor({ kind: "hint", threadId: T1 });
-    expect(clampStatus("independent", facts(l), NONE)).toEqual({ status: "independent", clampedFrom: null });
+    expect(clampStatus("independent", facts(l), NONE, true)).toEqual({ status: "independent", clampedFrom: null });
   });
 
   test("help on another thread does not cap this one", () => {
@@ -74,7 +74,7 @@ describe("R12: help before the answer caps at after_help", () => {
 describe("R13: skipped or unanswered is not_assessed", () => {
   test("a skipped question", () => {
     const l = log().tutor(ask(T1, 1)).learner({ kind: "skip" }, T1);
-    expect(clampStatus("independent", facts(l), NONE)).toEqual({ status: "not_assessed", clampedFrom: "independent" });
+    expect(clampStatus("independent", facts(l), NONE, true)).toEqual({ status: "not_assessed", clampedFrom: "independent" });
   });
 
   test("a question with no learner turn at all", () => {

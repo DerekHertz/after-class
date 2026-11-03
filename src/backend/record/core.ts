@@ -10,7 +10,8 @@ import { attributeTurns, moveThreads, threadFacts } from "../review/clamp";
 export type RecordBundle = {
   readonly hash: string;
   readonly notes: readonly Omit<Note, "userEdit">[];
-  readonly observations: readonly Omit<Observation, "status" | "clampedFrom" | "dispute" | "corrections">[];
+  /** `assessable`: every claim the thread asked about was still usable at save (R3). */
+  readonly observations: readonly (Omit<Observation, "status" | "clampedFrom" | "dispute" | "corrections"> & { readonly assessable: boolean })[];
   readonly links: readonly SubjectLinkSuggestion[];
   readonly evidence: readonly EvidenceId[];
 };
@@ -56,6 +57,7 @@ export function buildBundle(reviewId: ReviewId, turns: readonly Turn[], claims: 
     conceptIds: conceptsOf(th.claims),
     proposed: proposals.get(th.id) ?? "not_assessed",
     facts: threadFacts(th.id, ordered),
+    assessable: th.claims.every((id) => claimById.has(id)),
   }));
 
   const known = new Set<string>(claims.flatMap((c) => c.evidence));
