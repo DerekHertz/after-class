@@ -193,7 +193,7 @@ describe("append-only facts and snapshots", () => {
          VALUES ('crv_1', 'chk_1', 'cap_1', 0, 1, '[]', '[]', 'boundary', ?, NULL)`,
       )
       .run(db.nextSeq());
-    expect(() => db.sql.run("UPDATE chunk_revisions SET provenance = 'time'")).toThrow(/R7/);
+    expect(() => db.sql.run("UPDATE chunk_revisions SET provenance = 'time'")).toThrow(/append-only/);
   });
 
   test("R14: the record refuses 'disputed' as a stored proposal or override", () => {

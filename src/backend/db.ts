@@ -42,9 +42,9 @@ const PENDING_SAVE_HOLDS = (captureCol: string) => `EXISTS (
     WHERE r.capture_id = ${captureCol}
       AND NOT EXISTS (SELECT 1 FROM saved_reviews s WHERE s.review_id = r.id))`;
 
-const appendOnly = (table: string, rule: string) => `
+const appendOnly = (table: string, rule?: string) => `
 CREATE TRIGGER ${table}_no_update BEFORE UPDATE ON ${table}
-BEGIN SELECT RAISE(ABORT, '${rule}: ${table} is append-only'); END;`;
+BEGIN SELECT RAISE(ABORT, '${rule ? `${rule}: ` : ""}${table} is append-only'); END;`;
 
 export const MIGRATIONS: { readonly [O in Owner]: readonly Migration[] } = {
   kernel: [
@@ -131,7 +131,7 @@ CREATE TABLE capture_facts (
   received_ms INTEGER NOT NULL,
   UNIQUE (capture_id, client_seq)
 ) STRICT;
-${appendOnly("capture_facts", "R1")}
+${appendOnly("capture_facts")}
 
 CREATE TABLE frames (
   evidence_id TEXT PRIMARY KEY,
@@ -146,7 +146,7 @@ CREATE TABLE frames (
   UNIQUE (capture_id, frame_id)
 ) STRICT;
 CREATE INDEX frames_by_source ON frames (source_id, media_s);
-${appendOnly("frames", "R1")}
+${appendOnly("frames")}
 
 -- Copies of cited evidence, written in the save transaction. Content-addressed and insert-only.
 CREATE TABLE evidence_snapshots (
@@ -212,7 +212,7 @@ CREATE TABLE chunk_revisions (
   CHECK ((revision_no = 1) = (supersedes IS NULL))
 ) STRICT;
 CREATE INDEX chunk_revisions_by_capture ON chunk_revisions (capture_id, ordinal, revision_no);
-${appendOnly("chunk_revisions", "R7")}`,
+${appendOnly("chunk_revisions")}`,
     },
   ],
 
@@ -249,7 +249,7 @@ CREATE TABLE prep_controls (
   at_ms INTEGER NOT NULL,
   PRIMARY KEY (seq, chunk_revision_id)
 ) STRICT;
-${appendOnly("prep_controls", "R8")}`,
+${appendOnly("prep_controls")}`,
     },
   ],
 
@@ -264,7 +264,7 @@ CREATE TABLE invite_answers (
   watched_s REAL NOT NULL CHECK (watched_s >= 0),
   at_ms INTEGER NOT NULL
 ) STRICT;
-${appendOnly("invite_answers", "R5")}
+${appendOnly("invite_answers")}
 
 -- R7: "Once a review starts, its scope never grows; corrections can change claims inside it but can't add material."
 -- The id is minted by the app, so a retried start inserts nothing.
@@ -289,7 +289,7 @@ CREATE TABLE review_turns (
   at_ms INTEGER NOT NULL
 ) STRICT;
 CREATE INDEX review_turns_by_review ON review_turns (review_id, seq);
-${appendOnly("review_turns", "R15")}`,
+${appendOnly("review_turns")}`,
     },
   ],
 
