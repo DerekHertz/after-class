@@ -71,6 +71,10 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
   const sorted = bySeq(turns);
   let activeMs = 0;
   let activeSince: number | null = sorted[0]?.atMs ?? null;
+  const stopClock = (atMs: number) => {
+    if (activeSince !== null) activeMs += atMs - activeSince;
+    activeSince = null;
+  };
 
   for (const t of sorted) {
     if (t.actor === "learner") {
@@ -79,11 +83,16 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
       if (detour.kind === "proposed" && !KEEPS_PROPOSAL.has(act.kind)) detour = { kind: "none" };
       switch (act.kind) {
         case "pause":
-          if (phase === "active" && activeSince !== null) activeMs += t.atMs - activeSince;
-          if (phase === "active") [phase, activeSince] = ["paused", null];
+          if (phase === "active") {
+            stopClock(t.atMs);
+            phase = "paused";
+          }
           break;
         case "resume":
-          if (phase === "paused") [phase, activeSince] = ["active", t.atMs];
+          if (phase === "paused") {
+            phase = "active";
+            activeSince = t.atMs;
+          }
           break;
         case "end":
         case "wrap_up":
@@ -135,8 +144,8 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
           disclosed.add(move.correctionId);
           break;
         case "wrap_up":
-          if (phase === "active" && activeSince !== null) activeMs += t.atMs - activeSince;
-          [phase, activeSince] = ["ended", null];
+          stopClock(t.atMs);
+          phase = "ended";
           break;
         default:
           break;
