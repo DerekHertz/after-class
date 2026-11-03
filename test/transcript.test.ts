@@ -1,10 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { media } from "../src/shared/time";
 import type { TranscriptSegment } from "../src/shared/domain";
 import { parseTimedTextUrl } from "../src/extension/content/main-world";
 import {
   buildTranscript, decodeEntities, isTimedTextMessage, isUsable, languageFromPanelHtml, normalizeText, parseClock, parseJson3, parseLanguageLabel,
-  rowsFromHtml, segmentsFromRows,
+  rowsFromHtml, segmentsFromRows, acquireTranscript, startCaptionListener,
 } from "../src/extension/content/transcript";
 
 const oldRow = (ts: string, text: string) => `
@@ -151,6 +151,12 @@ describe("json3 captions", () => {
       expect(parseJson3(junk)).toEqual([]);
     }
   });
+
+  test("an event with a negative or non-finite start is skipped, and the rest survive", () => {
+    const at = (tStartMs: number, text: string) => ({ tStartMs, dDurationMs: 900, segs: [{ utf8: text }] });
+    const out = parseJson3({ events: [at(-3000, "pre-roll"), at(Number.NaN, "nan"), at(Number.POSITIVE_INFINITY, "inf"), at(0, "a"), at(1000, "b")] });
+    expect(out.map((s) => s.text)).toEqual(["a", "b"]);
+  });
 });
 
 describe("usability check", () => {
@@ -216,5 +222,45 @@ describe("caption interception", () => {
     expect(isTimedTextMessage({ ...good, source: "other" })).toBe(false);
     expect(isTimedTextMessage({ ...good, asr: "no" })).toBe(false);
     expect(isTimedTextMessage(null)).toBe(false);
+  });
+});
+
+describe("acquireTranscript never hangs", () => {
+  const g = globalThis as unknown as Record<string, unknown>;
+  const saved = { window: g.window, document: g.document };
+  afterEach(() => {
+    g.window = saved.window;
+    g.document = saved.document;
+  });
+
+  function fakeWindow() {
+    const listeners: ((e: unknown) => void)[] = [];
+    const win = { location: { origin: "https://www.youtube.com" }, addEventListener: (_: string, f: (e: unknown) => void) => listeners.push(f) };
+    g.window = win;
+    return { deliver: (data: unknown) => listeners.forEach((f) => f({ source: win, origin: win.location.origin, data })) };
+  }
+  const event = (tStartMs: number, i: number) => ({ tStartMs, dDurationMs: 900, segs: [{ utf8: `sentence number ${i}` }] });
+
+  test("a caption track with a negative start still becomes a transcript instead of vanishing", async () => {
+    const { deliver } = fakeWindow();
+    startCaptionListener();
+    g.document = { querySelector: () => null, querySelectorAll: () => [] };
+    const events = [event(-3000, -1), ...Array.from({ length: 8 }, (_, i) => event(i * 1000, i))];
+    const pending = acquireTranscript("NEGSTART_aaa", 8, 500);
+    deliver({ source: "afterclass", kind: "timedtext", videoId: "NEGSTART_aaa", lang: "en", asr: false, payload: { events } });
+    const r = await pending;
+    expect(r.kind).toBe("transcript");
+    if (r.kind === "transcript") expect(r.segments).toHaveLength(8);
+  });
+
+  test("a panel whose rows never stop changing is abandoned at the overall deadline", async () => {
+    fakeWindow();
+    let rows = 0;
+    const panel = { getAttribute: () => "ENGAGEMENT_PANEL_VISIBILITY_EXPANDED", querySelectorAll: () => Array.from({ length: ++rows }), outerHTML: "", querySelector: () => null };
+    g.document = { querySelector: () => panel, querySelectorAll: () => [] };
+    const started = Date.now();
+    const r = await acquireTranscript("NEVERSETTLE", 600, 100, 400);
+    expect(r.kind).toBe("transcript_unavailable");
+    expect(Date.now() - started).toBeLessThan(2000);
   });
 });
