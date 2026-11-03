@@ -24,7 +24,7 @@ import { Material } from "../../shared/time";
 import { ProviderError } from "../providers/memo";
 import type { Task } from "../providers/memo";
 import type { ClaudeCli, ClaudeRequest } from "../providers/claude";
-import { moveThreads } from "./clamp";
+import { attributeTurns, moveThreads } from "./clamp";
 
 export const MAX_MAIN_QUESTIONS = 3;
 
@@ -68,7 +68,7 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
   let wrapUpRequested = false;
   const readyResources = new Set<ResourceId>();
   const disclosed = new Set<string>();
-  const sorted = bySeq(turns);
+  const sorted = attributeTurns(turns);
   let activeMs = 0;
   let activeSince: number | null = sorted[0]?.atMs ?? null;
   const stopClock = (atMs: number) => {
@@ -102,7 +102,7 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
           wrapUpRequested = false;
           break;
         case "dispute":
-          openDispute = t.threadId ?? openThread;
+          openDispute = t.threadId;
           break;
         case "detour_accept":
           if (detour.kind === "proposed") {

@@ -5,7 +5,7 @@ import { canonicalJson, stableId } from "../../shared/ids";
 import type { ConceptId, EvidenceId, IdPart, ReviewId, ThreadId } from "../../shared/ids";
 import type { AssessableClaim, NonEmpty, Note, NoteSegment, Observation, SubjectLinkSuggestion, Turn } from "../../shared/domain";
 import type { WrapUpOutput } from "../review/tutor";
-import { moveThreads, threadFacts } from "../review/clamp";
+import { attributeTurns, moveThreads, threadFacts } from "../review/clamp";
 
 export type RecordBundle = {
   readonly hash: string;
@@ -34,7 +34,7 @@ function sortedUnique<T extends string>(xs: Iterable<T>): T[] {
  * Every thread gets an observation; a thread the wrap-up skipped is proposed not_assessed.
  */
 export function buildBundle(reviewId: ReviewId, turns: readonly Turn[], claims: readonly AssessableClaim[], wrapUp: WrapUpOutput, links: readonly SubjectLinkSuggestion[] = []): RecordBundle {
-  const ordered = [...turns].sort((a, b) => a.seq - b.seq);
+  const ordered = attributeTurns(turns);
   const claimById = new Map(claims.map((c) => [c.id, c]));
 
   const threads: { readonly id: ThreadId; readonly claims: NonEmpty<AssessableClaim["id"]> }[] = [];

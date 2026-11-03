@@ -12,8 +12,18 @@ import { HELP_MOVES } from "../../shared/domain";
 
 const HELP: ReadonlySet<TutorMove["kind"]> = new Set(HELP_MOVES);
 
-function bySeq(turns: readonly Turn[]): readonly Turn[] {
-  return [...turns].sort((a, b) => a.seq - b.seq);
+/**
+ * Turns in seq order, each learner turn sent with no thread attributed to the
+ * thread open at that point. The tutor's state, the clamp and the record all
+ * read turns through this, so they agree on which thread a learner act is about.
+ */
+export function attributeTurns(turns: readonly Turn[]): readonly Turn[] {
+  let open: ThreadId | null = null;
+  return [...turns].sort((a, b) => a.seq - b.seq).map((t) => {
+    if (t.actor === "tutor" && t.move.kind === "ask_main") open = t.move.threadId;
+    else if (t.actor === "tutor" && t.move.kind === "close_thread" && t.move.threadId === open) open = null;
+    return t.actor === "learner" && t.threadId === null && open !== null ? { ...t, threadId: open } : t;
+  });
 }
 
 /** The threads a tutor move is about. A correction disclosure can touch several. */
@@ -44,7 +54,7 @@ export function threadFacts(threadId: ThreadId, turns: readonly Turn[]): ThreadF
   let saidDontKnow = false;
   const learnerTurns: TurnId[] = [];
   const helpTurns: TurnId[] = [];
-  for (const t of bySeq(turns)) {
+  for (const t of attributeTurns(turns)) {
     if (t.actor === "learner" && t.threadId === threadId) {
       learnerTurns.push(t.id);
       const k = t.act.kind;
@@ -77,7 +87,7 @@ export function threadFacts(threadId: ThreadId, turns: readonly Turn[]): ThreadF
  */
 export function threadDispute(threadId: ThreadId, turns: readonly Turn[]): Exclude<DisputeState, { kind: "resolved_by_learner" }> {
   let d: Exclude<DisputeState, { kind: "resolved_by_learner" }> = { kind: "none" };
-  for (const t of bySeq(turns)) {
+  for (const t of attributeTurns(turns)) {
     if (t.actor === "learner" && t.threadId === threadId && t.act.kind === "dispute") d = { kind: "open", turnId: t.id };
     else if (t.actor === "tutor" && t.move.kind === "answer_dispute" && t.move.threadId === threadId && !t.move.settled && d.kind !== "none") d = { kind: "unsettled" };
   }
