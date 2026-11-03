@@ -391,7 +391,7 @@ export async function main(options: MainOptions = {}): Promise<Running> {
   );
 
   // The scheduler is the only holder of these; http gets the same store with ingest registering the capture first.
-  const served: EvidenceStore = {
+  const served: EvidenceStoreWithProbe = {
     ...evidence,
     ingest(batch) {
       captures.add(batch.captureId);
@@ -408,7 +408,7 @@ export async function main(options: MainOptions = {}): Promise<Running> {
     }
   }
 
-  const server = serve({ modules: { ledger, evidence: served, reviews }, auth: { port, extensionId, token }, appDir });
+  const server = serve({ modules: { ledger, evidence: served, reviews, record, preparation, segmentation }, auth: { port, extensionId, token }, appDir });
   const boundPort = server.port as number;
 
   if (extensionId === "") logError("backend: AFTERCLASS_EXTENSION_ID is not set, so the extension's requests are refused (403) until it is");

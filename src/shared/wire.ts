@@ -582,6 +582,8 @@ export const ROUTES = {
   resolveDispute: route("POST", "/record/observations/:observationId/dispute-resolution", { request: disputeResolutionRequest, reply: EMPTY }),
   overrideObservation: route("POST", "/record/observations/:observationId/override", { request: observationOverrideRequest, reply: EMPTY }),
   deleteEvidence: route("POST", "/record/evidence/delete", { request: evidenceDeleteRequest, reply: EMPTY }),
+  /** Re-queues the capture's chunks that are unfinished or have no supported claim. No body; the app's "Check again". */
+  retryPreparation: route("POST", "/captures/:captureId/retry-preparation", { reply: EMPTY }),
 } as const;
 
 export type RouteName = keyof typeof ROUTES;

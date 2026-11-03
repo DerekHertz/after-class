@@ -232,6 +232,55 @@ describe("R15: retrying a save never creates a duplicate record", () => {
   });
 });
 
+describe("saveState reads the persisted save state, not what this process saw", () => {
+  const OTHER = stableId("rvw", "review-2") as ReviewId;
+
+  test("unsaved before any save, save_pending after a failed one, saved after the retry", async () => {
+    const h = harness();
+    expect(h.record.saveState(REVIEW)).toBe("unsaved");
+    h.failNextSnapshots(1);
+    expect((await h.record.save(REVIEW)).kind).toBe("save_failed");
+    expect(h.record.saveState(REVIEW)).toBe("save_pending");
+    expect(h.record.saveState(OTHER)).toBe("unsaved");
+    expect((await h.record.save(REVIEW)).kind).toBe("saved");
+    expect(h.record.saveState(REVIEW)).toBe("saved");
+  });
+
+  test("a failed wrap-up is a pending save too", async () => {
+    let fail = true;
+    const h = harness({ wrapUp: async () => (fail ? Promise.reject(new Error("claude timed out")) : WRAP_UP) });
+    await h.record.save(REVIEW);
+    expect(h.record.saveState(REVIEW)).toBe("save_pending");
+    fail = false;
+    await h.record.save(REVIEW);
+    expect(h.record.saveState(REVIEW)).toBe("saved");
+  });
+
+  test('R15: "Retrying a save never creates a duplicate record." A restart keeps save_pending, and the retry on a fresh record saves once', async () => {
+    const first = harness();
+    first.failNextSnapshots(1);
+    expect((await first.record.save(REVIEW)).kind).toBe("save_failed");
+
+    const restarted = harness({ db: first.db });
+    expect(restarted.record.saveState(REVIEW)).toBe("save_pending");
+    expect((await restarted.record.save(REVIEW)).kind).toBe("saved");
+    expect(restarted.record.saveState(REVIEW)).toBe("saved");
+    expect((await restarted.record.save(REVIEW)).kind).toBe("saved");
+    expect(rows(restarted).notes).toHaveLength(2);
+    expect(rows(restarted).saved_reviews).toHaveLength(1);
+    expect(first.db.sql.query("SELECT COUNT(*) AS n FROM save_failures").get()).toEqual({ n: 0 });
+  });
+
+  test("a saved review stays saved when a later re-save fails", async () => {
+    const h = harness();
+    await h.record.save(REVIEW);
+    h.failNextSnapshots(1);
+    expect((await h.record.save(REVIEW)).kind).toBe("save_failed");
+    expect(h.record.saveState(REVIEW)).toBe("saved");
+    expect((await h.record.save(REVIEW)).kind).toBe("saved");
+  });
+});
+
 describe("the learning record", () => {
   test("contributions are attributed: source claims, learner words verbatim, tutor summary", async () => {
     const h = harness();
