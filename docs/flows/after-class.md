@@ -128,3 +128,40 @@ Drafted as candidates by the agent from the PRD and approved flow; Derek approve
 - R15 `[test]` Retrying a save never creates a duplicate record.
 - R16 `[TLC]` Evidence cited by a saved note is only deleted when I delete it, never by expiry.
 - R17 `[test]` Every paid call records a usage event; unknown cost is stored as unknown, not zero.
+
+## Stack (approved 2026-11-03)
+
+TypeScript throughout. Bun 1.4.3 runs, bundles, serves, tests, and provides SQLite (`bun:sqlite`). Chrome MV3 extension bundled by `Bun.build`, hand-written manifest. Review app is React served by `Bun.serve`. Keys in `~/.config/afterclass/keys.env` (0600), backend-only.
+
+Supply-chain policy: exact pins, committed `bun.lock`, frozen installs, `minimumReleaseAge = 604800` in `bunfig.toml`, no `trustedDependencies` (no dependency install scripts).
+
+| Package | Version | Kind |
+| --- | --- | --- |
+| zod | 4.6.7 | runtime |
+| react, react-dom | 19.3.1 | runtime |
+| @anthropic-ai/sdk | 1.3.0 | runtime |
+| typescript | 7.0.2 | dev |
+| @types/chrome | 0.3.6 | dev |
+| @types/react | 19.3.0 | dev |
+
+Transcript source: YouTube transcript panel first, player caption interception as fallback; only segments inside watched intervals become evidence (R1).
+
+Speech: input via Chrome Web Speech API. Output must not sound robotic (Derek); provider pending. Tutor turns stream to speech by sentence; the tutor stops talking when Derek starts.
+
+Voice provider: parked by Derek (2026-11-03). Candidates when resumed are OpenAI gpt-4o-mini-tts, ElevenLabs and Cartesia, chosen by a blind listening test. Chrome speechSynthesis is the fallback only.
+
+Models: interpretation and tutor default to Claude Opus 5.5 ($4/$20 per MTok, cache read $0.20). Sonnet 5.5 ($2/$10) is the comparison arm in a lab test. Prices are from the Claude API reference cached 2026-10-06.
+
+## Live-call scope (approved 2026-11-03)
+
+Five named experiments. Claude calls go through `claude -p` on Derek's subscription, with cost recorded as notional. Jev runs on `TYPESAFE_API_KEY`, with cost recorded as unknown until reported. Anything outside the five needs Derek's OK first. Sizes and pass bars are proposals pending Derek's adoption (see the experiments section once approved).
+
+## Experiments and pass bars (adopted by Derek, 2026-11-03)
+
+Set before any results; not to be tuned to fit observations. Derek runs the tests that need him later.
+
+1. Capture probe (free). Bar: every watched interval has evidence or a logged gap; ≥9/10 spot checks caption-to-screen within ±2s; board text readable in ≥9/10 frames; zero ad evidence.
+2. Jev boundary and visual lab (~800 Jev calls, max 3 tuning rounds, tune on first halves, score once on held-out second halves). Bar: ≥70% of labeled boundaries detected within ±60s; ≤1 false close per 15 min; ≤1 important visual step lost per lecture; ≥50% duplicates dropped.
+3. Interpretation and claim checks (~8 Opus calls, ≤80 Jev checks). Bar: zero claims Jev marked supported that the audit finds wrong (each one reported as an error); every visual claim cites a frame.
+4. Sonnet 5.5 vs Opus 5.5, blind audit. Opus stays default unless Sonnet matches accuracy; then Derek chooses.
+5. Two live reviews. Bar: the R12, R13 and R14 checks pass and contributions are credited correctly; time to first spoken word reported with no target yet.

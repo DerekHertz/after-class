@@ -1,0 +1,4 @@
+[install]
+exact = true
+# 7 days: most 2026 npm compromises were pulled within hours of publish.
+minimumReleaseAge = 604800
