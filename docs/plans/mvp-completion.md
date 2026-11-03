@@ -185,6 +185,13 @@ Lane budget (Derek, 2026-11-03: lean). Three lanes per PR, run in sequence by on
 
 - [ ] Root's clean verdict at the exact head SHA.
 
+## Add one interval helper (M2b, from retro 1)
+
+**Depends on.** M2.
+
+- [ ] Add a half-open interval helper to `src/shared/time.ts` (contains, overlaps, clip) with a property test, and switch the modules that hand-roll `<` or `<=` on media-time spans to it. One PR per module family if the diff is large.
+- [ ] Review gate: none. Verified by the property test and the existing suites.
+
 ## Serve the backend with auth and the review app (M3)
 
 **Depends on.** M1.
@@ -277,6 +284,7 @@ Lane budget (Derek, 2026-11-03: lean). Three lanes per PR, run in sequence by on
 
 **Build.**
 
+- [ ] A shared test helper that fires two events at a chosen interleaving point (retro 1, class 2: races). The scheduler tests use it for a delta racing a stale demand snapshot.
 - [ ] `pump()` collects demand from segmentation, frame judging and preparation, runs it through `memo.run` with per-provider limits and priority (boundaries before interpretation before resources), aborts work no longer demanded, skips frame judging when there is no previous frame, and runs `evidence.sweepExpired` daily.
 
 **You see.**
@@ -357,6 +365,7 @@ Lane budget (Derek, 2026-11-03: lean). Three lanes per PR, run in sequence by on
 
 **Build.**
 
+- [ ] The same interleave helper covers a tutor turn racing a claim losing its check (R3 at commit) and a resent turn racing its original (retro 1, classes 1 and 2).
 - [ ] Routes from `ROUTES` for invites, review options, start, NDJSON turns, record view and edits, evidence lookup, usage, and a retry-preparation route calling `preparation.retry`.
 - [ ] `ReviewView.saved` reads the record's save state.
 
@@ -486,6 +495,7 @@ Lane budget (Derek, 2026-11-03: lean). Three lanes per PR, run in sequence by on
 
 **Build.**
 
+- [ ] The replay test resends every request once and asserts no table gains a duplicate row (retro 1, classes 1 and 4: retries and stale ids).
 - [ ] A recorded fact log and memo cassette driven through the composed backend from ingest to saved record, run in `bun test`.
 
 **You see.**
