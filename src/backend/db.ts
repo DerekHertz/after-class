@@ -261,6 +261,25 @@ CREATE TABLE prep_controls (
 ) STRICT;
 ${appendOnly("prep_controls")}`,
     },
+    {
+      id: "002-frozen-inputs",
+      sql: `
+-- A job's input, frozen when the job first runs: later evidence changes (frame judgments, deletions,
+-- a retried check) never re-key work that already started. One row per (kind, subject).
+-- R4: "A claim gets at most one revision; after that it's unverified." A revision row's subject is its claim.
+CREATE TABLE prep_inputs (
+  kind TEXT NOT NULL CHECK (kind IN ('interpretation','revision','resource_search')),
+  subject_id TEXT NOT NULL,
+  capture_id TEXT NOT NULL,
+  memo_key TEXT NOT NULL,
+  input_json TEXT NOT NULL,
+  seq INTEGER NOT NULL UNIQUE,
+  PRIMARY KEY (kind, subject_id)
+) STRICT;
+CREATE INDEX prep_inputs_by_capture ON prep_inputs (capture_id, kind, seq);
+CREATE INDEX prep_inputs_by_key ON prep_inputs (memo_key);
+${appendOnly("prep_inputs")}`,
+    },
   ],
 
   review: [

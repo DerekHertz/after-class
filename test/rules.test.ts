@@ -37,7 +37,6 @@ describe("Derek's rules are quoted verbatim", () => {
 
 describe("Derek's rules", () => {
   test.todo("R3 a header with a non-assessable claim id is rejected before any word streams; assessable() returns null unless supported_by_check (W8: validateMove; W6: assessable)");
-  test.todo("R4 deriveClaimStatus never yields a second revision; recheck no/uncertain/failed ⇒ unverified; a boundary move keeps the used revision (W6)");
   test.todo("R5 answering Later leaves preparation.demand() identical (W7 + W6)");
   test.todo("R6 options() is ready with resource search pending or failed (W7)");
   test.todo("R7 corrections() never adds material; the reviews row rejects UPDATE (W7)");
