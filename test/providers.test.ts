@@ -248,6 +248,31 @@ describe("Jev client", () => {
       expect(err.retryable).toBe(true);
     });
 
+    test("a failure while reading the response body is a retryable ProviderError, like a connect failure", async () => {
+      const broken = () => new Response(new ReadableStream({ start: (c) => c.error(new Error("stream reset")) }), { status: 200 });
+      const err = await ask(broken);
+      expect(err).toBeInstanceOf(ProviderError);
+      expect(err.retryable).toBe(true);
+      expect(err.usage).toBeNull();
+      expect(err.message).toContain("stream reset");
+    });
+
+    test("a timeout while reading the response body is retryable; a caller abort there passes through", async () => {
+      const stalled = (init?: RequestInit) =>
+        new Response(new ReadableStream({ start: (c) => init!.signal!.addEventListener("abort", () => c.error(new DOMException("a", "AbortError"))) }), { status: 200 });
+      const slow = createJevClient({ apiKey: "k", timeoutMs: 10, fetch: (async (_u: unknown, init?: RequestInit) => stalled(init)) as unknown as typeof fetch });
+      const timedOut = await slow.ask(noulReq(), NEVER).catch((e) => e);
+      expect(timedOut).toBeInstanceOf(ProviderError);
+      expect(timedOut.retryable).toBe(true);
+
+      const c = new AbortController();
+      const caller = createJevClient({ apiKey: "k", fetch: (async (_u: unknown, init?: RequestInit) => stalled(init)) as unknown as typeof fetch });
+      const pending = caller.ask(noulReq(), c.signal).catch((e) => e);
+      await Bun.sleep(5);
+      c.abort();
+      expect((await pending).name).toBe("AbortError");
+    });
+
     test("a response in the wrong shape is a non-retryable error", async () => {
       expect((await ask(() => json({ answers: "x" }))).retryable).toBe(false);
       expect((await ask(() => json(answersBody({ q: { type: "noul", noul: 1.5 } })))).retryable).toBe(false);
@@ -501,8 +526,8 @@ describe("claudeArgs", () => {
 });
 
 /** A fake `claude` process: scripted stdout chunks, optionally held open until released or killed. */
-type Script = { readonly stdout?: readonly (string | Uint8Array)[]; readonly stderr?: string; readonly code?: number; readonly hold?: Promise<void> };
-type Spawned = { argv: readonly string[]; cwd: string; env: Record<string, string>; stdin: string[]; killed: boolean; ended: boolean };
+type Script = { readonly stdout?: readonly (string | Uint8Array)[]; readonly stderr?: string; readonly code?: number; readonly hold?: Promise<void>; readonly ignoreSigterm?: boolean };
+type Spawned = { argv: readonly string[]; cwd: string; env: Record<string, string>; stdin: string[]; killed: boolean; signals: (string | number | undefined)[]; ended: boolean };
 
 function fakeSpawn(script: Script | ((n: number) => Script)): { spawn: SpawnFn; calls: Spawned[]; live: () => number; peak: () => number } {
   const calls: Spawned[] = [];
@@ -510,7 +535,7 @@ function fakeSpawn(script: Script | ((n: number) => Script)): { spawn: SpawnFn; 
   let peak = 0;
   const spawn: SpawnFn = (argv, opts) => {
     const s = typeof script === "function" ? script(calls.length + 1) : script;
-    const call: Spawned = { argv, cwd: opts.cwd, env: opts.env, stdin: [], killed: false, ended: false };
+    const call: Spawned = { argv, cwd: opts.cwd, env: opts.env, stdin: [], killed: false, signals: [], ended: false };
     calls.push(call);
     live++;
     peak = Math.max(peak, live);
@@ -542,9 +567,11 @@ function fakeSpawn(script: Script | ((n: number) => Script)): { spawn: SpawnFn; 
       stdout,
       stderr,
       exited,
-      kill: () => {
+      kill: (signal) => {
         call.killed = true;
-        finish(143);
+        call.signals.push(signal);
+        if (s.ignoreSigterm && signal !== "SIGKILL") return;
+        finish(signal === "SIGKILL" ? 137 : 143);
       },
     };
     return proc;
@@ -552,9 +579,9 @@ function fakeSpawn(script: Script | ((n: number) => Script)): { spawn: SpawnFn; 
   return { spawn, calls, live: () => live, peak: () => peak };
 }
 
-const cli = (s: Script | ((n: number) => Script), extra: { maxConcurrent?: number; env?: Record<string, string | undefined> } = {}) => {
+const cli = (s: Script | ((n: number) => Script), extra: { maxConcurrent?: number; env?: Record<string, string | undefined>; killGraceMs?: number } = {}) => {
   const fake = fakeSpawn(s);
-  return { ...fake, claude: createClaudeCli({ bin: "claude", cwd: "/work", maxConcurrent: extra.maxConcurrent ?? 2, spawn: fake.spawn, ...(extra.env ? { env: extra.env } : {}) }) };
+  return { ...fake, claude: createClaudeCli({ bin: "claude", cwd: "/work", maxConcurrent: extra.maxConcurrent ?? 2, spawn: fake.spawn, ...(extra.env ? { env: extra.env } : {}), ...(extra.killGraceMs !== undefined ? { killGraceMs: extra.killGraceMs } : {}) }) };
 };
 
 const Out = z.object({ concepts: z.array(z.string()) });
@@ -712,6 +739,37 @@ describe("claude structured", () => {
     expect(calls[0]!.killed).toBe(true);
   });
 
+  test("a child that ignores SIGTERM is SIGKILLed after the grace, so the call ends and the slot is released", async () => {
+    const stubborn = { hold: new Promise<void>(() => {}), ignoreSigterm: true };
+    const { claude, calls } = cli((n) => (n === 1 ? stubborn : { stdout: [JSON.stringify(successEnvelope)] }), { maxConcurrent: 1, killGraceMs: 20 });
+    const c = new AbortController();
+    const first = claude.structured(req(), Out, c.signal).catch((e) => e);
+    await Bun.sleep(5);
+    c.abort();
+    expect((await first).name).toBe("AbortError");
+    expect(calls[0]!.signals).toEqual([undefined, "SIGKILL"]);
+    expect((await claude.structured(req(), Out, NEVER)).output.concepts).toHaveLength(2);
+  });
+
+  test("a timed-out child that ignores SIGTERM is SIGKILLed and the error stays retryable", async () => {
+    const { claude, calls } = cli({ hold: new Promise(() => {}), ignoreSigterm: true }, { killGraceMs: 20 });
+    const err = await claude.structured(req({ timeoutMs: 20 }), Out, NEVER).catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.retryable).toBe(true);
+    expect(calls[0]!.signals).toEqual([undefined, "SIGKILL"]);
+  });
+
+  test("a child that exits on SIGTERM is never SIGKILLed", async () => {
+    const { claude, calls } = cli({ hold: new Promise(() => {}) }, { killGraceMs: 20 });
+    const c = new AbortController();
+    const pending = claude.structured(req(), Out, c.signal).catch((e) => e);
+    await Bun.sleep(5);
+    c.abort();
+    await pending;
+    await Bun.sleep(40);
+    expect(calls[0]!.signals).toEqual([undefined]);
+  });
+
   test("an already-aborted signal never spawns", async () => {
     const { claude, calls } = cli({ stdout: [JSON.stringify(successEnvelope)] });
     const c = new AbortController();
@@ -720,8 +778,11 @@ describe("claude structured", () => {
     expect(calls).toEqual([]);
   });
 
-  test("ANTHROPIC_API_KEY never reaches the child, so billing stays on the subscription", async () => {
-    const { claude, calls } = cli({ stdout: [JSON.stringify(successEnvelope)] }, { env: { PATH: "/bin", ANTHROPIC_API_KEY: "sk-secret", HOME: "/h" } });
+  test("no Anthropic credential or endpoint override reaches the child, so billing stays on the subscription", async () => {
+    const { claude, calls } = cli(
+      { stdout: [JSON.stringify(successEnvelope)] },
+      { env: { PATH: "/bin", ANTHROPIC_API_KEY: "sk-secret", ANTHROPIC_AUTH_TOKEN: "tok", ANTHROPIC_BASE_URL: "https://proxy.example", HOME: "/h" } },
+    );
     await claude.structured(req(), Out, NEVER);
     expect(calls[0]!.env).toEqual({ PATH: "/bin", HOME: "/h" });
   });
@@ -1007,9 +1068,9 @@ describe("R17 and the ledger", () => {
     const stages = ledger.stages();
     expect(stages.map((x) => x.purpose)).toEqual(["boundary", "claim_check", "interpretation", "wrap_up"]);
     const interp = stages.find((x) => x.purpose === "interpretation")!;
-    expect(interp).toMatchObject({ provider: "claude", calls: 2, unknownCostCalls: 0, usd: { measured: 0, notional: 0.0842, estimated: 0 }, inputTokens: 300, outputTokens: 150, cacheReadTokens: 1800 });
+    expect(interp).toMatchObject({ provider: "claude", calls: 2, unknownCostCalls: 0, usd: { measured: null, notional: 0.0842, estimated: null }, inputTokens: 300, outputTokens: 150, cacheReadTokens: 1800 });
     const boundary = stages.find((x) => x.purpose === "boundary")!;
-    expect(boundary).toMatchObject({ provider: "jev", calls: 2, unknownCostCalls: 2, usd: { measured: 0, notional: 0, estimated: 0 }, inputTokens: 200, outputTokens: 4, cacheReadTokens: null });
+    expect(boundary).toMatchObject({ provider: "jev", calls: 2, unknownCostCalls: 2, usd: { measured: null, notional: null, estimated: null }, inputTokens: 200, outputTokens: 4, cacheReadTokens: null });
     expect(stages.find((x) => x.purpose === "claim_check")).toMatchObject({ calls: 1, errors: 1, inputTokens: null });
   });
 

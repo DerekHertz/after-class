@@ -198,7 +198,14 @@ export function createJevClient(opts: {
       if (Buffer.byteLength(body) > JEV_IMAGE_LIMITS.maxRequestBytes) reject(`jev request is ${Buffer.byteLength(body)} bytes, over ${JEV_IMAGE_LIMITS.maxRequestBytes}`);
 
       const timeout = AbortSignal.timeout(timeoutMs);
+      const transportFailure = (err: unknown): unknown => {
+        if (signal.aborted) return err;
+        if (timeout.aborted) return new ProviderError(`jev request timed out after ${timeoutMs}ms`, null, true);
+        if (isAbort(err)) return err;
+        return new ProviderError(`jev network error: ${err instanceof Error ? err.message : String(err)}`, null, true);
+      };
       let res: Response;
+      let text: string;
       try {
         res = await doFetch(`${baseUrl}/systemone`, {
           method: "POST",
@@ -210,14 +217,11 @@ export function createJevClient(opts: {
           body,
           signal: AbortSignal.any([signal, timeout]),
         });
+        text = await res.text();
       } catch (err) {
-        if (signal.aborted) throw err;
-        if (timeout.aborted) throw new ProviderError(`jev request timed out after ${timeoutMs}ms`, null, true);
-        if (isAbort(err)) throw err;
-        throw new ProviderError(`jev network error: ${err instanceof Error ? err.message : String(err)}`, null, true);
+        throw transportFailure(err);
       }
 
-      const text = await res.text();
       if (!res.ok) throw new ProviderError(describeError(res.status, text), null, res.status >= 500 || res.status === 429);
 
       let json: unknown;

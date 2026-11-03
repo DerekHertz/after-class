@@ -6,6 +6,8 @@
  * Auth: Derek's subscription. `--bare` never reads subscription login, so it is
  * NOT passed (SYNTHESIS correction), and ANTHROPIC_API_KEY is removed from the
  * child's environment so a stray key cannot silently switch a call to API billing.
+ * ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL are removed too: a Claude Code shell may set them,
+ * and either would move billing or the endpoint off the login.
  * One arg builder:
  *   claude -p --model <m> --effort <e> --system-prompt <s>
  *          --restricted --tools Read --strict-mcp-config --disable-slash-commands
@@ -84,7 +86,7 @@ export type ClaudeProcess = {
   readonly stdout: ReadableStream<Uint8Array>;
   readonly stderr: ReadableStream<Uint8Array>;
   readonly exited: Promise<number>;
-  kill(): void;
+  kill(signal?: NodeJS.Signals): void;
 };
 
 export type SpawnFn = (argv: readonly string[], opts: { readonly cwd: string; readonly env: Record<string, string> }) => ClaudeProcess;
@@ -314,6 +316,8 @@ async function stageImages(images: readonly ClaudeImage[], root: string): Promis
 
 type Outcome = { readonly stdout: string; readonly stderr: string; readonly code: number };
 
+const BILLING_ENV = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"] as const;
+
 export function createClaudeCli(opts: {
   readonly bin: string;
   readonly cwd: string;
@@ -321,14 +325,17 @@ export function createClaudeCli(opts: {
   readonly spawn?: SpawnFn;
   readonly imageRoot?: string;
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /** How long a cancelled child gets to exit on SIGTERM before SIGKILL. */
+  readonly killGraceMs?: number;
 }): ClaudeCli {
   const spawn = opts.spawn ?? bunSpawn;
   const limiter = createLimiter(opts.maxConcurrent);
   const imageRoot = opts.imageRoot ?? tmpdir();
+  const killGraceMs = opts.killGraceMs ?? 2_000;
 
   const childEnv = (): Record<string, string> => {
     const merged: Record<string, string | undefined> = { ...(opts.env ?? process.env) };
-    delete merged.ANTHROPIC_API_KEY;
+    for (const name of BILLING_ENV) delete merged[name];
     return Object.fromEntries(Object.entries(merged).filter((e): e is [string, string] => e[1] !== undefined));
   };
 
@@ -341,12 +348,18 @@ export function createClaudeCli(opts: {
       signal.throwIfAborted();
       const proc = spawn([opts.bin, ...claudeArgs(req, output, jsonSchema, staged?.dir ?? null)], { cwd: opts.cwd, env: childEnv() });
 
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      // A child that ignores SIGTERM would hold this call, and its limiter slot, forever.
+      const stop = () => {
+        proc.kill();
+        killTimer ??= setTimeout(() => proc.kill("SIGKILL"), killGraceMs);
+      };
       let timedOut = false;
       const timer = setTimeout(() => {
         timedOut = true;
-        proc.kill();
+        stop();
       }, req.timeoutMs);
-      const onAbort = () => proc.kill();
+      const onAbort = stop;
       signal.addEventListener("abort", onAbort, { once: true });
       try {
         try {
@@ -365,6 +378,7 @@ export function createClaudeCli(opts: {
         return { stdout, stderr, code };
       } finally {
         clearTimeout(timer);
+        clearTimeout(killTimer);
         signal.removeEventListener("abort", onAbort);
       }
     } finally {
