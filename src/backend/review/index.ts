@@ -277,7 +277,14 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
   function correctionsOf(reviewId: ReviewId, review: Stored, turns: readonly Turn[]): Correction[] {
     const disclosed = new Set(turns.flatMap((t) => (t.actor === "tutor" && t.move.kind === "disclose_correction" ? [t.move.correctionId] : [])));
     const inScope = evidenceIds(deps.bundle(review.scope.material));
-    return deriveCorrections(reviewId, review.scope, deps.assessableIn(review.captureId, review.scope.material), disclosed, review.claimTexts, inScope);
+    const states = new Map(
+      deps.claimsIn(review.captureId, review.scope.material).map((c) => {
+        const checkedAt = Math.max(c.originalCheck?.atSeq ?? 0, c.revisionCheck?.atSeq ?? 0);
+        return [c.id, { status: c.status, checkedAt }] as const;
+      }),
+    );
+    const claimState = (id: ClaimId) => states.get(id) ?? "absent";
+    return deriveCorrections(reviewId, review.scope, deps.assessableIn(review.captureId, review.scope.material), disclosed, review.claimTexts, inScope, claimState);
   }
 
   function stateOf(reviewId: ReviewId, review: Stored, turns: readonly Turn[]) {

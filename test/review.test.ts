@@ -9,7 +9,7 @@ import { describe, expect, test } from "bun:test";
 import { randomId, stableId } from "../src/shared/ids";
 import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, EvidenceId, ReviewId, ThreadId, TurnId } from "../src/shared/ids";
 import type {
-  AssessableClaim, ChunkPrep, ChunkProvenance, ChunkRevision, Claim, ClaimStatus, EvidenceBundle, Gap, LearnerAct, Passage, ReviewState,
+  AssessableClaim, ChunkPrep, ChunkProvenance, ChunkRevision, Claim, ClaimStatus, EvidenceBundle, Gap, LearnerAct, Passage, ReviewState, Seq,
   StartResult, Turn, TurnEvent, TutorMove, TutorMoveKind,
 } from "../src/shared/domain";
 import { Material, interval } from "../src/shared/time";
@@ -33,7 +33,7 @@ const seq = (n: number) => asSeq(n);
 
 // ───────────────────────────── the fake preparation world ─────────────────────────────
 
-type WorldClaim = { text: string; evidence: EvidenceId[]; status: ClaimStatus };
+type WorldClaim = { text: string; evidence: EvidenceId[]; status: ClaimStatus; checkedAt?: Seq };
 
 class World {
   readonly captureId: CaptureId = randomId("cap");
@@ -80,6 +80,13 @@ class World {
     return id;
   }
 
+  /** A check result lands: new status, stamped with the check's seq. */
+  check(id: ClaimId, status: ClaimStatus): void {
+    const c = this.claims.get(id)!;
+    c.status = status;
+    c.checkedAt = this.db.nextSeq();
+  }
+
   private inside(material: Material, ids: readonly EvidenceId[]): boolean {
     return ids.every((e) => Material.covers(material, SRC, this.evidence.get(e)!));
   }
@@ -113,7 +120,9 @@ class World {
         .filter(([, c]) => c.status === "supported_by_check" && this.inside(material, c.evidence))
         .map(([id, c]) => ({ id, conceptId: CONCEPT, text: c.text, evidence: c.evidence, assumptions: [] }) as unknown as AssessableClaim),
     claimsIn: (_: CaptureId, material: Material): readonly Claim[] =>
-      [...this.claims].filter(([, c]) => this.inside(material, c.evidence)).map(([id, c]) => ({ id, status: c.status }) as unknown as Claim),
+      [...this.claims]
+        .filter(([, c]) => this.inside(material, c.evidence))
+        .map(([id, c]) => ({ id, status: c.status, originalCheck: c.checkedAt ? { atSeq: c.checkedAt } : null, revisionCheck: null }) as unknown as Claim),
     bundle: (material: Material): EvidenceBundle => ({
       material,
       passages: [...this.evidence]
@@ -352,21 +361,32 @@ describe("corrections (R7)", () => {
   const texts = new Map([[c1, "claim 1"], [c2, "claim 2"]]);
   const inScope = new Set(w.deps.bundle(scope.material).passages.map((p) => p.id));
   const usable = (...ids: ClaimId[]) => w.deps.assessableIn(w.captureId, Material.of([[SRC, [interval(0, 1000)]]])).filter((c) => ids.includes(c.id));
+  const unchanged = () => null;
 
   test("nothing changed, nothing to disclose", () => {
-    expect(corrections(rid, scope, usable(c1, c2), new Set(), texts, inScope)).toEqual([]);
+    expect(corrections(rid, scope, usable(c1, c2), new Set(), texts, inScope, unchanged)).toEqual([]);
   });
 
   test("a claim that stops being usable is withdrawn; changed text is a correction", () => {
     const changed = usable(c1).map((c) => ({ ...c, text: "claim 1, reworded" }) as AssessableClaim);
-    const out = corrections(rid, scope, changed, new Set(), texts, inScope);
+    const out = corrections(rid, scope, changed, new Set(), texts, inScope, unchanged);
     expect(out.map((c) => [c.claimId, c.change, c.disclosed])).toEqual([[c1, "text_changed", false], [c2, "withdrawn", false]]);
   });
 
   test("a correction already disclosed is marked disclosed", () => {
-    const [first] = corrections(rid, scope, usable(c1), new Set(), texts, inScope);
-    const again = corrections(rid, scope, usable(c1), new Set([first!.id]), texts, inScope);
+    const [first] = corrections(rid, scope, usable(c1), new Set(), texts, inScope, unchanged);
+    const again = corrections(rid, scope, usable(c1), new Set([first!.id]), texts, inScope, unchanged);
     expect(again[0]).toMatchObject({ claimId: c2, change: "withdrawn", disclosed: true });
+  });
+
+  test("each occurrence of a change is its own correction: new text, or a claim state reached by a new check", () => {
+    const disclosed = new Set(corrections(rid, scope, usable(c1), new Set(), texts, inScope, () => ({ checkedAt: 7 })).map((c) => c.id));
+    const reworded = (text: string) => usable(c1, c2).map((c) => (c.id === c2 ? ({ ...c, text }) as AssessableClaim : c));
+    expect(corrections(rid, scope, usable(c1), disclosed, texts, inScope, () => ({ checkedAt: 7 }))).toMatchObject([{ change: "withdrawn", disclosed: true }]);
+    expect(corrections(rid, scope, usable(c1), disclosed, texts, inScope, () => ({ checkedAt: 9 }))).toMatchObject([{ change: "withdrawn", disclosed: false }]);
+    const once = new Set(corrections(rid, scope, reworded("v1"), new Set(), texts, inScope, unchanged).map((c) => c.id));
+    expect(corrections(rid, scope, reworded("v1"), once, texts, inScope, unchanged)).toMatchObject([{ change: "text_changed", disclosed: true }]);
+    expect(corrections(rid, scope, reworded("v2"), once, texts, inScope, unchanged)).toMatchObject([{ change: "text_changed", disclosed: false }]);
   });
 
   test("a newly usable claim is a correction only when all its evidence is inside the scope material", () => {
@@ -375,7 +395,7 @@ describe("corrections (R7)", () => {
     w2.claim(4, 500, 510);
     const fresh = w2.deps.assessableIn(w2.captureId, Material.of([[SRC, [interval(0, 1000)]]]));
     const inside = new Set([...inScope, ...[...w2.evidence].filter(([, i]) => i.start < 100).map(([id]) => id)]);
-    const out = corrections(rid, scope, [...usable(c1, c2), ...fresh], new Set(), texts, inside);
+    const out = corrections(rid, scope, [...usable(c1, c2), ...fresh], new Set(), texts, inside, unchanged);
     expect(out.map((c) => [c.claimId, c.change])).toEqual([[stableId("clm", "k", 3), "new_in_scope"]]);
   });
 });
@@ -595,6 +615,55 @@ describe("start", () => {
 });
 
 // ───────────────────────────── R7: scope never grows ─────────────────────────────
+
+describe("a recurring correction is disclosed each time", () => {
+  /** Each turn the tutor discloses the first pending correction, or wraps up when none is pending. */
+  function disclosingRig(text = "v0") {
+    const r = rig();
+    r.world.close(0, 0, 300);
+    const claim = r.world.claim(1, 10, 20, "supported_by_check", text);
+    const reviewId = randomId("rvw");
+    started(r.reviews.start(r.capture, "prepared_only", reviewId));
+    const t = tutorHarness(r.db, (input) => {
+      const pending = input.state.corrections.find((c) => !c.disclosed);
+      return pending
+        ? reply({ kind: "disclose_correction", correctionId: pending.id, threadIds: [], evidence: [] }, "A correction.")
+        : reply({ kind: "ask_main", threadId: THREAD, claimIds: [input.claims[0]!.id] }, "A question.");
+    });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit });
+    const pending = () => reviews.view(reviewId).state.corrections.filter((c) => !c.disclosed);
+    const turn = () => collect(reviews.turn(reviewId, randomId("turn"), answer()));
+    return { ...r, claim, reviewId, reviews, pending, turn };
+  }
+
+  test("a second text change after the first was disclosed must be disclosed too", async () => {
+    const x = disclosingRig("v0");
+    x.world.claims.get(x.claim)!.text = "v1";
+    await x.turn();
+    expect(x.pending()).toEqual([]);
+    x.world.claims.get(x.claim)!.text = "v2";
+    expect(x.pending()).toMatchObject([{ claimId: x.claim, change: "text_changed" }]);
+  });
+
+  test("withdrawn, disclosed, reinstated by a new check, then withdrawn again must be disclosed again", async () => {
+    const x = disclosingRig();
+    x.world.check(x.claim, "unverified");
+    await x.turn();
+    expect(x.pending()).toEqual([]);
+    x.world.check(x.claim, "supported_by_check");
+    expect(x.pending()).toEqual([]);
+    x.world.check(x.claim, "unverified");
+    expect(x.pending()).toMatchObject([{ claimId: x.claim, change: "withdrawn" }]);
+  });
+
+  test("a withdrawal that persists is disclosed once", async () => {
+    const x = disclosingRig();
+    x.world.check(x.claim, "unverified");
+    await x.turn();
+    await x.turn();
+    expect(x.pending()).toEqual([]);
+  });
+});
 
 describe("R7 scope never grows (the TLC counterexample)", () => {
   /** Review starts on [0, 60); a later window moves the boundary so the chunk now reaches [0, 120) with a new claim in the new half. */

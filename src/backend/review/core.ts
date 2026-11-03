@@ -2,7 +2,7 @@
  * Pure invite policy, scope freezing and corrections (W7). Importable only by review/ and test/.
  */
 import { canonicalJson } from "../../shared/ids";
-import type { ChunkRevisionId, ClaimId, EvidenceId, ReviewId } from "../../shared/ids";
+import type { ChunkRevisionId, ClaimId, EvidenceId, IdPart, ReviewId } from "../../shared/ids";
 import type {
   AssessableClaim, ChunkPrep, ChunkProvenance, ChunkRevision, Correction, EvidenceBundle, FrozenScope, InviteAnswer, InviteState,
   NonEmpty, PartialReason, Seq,
@@ -107,8 +107,13 @@ export function freezeScope(
   };
 }
 
-export function correctionId(reviewId: ReviewId, claimId: ClaimId, change: Correction["change"]): string {
-  const hex = new Bun.CryptoHasher("sha256").update(canonicalJson([reviewId, claimId, change])).digest("hex");
+/**
+ * `occurrence` names this instance of the change (the claim's text now and the
+ * state its latest check left it in), so a change that recurs after being
+ * disclosed gets a new id and is disclosed again.
+ */
+export function correctionId(reviewId: ReviewId, claimId: ClaimId, change: Correction["change"], occurrence: IdPart): string {
+  const hex = new Bun.CryptoHasher("sha256").update(canonicalJson([reviewId, claimId, change, occurrence])).digest("hex");
   return `corr_${hex.slice(0, 26)}`;
 }
 
@@ -119,6 +124,7 @@ export function correctionId(reviewId: ReviewId, claimId: ClaimId, change: Corre
  * `evidenceInScope` is the evidence the frozen material contains. A claim citing
  * anything else is treated as not usable, so a dependency that ignores the
  * material it was given still cannot add material to the review.
+ * `claimState(id)` is what preparation last decided about the claim (status and check seq).
  */
 export function corrections(
   reviewId: ReviewId,
@@ -127,12 +133,13 @@ export function corrections(
   disclosedIds: ReadonlySet<string>,
   startTexts: ReadonlyMap<ClaimId, string>,
   evidenceInScope: ReadonlySet<EvidenceId>,
+  claimState: (id: ClaimId) => IdPart,
 ): Correction[] {
   const usable = usableInScope(usableNow, evidenceInScope);
   const atStart = new Set<ClaimId>(scope.claimsAtStart);
   const out: Correction[] = [];
   const add = (claimId: ClaimId, change: Correction["change"]) => {
-    const id = correctionId(reviewId, claimId, change);
+    const id = correctionId(reviewId, claimId, change, { text: usable.get(claimId)?.text ?? null, state: claimState(claimId) });
     out.push({ id, claimId, change, disclosed: disclosedIds.has(id) });
   };
   for (const id of scope.claimsAtStart) {
