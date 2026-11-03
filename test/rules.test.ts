@@ -52,5 +52,4 @@ describe("Derek's rules", () => {
   test.todo("R14 an open or unsettled dispute is saved as disputed; isLearningGap false unless resolved_by_learner it_was_my_gap (W8)");
   test.todo("R15 save twice ⇒ identical row counts and IDs; a resent turn or start with the same app-minted id inserts nothing (W8, W7)");
   test.todo("R16 sweepExpired keeps snapshots cited by any live note and raw evidence of unsaved reviews; deletes after deleteNote + expiry (W3; triggers tested in test/db.test.ts)");
-  test.todo("R17 Jev usage events carry cost kind unknown with usd NULL; Claude events are notional (W5; memo path tested in test/memo.test.ts)");
 });
