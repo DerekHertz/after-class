@@ -16,7 +16,11 @@ export type TabCaptureState = {
   readonly lastAck: IngestAck | null;
   readonly uploadBacklog: number;
   readonly lastError: string | null;
+  /** Facts the backend refused and the outbox set aside (a placeholder went in their place). Never dropped silently. */
+  readonly deadLetters: DeadLetterSummary;
 };
+
+export type DeadLetterSummary = { readonly count: number; readonly latestReason: string | null };
 
 export type PopupRequest =
   | { readonly type: "start"; readonly tabId: number }
@@ -57,7 +61,7 @@ export function transition(
     case "start":
       if (current !== null && current.state !== "stopped") return noop;
       return {
-        next: { tabId: event.tabId, captureId: mintCaptureId(), state: "capturing", pauseReason: null, nextClientSeq: 0, lastAck: null, uploadBacklog: 0, lastError: null },
+        next: { tabId: event.tabId, captureId: mintCaptureId(), state: "capturing", pauseReason: null, nextClientSeq: 0, lastAck: null, uploadBacklog: 0, lastError: null, deadLetters: { count: 0, latestReason: null } },
         fact: control("start", "user"),
       };
     case "pause":

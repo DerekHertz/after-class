@@ -24,6 +24,8 @@ export type PopupView = {
   readonly watched: string | null;
   readonly invite: InviteState;
   readonly problem: string | null;
+  /** Facts the backend refused and the outbox set aside; each is a logged gap, shown so it is never silent. */
+  readonly deadLetters: string | null;
 };
 
 const CAPTION_TEXT: Readonly<Record<CaptureView["transcript"], string>> = {
@@ -68,6 +70,9 @@ export function describePopup(state: TabCaptureState | null, tab: { readonly url
 
   const problem = state?.lastError ? `Backend: ${state.lastError}${state.uploadBacklog > 0 ? ` (${state.uploadBacklog} facts waiting)` : ""}` : null;
 
+  const dead = state?.deadLetters;
+  const deadLetters = dead && dead.count > 0 ? `${dead.count} ${dead.count === 1 ? "fact was" : "facts were"} refused by the backend and set aside, logged as a gap${dead.latestReason ? ` (latest: ${dead.latestReason})` : ""}` : null;
+
   return {
     headline,
     tone,
@@ -80,6 +85,7 @@ export function describePopup(state: TabCaptureState | null, tab: { readonly url
     watched: capture && capture.watchedSeconds > 0 ? formatSeconds(capture.watchedSeconds) : null,
     invite: state?.lastAck?.invite ?? { state: "none" },
     problem,
+    deadLetters,
   };
 }
 
@@ -167,6 +173,7 @@ export function renderPopup(root: HTMLElement, send: (req: PopupRequest) => Prom
       invite,
       v.invite.state === "invited" ? null : inviteButtons(false),
       v.problem ? h("div", { class: "error", text: v.problem }) : null,
+      v.deadLetters ? h("div", { class: "error", text: v.deadLetters }) : null,
       error ? h("div", { class: "error", text: error }) : null,
     ];
     root.replaceChildren(...children.filter((c): c is Node | string => c !== null));

@@ -18,7 +18,7 @@ import type { CaptureFactBody, InviteAnswer, InviteState } from "../../shared/do
 import type { IngestAck } from "../../shared/wire";
 import type { ContentSignal, ControlMessage } from "../content/capture";
 import { acceptsFact, badgeFor, isWatchUrl, safeReviewUrl, transition } from "./control";
-import type { ControlEvent, OptionsRequest, PopupRequest, TabCaptureState } from "./control";
+import type { ControlEvent, DeadLetterSummary, OptionsRequest, PopupRequest, TabCaptureState } from "./control";
 import { classifyStatus, createFlusher, createIdbOutbox, isIngestAck } from "./outbox";
 import type { FlushOutcome, Transport } from "./outbox";
 
@@ -80,7 +80,7 @@ async function pairingToken(): Promise<string | null> {
   return typeof t === "string" && t !== "" ? t : null;
 }
 
-async function backendFetch(method: "GET" | "POST", path: string, body?: unknown): Promise<{ readonly ok: true; readonly json: unknown } | { readonly ok: false; readonly retryable: boolean; readonly error: string }> {
+async function backendFetch(method: "GET" | "POST", path: string, body?: unknown): Promise<{ readonly ok: true; readonly json: unknown } | { readonly ok: false; readonly retryable: boolean; readonly error: string; readonly rejected?: boolean }> {
   const token = await pairingToken();
   if (token === null) return { ok: false, retryable: false, error: "no pairing token: paste it in After Class options" };
   try {
@@ -90,7 +90,12 @@ async function backendFetch(method: "GET" | "POST", path: string, body?: unknown
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(30_000),
     });
-    if (!res.ok) return { ok: false, ...classifyStatus(res.status) };
+    if (!res.ok) {
+      const c = classifyStatus(res.status);
+      // The backend says which fact it refused; keep that with the dead letter.
+      const detail = c.rejected ? (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 200) : "";
+      return { ok: false, ...c, error: detail === "" ? c.error : `${c.error}: ${detail}` };
+    }
     return { ok: true, json: await res.json().catch(() => null) };
   } catch {
     return { ok: false, retryable: true, error: "backend unreachable" };
@@ -110,11 +115,16 @@ const flusher = createFlusher({
   onOutcome: (captureId, outcome) => void serialized(() => applyOutcome(captureId, outcome)),
 });
 
+async function deadLetterSummary(captureId: CaptureId): Promise<DeadLetterSummary> {
+  const dead = await store.deadLetters(captureId);
+  return { count: dead.length, latestReason: dead.at(-1)?.reason ?? null };
+}
+
 async function applyOutcome(captureId: CaptureId, outcome: FlushOutcome): Promise<void> {
   const tabs = await loadTabs();
   for (const [id, s] of Object.entries(tabs)) {
     if (s.captureId !== captureId) continue;
-    const next: TabCaptureState = { ...s, lastAck: outcome.ack ?? s.lastAck, uploadBacklog: outcome.remaining, lastError: outcome.error };
+    const next: TabCaptureState = { ...s, lastAck: outcome.ack ?? s.lastAck, uploadBacklog: outcome.remaining, lastError: outcome.error, deadLetters: await deadLetterSummary(captureId) };
     tabs[id] = next;
     renderBadge(s.tabId, next);
   }
@@ -247,7 +257,7 @@ async function handlePopup(req: PopupRequest): Promise<WorkerResponse> {
         lastHeartbeat.set(req.tabId, now);
         void flusher.flush(state.captureId, { heartbeat: true });
       }
-      return { state: { ...state, uploadBacklog: await store.backlog(state.captureId) } };
+      return { state: { ...state, uploadBacklog: await store.backlog(state.captureId), deadLetters: await deadLetterSummary(state.captureId) } };
     }
     case "invite_answer": {
       const invite = await answerInvite(req.tabId, req.answer);

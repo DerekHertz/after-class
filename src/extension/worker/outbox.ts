@@ -25,6 +25,41 @@ export interface OutboxStore {
   backlog(captureId: CaptureId): Promise<number>;
   /** Captures that still hold unacked facts. */
   captureIds(): Promise<readonly CaptureId[]>;
+  /**
+   * Atomically sets a fact the backend refuses aside: the original (with the reason) goes to the
+   * dead-letter store and `placeholder` takes its place at the same clientSeq, so the backend's
+   * contiguous ack is never blocked by a hole.
+   */
+  quarantine(captureId: CaptureId, fact: StoredFact, placeholder: CaptureFactBody, reason: string): Promise<void>;
+  /** Everything set aside for a capture, oldest first. Kept until a human looks; never deleted by an ack. */
+  deadLetters(captureId: CaptureId): Promise<readonly DeadFact[]>;
+}
+
+export type DeadFact = StoredFact & { readonly reason: string; readonly atMs: number };
+
+const VIDEO_ID = /^[\w-]{11}$/;
+/** Marks a placeholder, so a refused placeholder is never set aside again. */
+export const WITHHELD = "withheld by the extension";
+
+export const isPlaceholder = (b: CaptureFactBody): boolean => b.kind === "channel" && b.detail.startsWith(WITHHELD);
+
+/**
+ * What the backend sees in place of a refused fact: a channel failure at the same clientSeq,
+ * so the evidence side logs a gap for it instead of silently missing it.
+ */
+export function placeholderFor(fact: StoredFact, reason: string): CaptureFactBody {
+  const b = fact.body;
+  const channel = b.kind === "transcript" || b.kind === "transcript_unavailable" ? "transcript" : b.kind === "frame" ? "frames" : "playback";
+  const videoId = "videoId" in b && typeof b.videoId === "string" && VIDEO_ID.test(b.videoId) ? b.videoId : null;
+  const at = b.kind === "span" ? b.start : b.kind === "frame" ? b.mediaS : b.kind === "ad" ? b.atContentS : null;
+  return {
+    kind: "channel",
+    channel,
+    health: "failed",
+    videoId,
+    atMediaS: at !== null && Number.isFinite(at) && at >= 0 ? at : null,
+    detail: `${WITHHELD}: the backend refused this ${b.kind} fact (${reason})`.slice(0, 500),
+  };
 }
 
 export const toWire = (f: StoredFact): WireFact => ({ ...f.body, clientSeq: f.clientSeq, wallMs: f.wallMs });
@@ -34,6 +69,7 @@ export const toWire = (f: StoredFact): WireFact => ({ ...f.body, clientSeq: f.cl
 export function createMemoryOutbox(): OutboxStore {
   const facts = new Map<CaptureId, StoredFact[]>();
   const next = new Map<CaptureId, number>();
+  const dead = new Map<CaptureId, DeadFact[]>();
   return {
     async append(captureId, body, wallMs) {
       const clientSeq = next.get(captureId) ?? 0;
@@ -54,19 +90,28 @@ export function createMemoryOutbox(): OutboxStore {
     async captureIds() {
       return [...facts].filter(([, v]) => v.length > 0).map(([k]) => k);
     },
+    async quarantine(captureId, fact, placeholder, reason) {
+      facts.set(captureId, (facts.get(captureId) ?? []).map((f) => (f.clientSeq === fact.clientSeq ? { ...f, body: placeholder } : f)));
+      dead.set(captureId, [...(dead.get(captureId) ?? []), { ...fact, reason, atMs: Date.now() }]);
+    },
+    async deadLetters(captureId) {
+      return dead.get(captureId) ?? [];
+    },
   };
 }
 
 const done = <T>(req: IDBRequest<T>) => new Promise<T>((res, rej) => ((req.onsuccess = () => res(req.result)), (req.onerror = () => rej(req.error))));
 const txDone = (tx: IDBTransaction) => new Promise<void>((res, rej) => ((tx.oncomplete = () => res()), (tx.onerror = tx.onabort = () => rej(tx.error))));
 
-/** Facts keyed [captureId, clientSeq]; `seq` holds the next clientSeq per capture. */
+/** Facts keyed [captureId, clientSeq]; `seq` holds the next clientSeq per capture; `dead` the facts the backend refused. */
 export function createIdbOutbox(factory: IDBFactory = indexedDB, name = "afterclass-outbox"): OutboxStore {
   const opened = new Promise<IDBDatabase>((resolve, reject) => {
-    const req = factory.open(name, 1);
+    const req = factory.open(name, 2);
     req.onupgradeneeded = () => {
-      req.result.createObjectStore("facts", { keyPath: ["captureId", "clientSeq"] });
-      req.result.createObjectStore("seq", { keyPath: "captureId" });
+      const have = req.result.objectStoreNames;
+      if (!have.contains("facts")) req.result.createObjectStore("facts", { keyPath: ["captureId", "clientSeq"] });
+      if (!have.contains("seq")) req.result.createObjectStore("seq", { keyPath: "captureId" });
+      if (!have.contains("dead")) req.result.createObjectStore("dead", { keyPath: ["captureId", "clientSeq"] });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -104,6 +149,17 @@ export function createIdbOutbox(factory: IDBFactory = indexedDB, name = "aftercl
       const keys = (await done(db.transaction("facts").objectStore("facts").getAllKeys())) as unknown as [CaptureId, number][];
       return [...new Set(keys.map((k) => k[0]))];
     },
+    async quarantine(captureId, fact, placeholder, reason) {
+      const db = await opened;
+      const tx = db.transaction(["facts", "dead"], "readwrite");
+      tx.objectStore("facts").put({ ...fact, body: placeholder });
+      tx.objectStore("dead").put({ ...fact, reason, atMs: Date.now() } satisfies DeadFact);
+      await txDone(tx);
+    },
+    async deadLetters(captureId) {
+      const db = await opened;
+      return done(db.transaction("dead").objectStore("dead").getAll(range(captureId, 0, Number.MAX_SAFE_INTEGER)));
+    },
   };
 }
 
@@ -139,7 +195,8 @@ export function nextBackoffMs(attempt: number): number {
 
 // ───────────────────────────── Transport contract ───────────────────────────
 
-export type TransportResult = { readonly ok: true; readonly ack: IngestAck } | { readonly ok: false; readonly retryable: boolean; readonly error: string };
+/** `rejected`: the backend refused the batch's content (not its auth or availability), so some fact in it is the problem. */
+export type TransportResult = { readonly ok: true; readonly ack: IngestAck } | { readonly ok: false; readonly retryable: boolean; readonly error: string; readonly rejected?: boolean };
 export type Transport = (captureId: CaptureId, facts: readonly WireFact[]) => Promise<TransportResult>;
 
 export function isIngestAck(v: unknown): v is IngestAck {
@@ -148,10 +205,10 @@ export function isIngestAck(v: unknown): v is IngestAck {
 }
 
 /** Auth and validation failures need a human or a fix; outages and overload are retried. */
-export function classifyStatus(status: number): { readonly retryable: boolean; readonly error: string } {
+export function classifyStatus(status: number): { readonly retryable: boolean; readonly error: string; readonly rejected?: boolean } {
   if (status === 401 || status === 403) return { retryable: false, error: `pairing token rejected (HTTP ${status}): check the token in After Class options` };
   if (status === 408 || status === 429 || status >= 500) return { retryable: true, error: `backend error (HTTP ${status})` };
-  return { retryable: false, error: `backend rejected the batch (HTTP ${status})` };
+  return { retryable: false, error: `backend rejected the batch (HTTP ${status})`, rejected: status === 400 || status === 413 || status === 422 };
 }
 
 // ───────────────────────────── Flush ────────────────────────────────────────
@@ -170,17 +227,59 @@ export type FlushOutcome = {
  */
 export async function flushCapture(store: OutboxStore, transport: Transport, captureId: CaptureId, opts: { readonly heartbeat?: boolean } = {}): Promise<FlushOutcome> {
   let ack: IngestAck | null = null;
+  type Failure = { readonly error: string; readonly retryable: boolean; readonly rejected: boolean };
+  const failed = async (f: Failure): Promise<FlushOutcome> => ({ ack, error: f.error, retryable: f.retryable, remaining: await store.backlog(captureId) });
+
+  /** Sends one batch and removes what the backend confirms. Null means delivered. */
+  async function send(batch: readonly StoredFact[]): Promise<Failure | null> {
+    const result = await transport(captureId, batch.map(toWire));
+    if (!result.ok) return { error: result.error, retryable: result.retryable, rejected: result.rejected === true };
+    ack = result.ack;
+    if (batch.length === 0) return null;
+    // An ack past the batch would delete facts appended while it was in flight, so it counts only up to what was sent.
+    const through = Math.min(result.ack.ackedThroughSeq, batch[batch.length - 1]!.clientSeq);
+    if (through < batch[0]!.clientSeq) return { error: "backend did not acknowledge the batch", retryable: true, rejected: false };
+    await store.ackThrough(captureId, through);
+    return null;
+  }
+
+  /**
+   * `batch` was refused as a whole. Halves are sent in order, so every good fact is delivered
+   * before the next is tried and the backend's contiguous ack keeps moving. A single refused
+   * fact is set aside and its placeholder is sent in its place.
+   */
+  async function isolate(batch: readonly StoredFact[], why: string): Promise<Failure | null> {
+    if (batch.length === 1) {
+      const fact = batch[0]!;
+      if (fact.body.kind === "control" || isPlaceholder(fact.body)) {
+        return { error: `backend refuses a ${fact.body.kind === "control" ? "control fact" : "placeholder"} that cannot be set aside`, retryable: false, rejected: true };
+      }
+      const placeholder = placeholderFor(fact, why);
+      await store.quarantine(captureId, fact, placeholder, `${fact.body.kind} fact: ${why}`);
+      return send([{ ...fact, body: placeholder }]);
+    }
+    const mid = Math.ceil(batch.length / 2);
+    for (const half of [batch.slice(0, mid), batch.slice(mid)]) {
+      const f = await send(half);
+      if (f === null) continue;
+      if (!f.rejected) return f;
+      const inner = await isolate(half, f.error);
+      if (inner !== null) return inner;
+    }
+    return null;
+  }
+
   for (let first = true; ; first = false) {
     const batch = selectBatch(await store.pending(captureId, BATCH_MAX_FACTS));
     if (batch.length === 0 && !(first && opts.heartbeat)) break;
-    const result = await transport(captureId, batch.map(toWire));
-    if (!result.ok) return { ack, error: result.error, retryable: result.retryable, remaining: await store.backlog(captureId) };
-    ack = result.ack;
-    if (batch.length === 0) break;
-    if (ack.ackedThroughSeq < batch[0]!.clientSeq) {
-      return { ack, error: "backend did not acknowledge the batch", retryable: true, remaining: await store.backlog(captureId) };
+    const f = await send(batch);
+    if (f === null) {
+      if (batch.length === 0) break;
+      continue;
     }
-    await store.ackThrough(captureId, ack.ackedThroughSeq);
+    if (!f.rejected || batch.length === 0) return failed(f);
+    const inner = await isolate(batch, f.error);
+    if (inner !== null) return failed(inner);
   }
   return { ack, error: null, retryable: false, remaining: await store.backlog(captureId) };
 }

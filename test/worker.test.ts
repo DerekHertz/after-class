@@ -19,7 +19,7 @@ import { describePopup } from "../src/extension/popup/popup";
 const CAP = randomId("cap");
 const mint = () => CAP;
 const state = (over: Partial<TabCaptureState> = {}): TabCaptureState => ({
-  tabId: 7, captureId: CAP, state: "capturing", pauseReason: null, nextClientSeq: 0, lastAck: null, uploadBacklog: 0, lastError: null, ...over,
+  tabId: 7, captureId: CAP, state: "capturing", pauseReason: null, nextClientSeq: 0, lastAck: null, uploadBacklog: 0, lastError: null, deadLetters: { count: 0, latestReason: null }, ...over,
 });
 const control = (action: "start" | "pause" | "resume" | "stop", reason: string) => ({ kind: "control", action, reason }) as CaptureFactBody;
 
@@ -217,6 +217,108 @@ describe("outbox", () => {
   });
 });
 
+describe("a batch the backend refuses", () => {
+  const poison = (n: number): CaptureFactBody => ({ kind: "channel", channel: "playback", health: "ok", videoId: null, atMediaS: null, detail: `POISON ${n}` });
+  const isPoison = (b: CaptureFactBody) => b.kind === "channel" && b.detail.startsWith("POISON");
+
+  /** A backend that answers 400 to any batch holding a poison fact, and stores the rest idempotently. */
+  function picky() {
+    const stored = new Map<number, CaptureFactBody>();
+    let requests = 0;
+    const transport: Transport = async (_captureId, facts) => {
+      requests++;
+      if (facts.some(isPoison)) return { ok: false, rejected: true, retryable: false, error: "backend rejected the batch (HTTP 400)" };
+      for (const f of facts) if (!stored.has(f.clientSeq)) stored.set(f.clientSeq, f);
+      let through = -1;
+      while (stored.has(through + 1)) through++;
+      return { ok: true, ack: ack(through) };
+    };
+    return { transport, stored, requests: () => requests };
+  }
+
+  test("the offending fact is set aside with its reason, a placeholder keeps the sequence whole, and everything else is delivered", async () => {
+    const store = createMemoryOutbox();
+    const bodies = [fact(0), fact(1), poison(2), fact(3), fact(4), fact(5)];
+    for (const [i, b] of bodies.entries()) await store.append(CAP, b, i);
+    const backend = picky();
+    const out = await flushCapture(store, backend.transport, CAP);
+    expect(out).toMatchObject({ error: null, remaining: 0 });
+    expect([...backend.stored.keys()].sort()).toEqual([0, 1, 2, 3, 4, 5]);
+    const placeholder = backend.stored.get(2)!;
+    expect(placeholder).toMatchObject({ kind: "channel", health: "failed" });
+    expect((placeholder as { detail: string }).detail).toContain("channel fact");
+    const dead = await store.deadLetters(CAP);
+    expect(dead).toHaveLength(1);
+    expect(dead[0]).toMatchObject({ clientSeq: 2, body: bodies[2], reason: "channel fact: backend rejected the batch (HTTP 400)" });
+  });
+
+  test("finding one bad fact in a full batch takes logarithmically many requests, not one per fact", async () => {
+    const store = createMemoryOutbox();
+    for (let i = 0; i < 500; i++) await store.append(CAP, i === 377 ? poison(i) : fact(i), i);
+    const backend = picky();
+    expect(await flushCapture(store, backend.transport, CAP)).toMatchObject({ error: null, remaining: 0 });
+    expect(backend.requests()).toBeLessThan(30);
+    expect(backend.stored.size).toBe(500);
+    expect(await store.deadLetters(CAP)).toHaveLength(1);
+  });
+
+  test("several bad facts are each set aside and the good ones between them still arrive in order", async () => {
+    const store = createMemoryOutbox();
+    for (let i = 0; i < 9; i++) await store.append(CAP, i % 4 === 1 ? poison(i) : fact(i), i);
+    const backend = picky();
+    expect(await flushCapture(store, backend.transport, CAP)).toMatchObject({ error: null, remaining: 0 });
+    expect((await store.deadLetters(CAP)).map((d) => d.clientSeq)).toEqual([1, 5]);
+    expect([...backend.stored.keys()]).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  test("an auth failure is not a bad fact: nothing is set aside and the batch stays whole", async () => {
+    const store = createMemoryOutbox();
+    for (let i = 0; i < 3; i++) await store.append(CAP, fact(i), i);
+    const denied: Transport = async () => ({ ok: false, retryable: false, error: "pairing token rejected (HTTP 401)" });
+    expect(await flushCapture(store, denied, CAP)).toMatchObject({ error: expect.stringContaining("401"), remaining: 3 });
+    expect(await store.deadLetters(CAP)).toEqual([]);
+  });
+
+  test("a backend that refuses even the placeholder stops with an error instead of looping or discarding more", async () => {
+    const store = createMemoryOutbox();
+    for (let i = 0; i < 3; i++) await store.append(CAP, fact(i), i);
+    const refuseAll: Transport = async () => ({ ok: false, rejected: true, retryable: false, error: "backend rejected the batch (HTTP 400)" });
+    const out = await flushCapture(store, refuseAll, CAP);
+    expect(out.error).not.toBeNull();
+    expect(out.retryable).toBe(false);
+    expect((await store.deadLetters(CAP)).length).toBeLessThanOrEqual(1);
+    expect(await store.backlog(CAP)).toBeGreaterThan(0);
+  });
+
+  test("status codes 400, 413 and 422 mean the content was refused; 401 and 404 do not", () => {
+    expect([400, 413, 422].map((s) => classifyStatus(s).rejected)).toEqual([true, true, true]);
+    expect([401, 403, 404, 500].map((s) => classifyStatus(s).rejected ?? false)).toEqual([false, false, false, false]);
+  });
+});
+
+describe("acknowledgement bounds", () => {
+  test("an ack beyond the batch removes only what was sent, so a fact appended mid-flight survives", async () => {
+    const store = createMemoryOutbox();
+    for (let i = 0; i < 3; i++) await store.append(CAP, fact(i), i);
+    let first = true;
+    const generous: Transport = async () => {
+      if (first) {
+        first = false;
+        await store.append(CAP, fact(3), 3);
+        return { ok: true, ack: ack(100) };
+      }
+      return { ok: true, ack: ack(3) };
+    };
+    const seen: number[][] = [];
+    const spy: Transport = async (id, facts) => {
+      seen.push(facts.map((f) => f.clientSeq));
+      return generous(id, facts);
+    };
+    expect(await flushCapture(store, spy, CAP)).toMatchObject({ error: null, remaining: 0 });
+    expect(seen).toEqual([[0, 1, 2], [3]]);
+  });
+});
+
 describe("batching", () => {
   const stored = (n: number, body: CaptureFactBody): StoredFact => ({ captureId: CAP, clientSeq: n, wallMs: n, body });
   const frame = (mb: number): CaptureFactBody =>
@@ -363,6 +465,13 @@ describe("popup view", () => {
     const v = describePopup(state({ lastError: "backend unreachable", uploadBacklog: 12 }), watch);
     expect(v.problem).toBe("Backend: backend unreachable (12 facts waiting)");
     expect(v.captions).toBe("Waiting for the backend");
+  });
+
+  test("facts the backend refused are shown with a count and the reason, never silent", () => {
+    expect(describePopup(state(), watch).deadLetters).toBeNull();
+    const v = describePopup(state({ deadLetters: { count: 2, latestReason: "transcript fact: backend rejected the batch (HTTP 400)" } }), watch);
+    expect(v.deadLetters).toContain("2 facts were refused");
+    expect(v.deadLetters).toContain("HTTP 400");
   });
 
   test("the toolbar badge flags an invite first, then capture state", () => {
