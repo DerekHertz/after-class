@@ -233,7 +233,7 @@ export function deriveGaps(facts: readonly CaptureFact[], watched: Material, isF
       if (s.verdict !== "counted") continue;
       if (episode.videoId !== null && episode.videoId !== s.fact.videoId) continue;
       const at = episode.atMediaS;
-      const holdsFailure = at !== null && s.fact.start < at && at < s.fact.end;
+      const holdsFailure = at !== null && s.fact.start <= at && at < s.fact.end;
       if (!holdsFailure && !(s.fact.clientSeq > episode.from && s.fact.clientSeq < episode.until)) continue;
       const start = holdsFailure ? at : s.fact.start;
       add(s.sourceId, { start: start as Interval["start"], end: s.fact.end }, episode.channel, episode.stalled && episode.channel === "frames" ? "frame_stall" : "channel_failed");

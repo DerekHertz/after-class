@@ -371,6 +371,10 @@ export function createClaudeCli(opts: {
         const reading = Promise.all([readAll(proc.stdout, onLine), readAll(proc.stderr)]);
         reading.catch(() => {});
         const code = await proc.exited;
+        // Once the child is gone a timeout or abort has nothing to kill: a late signal would hit a dead (or reused) pid while we only drain pipes.
+        clearTimeout(timer);
+        clearTimeout(killTimer);
+        signal.removeEventListener("abort", onAbort);
         // A killed process can leave a grandchild holding the pipes open, so a cancelled call never waits for them to drain.
         if (signal.aborted) throw abortError();
         if (timedOut) throw new ProviderError(`claude timed out after ${req.timeoutMs}ms`, null, true);

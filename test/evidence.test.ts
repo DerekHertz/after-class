@@ -850,6 +850,18 @@ describe("a channel failure is recorded whatever order its fact arrives in", () 
     expect(failedGaps(late, b)).toEqual(failedGaps(early, a));
   });
 
+  test("a failure at a span's first second is inside that span, and one at its end belongs to the next (half-open)", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.span(0, 10);
+    s.span(10, 20);
+    failed(s, 10);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(failedGaps(h, s)).toEqual([["transcript", 10, 20]]);
+  });
+
   test("a span after the next ok is not part of the failure", () => {
     const h = harness();
     const s = stream();

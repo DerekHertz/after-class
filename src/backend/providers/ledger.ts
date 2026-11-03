@@ -93,7 +93,7 @@ export function createLedger(db: Db): Ledger {
     const byKind = Object.fromEntries(
       COST_KINDS.map((k) => {
         const row = kinds.find((r) => r.cost_kind === k);
-        return [k, { calls: row?.calls ?? 0, usd: k === "unknown" ? null : (row?.usd ?? 0) }];
+        return [k, { calls: row?.calls ?? 0, usd: k === "unknown" ? null : (row?.usd ?? null) }];
       }),
     ) as UsageSummary["byKind"];
     const byPurpose = Object.fromEntries(

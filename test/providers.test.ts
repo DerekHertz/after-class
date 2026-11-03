@@ -770,6 +770,30 @@ describe("claude structured", () => {
     expect(calls[0]!.signals).toEqual([undefined]);
   });
 
+  test("a real child that has exited gets no late kill while its pipes are still draining", async () => {
+    const kills: (NodeJS.Signals | undefined)[] = [];
+    // The shell prints the envelope and exits at once, but its background sleep holds stdout open for 400ms, well past the 100ms timeout.
+    const script = `printf '%s' "$ENVELOPE"; sleep 0.4 &`;
+    const spawn: SpawnFn = (_argv, opts) => {
+      const child = Bun.spawn(["/bin/sh", "-c", script], { cwd: opts.cwd, env: { ...opts.env, ENVELOPE: JSON.stringify(successEnvelope) }, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      const proc = child as unknown as ClaudeProcess;
+      return {
+        stdin: proc.stdin,
+        stdout: proc.stdout,
+        stderr: proc.stderr,
+        exited: proc.exited,
+        kill(signal) {
+          kills.push(signal);
+          child.kill(signal);
+        },
+      };
+    };
+    const claude = createClaudeCli({ bin: "/bin/sh", cwd: "/tmp", maxConcurrent: 1, spawn });
+    const { output } = await claude.structured(req({ timeoutMs: 100 }), Out, NEVER);
+    expect(output.concepts).toHaveLength(2);
+    expect(kills.length).toBe(0);
+  });
+
   test("an already-aborted signal never spawns", async () => {
     const { claude, calls } = cli({ stdout: [JSON.stringify(successEnvelope)] });
     const c = new AbortController();
@@ -1060,7 +1084,7 @@ describe("R17 and the ledger", () => {
     const s = ledger.summary();
     expect(s.byKind.unknown).toEqual({ calls: 4, usd: null });
     expect(s.byKind.notional).toEqual({ calls: 2, usd: 0.0842 });
-    expect(s.byKind.measured).toEqual({ calls: 0, usd: 0 });
+    expect(s.byKind.measured).toEqual({ calls: 0, usd: null });
     expect(s.byPurpose.boundary).toEqual({ calls: 2, errors: 0, unknownCost: 2 });
     expect(s.byPurpose.claim_check).toEqual({ calls: 1, errors: 1, unknownCost: 1 });
     expect(s.byPurpose.wrap_up).toEqual({ calls: 1, errors: 0, unknownCost: 1 });
@@ -1097,10 +1121,21 @@ describe("R17 and the ledger", () => {
     expect(ledger.list({ memoKey: memo.key(boundaryTask(jev), first), limit: 10 })).toHaveLength(1);
   });
 
+  test("a kind with no calls reports usd null, not $0; a ledger of only unknown-cost calls prices nothing", async () => {
+    const db = testDb();
+    const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
+    const { jev } = fakeJev(() => ({ new_concept: p(0.9), stopping_point: p(0.1) }));
+    await memo.run(boundaryTask(jev), boundaryInput());
+    const s = createLedger(db).summary();
+    expect(s.byKind.unknown).toEqual({ calls: 1, usd: null });
+    for (const k of ["measured", "notional", "estimated"] as const) expect(s.byKind[k]).toEqual({ calls: 0, usd: null });
+  });
+
   test("an empty ledger reports zero calls and no invented money", () => {
     const ledger = createLedger(testDb());
     const s = ledger.summary();
     expect(s.byKind.unknown).toEqual({ calls: 0, usd: null });
+    for (const k of ["measured", "notional", "estimated"] as const) expect(s.byKind[k]).toEqual({ calls: 0, usd: null });
     expect(Object.values(s.byPurpose).every((x) => x.calls === 0)).toBe(true);
     expect(ledger.stages()).toEqual([]);
     expect(ledger.list({ limit: 5 })).toEqual([]);
