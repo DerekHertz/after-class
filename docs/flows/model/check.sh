@@ -41,6 +41,5 @@ chart "$here/Record.tla" --config "$here/Record.cfg" \
 chart "$here/Record.tla" --config "$here/Record-chart.cfg" \
   --view "$here/record.view.mjs" --out "$here/out-record/chart"
 plain Record Record.cfg "$here/out-record/tlc-plain.out"
-plain Record Record-holds.cfg "$here/out-record/tlc-plain-holds.out"
 
 bun "$here/mutants.ts" > "$here/out-mutants.md"

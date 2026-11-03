@@ -3,12 +3,6 @@ title: "After Class review record"
 ---
 stateDiagram-v2
   direction LR
-  state "Legend" as legend {
-    lg0: Breaks R14_DisputedNeverCountedAsGap in some cases
-    lg1: Path to the R14_DisputedNeverCountedAsGap bug
-  }
-  class lg0 mayBreak
-  class lg1 bugPath
   state "At the same time" as all {
     state "Review" as r0 {
       s0: Reviewing
@@ -54,16 +48,3 @@ stateDiagram-v2
       s10 --> s12: the evidence expires [when Review is Review ended and Note is Note deleted]
     }
   }
-  classDef mayBreak fill:#fff3e6,stroke:#e8730c,stroke-width:2.5px,color:#b85a06
-  class s0 bugPath
-  class s1 bugPath
-  class s2 mayBreak
-  class s2 bugPath
-  class s6 bugPath
-  class s7 mayBreak
-  class s7 bugPath
-  class s8 mayBreak
-  class s9 mayBreak
-  class s10 bugPath
-  class s11 mayBreak
-  class s12 mayBreak

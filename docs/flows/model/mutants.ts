@@ -80,6 +80,15 @@ const mutants: Mutant[] = [
     to: ``,
   },
   {
+    name: "tutor proposal overrides a settled dispute",
+    module: "Record",
+    rule: "R14_DisputedNeverCountedAsGap",
+    kind: "INVARIANT",
+    removes: "TLC fix R14, second path: a dispute you settle saves the way you settled it",
+    from: `                        [] obs[c] = "resolved gap" -> "gap"\n                        [] obs[c] = "resolved not gap" -> "not gap"\n`,
+    to: ``,
+  },
+  {
     name: "pending save not cited",
     module: "Record",
     rule: "R16_CitedEvidenceNeverExpires",

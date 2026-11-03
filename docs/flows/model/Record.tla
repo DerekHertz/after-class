@@ -134,6 +134,8 @@ TheDetourEnds ==
 \* [code] Clamp the proposal: help before the answer caps at "after help";
 \*        skipped or unanswered is "not assessed"; a dispute still open or
 \*        unsettled saves as "disputed", never as a gap.  (TLC fix R14)
+\* [code] A dispute you settle saves the way you settled it; the tutor's
+\*        proposal can't override it.  (TLC fix R14, second path)
 \* [code] Save notes, observations, suggested graph links, evidence refs (stable IDs).
 \* [code] Save fails -> keep a pending save locally, show it, offer retry.
 YouEndTheReview ==
@@ -142,6 +144,8 @@ YouEndTheReview ==
         counted' = [c \in Claims |->
                       CASE obs[c] = "none" -> "not assessed"
                         [] obs[c] = "disputed" -> "disputed"
+                        [] obs[c] = "resolved gap" -> "gap"
+                        [] obs[c] = "resolved not gap" -> "not gap"
                         [] OTHER -> proposal[c]]
     /\ note' \in {"saved", "pending"}
     /\ review' = "ended"
