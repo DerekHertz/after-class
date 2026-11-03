@@ -27,7 +27,7 @@ import type { Db } from "../db";
 import type { WorkItem } from "../scheduler";
 import type { Lookup } from "../providers/memo";
 import type { FrameChangeInput } from "../providers/jev-tasks";
-import { adInside, bundleToJson, dedupeGaps, foldCapture, frameInside, gapTouches, selectScope } from "./core";
+import { adInside, bundleToJson, clipGap, dedupeGaps, foldCapture, frameInside, selectScope } from "./core";
 import type { EvidenceBundleJson, FrameEntry, Projection, StoredFact } from "./core";
 
 /** Newly watched material in WATCH order (not media order): what segmentation windows over. */
@@ -150,9 +150,9 @@ export function createEvidence(db: Db, dataDir: string, deps: {
     const hit = projections.get(captureId);
     if (hit) return hit;
     const stored: StoredFact[] = loadFacts.all(captureId).map((r) => {
-      const body = JSON.parse(r.body_json) as { kind: CaptureFact["kind"] };
+      const { jpegOk, ...body } = JSON.parse(r.body_json) as { kind: CaptureFact["kind"]; jpegOk?: boolean };
       const fact = { captureId, clientSeq: r.client_seq, wallMs: r.wall_ms, ...body, ...(body.kind === "frame" ? { jpegBase64: "" } : {}) } as CaptureFact;
-      return { seq: asSeq(r.seq), fact, hasBytes: r.has_bytes === 1 };
+      return { seq: asSeq(r.seq), fact, hasBytes: r.has_bytes === 1, jpeg: jpegOk === true };
     });
     const p = foldCapture(captureId, stored);
     projections.set(captureId, p);
@@ -260,16 +260,22 @@ export function createEvidence(db: Db, dataDir: string, deps: {
       }
 
       const dead = deleted();
-      const frames = new Map<number, { readonly id: EvidenceId; readonly path: string; readonly stored: boolean }>();
+      const frames = new Map<number, { readonly id: EvidenceId; readonly path: string; readonly stored: boolean; readonly jpeg: boolean }>();
+      const claimed = new Set<EvidenceId>();
       for (const f of fresh) {
         if (f.kind !== "frame") continue;
         const sourceId = stableId("src", "youtube", f.videoId);
         const id = stableId("ev", captureId, f.frameId);
         const path = join("frames", sourceId, `${id}.jpg`);
         const decoded = new Uint8Array(Buffer.from(f.jpegBase64, "base64"));
-        const stored = isJpeg(decoded) && !dead.has(id);
-        if (stored) writeAtomic(abs(path), decoded);
-        frames.set(f.clientSeq, { id, path, stored });
+        const jpeg = isJpeg(decoded);
+        // A resent frameId keeps the first bytes: the file is written only for an id with no row yet.
+        const stored = jpeg && !dead.has(id) && !claimed.has(id) && frameRow.get(id) === null;
+        if (stored) {
+          claimed.add(id);
+          writeAtomic(abs(path), decoded);
+        }
+        frames.set(f.clientSeq, { id, path, stored, jpeg });
       }
 
       const at = now();
@@ -280,6 +286,7 @@ export function createEvidence(db: Db, dataDir: string, deps: {
           delete body.clientSeq;
           delete body.wallMs;
           delete body.jpegBase64;
+          if (f.kind === "frame") body.jpegOk = frames.get(f.clientSeq)!.jpeg;
           const seq = db.nextSeq();
           insertFact.run(seq, captureId, f.clientSeq, f.wallMs, f.kind, JSON.stringify(body), at);
           const frame = frames.get(f.clientSeq);
@@ -344,7 +351,7 @@ export function createEvidence(db: Db, dataDir: string, deps: {
           const frame = withTeaching(e);
           if (frame.teaching === "kept" || frame.teaching === "uncertain") frames.set(frame.id, frame);
         }
-        for (const g of p.gaps) if (gapTouches(material, g)) gaps.push(g);
+        for (const g of p.gaps) gaps.push(...clipGap(material, g));
         for (const a of p.ads) if (adInside(material, a)) ads.set(`${a.sourceId}|${a.atContentS}|${a.wallDurationMs}`, a);
       }
       return {
@@ -429,9 +436,12 @@ export function createEvidence(db: Db, dataDir: string, deps: {
 
     deleteByUser(ids, requestId) {
       const files: string[] = [];
+      const index = raw();
+      const existing = new Set(ids.filter((id) => index.has(id) || frameRow.get(id) !== null || snapshotRow.get(id) !== null));
       db.tx(() => {
         const exists = db.sql.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM evidence_deletions WHERE evidence_id = ?");
         for (const id of ids) {
+          if (!existing.has(id)) continue;
           if (exists.get(id)!.n === 0) {
             db.sql.run("INSERT INTO evidence_deletions (evidence_id, request_id, deleted_ms, seq) VALUES (?, ?, ?, ?)", [id, requestId, now(), db.nextSeq()]);
           }

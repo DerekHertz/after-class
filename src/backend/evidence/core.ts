@@ -46,23 +46,29 @@ export function spanPlausible(span: SpanFact, sourceDurationS: number | null): b
   return span.end - span.start <= (span.rate * span.wallDurationMs) / 1000 * 1.25 + 1.5;
 }
 
-export type SpanVerdict = "counted" | "implausible" | "outside_capture";
+export type SpanVerdict = "counted" | "implausible" | "outside_capture" | "pending";
 export type ClassifiedSpan = { readonly fact: SpanFact; readonly sourceId: SourceId; readonly verdict: SpanVerdict };
 
 /**
  * R1: "Evidence only comes from intervals I actually watched while capture was on."
  * A span is counted only inside an active control period of this capture: after
- * `start` or `resume`, before `pause` or `stop`, in clientSeq order.
+ * `start` or `resume`, before `pause` or `stop`, in clientSeq order. Only the
+ * contiguous clientSeq prefix from 0 is folded: a span past a hole is `pending`,
+ * because the missing fact may be the pause that makes it unwatched.
  */
 export function classifySpans(facts: readonly CaptureFact[], durationOf: (sourceId: SourceId) => number | null): ClassifiedSpan[] {
   let active = false;
+  let expected = 0;
+  let complete = true;
   const out: ClassifiedSpan[] = [];
   for (const f of sortedFacts(facts)) {
-    if (f.kind === "control") {
+    if (complete && f.clientSeq !== expected) complete = false;
+    expected++;
+    if (f.kind === "control" && complete) {
       active = f.action === "start" || f.action === "resume";
     } else if (f.kind === "span") {
       const sourceId = sourceIdOf(f.videoId);
-      const verdict: SpanVerdict = !active ? "outside_capture" : spanPlausible(f, durationOf(sourceId)) ? "counted" : "implausible";
+      const verdict: SpanVerdict = !complete ? "pending" : !active ? "outside_capture" : spanPlausible(f, durationOf(sourceId)) ? "counted" : "implausible";
       out.push({ fact: f, sourceId, verdict });
     }
   }
@@ -147,16 +153,45 @@ function transcriptGapReason(info: TranscriptInfo | undefined): "no_transcript" 
   return null;
 }
 
+type FailureEpisode = {
+  readonly channel: Channel;
+  readonly videoId: string | null;
+  readonly atMediaS: number | null;
+  readonly stalled: boolean;
+  /** clientSeq of the failure fact and of the fact that ended it (the next ok or failure of the channel; Infinity at capture end). */
+  readonly from: number;
+  readonly until: number;
+};
+
+/**
+ * A failure covers the watched media after it until the channel recovers, and
+ * the span that holds its own `atMediaS` even when the fact arrives after that
+ * span (the extension reports a failure once it notices it).
+ */
+function failureEpisodes(sorted: readonly CaptureFact[]): FailureEpisode[] {
+  const open = new Map<Channel, Omit<FailureEpisode, "until">>();
+  const out: FailureEpisode[] = [];
+  for (const f of sorted) {
+    if (f.kind !== "channel") continue;
+    const prior = open.get(f.channel);
+    if (prior) out.push({ ...prior, until: f.clientSeq });
+    if (f.health === "ok") open.delete(f.channel);
+    else open.set(f.channel, { channel: f.channel, videoId: f.videoId, atMediaS: f.atMediaS, stalled: f.health === "stalled", from: f.clientSeq });
+  }
+  for (const e of open.values()) out.push({ ...e, until: Infinity });
+  return out;
+}
+
 const FRAME_STALL_S = 3;
 
 /**
  * Gaps for a source: watched intervals with no transcript (no_transcript /
  * transcript_declined), with tabVisible=false (hidden_tab, frames channel),
- * with no frame sample for > 3 s while visible (frame_stall), channel
- * failures, implausible spans, and spans emitted while capture was off
+ * with no frame sample for > 3 s while visible (frame_stall; a frame fact
+ * whose bytes were not a JPEG is no sample), channel failures, implausible spans, and spans emitted while capture was off
  * (capture_paused). Ad time is deliberately not a gap (flow A).
  */
-export function deriveGaps(facts: readonly CaptureFact[], watched: Material): Gap[] {
+export function deriveGaps(facts: readonly CaptureFact[], watched: Material, isFrameSample: (f: FrameFact) => boolean): Gap[] {
   const sorted = sortedFacts(facts);
   const spans = classifySpans(sorted, durationLookup(sorted));
   const gaps: Gap[] = [];
@@ -177,7 +212,7 @@ export function deriveGaps(facts: readonly CaptureFact[], watched: Material): Ga
 
   const samples = new Map<SourceId, number[]>();
   for (const f of sorted) {
-    if (f.kind !== "frame") continue;
+    if (f.kind !== "frame" || !isFrameSample(f)) continue;
     const id = sourceIdOf(f.videoId);
     samples.set(id, [...(samples.get(id) ?? []), f.mediaS]);
   }
@@ -193,19 +228,15 @@ export function deriveGaps(facts: readonly CaptureFact[], watched: Material): Ga
     }
   }
 
-  const verdictOf = new Map<CaptureFact, SpanVerdict>(spans.map((s) => [s.fact, s.verdict]));
-  const failing = new Map<Channel, { readonly videoId: string | null; readonly atMediaS: number | null; readonly stalled: boolean }>();
-  for (const f of sorted) {
-    if (f.kind === "channel") {
-      if (f.health === "ok") failing.delete(f.channel);
-      else failing.set(f.channel, { videoId: f.videoId, atMediaS: f.atMediaS, stalled: f.health === "stalled" });
-    } else if (f.kind === "span") {
-      if (verdictOf.get(f) !== "counted") continue;
-      for (const [channel, state] of failing) {
-        if (state.videoId !== null && state.videoId !== f.videoId) continue;
-        const from = state.atMediaS !== null && f.start < state.atMediaS && state.atMediaS < f.end ? state.atMediaS : f.start;
-        add(sourceIdOf(f.videoId), { start: from as Interval["start"], end: f.end }, channel, state.stalled && channel === "frames" ? "frame_stall" : "channel_failed");
-      }
+  for (const episode of failureEpisodes(sorted)) {
+    for (const s of spans) {
+      if (s.verdict !== "counted") continue;
+      if (episode.videoId !== null && episode.videoId !== s.fact.videoId) continue;
+      const at = episode.atMediaS;
+      const holdsFailure = at !== null && s.fact.start < at && at < s.fact.end;
+      if (!holdsFailure && !(s.fact.clientSeq > episode.from && s.fact.clientSeq < episode.until)) continue;
+      const start = holdsFailure ? at : s.fact.start;
+      add(s.sourceId, { start: start as Interval["start"], end: s.fact.end }, episode.channel, episode.stalled && episode.channel === "frames" ? "frame_stall" : "channel_failed");
     }
   }
 
@@ -241,8 +272,11 @@ export function deriveAds(facts: readonly CaptureFact[]): AdRecord[] {
 
 // ───────────────────────────── Capture projection ───────────────────────────
 
-/** A stored fact. `hasBytes` is true when its frame row (and file) still exists. */
-export type StoredFact = { readonly seq: Seq; readonly fact: CaptureFact; readonly hasBytes: boolean };
+/**
+ * A stored fact. `hasBytes` is true when its frame row (and file) still exists.
+ * `jpeg` is true for a frame fact whose bytes were a JPEG when it arrived, even if the user deleted the frame since.
+ */
+export type StoredFact = { readonly seq: Seq; readonly fact: CaptureFact; readonly hasBytes: boolean; readonly jpeg: boolean };
 
 export type FrameEntry = {
   /** `teaching` is "unjudged" here: it derives from the memo at read time. */
@@ -275,7 +309,7 @@ export type Projection = {
 const NEARBY_S = 15;
 
 function holdsPoint(set: IntervalSet, p: number): boolean {
-  return set.intervals().some((i) => i.start <= p && p <= i.end);
+  return set.intervals().some((i) => i.start <= p && p < i.end);
 }
 
 export function foldCapture(captureId: CaptureId, stored: readonly StoredFact[]): Projection {
@@ -283,6 +317,7 @@ export function foldCapture(captureId: CaptureId, stored: readonly StoredFact[])
   const facts = rows.map((r) => r.fact);
   const seqOf = new Map<CaptureFact, Seq>(rows.map((r) => [r.fact, r.seq]));
   const bytesOf = new Map<CaptureFact, boolean>(rows.map((r) => [r.fact, r.hasBytes]));
+  const jpegOf = new Map<CaptureFact, boolean>(rows.map((r) => [r.fact, r.jpeg]));
 
   const spans = classifySpans(facts, durationLookup(facts));
   const watched = materialOf(spans, (s) => s.verdict === "counted");
@@ -379,7 +414,7 @@ export function foldCapture(captureId: CaptureId, stored: readonly StoredFact[])
     visible,
     passages: passages.map(({ order: _order, ...p }) => p),
     frames,
-    gaps: dedupeGaps([...deriveGaps(facts, watched), ...partial]),
+    gaps: dedupeGaps([...deriveGaps(facts, watched, (f) => jpegOf.get(f) === true), ...partial]),
     ads: deriveAds(facts),
   };
 }
@@ -418,8 +453,9 @@ export function selectScope(projections: readonly Projection[], material: Materi
   return containing.length > 0 ? containing : touching;
 }
 
-export function gapTouches(material: Material, g: Gap): boolean {
-  return Material.get(material, g.sourceId).overlapFraction(g.interval) > 0;
+/** The parts of `g` inside `material`: a bundle never describes time outside its own material. */
+export function clipGap(material: Material, g: Gap): Gap[] {
+  return Material.get(material, g.sourceId).intersect(IntervalSet.of([g.interval])).intervals().map((interval) => ({ ...g, interval }));
 }
 
 export function adInside(material: Material, a: AdRecord): boolean {

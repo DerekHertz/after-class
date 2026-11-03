@@ -88,6 +88,8 @@ const exceptStalls = <G extends { readonly reason: string }>(gaps: readonly G[])
 
 const textsOf = (passages: readonly { readonly text: string }[]) => passages.map((p) => p.text);
 
+const count = (h: ReturnType<typeof harness>, table: string) => h.db.sql.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM ${table}`).get()!.n;
+
 describe("R1: evidence only from intervals watched while capture was on", () => {
   test("a passage exists only for a segment wholly inside watched time; a partly watched one is a gap", () => {
     const h = harness();
@@ -753,5 +755,216 @@ describe("get", () => {
     const got: ReadonlyMap<EvidenceId, Evidence | { readonly kind: "deleted" }> = h.evidence.get([p.id, unknown]);
     expect([...got.keys()]).toEqual([p.id]);
     expect(got.get(p.id)).toEqual(p);
+  });
+});
+
+describe("half-open intervals: a point at a material's end is outside it", () => {
+  test("a frame or ad exactly at the end of the material stays out of the bundle", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.span(0, 20);
+    s.ad(10);
+    s.frame("at9", 9);
+    s.frame("at10", 10);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    const b = h.evidence.bundle(Material.of([[SRC, [interval(0, 10)]]]));
+    expect(b.frames.map((f) => Number(f.mediaS))).toEqual([9]);
+    expect(b.ads).toEqual([]);
+    expect(h.evidence.bundle(Material.of([[SRC, [interval(10, 20)]]])).ads).toHaveLength(1);
+  });
+
+  test("a frame exactly at the end of the visible watched span is not a frame candidate", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.span(0, 10);
+    s.frame("at0", 0);
+    s.frame("at10", 10);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(h.evidence.watchOrder(s.captureId).frameCandidates.map((f) => Number(f.mediaS))).toEqual([0]);
+  });
+});
+
+describe("a bundle describes only time inside its material", () => {
+  const hiddenGaps = (b: { readonly gaps: readonly { readonly reason: string; readonly interval: { readonly start: number; readonly end: number } }[] }) =>
+    b.gaps.filter((g) => g.reason === "hidden_tab").map((g) => [g.interval.start, g.interval.end]);
+
+  test("gaps are clipped to the material, and a fragmented material clips each piece", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.span(0, 100, { visible: false });
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(hiddenGaps(h.evidence.bundle(Material.of([[SRC, [interval(0, 5)]]])))).toEqual([[0, 5]]);
+    expect(hiddenGaps(h.evidence.bundle(Material.of([[SRC, [interval(2, 4), interval(50, 60)]]])))).toEqual([[2, 4], [50, 60]]);
+  });
+
+  test("a gap that only touches the material's edge is not in the bundle", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.span(0, 10, { visible: false });
+    s.span(10, 20);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(hiddenGaps(h.evidence.bundle(Material.of([[SRC, [interval(10, 20)]]])))).toEqual([]);
+  });
+});
+
+describe("a channel failure is recorded whatever order its fact arrives in", () => {
+  const failed = (s: ReturnType<typeof stream>, atMediaS: number | null, channel: "transcript" | "frames" = "transcript") =>
+    s.push({ kind: "channel", channel, health: "failed", videoId: VIDEO, atMediaS: atMediaS === null ? null : media(atMediaS), detail: "late" });
+  const failedGaps = (h: ReturnType<typeof harness>, s: ReturnType<typeof stream>) =>
+    h.evidence.captureBundle(s.captureId).gaps.filter((g) => g.reason === "channel_failed").map((g) => [g.channel, g.start, g.end]);
+
+  test("reported after the span it happened in, with no later span", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.span(0, 10);
+    failed(s, 4);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(failedGaps(h, s)).toEqual([["transcript", 4, 10]]);
+  });
+
+  test("the same gap whether the failure arrives before or after its span", () => {
+    const early = harness();
+    const a = stream();
+    a.control("start");
+    a.source();
+    failed(a, 4);
+    a.span(0, 10);
+    early.evidence.ingest({ captureId: a.captureId, facts: a.facts });
+    const late = harness();
+    const b = stream();
+    b.control("start");
+    b.source();
+    b.span(0, 10);
+    failed(b, 4);
+    late.evidence.ingest({ captureId: b.captureId, facts: b.facts });
+    expect(failedGaps(early, a)).toEqual([["transcript", 4, 10]]);
+    expect(failedGaps(late, b)).toEqual(failedGaps(early, a));
+  });
+
+  test("a span after the next ok is not part of the failure", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.span(0, 10);
+    failed(s, 4);
+    s.push({ kind: "channel", channel: "transcript", health: "ok", videoId: VIDEO, atMediaS: null, detail: "" });
+    s.span(10, 20);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(failedGaps(h, s)).toEqual([["transcript", 4, 10]]);
+  });
+});
+
+describe("R1: a span counts only once the control facts before it have all arrived", () => {
+  test("a span after a missing pause fact is not watched until the pause arrives", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.span(0, 5);
+    s.control("pause");
+    s.span(100, 105);
+    h.evidence.ingest({ captureId: s.captureId, facts: [s.facts[0]!, s.facts[1]!, s.facts[3]!] });
+    expect(Material.canonical(h.evidence.watchedMaterial(s.captureId))).toEqual([[SRC, [[0, 5]]]]);
+    expect(h.evidence.captureBundle(s.captureId).gaps.some((g) => g.start === 100)).toBe(false);
+
+    h.evidence.ingest({ captureId: s.captureId, facts: [s.facts[2]!] });
+    expect(Material.canonical(h.evidence.watchedMaterial(s.captureId))).toEqual([[SRC, [[0, 5]]]]);
+    expect(h.evidence.captureBundle(s.captureId).gaps).toContainEqual({ sourceId: SRC, start: 100, end: 105, channel: "playback", reason: "capture_paused" });
+  });
+
+  test("a span after a missing resume fact counts only once the resume arrives", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.control("pause");
+    s.control("resume");
+    s.span(0, 5);
+    h.evidence.ingest({ captureId: s.captureId, facts: [s.facts[0]!, s.facts[1]!, s.facts[3]!] });
+    expect(Material.isEmpty(h.evidence.watchedMaterial(s.captureId))).toBe(true);
+    h.evidence.ingest({ captureId: s.captureId, facts: [s.facts[2]!] });
+    expect(Material.canonical(h.evidence.watchedMaterial(s.captureId))).toEqual([[SRC, [[0, 5]]]]);
+  });
+});
+
+describe("a resent frame id", () => {
+  const OTHER_JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 9, 9, 9, 9]).toString("base64");
+
+  test("under a new clientSeq with other bytes does not overwrite the stored frame", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.span(0, 10);
+    s.frame("dup", 5);
+    s.frame("dup", 5, { jpeg: OTHER_JPEG });
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts.slice(0, 3) });
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts.slice(3) });
+    expect([...h.evidence.frameBytes(stableId("ev", s.captureId, "dup"))!]).toEqual([...Buffer.from(JPEG, "base64")]);
+    expect(count(h, "frames")).toBe(1);
+  });
+
+  test("twice in one batch keeps the first bytes", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.span(0, 10);
+    s.frame("dup", 5);
+    s.frame("dup", 5, { jpeg: OTHER_JPEG });
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect([...h.evidence.frameBytes(stableId("ev", s.captureId, "dup"))!]).toEqual([...Buffer.from(JPEG, "base64")]);
+  });
+});
+
+describe("a frame fact whose bytes were not a JPEG", () => {
+  const stalls = (h: ReturnType<typeof harness>, s: ReturnType<typeof stream>) =>
+    h.evidence.captureBundle(s.captureId).gaps.filter((g) => g.reason === "frame_stall").map((g) => [g.start, g.end]);
+
+  test("is not a frame sample, so frame_stall still covers the time it claims", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.span(0, 20);
+    s.frame("bad", 10, { jpeg: Buffer.from("zzzzzzzzzzzz").toString("base64") });
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(stalls(h, s)).toEqual([[0, 20]]);
+  });
+
+  test("a real frame the user later deleted still counts as a sample", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.span(0, 20);
+    s.frame("good", 10);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    const before = stalls(h, s);
+    expect(before).toEqual([[0, 10], [10, 20]]);
+    h.evidence.deleteByUser([stableId("ev", s.captureId, "good")], "r1");
+    expect(stalls(h, s)).toEqual(before);
+  });
+});
+
+describe("deleteByUser on an id that never existed", () => {
+  test("leaves no tombstone, so evidence that later arrives under that id is not blocked", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.span(0, 10);
+    const id = stableId("ev", s.captureId, "later");
+    h.evidence.deleteByUser([id, stableId("ev", "never")], "r1");
+    expect(count(h, "evidence_deletions")).toBe(0);
+    s.frame("later", 5);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(h.evidence.frameBytes(id)).not.toBeNull();
+    expect(h.evidence.get([id]).get(id)).toMatchObject({ kind: "frame" });
   });
 });
