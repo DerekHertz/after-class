@@ -1,0 +1,82 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 71 and seed 7470792806446384173 with 8 workers on 8 cores with 1765MB heap and 64MB offheap memory [pid: 1806857] (Linux 6.18.54.1-microsoft-standard-WSL2 amd64, Ubuntu 21.0.12.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /tmp/tmp.yRAGIRkqCU/Record.cfg/Record.tla
+Parsing file /tmp/tmp.yRAGIRkqCU/Record.cfg/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module Record
+Starting... (2026-11-03 14:01:03)
+Computing initial states...
+Computed 2 initial states...
+Finished computing initial states: 4 distinct states generated at 2026-11-03 14:01:03.
+Error: Invariant R14_DisputedNeverCountedAsGap is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ counted = <<"none", "none">>
+/\ detourYes = FALSE
+/\ review = "active"
+/\ detour = "none"
+/\ evidence = "kept"
+/\ resources = "found"
+/\ question = 0
+/\ note = "none"
+/\ obs = <<"none", "none">>
+
+State 2: <TutorAsksAboutAClaim line 59, col 5 to line 64, col 95 of module Record>
+/\ counted = <<"none", "none">>
+/\ detourYes = FALSE
+/\ review = "active"
+/\ detour = "none"
+/\ evidence = "kept"
+/\ resources = "found"
+/\ question = 1
+/\ note = "none"
+/\ obs = <<"none", "none">>
+
+State 3: <YouAnswer line 68, col 5 to line 72, col 90 of module Record>
+/\ counted = <<"none", "none">>
+/\ detourYes = FALSE
+/\ review = "active"
+/\ detour = "none"
+/\ evidence = "kept"
+/\ resources = "found"
+/\ question = 0
+/\ note = "none"
+/\ obs = <<"answered", "none">>
+
+State 4: <YouDispute line 83, col 5 to line 86, col 100 of module Record>
+/\ counted = <<"none", "none">>
+/\ detourYes = FALSE
+/\ review = "active"
+/\ detour = "none"
+/\ evidence = "kept"
+/\ resources = "found"
+/\ question = 0
+/\ note = "none"
+/\ obs = <<"disputed", "none">>
+
+State 5: <YouSettleTheDispute line 91, col 5 to line 94, col 100 of module Record>
+/\ counted = <<"none", "none">>
+/\ detourYes = FALSE
+/\ review = "active"
+/\ detour = "none"
+/\ evidence = "kept"
+/\ resources = "found"
+/\ question = 0
+/\ note = "none"
+/\ obs = <<"resolved not gap", "none">>
+
+State 6: <YouEndTheReview line 140, col 5 to line 151, col 45 of module Record>
+/\ counted = <<"gap", "not assessed">>
+/\ detourYes = FALSE
+/\ review = "ended"
+/\ detour = "none"
+/\ evidence = "kept"
+/\ resources = "found"
+/\ question = 0
+/\ note = "pending"
+/\ obs = <<"resolved not gap", "none">>
+
+1070 states generated, 354 distinct states found, 183 states left on queue.
+The depth of the complete state graph search is 6.
+The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 11 and the 95th percentile is 7).
+Finished in 00s at (2026-11-03 14:01:03)

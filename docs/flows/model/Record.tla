@@ -1,6 +1,7 @@
 ---- MODULE Record ----
 \* One review and its learning record from docs/flows/after-class.md section D, starting when the
 \* review has started on a frozen scope of supported claims. Checks R11, R14, R16.
+\* Each flow line tagged "(TLC fix Rn)" is quoted above the step that models it.
 \* Preparation, scope and capture are Preparation.tla.
 \* [agent] steps may give any answer the flow allows. [code] steps do what their line says.
 
@@ -29,7 +30,7 @@ TypeOK ==
     /\ resources \in {"not started", "searching", "found", "failed"}
     /\ question \in {NoQuestion} \union Claims
     /\ obs \in [Claims -> {"none", "answered", "disputed", "resolved gap", "resolved not gap"}]
-    /\ counted \in [Claims -> {"none", "gap", "not gap", "not assessed"}]
+    /\ counted \in [Claims -> {"none", "gap", "not gap", "not assessed", "disputed"}]
     /\ detour \in {"none", "offered", "waiting", "on"}
     /\ detourYes \in BOOLEAN
     /\ note \in {"none", "pending", "saved", "deleted"}
@@ -131,13 +132,17 @@ TheDetourEnds ==
 \*         not assessed) from the actual turns. Here "gap" stands for the statuses that count as a
 \*         learning gap and "not gap" for the rest.
 \* [code] Clamp the proposal: help before the answer caps at "after help";
-\*        skipped or unanswered is "not assessed".
+\*        skipped or unanswered is "not assessed"; a dispute still open or
+\*        unsettled saves as "disputed", never as a gap.  (TLC fix R14)
 \* [code] Save notes, observations, suggested graph links, evidence refs (stable IDs).
 \* [code] Save fails -> keep a pending save locally, show it, offer retry.
 YouEndTheReview ==
     /\ review = "active"
     /\ \E proposal \in [Claims -> {"gap", "not gap"}] :
-        counted' = [c \in Claims |-> IF obs[c] = "none" THEN "not assessed" ELSE proposal[c]]
+        counted' = [c \in Claims |->
+                      CASE obs[c] = "none" -> "not assessed"
+                        [] obs[c] = "disputed" -> "disputed"
+                        [] OTHER -> proposal[c]]
     /\ note' \in {"saved", "pending"}
     /\ review' = "ended"
     /\ question' = NoQuestion
@@ -163,12 +168,13 @@ YouDeleteTheEvidence ==
     /\ evidence' = "deleted by me"
     /\ UNCHANGED <<review, resources, question, obs, counted, detour, detourYes, note>>
 
-\* Not in the flow. From the MVP spec: "the accepted thirty-day expiry applies only to uncited raw
-\* captures", where cited means cited by a saved note. Not while the review is open.
+\* From the MVP spec: "the accepted thirty-day expiry applies only to uncited raw captures".
+\* Not while the review is open.
+\* [code] Evidence cited by a pending save counts as cited; expiry skips it.  (TLC fix R16)
 RawEvidenceExpires ==
     /\ review = "ended"
     /\ evidence = "kept"
-    /\ note # "saved"
+    /\ note \notin {"saved", "pending"}
     /\ evidence' = "expired"
     /\ UNCHANGED <<review, resources, question, obs, counted, detour, detourYes, note>>
 

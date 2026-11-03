@@ -107,6 +107,8 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 [code] Clamp the proposal: help before the answer caps at "after help";
        skipped or unanswered is "not assessed"; a dispute still open or
        unsettled saves as "disputed", never as a gap.                       (TLC fix R14)
+[code] A dispute you settle saves the way you settled it; the tutor's
+       proposal can't override it.                                          (TLC fix R14, second path)
 [code] Save notes, observations, suggested graph links, evidence refs (stable IDs).
 [code] Save fails → keep a pending save locally, show it, offer retry
        (stable IDs make retry overwrite, not duplicate).
@@ -114,7 +116,7 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 [user] Inspect, edit, accept/correct links, revisit, delete.
 ```
 
-Flow sections A–D approved as a whole on 2026-11-03. The first TLC run broke R3, R4, R7, R8, R14 and R16; Derek approved the six flow fixes marked "TLC fix" above on 2026-11-03 (rules unchanged). Re-check pending.
+Flow sections A–D approved as a whole on 2026-11-03. The first TLC run broke R3, R4, R7, R8, R14 and R16; Derek approved the six flow fixes marked "TLC fix" above on 2026-11-03 (rules unchanged). The re-check held 10 of 11 rules; R14 broke on a second path (a dispute Derek settles), and Derek approved the "second path" line the same day. Final re-check pending.
 
 ## Rules (approved by Derek, 2026-11-03)
 
