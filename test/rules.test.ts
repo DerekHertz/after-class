@@ -46,9 +46,6 @@ describe("Derek's rules", () => {
   test.todo("R8 a hit stored after the stop-early Seq leaves the claim dropped; an outdated input key is never selected; save never writes note_edits (W6, W8)");
   test.todo("R9 start() leaves CaptureView.status unchanged; a stop control fact leaves ReviewView.state.phase unchanged (W7 + W3)");
   test.todo("R10 start() with zero assessable claims returns nothing_to_review and writes no review row (W7)");
-  test.todo("R12 hint, explain or a correction disclosure before the first answer: clampStatus('independent') ⇒ after_help (W8)");
-  test.todo("R13 skip or no answer ⇒ not_assessed regardless of proposal (W8)");
-  test.todo("R14 an open or unsettled dispute is saved as disputed; isLearningGap false unless resolved_by_learner it_was_my_gap (W8)");
   test.todo("R15 save twice ⇒ identical row counts and IDs; a resent turn or start with the same app-minted id inserts nothing (W8, W7)");
   test.todo("R16 sweepExpired keeps snapshots cited by any live note and raw evidence of unsaved reviews; deletes after deleteNote + expiry (W3; triggers tested in test/db.test.ts)");
   test.todo("R17 Jev usage events carry cost kind unknown with usd NULL; Claude events are notional (W5; memo path tested in test/memo.test.ts)");
