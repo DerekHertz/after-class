@@ -428,10 +428,11 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
         appendTurn(reviewId, noticeId, "code", null, { notice: { kind: "correction_pending", correctionId: c.id, affectedClaims: [c.claimId] } });
       }
     }
+    const turns = loadTurns(reviewId);
+    const { claims, evidence } = grounding(review, state, turns);
     const allowed = [...kit.allowedMoves(state)];
     if (allowed.length === 0) return null;
-    const turns = loadTurns(reviewId);
-    return { state, allowed, scope: review.scope, ...grounding(review, state, turns), turns, priorObservations: [], repairNote };
+    return { state, allowed, scope: review.scope, claims, evidence, turns, priorObservations: [], repairNote };
   }
 
   /**

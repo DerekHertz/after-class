@@ -752,6 +752,21 @@ describe("turn", () => {
     expect(stored[1]).toMatchObject({ actor: "tutor", threadId: THREAD, say: "What is the main idea? Say it in your own words." });
   });
 
+  test("every learner turn carries the thread open when it was said", async () => {
+    const r = startedRig();
+    let call = 0;
+    const t = tutorHarness(r.db, () => {
+      call++;
+      if (call === 1) return reply(askMain(r.claim), "Question.");
+      if (call === 2) return reply({ kind: "ask_followup", threadId: THREAD }, "Say more.");
+      return reply({ kind: "close_thread", threadId: THREAD }, "Good.");
+    });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit });
+    for (let i = 0; i < 4; i++) await collect(reviews.turn(r.reviewId, randomId("turn"), answer(String(i))));
+    const learners = reviews.view(r.reviewId).turns.filter((x) => x.actor === "learner");
+    expect(learners.map((x) => x.threadId)).toEqual([null, THREAD, THREAD, null]);
+  });
+
   test("the learner turn is committed before the model is called", async () => {
     const r = rig();
     r.world.close(0, 0, 300);
