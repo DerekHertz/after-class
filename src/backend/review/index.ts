@@ -15,7 +15,7 @@ import { stableId } from "../../shared/ids";
 import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, EvidenceId, ReviewId, ThreadId, TurnId } from "../../shared/ids";
 import type {
   AssessableClaim, ChunkPrep, ChunkRevision, Claim, CodeNotice, Correction, EvidenceBundle, FrozenScope, InviteAnswer, InviteState,
-  LearnerAct, ReviewOptions, ReviewView, Seq, StartChoice, StartResult, Turn, TurnEvent, TutorMove,
+  LearnerAct, ReviewOptions, ReviewState, ReviewView, Seq, StartChoice, StartResult, Turn, TurnEvent, TutorMove,
 } from "../../shared/domain";
 import { Material } from "../../shared/time";
 import { asSeq } from "../db";
@@ -52,6 +52,8 @@ export type Reviews = {
    * resend of the same turnId replays the stored reply instead of paying twice.
    * The tutor's header is validated before a word is spoken; an invalid header
    * aborts the call and gets one repair attempt, then a code-authored move.
+   * The `move` event follows the prose and is sent only once the turn is stored,
+   * after the move passed validateMove again against the claims usable then.
    */
   turn(reviewId: ReviewId, turnId: TurnId, act: LearnerAct): AsyncIterable<TurnEvent>;
   view(reviewId: ReviewId): ReviewView;
@@ -320,10 +322,6 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
   }
 
   /**
-   * One model call. Deltas are held back until the header is valid, so an
-   * invalid header aborts the call before anything is yielded.
-   */
-  /**
    * A terminal failure stored before this request began answered an earlier send,
    * not this one, so a resend clears it and asks the model once more.
    */
@@ -334,7 +332,12 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     return deps.runTutor(input, onDelta, signal);
   }
 
-  async function* attempt(reviewId: ReviewId, turnId: TurnId, input: TutorInput, asOf: Seq): AsyncGenerator<TurnEvent, Attempt> {
+  /**
+   * One model call. Prose is held back until the header passes validateMove, so an
+   * invalid header aborts the call before a word is spoken. The move itself is
+   * not yielded here: turn() sends it once the turn is committed.
+   */
+  async function* attempt(input: TutorInput, asOf: Seq): AsyncGenerator<TurnEvent, Attempt> {
     const queue: TurnEvent[] = [];
     let wake: (() => void) | null = null;
     const push = (e: TurnEvent) => {
@@ -342,7 +345,6 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
       wake?.();
     };
     const ctl = new AbortController();
-    const outId = tutorTurnId(reviewId, turnId);
     let buf = "";
     let gated = false;
     let invalid: string | null = null;
@@ -371,7 +373,6 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
       if (!verdict.ok) return rejectHeader(verdict.why);
       gated = true;
       streamedMove = header.move;
-      push({ type: "move", turnId: outId, move: header.move });
       speak(header.rest);
     };
 
@@ -404,9 +405,57 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     }
     const verdict = kit.validateMove(lookup.value.move, input);
     if (!verdict.ok) return { kind: "invalid", why: verdict.why, stored: true };
-    yield { type: "move", turnId: outId, move: lookup.value.move };
     yield* spoken(lookup.value.say);
     return { kind: "spoken", move: lookup.value.move, say: lookup.value.say };
+  }
+
+  /** The claims and evidence the tutor may use now (R3, R7): re-read on every call, so a claim that lost its check drops out. */
+  function grounding(review: Stored, state: ReviewState, turns: readonly Turn[]): Pick<TutorInput, "claims" | "evidence"> {
+    const usable = usableNow(review);
+    const asked = turns.find((t) => t.actor === "tutor" && t.move.kind === "ask_main" && t.move.threadId === state.openThread);
+    const threadClaims = new Set<ClaimId>(asked?.actor === "tutor" && asked.move.kind === "ask_main" ? asked.move.claimIds : []);
+    const cited = new Set(usable.filter((c) => threadClaims.size === 0 || threadClaims.has(c.id)).flatMap((c) => c.evidence));
+    const full = deps.bundle(review.scope.material);
+    return { claims: usable, evidence: { ...full, passages: full.passages.filter((p) => cited.has(p.id)), frames: full.frames.filter((f) => cited.has(f.id)) } };
+  }
+
+  /** Notes every undisclosed correction in the log, then builds the tutor's input; null when no move is allowed. */
+  function tutorInput(reviewId: ReviewId, review: Stored, repairNote: string | null): TutorInput | null {
+    const { corrs, state } = stateOf(reviewId, review, loadTurns(reviewId));
+    for (const c of corrs) {
+      const noticeId = codeTurnId(reviewId, c.id);
+      if (!c.disclosed && !hasTurn(noticeId)) {
+        appendTurn(reviewId, noticeId, "code", null, { notice: { kind: "correction_pending", correctionId: c.id, affectedClaims: [c.claimId] } });
+      }
+    }
+    const allowed = [...kit.allowedMoves(state)];
+    if (allowed.length === 0) return null;
+    const turns = loadTurns(reviewId);
+    return { state, allowed, scope: review.scope, ...grounding(review, state, turns), turns, priorObservations: [], repairNote };
+  }
+
+  /**
+   * Stores the tutor turn if the move still passes validateMove against the claims
+   * usable now, since one can lose its check while the model is talking.
+   * R3: "A claim can be used to judge my answers only if it passed the evidence check."
+   * Returns the stored turn, or why the move went stale.
+   */
+  function commit(reviewId: ReviewId, turnId: TurnId, review: Stored, input: TutorInput, move: TutorMove, say: string) {
+    const outId = tutorTurnId(reviewId, turnId);
+    return db.tx((): { readonly ok: true; readonly move: TutorMove; readonly say: string } | { readonly ok: false; readonly why: string } => {
+      const already = loadTurns(reviewId).find((t) => t.id === outId);
+      if (already?.actor === "tutor") return { ok: true, move: already.move, say: already.say };
+      const verdict = kit.validateMove(move, { ...input, ...grounding(review, input.state, input.turns) });
+      if (!verdict.ok) return { ok: false, why: verdict.why };
+      appendTurn(reviewId, outId, "tutor", threadOf(move), { move, say });
+      if (move.kind === "close_thread") {
+        const after = stateOf(reviewId, review, loadTurns(reviewId)).state;
+        if (!after.softTargetOffered && after.activeSeconds >= softTargetS) {
+          appendTurn(reviewId, codeTurnId(reviewId, `soft_target:${turnId}`), "code", null, { notice: { kind: "soft_target_reached", elapsedS: after.activeSeconds } });
+        }
+      }
+      return { ok: true, move, say };
+    });
   }
 
   async function* turn(reviewId: ReviewId, turnId: TurnId, act: LearnerAct): AsyncGenerator<TurnEvent> {
@@ -423,77 +472,57 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     yield { type: "learner_turn_stored", turnId };
 
     const outId = tutorTurnId(reviewId, turnId);
-    const turns = loadTurns(reviewId);
-    if (hasTurn(outId)) {
-      const reply = turns.find((t) => t.id === outId);
-      if (reply?.actor === "tutor") {
-        yield { type: "move", turnId: outId, move: reply.move };
-        yield* spoken(reply.say);
-        yield { type: "turn_complete", turnId: outId };
-      }
+    const reply = loadTurns(reviewId).find((t) => t.id === outId);
+    if (reply?.actor === "tutor") {
+      yield* spoken(reply.say);
+      yield { type: "move", turnId: outId, move: reply.move };
+      yield { type: "turn_complete", turnId: outId };
       return;
     }
 
-    const { corrs, state } = stateOf(reviewId, review, turns);
-    for (const c of corrs) {
-      const noticeId = codeTurnId(reviewId, c.id);
-      if (!c.disclosed && !hasTurn(noticeId)) {
-        appendTurn(reviewId, noticeId, "code", null, { notice: { kind: "correction_pending", correctionId: c.id, affectedClaims: [c.claimId] } });
+    // Two model attempts (the second carries the repair note), then code's own move.
+    let input = tutorInput(reviewId, review, null);
+    const asOf = deps.nextSeq();
+    let replayed = true;
+    for (let n = 0; input && n < 2; n++) {
+      const outcome = yield* attempt(input, asOf);
+      if (outcome.kind === "failed") {
+        yield { type: "turn_failed", error: outcome.error, retryable: true };
+        return;
       }
+      let why: string;
+      if (outcome.kind === "spoken") {
+        const done = commit(reviewId, turnId, review, input, outcome.move, outcome.say);
+        if (done.ok) {
+          yield { type: "move", turnId: outId, move: done.move };
+          yield { type: "turn_complete", turnId: outId };
+          return;
+        }
+        why = done.why;
+        replayed = false;
+      } else {
+        why = outcome.why;
+        replayed &&= outcome.stored;
+      }
+      input = tutorInput(reviewId, review, why);
     }
-
-    const allowed = [...kit.allowedMoves(state)];
-    if (allowed.length === 0) {
+    if (!input) {
       yield { type: "turn_complete", turnId };
       return;
     }
 
-    const usable = usableNow(review);
-    const asked = turns.find((t) => t.actor === "tutor" && t.move.kind === "ask_main" && t.move.threadId === state.openThread);
-    const threadClaims = new Set<ClaimId>(asked?.actor === "tutor" && asked.move.kind === "ask_main" ? asked.move.claimIds : []);
-    const cited = new Set(usable.filter((c) => threadClaims.size === 0 || threadClaims.has(c.id)).flatMap((c) => c.evidence));
-    const full = deps.bundle(review.scope.material);
-    const input: TutorInput = {
-      state,
-      allowed,
-      scope: review.scope,
-      claims: usable,
-      evidence: { ...full, passages: full.passages.filter((p) => cited.has(p.id)), frames: full.frames.filter((f) => cited.has(f.id)) },
-      turns: loadTurns(reviewId),
-      priorObservations: [],
-      repairNote: null,
-    };
-
-    const asOf = deps.nextSeq();
-    let outcome = yield* attempt(reviewId, turnId, input, asOf);
-    let replayed = outcome.kind === "invalid" && outcome.stored;
-    if (outcome.kind === "invalid") outcome = yield* attempt(reviewId, turnId, { ...input, repairNote: outcome.why }, asOf);
-    if (outcome.kind === "invalid") {
-      replayed &&= outcome.stored;
-      const fallback = codeMove(input);
-      if (!fallback) {
-        yield { type: "turn_failed", error: `no valid move: ${outcome.why}`, retryable: !replayed };
-        return;
-      }
-      yield { type: "move", turnId: outId, move: fallback.move };
-      yield* spoken(fallback.say);
-      outcome = { kind: "spoken", ...fallback };
-    }
-    if (outcome.kind === "failed") {
-      yield { type: "turn_failed", error: outcome.error, retryable: true };
+    const fallback = codeMove(input);
+    if (!fallback) {
+      yield { type: "turn_failed", error: `no valid move: ${input.repairNote}`, retryable: !replayed };
       return;
     }
-
-    const { move, say } = outcome;
-    db.tx(() => {
-      if (hasTurn(outId)) return;
-      appendTurn(reviewId, outId, "tutor", threadOf(move), { move, say });
-      if (move.kind !== "close_thread") return;
-      const after = stateOf(reviewId, review, loadTurns(reviewId)).state;
-      if (!after.softTargetOffered && after.activeSeconds >= softTargetS) {
-        appendTurn(reviewId, codeTurnId(reviewId, `soft_target:${turnId}`), "code", null, { notice: { kind: "soft_target_reached", elapsedS: after.activeSeconds } });
-      }
-    });
+    const done = commit(reviewId, turnId, review, input, fallback.move, fallback.say);
+    if (!done.ok) {
+      yield { type: "turn_failed", error: `no valid move: ${done.why}`, retryable: true };
+      return;
+    }
+    yield* spoken(done.say);
+    yield { type: "move", turnId: outId, move: done.move };
     yield { type: "turn_complete", turnId: outId };
   }
 

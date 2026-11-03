@@ -727,17 +727,23 @@ describe("R7 scope never grows (the TLC counterexample)", () => {
 // ───────────────────────────── turns ─────────────────────────────
 
 describe("turn", () => {
-  test("streams learner_turn_stored, the validated move, the prose by delta and sentence, then turn_complete", async () => {
+  test("streams learner_turn_stored, the prose by delta and sentence, the move once stored, then turn_complete", async () => {
     const r = startedRig();
     const move = askMain(r.claim);
     const t = tutorHarness(r.db, () => reply(move, "What is the main idea? Say it in your own words."));
     const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit, now: () => 1 });
     const turnId = randomId("turn");
-    const events = await collect(reviews.turn(r.reviewId, turnId, answer()));
+    const events: TurnEvent[] = [];
+    let storedWhenMoveSent: readonly Turn[] = [];
+    for await (const e of reviews.turn(r.reviewId, turnId, answer())) {
+      if (e.type === "move") storedWhenMoveSent = reviews.view(r.reviewId).turns;
+      events.push(e);
+    }
 
     expect(types(events)[0]).toBe("learner_turn_stored");
-    expect(types(events)[1]).toBe("move");
-    expect(types(events).at(-1)).toBe("turn_complete");
+    expect(types(events)[1]).toBe("say_delta");
+    expect(types(events).slice(-2)).toEqual(["move", "turn_complete"]);
+    expect(storedWhenMoveSent.filter((x) => x.actor === "tutor")).toMatchObject([{ move }]);
     expect(events.filter((e) => e.type === "move")).toEqual([{ type: "move", turnId: stableId("turn", r.reviewId, turnId, "tutor"), move }]);
     expect(events.filter((e) => e.type === "say_delta").map((e) => e.type === "say_delta" && e.text).join("")).toBe("What is the main idea? Say it in your own words.");
     expect(events.filter((e) => e.type === "sentence").map((e) => e.type === "sentence" && e.text)).toEqual(["What is the main idea?", "Say it in your own words."]);
@@ -823,6 +829,29 @@ describe("turn", () => {
     expect(JSON.stringify(events)).not.toContain("SPOKEN-WITHOUT-LEAVE");
     expect(events.filter((e) => e.type === "move")).toHaveLength(1);
     expect(events.find((e) => e.type === "move")).toMatchObject({ move: { claimIds: [r.claim] } });
+    expect(types(events).at(-1)).toBe("turn_complete");
+  });
+
+  test("R3: a claim that loses its check while the model talks is neither stored nor sent as the move; the repair sees the change", async () => {
+    const r = startedRig();
+    const t = tutorHarness(r.db, (input) => {
+      if (input.repairNote === null) {
+        r.world.check(r.claim, "unverified");
+        return reply(askMain(r.claim), "Tell me about claim one.");
+      }
+      return reply({ kind: "disclose_correction", correctionId: input.state.corrections[0]!.id, threadIds: [], evidence: [] }, "That claim did not hold up.");
+    });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit });
+    const events = await collect(reviews.turn(r.reviewId, randomId("turn"), answer()));
+
+    const namesClaim = (move: TutorMove) => move.kind === "ask_main" && move.claimIds.includes(r.claim);
+    expect(events.filter((e) => e.type === "move" && namesClaim(e.move))).toEqual([]);
+    expect(reviews.view(r.reviewId).turns.filter((x) => x.actor === "tutor" && namesClaim(x.move))).toEqual([]);
+    expect(t.calls).toHaveLength(2);
+    expect(t.calls[1]!.repairNote).not.toBeNull();
+    expect(t.calls[1]!.claims.map((c) => c.id)).not.toContain(r.claim);
+    expect(t.calls[1]!.allowed).toEqual(["disclose_correction"]);
+    expect(events.filter((e) => e.type === "move")).toMatchObject([{ move: { kind: "disclose_correction" } }]);
     expect(types(events).at(-1)).toBe("turn_complete");
   });
 
