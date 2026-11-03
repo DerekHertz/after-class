@@ -46,7 +46,6 @@ describe("Derek's rules", () => {
   test.todo("R8 a hit stored after the stop-early Seq leaves the claim dropped; an outdated input key is never selected; save never writes note_edits (W6, W8)");
   test.todo("R9 start() leaves CaptureView.status unchanged; a stop control fact leaves ReviewView.state.phase unchanged (W7 + W3)");
   test.todo("R10 start() with zero assessable claims returns nothing_to_review and writes no review row (W7)");
-  test.todo("R11 detour_step is not in allowedMoves until a learner detour_accept turn (W8)");
   test.todo("R12 hint, explain or a correction disclosure before the first answer: clampStatus('independent') ⇒ after_help (W8)");
   test.todo("R13 skip or no answer ⇒ not_assessed regardless of proposal (W8)");
   test.todo("R14 an open or unsettled dispute is saved as disputed; isLearningGap false unless resolved_by_learner it_was_my_gap (W8)");
