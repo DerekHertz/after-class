@@ -1,4 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { MutableRefObject } from "react";
+import { Material } from "../shared/time";
 import type { EvidenceId, ReviewId } from "../shared/ids";
 import type { AppApi } from "./api";
 import { useAppearance, useSceneActivity } from "./appearance";
@@ -18,6 +20,7 @@ export type ReviewDeps = { readonly api: AppApi; readonly speaker: Speaker; read
 
 export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewDeps & { readonly reviewId: ReviewId }) {
   const { appearance } = useAppearance();
+  const speechToggle = useRef<(() => void) | null>(null);
   const history = useRef<HTMLDivElement>(null);
   const sourceHeading = useRef<HTMLHeadingElement>(null);
   const sourceToggle = useRef<HTMLButtonElement>(null);
@@ -85,12 +88,13 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     <main className="review">
       <header className="review-header">
         <div>
-          <p className="review-wordmark">After Class</p>
-          <h1>Review</h1>
+          <h1>{[...titles.values()].join("; ") || "Review"}</h1>
+          <p className="review-scope-line">Reviewing {Material.sources(view.scope.material).flatMap(id => Material.get(view.scope.material, id).intervals().map(formatInterval)).join(" · ")}</p>
         </div>
         <div className="review-navigation">
           <span className="review-phase">{view.state.phase}</span>
           <Link to={{ page: "record", reviewId: null }}>My notebook</Link>
+          <Actions ids={actions.filter(id => id === "pause" || id === "resume" || id === "end")} disabled={streaming || state.unsent.length > 0} send={id => void controller.send(toAct(id, "", "text"))} />
         </div>
       </header>
       <SaveBanner state={state} onRetry={() => void controller.save()} reviewId={reviewId} />
@@ -98,7 +102,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
       <div className={`review-workspace${sourceOpen ? "" : " source-closed"}`}>
         <section className="conversation-notebook" aria-labelledby="conversation-heading">
           <div className="notebook-heading">
-            <h2 id="conversation-heading">Conversation</h2>
+            <h2 id="conversation-heading">Conversation</h2><span className="question-marker">Question {view.state.mainQuestions}</span>
             <button type="button" onClick={() => {
               followHistory.current = true;
               if (history.current) history.current.scrollTop = history.current.scrollHeight;
@@ -138,12 +142,13 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             </div>
           )}
           <Composer
-            actions={actions.filter((a) => a !== "continue" && a !== "wrap_up")}
+            actions={actions.filter((a) => !["continue", "wrap_up", "pause", "resume", "end"].includes(a))}
             disabled={streaming || state.unsent.length > 0}
             sendError={state.sendError}
             speech={speech}
             onSpeaking={controller.learnerSpeaking}
             onListeningChange={setListening}
+            speechToggle={speechToggle}
             send={(id, text, modality) => controller.send(toAct(id, text, modality))}
           />
           {view.observations.length > 0 && (
@@ -164,9 +169,10 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           )}
         </section>
         <div className="review-source-column">
-        <RoomTools scene={appearance.scene} sourceOpen={sourceOpen} onSource={() => {
+        <RoomTools scene={appearance.scene} sourceOpen={sourceOpen} listening={listening} speechAvailable={speech.supported && actions.includes("answer")} onSpeak={() => speechToggle.current?.()} onSource={(origin) => {
+          sourceOrigin.current = origin ?? sourceToggle.current;
           if (sourceOpen) closeSource();
-          else { sourceOrigin.current = sourceToggle.current; setSourceOpen(true); }
+          else setSourceOpen(true);
         }} />
         <aside id="review-source" className="source-stand" aria-labelledby="source-heading" hidden={!sourceOpen}>
           <div className="source-heading">
@@ -264,14 +270,14 @@ function Actions({ ids, disabled, send }: { readonly ids: readonly ActionId[]; r
   return (
     <span className="actions">
       {ids.map((id) => (
-        <button key={id} type="button" disabled={disabled} onClick={() => send(id)}>{ACTION_LABEL[id]}</button>
+        <button key={id} type="button" data-action={id} disabled={disabled} onClick={() => send(id)}>{ACTION_LABEL[id]}</button>
       ))}
     </span>
   );
 }
 
 export function Composer({
-  actions, disabled, sendError, speech, onSpeaking, onListeningChange, send,
+  actions, disabled, sendError, speech, onSpeaking, onListeningChange, speechToggle, send,
 }: {
   readonly actions: readonly ActionId[];
   readonly disabled: boolean;
@@ -279,6 +285,7 @@ export function Composer({
   readonly speech: SpeechInput;
   readonly onSpeaking: () => void;
   readonly onListeningChange?: (listening: boolean) => void;
+  readonly speechToggle?: MutableRefObject<(() => void) | null>;
   readonly send: (id: ActionId, text: string, modality: "speech" | "text") => Promise<boolean>;
 }) {
   const responseId = useId();
@@ -311,6 +318,11 @@ export function Composer({
       },
     });
   }
+
+  useEffect(() => {
+    if (speechToggle) speechToggle.current = toggleListening;
+    return () => { if (speechToggle) speechToggle.current = null; };
+  }, [speechToggle, listening, speech, onSpeaking]);
 
   async function fire(id: ActionId) {
     if (disabled || submitting.current || !actions.includes(id) || (NEEDS_TEXT.has(id) && draft.trim() === "")) return;

@@ -1,0 +1,53 @@
+{
+  "mote": {
+    "width": 1536,
+    "height": 1024,
+    "colorType": "RGBA",
+    "alphaRange": [
+      0,
+      254
+    ],
+    "fullyTransparentPixels": 1020693,
+    "totalPixels": 1572864,
+    "visibleBoundingBox": [
+      0,
+      0,
+      1483,
+      977
+    ]
+  },
+  "pip": {
+    "width": 1159,
+    "height": 1358,
+    "colorType": "RGBA",
+    "alphaRange": [
+      0,
+      255
+    ],
+    "fullyTransparentPixels": 727502,
+    "totalPixels": 1573922,
+    "visibleBoundingBox": [
+      0,
+      0,
+      1144,
+      1357
+    ]
+  },
+  "lumi": {
+    "width": 1312,
+    "height": 1199,
+    "colorType": "RGBA",
+    "alphaRange": [
+      0,
+      255
+    ],
+    "fullyTransparentPixels": 967883,
+    "totalPixels": 1573088,
+    "visibleBoundingBox": [
+      55,
+      14,
+      1271,
+      1198
+    ]
+  }
+}

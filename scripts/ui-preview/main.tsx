@@ -11,12 +11,13 @@ import { api, speech, ids, scenario, scenarios, continueFixture, dictateFixture,
 
 const unsent = createMemoryUnsent();
 const speaker = { beginTurn() {}, speak() {}, stop() {} };
+const clean = new URLSearchParams(location.search).get("clean") === "1";
 function Preview() {
   const path = usePathname();
   const calls = useSyncExternalStore(requestLedger.subscribe, requestLedger.snapshot);
   const page = path.includes("/record") || scenario.startsWith("record") ? "record" : path.includes("/capture") || scenario.startsWith("capture") ? "capture" : path.includes("/usage") || scenario === "usage" ? "usage" : "review";
   return <>
-    <aside className="fixture-toolbar" aria-label="Preview fixtures">
+    <aside className="fixture-toolbar" aria-label="Preview fixtures" hidden={clean}>
       <strong>Deterministic UI fixture</strong><span>No live lecture or model calls.</span>
       <label>Scenario <select value={scenario} onChange={event => { location.href = `/?scenario=${event.target.value}`; }}>{scenarios.map(value => <option key={value}>{value}</option>)}</select></label>
       <button type="button" onClick={continueFixture}>Finish pending fixture operation</button>

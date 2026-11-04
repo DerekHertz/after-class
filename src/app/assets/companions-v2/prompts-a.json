@@ -1,0 +1,26 @@
+{
+  "selected": [
+    {
+      "name": "mote",
+      "mode": "built-in imagegen",
+      "reference": "docs/design/mascot-studies-2026-11-03/mote.png",
+      "output": "src/app/assets/companions-v2/mote.png",
+      "prompt": "Use case: identity-preserve\nAsset type: transparent production character cutout for After Class web app.\nInput image 1 is the exact character reference and edit target. Extract/recreate ONLY the large Mote character from the LEFT portrait in the reference, keeping its detailed original design, proportions and painterly rendering unchanged. Remove the book pedestal, brass lamp, all UI, all text and every background object. Full body and both wings and antennae fully visible with comfortable transparent margin. Same three-quarter pose facing toward the right, friendly quiet expression. Preserve the fuzzy warm cream head with individually inked fur edges, tiny black oval eyes and mouth, rich amber feather-shaped antennae, large layered cream folded-page wings with delicate brown veins and dusty-blue crescent markings, textured navy waistcoat with two gold buttons, ochre leather cross-body satchel with stitching, small cream paws. Preserve fine ink contours, warm hand-painted grain, soft shaded dimensional volumes, original storybook finish. Do NOT simplify into flat vector or icon, do not add new props, no book, no lamp, no speech bubble. Truly transparent alpha background, no checkerboard painted in, no colored rectangle, no ground plane or broad ground shadow. Center character large on canvas, high detail suitable for 256 CSS pixels and higher."
+    },
+    {
+      "name": "pip",
+      "mode": "built-in imagegen",
+      "reference": "docs/design/mascot-studies-2026-11-03/pip.png",
+      "output": "src/app/assets/companions-v2/pip.png",
+      "prompt": "Use case: background-extraction\nAsset type: detailed transparent production mascot cutout for After Class web app.\nImage 1 is the exact original Pip character reference/edit target. Isolate ONLY the large Pip eraser character shown on the LEFT, remove the green book pedestal and all surrounding layout, text, rules and UI. Preserve the original character EXACTLY: chunky cream rectangular eraser with rounded bevels, tactile fine stippled rubber grain and worn ink outlines, deep coral-red rounded cap with shaded side faces and fine diagonal seam/white highlight, pair of small black dot eyes, ochre leather cross-body strap with stitching, cream oval hands held gently together, small cobalt-blue legs and shoes. Keep same seated three-quarter pose facing slightly right, same quiet expression, same body/limb proportions and fine hand-painted material shading. This is a high-detail storybook/inked dimensional illustration matching the reference, not flat vector, icon, low-poly or simplified drawing. Full silhouette with hands/feet visible, centered large on canvas with margin. True transparent alpha immediately outside character edges, no background, no floor plane, no shadow, no halo/glow, no book, no text, no other props."
+    },
+    {
+      "name": "lumi",
+      "mode": "built-in imagegen",
+      "reference": "docs/design/mascot-studies-2026-11-03/lumi.png",
+      "output": "src/app/assets/companions-v2/lumi.png",
+      "prompt": "Use case: background-extraction\nAsset type: detailed transparent production mascot cutout for After Class web app.\nImage 1 is the exact original Lumi character reference and edit target. Isolate ONLY the large Lumi desk-lamp character shown on LEFT, removing the book pedestal, paper background, UI, text and all other elements. Preserve the original design and pose EXACTLY, three-quarter view facing right: rounded butter-yellow metal lamp shade with three ventilation slits, cream underside with tiny black oval eyes and a small gentle smile, warm illuminated interior, two articulated ochre/cream neck arms with large brass screw joints and visible screw slots, deep cobalt-blue weighted base with bevels and four small rubber feet, small ochre rectangular switch on base. Keep the precise ink contours, soft hand-painted grain, detailed shaded metal joints, matte enamel highlights and volumetric construction. Full shade/arms/base/feet visible, centered large with transparent margin. Match the reference illustration craft, do NOT simplify into SVG/icon/flat vector or glossy plastic 3D. True transparent alpha immediately outside natural character edges, no solid background, no floor plane, no book, no large light-beam spill or ground shadow, no halo/glow, no text or extra props."
+    }
+  ],
+  "note": "Mote targeted alpha-halo cleanup output was discarded after pixel inspection proved the apparent warm haze is RGB under fully transparent pixels in the selected original cutout."
+}

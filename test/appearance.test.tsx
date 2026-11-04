@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { APPEARANCE_KEY, COMPANIONS, DEFAULT_APPEARANCE, SCENES, parseAppearance, persistAppearance, readAppearance } from "../src/app/appearance";
 import { CompanionDrawing } from "../src/app/companion";
@@ -24,11 +25,14 @@ describe("local appearance preferences", () => {
     expect(persistAppearance({ setItem(key, value) { expect(key).toBe(APPEARANCE_KEY); record = value; } }, { ...DEFAULT_APPEARANCE, companion: "yun" })).toBe(true);
     expect(readAppearance({ getItem() { return record; } }).companion).toBe("yun");
   });
-  test("every companion is a separate scalable transparent illustration", () => {
+  test("every companion has its own detailed raster asset with an alpha channel", () => {
     for (const id of Object.keys(COMPANIONS) as (keyof typeof COMPANIONS)[]) {
       const html = renderToStaticMarkup(<CompanionDrawing id={id} />);
-      expect(html).toContain('<svg');
-      expect(html).not.toContain('<image');
+      expect(html).toContain(`data-companion="${id}"`);
+      expect(html).not.toContain('<svg');
+      const png = readFileSync(new URL(`../src/app/assets/companions-v2/${id}.png`, import.meta.url));
+      expect(png.subarray(1, 4).toString()).toBe("PNG");
+      expect(png[25]).toBe(6);
     }
   });
   test("appearance controls are separate from the stable workspace", () => {

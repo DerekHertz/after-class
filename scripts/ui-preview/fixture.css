@@ -3,3 +3,4 @@
 .fixture-toolbar details { width: 100%; }
 .fixture-toolbar pre { max-height: 10rem; overflow: auto; white-space: pre-wrap; }
 .fixture-toolbar a { color: #284f9b; }
+.fixture-toolbar[hidden] { display: none; }
