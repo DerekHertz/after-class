@@ -51,10 +51,11 @@ const EPS = 1e-9;
 // ───────────────────────────── labels ─────────────────────────────
 
 export type LabelItem = { readonly mediaS: number; readonly note: string; readonly confirmed: boolean; readonly cue?: string };
-export type DuplicateMember = { readonly mediaS: number; readonly frameId?: string };
+export type DuplicateMember = { readonly mediaS: number; readonly frameId?: string; readonly videoId?: string };
 export type DuplicateGroup = { readonly note: string; readonly confirmed: boolean; readonly cue?: string; readonly frames: readonly DuplicateMember[] };
 export type SpanS = { readonly start: number; readonly end: number };
 
+/** Schema 1: a lecture is one video. Still fully supported: it is a lecture of one video. */
 export type LabelFile = {
   readonly schemaVersion: 1;
   readonly status: "draft" | "signed_off";
@@ -68,7 +69,23 @@ export type LabelFile = {
   readonly duplicateGroups: readonly DuplicateGroup[];
 };
 
-export type LabelResult = { readonly ok: true; readonly labels: LabelFile } | { readonly ok: false; readonly errors: readonly string[] };
+/** Schema 2 (Amendment 1): a lecture is the set of clips of one capture, in watch order. Every time is (videoId, mediaS). */
+export type LabelFileV2 = {
+  readonly schemaVersion: 2;
+  readonly status: "draft" | "signed_off";
+  readonly signedOffBy: string | null;
+  readonly signedOffAt: string | null;
+  readonly description?: string;
+  readonly draftNote?: string;
+  readonly lecture: { readonly captureId: string; readonly videos: readonly { readonly videoId: string; readonly title?: string; readonly spanS: SpanS }[] };
+  readonly boundaries: readonly (LabelItem & { readonly videoId: string })[];
+  readonly visualSteps: readonly (LabelItem & { readonly videoId: string })[];
+  readonly duplicateGroups: readonly (Omit<DuplicateGroup, "frames"> & { readonly frames: readonly (DuplicateMember & { readonly videoId: string })[] })[];
+};
+
+export type AnyLabelFile = LabelFile | LabelFileV2;
+
+export type LabelResult = { readonly ok: true; readonly labels: AnyLabelFile } | { readonly ok: false; readonly errors: readonly string[] };
 
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 const isNum = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
@@ -84,7 +101,8 @@ export function validateLabels(input: unknown): LabelResult {
 
   if (!isObj(input)) return { ok: false, errors: ["labels: expected a JSON object"] };
   unknownKeys("labels", input, ["schemaVersion", "status", "signedOffBy", "signedOffAt", "description", "draftNote", "lecture", "boundaries", "visualSteps", "duplicateGroups"]);
-  if (input.schemaVersion !== 1) err("schemaVersion", `expected 1, got ${JSON.stringify(input.schemaVersion)}`);
+  if (input.schemaVersion !== 1 && input.schemaVersion !== 2) err("schemaVersion", `expected 1 or 2, got ${JSON.stringify(input.schemaVersion)}`);
+  const v2 = input.schemaVersion === 2;
   const status = input.status;
   if (status !== "draft" && status !== "signed_off") err("status", `expected "draft" or "signed_off", got ${JSON.stringify(status)}`);
   if (input.description !== undefined && typeof input.description !== "string") err("description", "expected a string");
@@ -98,22 +116,54 @@ export function validateLabels(input: unknown): LabelResult {
     if (input.signedOffAt !== null) err("signedOffAt", `a draft must have null here, got ${JSON.stringify(input.signedOffAt)}`);
   }
 
+  // Schema 1 has one span; schema 2 has one span per video, keyed by videoId.
   let span: SpanS | null = null;
+  const spans = new Map<string, SpanS>();
+  const spanOk = (path: string, s: unknown): SpanS | null => {
+    if (!isObj(s) || !isNum(s.start) || !isNum(s.end) || s.start < 0 || !(s.end > s.start)) {
+      err(path, "expected {start, end} in media seconds with 0 <= start < end");
+      return null;
+    }
+    return { start: s.start, end: s.end };
+  };
   const lecture = input.lecture;
   if (!isObj(lecture)) err("lecture", "expected an object");
-  else {
+  else if (v2) {
+    unknownKeys("lecture", lecture, ["captureId", "videos"]);
+    if (!isText(lecture.captureId)) err("lecture.captureId", "expected a non-empty string");
+    if (!Array.isArray(lecture.videos) || lecture.videos.length === 0) err("lecture.videos", "expected a non-empty array: the clips of the capture in watch order");
+    else {
+      lecture.videos.forEach((v: unknown, i) => {
+        const path = `lecture.videos[${i}]`;
+        if (!isObj(v)) return err(path, "expected an object");
+        unknownKeys(path, v, ["videoId", "title", "spanS"]);
+        if (!isText(v.videoId)) err(`${path}.videoId`, "expected a non-empty string");
+        else if (spans.has(v.videoId)) err(`${path}.videoId`, `${v.videoId} is listed twice; each clip appears once, in watch order`);
+        if (v.title !== undefined && typeof v.title !== "string") err(`${path}.title`, "expected a string");
+        const sp = spanOk(`${path}.spanS`, v.spanS);
+        if (sp !== null && isText(v.videoId) && !spans.has(v.videoId)) spans.set(v.videoId, sp);
+      });
+    }
+  } else {
     unknownKeys("lecture", lecture, ["captureId", "videoId", "title", "spanS"]);
     if (!isText(lecture.captureId)) err("lecture.captureId", "expected a non-empty string");
     if (!isText(lecture.videoId)) err("lecture.videoId", "expected a non-empty string");
     if (lecture.title !== undefined && typeof lecture.title !== "string") err("lecture.title", "expected a string");
-    const s = lecture.spanS;
-    if (!isObj(s) || !isNum(s.start) || !isNum(s.end) || s.start < 0 || !(s.end > s.start)) err("lecture.spanS", "expected {start, end} in media seconds with 0 <= start < end");
-    else span = { start: s.start, end: s.end };
+    span = spanOk("lecture.spanS", lecture.spanS);
   }
 
-  const checkTime = (path: string, t: unknown) => {
+  /** Schema 2 times are checked against the span of the item's own video. */
+  const checkTime = (path: string, t: unknown, o: Record<string, unknown>) => {
+    let within: SpanS | null = span;
+    let label = "the lecture span";
+    if (v2) {
+      if (!isText(o.videoId)) err(`${path}.videoId`, "expected the id of one of lecture.videos");
+      else if (!spans.has(o.videoId)) err(`${path}.videoId`, `${o.videoId} is not one of lecture.videos (${[...spans.keys()].join(", ")})`);
+      within = isText(o.videoId) ? (spans.get(o.videoId) ?? null) : null;
+      label = `the span of video ${String(o.videoId)}`;
+    }
     if (!isNum(t) || t < 0) err(`${path}.mediaS`, `expected media seconds >= 0, got ${JSON.stringify(t)}`);
-    else if (span !== null && (t < span.start || t >= span.end)) err(`${path}.mediaS`, `${t} lies outside the lecture span [${span.start}, ${span.end}) (the span is half-open)`);
+    else if (within !== null && (t < within.start || t >= within.end)) err(`${path}.mediaS`, `${t} lies outside ${label} [${within.start}, ${within.end}) (the span is half-open)`);
   };
   const checkCommon = (path: string, o: Record<string, unknown>) => {
     if (typeof o.note !== "string") err(`${path}.note`, "expected a string (it may be empty)");
@@ -127,8 +177,8 @@ export function validateLabels(input: unknown): LabelResult {
     list.forEach((it: unknown, i) => {
       const path = `${name}[${i}]`;
       if (!isObj(it)) return err(path, "expected an object");
-      unknownKeys(path, it, ["mediaS", "note", "confirmed", "cue"]);
-      checkTime(path, it.mediaS);
+      unknownKeys(path, it, v2 ? ["videoId", "mediaS", "note", "confirmed", "cue"] : ["mediaS", "note", "confirmed", "cue"]);
+      checkTime(path, it.mediaS, it);
       checkCommon(path, it);
     });
   };
@@ -147,14 +197,14 @@ export function validateLabels(input: unknown): LabelResult {
       g.frames.forEach((f: unknown, k) => {
         const fp = `${path}.frames[${k}]`;
         if (!isObj(f)) return err(fp, "expected an object");
-        unknownKeys(fp, f, ["mediaS", "frameId"]);
-        checkTime(fp, f.mediaS);
+        unknownKeys(fp, f, v2 ? ["videoId", "mediaS", "frameId"] : ["mediaS", "frameId"]);
+        checkTime(fp, f.mediaS, f);
         if (f.frameId !== undefined && !isText(f.frameId)) err(`${fp}.frameId`, "expected a non-empty string when present");
       });
     });
   }
 
-  return errors.length > 0 ? { ok: false, errors } : { ok: true, labels: input as unknown as LabelFile };
+  return errors.length > 0 ? { ok: false, errors } : { ok: true, labels: input as unknown as AnyLabelFile };
 }
 
 // ───────────────────────────── the split ─────────────────────────────
@@ -168,6 +218,108 @@ export function halfOf(timeS: number, span: SpanS): Half | null {
 }
 
 export const halfRange = (span: SpanS, half: Half): SpanS => (half === "first" ? { start: span.start, end: splitPoint(span) } : { start: splitPoint(span), end: span.end });
+
+// ───────────────────────────── a lecture as a set of clips (Amendment 1) ─────────────────────────────
+
+/** A position in a lecture: media seconds of one clip. Distance across clips is undefined. */
+export type Place = { readonly videoId: string; readonly mediaS: number };
+
+export type Clip = { readonly videoId: string; readonly spanS: SpanS; readonly watchedS: number };
+
+/** Amendment 1, PROPOSED: the id of a lecture. One video keeps the schema 1 id, so a one-video lecture is the same lecture in either schema. */
+export function lectureIdOfLabels(labels: AnyLabelFile): string {
+  if (labels.schemaVersion === 1) return `${labels.lecture.captureId}/${labels.lecture.videoId}`;
+  const [first, ...rest] = labels.lecture.videos;
+  return rest.length === 0 ? `${labels.lecture.captureId}/${first!.videoId}` : `${labels.lecture.captureId}/set:${first!.videoId}+${rest.length}`;
+}
+
+/** Labels and clips in one shape for both schemas. A schema 1 file is a lecture of one video. */
+export type LabelView = {
+  readonly captureId: string;
+  readonly clips: readonly { readonly videoId: string; readonly title?: string; readonly spanS: SpanS }[];
+  readonly boundaries: readonly (LabelItem & { readonly videoId: string })[];
+  readonly visualSteps: readonly (LabelItem & { readonly videoId: string })[];
+  readonly duplicateGroups: readonly (Omit<DuplicateGroup, "frames"> & { readonly frames: readonly (DuplicateMember & { readonly videoId: string })[] })[];
+};
+
+export function viewOf(labels: AnyLabelFile): LabelView {
+  if (labels.schemaVersion === 2) return { captureId: labels.lecture.captureId, clips: labels.lecture.videos, boundaries: labels.boundaries, visualSteps: labels.visualSteps, duplicateGroups: labels.duplicateGroups };
+  const { captureId, videoId, title, spanS } = labels.lecture;
+  const at = <T extends object>(x: T) => ({ ...x, videoId });
+  return {
+    captureId,
+    clips: [{ videoId, ...(title !== undefined ? { title } : {}), spanS }],
+    boundaries: labels.boundaries.map(at),
+    visualSteps: labels.visualSteps.map(at),
+    duplicateGroups: labels.duplicateGroups.map((g) => ({ ...g, frames: g.frames.map(at) })),
+  };
+}
+
+/**
+ * The tune and held-out split of one lecture.
+ * One clip: the schema 1 rule, the midpoint of the span (adopted definition 9).
+ * Two or more clips (Amendment 1, replaces definition 9 for sets): the clip JOIN nearest the midpoint of the total
+ * watched time, in watch order, ties to the earlier join. The clips before it are the tune half, the clips after it the
+ * held-out half; no clip is cut.
+ */
+export type Splitter = {
+  readonly kind: "midpoint" | "join";
+  /** Index of the first clip of the held-out half; 0 for a midpoint split (nothing is a join). */
+  readonly joinIndex: number;
+  /** For a join split: total watched seconds, their midpoint, and the watched seconds before and after the join. */
+  readonly totalS: number;
+  readonly midpointS: number;
+  readonly beforeS: number;
+  readonly afterS: number;
+  readonly clips: readonly Clip[];
+  halfOf(videoId: string, mediaS: number): Half | null;
+  /** The part of this clip that belongs to `half`, or null when the clip is wholly in the other half. */
+  rangeOf(videoId: string, half: Half): SpanS | null;
+  clipsIn(half: Half): readonly Clip[];
+};
+
+export function makeSplitter(clips: readonly Clip[]): Splitter {
+  if (clips.length === 0) throw new RangeError("a lecture has at least one clip");
+  const index = new Map(clips.map((c, i) => [c.videoId, i] as const));
+  if (clips.length === 1) {
+    const only = clips[0]!;
+    return {
+      kind: "midpoint", joinIndex: 0, totalS: only.watchedS, midpointS: splitPoint(only.spanS), beforeS: 0, afterS: 0, clips,
+      halfOf: (v, t) => (v === only.videoId ? halfOf(t, only.spanS) : null),
+      rangeOf: (v, h) => (v === only.videoId ? halfRange(only.spanS, h) : null),
+      clipsIn: () => [only],
+    };
+  }
+  const total = clips.reduce((a, c) => a + c.watchedS, 0);
+  const mid = total / 2;
+  let joinIndex = 1;
+  let best = Number.POSITIVE_INFINITY;
+  let before = 0;
+  let cumulative = 0;
+  for (let j = 1; j < clips.length; j++) {
+    cumulative += clips[j - 1]!.watchedS;
+    const d = Math.abs(cumulative - mid);
+    if (d < best - EPS) {
+      best = d;
+      joinIndex = j;
+      before = cumulative;
+    }
+  }
+  const halfOfClip = (v: string): Half | null => {
+    const i = index.get(v);
+    return i === undefined ? null : i < joinIndex ? "first" : "second";
+  };
+  const clipOf = (v: string) => clips[index.get(v) ?? -1];
+  return {
+    kind: "join", joinIndex, totalS: total, midpointS: mid, beforeS: before, afterS: total - before, clips,
+    halfOf: (v, t) => {
+      const c = clipOf(v);
+      return c === undefined || t < c.spanS.start || t >= c.spanS.end ? null : halfOfClip(v);
+    },
+    rangeOf: (v, h) => (halfOfClip(v) === h ? clipOf(v)!.spanS : null),
+    clipsIn: (h) => clips.filter((c) => halfOfClip(c.videoId) === h),
+  };
+}
 
 // ───────────────────────────── verdicts from stored probabilities ─────────────────────────────
 
@@ -213,6 +365,31 @@ export function matchBoundaries(labels: readonly number[], detections: readonly 
   return { pairs, missedLabels, falseCloses: D.filter((_, i) => !used.has(i)) };
 }
 
+export type PlacedMatching = {
+  readonly pairs: readonly (readonly [label: Place, detection: Place])[];
+  readonly missedLabels: readonly Place[];
+  readonly falseCloses: readonly Place[];
+};
+
+/**
+ * Amendment 1: the same one-to-one, inclusive +-60 s matching, run separately inside each clip. A label and a detection
+ * in different clips never match: the distance between them is undefined. Outputs are in watch order, then by time.
+ */
+export function matchPlaced(labels: readonly Place[], detections: readonly Place[], clipOrder: readonly string[], tolS = TOLERANCE_S): PlacedMatching {
+  const pairs: [Place, Place][] = [];
+  const missedLabels: Place[] = [];
+  const falseCloses: Place[] = [];
+  const videos = [...new Set([...clipOrder, ...labels.map((l) => l.videoId), ...detections.map((d) => d.videoId)])];
+  for (const videoId of videos) {
+    const m = matchBoundaries(labels.filter((l) => l.videoId === videoId).map((l) => l.mediaS), detections.filter((d) => d.videoId === videoId).map((d) => d.mediaS), tolS);
+    const at = (mediaS: number): Place => ({ videoId, mediaS });
+    pairs.push(...m.pairs.map(([l, d]): [Place, Place] => [at(l), at(d)]));
+    missedLabels.push(...m.missedLabels.map(at));
+    falseCloses.push(...m.falseCloses.map(at));
+  }
+  return { pairs, missedLabels, falseCloses };
+}
+
 export function falseClosesPerWindow(falseCloses: number, watchedS: number): { readonly rate: number | null; readonly pass: boolean | null } {
   if (!(watchedS > 0)) return { rate: null, pass: null };
   return { rate: (falseCloses * FALSE_CLOSE_WINDOW_S) / watchedS, pass: falseCloses * FALSE_CLOSE_WINDOW_S <= FALSE_CLOSES_MAX_PER_WINDOW * watchedS + EPS };
@@ -238,30 +415,56 @@ export type WindowRecord = {
   readonly frames: readonly string[];
   readonly newMaterial: readonly (readonly [string, readonly (readonly [number, number])[]])[];
   readonly watchedSecondsAtEnd: number;
+  /**
+   * Amendment 1: the clip this window belongs to, and `startS`/`endS` are in that clip. A window whose new material spans a
+   * clip join belongs to the clip where its new material ends (PROPOSED). Absent in records written before the amendment.
+   */
+  readonly videoId?: string;
 };
-export type FrameRecord = { readonly id: string; readonly mediaS: number; readonly hasBefore: boolean };
+export type FrameRecord = { readonly id: string; readonly mediaS: number; readonly hasBefore: boolean; readonly videoId?: string };
 
-export type LectureRecord = {
+type LectureCommon = {
   readonly t: "lecture";
   readonly lectureId: string;
   readonly labelsFile: string;
   readonly labelsSha256: string;
   readonly captureId: string;
-  readonly videoId: string;
-  readonly sourceId: string;
-  readonly spanS: SpanS;
-  readonly half: Half;
   readonly captureStopped: boolean;
-  readonly watched: readonly (readonly [number, number])[];
+  readonly half: Half;
   readonly windows: readonly WindowRecord[];
   readonly frames: readonly FrameRecord[];
 };
+export type ClipRecord = { readonly videoId: string; readonly sourceId: string; readonly spanS: SpanS; readonly watched: readonly (readonly [number, number])[] };
+
+/** One video: the record as written before Amendment 1, so old results still parse and score the same. */
+export type LectureRecordV1 = LectureCommon & {
+  readonly videoId: string;
+  readonly sourceId: string;
+  readonly spanS: SpanS;
+  readonly watched: readonly (readonly [number, number])[];
+};
+/** A set of clips in watch order. Windows and frames are those of the scored half only; the clips are all of them, so the split can be recomputed. */
+export type LectureRecordSet = LectureCommon & { readonly clips: readonly ClipRecord[] };
+export type LectureRecord = LectureRecordV1 | LectureRecordSet;
+
+export const clipsOf = (l: LectureRecord): readonly ClipRecord[] => ("clips" in l ? l.clips : [{ videoId: l.videoId, sourceId: l.sourceId, spanS: l.spanS, watched: l.watched }]);
+
+export const watchedIn = (watched: readonly (readonly [number, number])[], range: SpanS): number => {
+  let sum = 0;
+  for (const [a, b] of watched) sum += Math.max(0, Math.min(b, range.end) - Math.max(a, range.start));
+  return sum;
+};
+
+/** The split of a stored lecture, recomputed from its clips: the same function the run used. */
+export const splitterOf = (l: LectureRecord): Splitter => makeSplitter(clipsOf(l).map((c) => ({ videoId: c.videoId, spanS: c.spanS, watchedS: watchedIn(c.watched, c.spanS) })));
 
 export type CallRecord = { readonly startedAtMs: number; readonly durationMs: number; readonly inputTokens: number | null; readonly outputTokens: number | null; readonly ok: boolean };
 
 export type JudgmentRecord = {
   readonly t: "judgment";
   readonly lectureId: string;
+  /** The clip the window or frame belongs to (Amendment 1). */
+  readonly videoId?: string;
   readonly purpose: "boundary" | "frame_change";
   readonly subject: string;
   readonly key: string;
@@ -315,7 +518,7 @@ export function parseResults(text: string): ParsedResults {
 
 // ───────────────────────────── detection ─────────────────────────────
 
-export type Detection = { readonly timeS: number; readonly provenance: ChunkProvenance; readonly windowId: string };
+export type Detection = { readonly timeS: number; readonly provenance: ChunkProvenance; readonly windowId: string; readonly videoId?: string };
 
 const windowOf = (w: WindowRecord): BoundaryWindow => ({
   id: w.id as WindowId,
@@ -364,26 +567,28 @@ export function detectBoundaries(
     const lastId = chunk.windows[chunk.windows.length - 1]!;
     const at = ordered.findIndex((w) => w.id === lastId);
     const next = ordered[at + 1];
-    out.push({ timeS: next ? next.startS : ordered[at]!.endS, provenance: chunk.provenance, windowId: next ? next.id : lastId });
+    const placed = next ?? ordered[at]!;
+    out.push({ timeS: next ? next.startS : ordered[at]!.endS, provenance: chunk.provenance, windowId: next ? next.id : lastId, ...(placed.videoId !== undefined ? { videoId: placed.videoId } : {}) });
   }
   return out.sort((a, b) => a.timeS - b.timeS);
 }
 
 // ───────────────────────────── visual steps and duplicates ─────────────────────────────
 
-export type FrameView = { readonly id: string; readonly mediaS: number; readonly dropped: boolean };
+export type FrameView = { readonly id: string; readonly mediaS: number; readonly dropped: boolean; readonly videoId?: string };
 
 export function framesView(lecture: LectureRecord, judgments: ReadonlyMap<string, StoredJudgment>, thresholds: Thresholds): readonly FrameView[] {
+  const clips = clipsOf(lecture);
   return [...lecture.frames]
     .sort((a, b) => a.mediaS - b.mediaS || (a.id < b.id ? -1 : 1))
     .map((f) => {
       const j = f.hasBefore ? judgments.get(`frame_change:${f.id}`) : undefined;
       const dropped = j !== undefined && j.error === null && verdictAt(j.p.teaching_change ?? null, thresholds) === "no";
-      return { id: f.id, mediaS: f.mediaS, dropped };
+      return { id: f.id, mediaS: f.mediaS, dropped, videoId: f.videoId ?? clips[0]!.videoId };
     });
 }
 
-export type StepOutcome = { readonly mediaS: number; readonly lost: boolean; readonly reason: "no candidate frame" | "every candidate frame dropped" | "kept" };
+export type StepOutcome = { readonly mediaS: number; readonly lost: boolean; readonly reason: "no candidate frame" | "every candidate frame dropped" | "kept"; readonly videoId?: string };
 
 /** Lost when no candidate frame lies in [s, s + PROPOSED_STEP_CATCH_S) of the same half, or every one of them was dropped. */
 export function stepOutcomes(steps: readonly number[], frames: readonly FrameView[], range: SpanS): readonly StepOutcome[] {
@@ -394,24 +599,42 @@ export function stepOutcomes(steps: readonly number[], frames: readonly FrameVie
   });
 }
 
-export type DuplicateOutcome = { readonly mediaS: number; readonly dropped: boolean; readonly resolved: boolean };
+/** Amendment 1: a step is shown only by frames of its own clip; the clip's range in the scored half is its own. */
+export function stepOutcomesPlaced(steps: readonly Place[], frames: readonly FrameView[], rangeOf: (videoId: string) => SpanS | null): readonly (StepOutcome & Place)[] {
+  return steps.flatMap((s) => {
+    const range = rangeOf(s.videoId);
+    return range === null ? [] : [{ ...stepOutcomes([s.mediaS], frames.filter((f) => f.videoId === s.videoId), range)[0]!, videoId: s.videoId }];
+  });
+}
 
-/** Every member of a group but its earliest is a duplicate. Only duplicates inside `range` are scored; an unresolvable one counts as not dropped. */
-export function duplicateOutcomes(groups: readonly DuplicateGroup[], frames: readonly FrameView[], range: SpanS): readonly DuplicateOutcome[] {
+export type DuplicateOutcome = { readonly mediaS: number; readonly dropped: boolean; readonly resolved: boolean; readonly videoId?: string };
+
+/** Where Amendment 1 members live: each member is scored in its own clip's part of the scored half, and "earliest" is in watch order. */
+export type DuplicateScope = { readonly clipOrder: readonly string[]; readonly rangeOf: (videoId: string) => SpanS | null };
+
+/**
+ * Every member of a group but its earliest is a duplicate. Only duplicates inside `range` are scored; an unresolvable one
+ * counts as not dropped. With a `scope` (members carry a videoId) the earliest is by (clip, media time), a member
+ * resolves only to a frame of its own clip, and the range is the clip's own.
+ */
+export function duplicateOutcomes(groups: readonly DuplicateGroup[], frames: readonly FrameView[], range: SpanS, scope?: DuplicateScope): readonly DuplicateOutcome[] {
+  const rank = (m: DuplicateMember) => scope?.clipOrder.indexOf(m.videoId ?? "") ?? 0;
   const out: DuplicateOutcome[] = [];
   for (const g of groups) {
-    const members = [...g.frames].sort((a, b) => a.mediaS - b.mediaS);
+    const members = [...g.frames].sort((a, b) => rank(a) - rank(b) || a.mediaS - b.mediaS);
     for (const m of members.slice(1)) {
-      if (m.mediaS < range.start || m.mediaS >= range.end) continue;
+      const within = scope ? scope.rangeOf(m.videoId ?? "") : range;
+      if (within === null || m.mediaS < within.start || m.mediaS >= within.end) continue;
+      const own = m.videoId === undefined ? frames : frames.filter((f) => f.videoId === m.videoId);
       const byId = m.frameId === undefined ? undefined : frames.find((f) => f.id === m.frameId);
       let hit: FrameView | undefined = byId;
       if (hit === undefined) {
-        for (const f of frames) {
+        for (const f of own) {
           const d = Math.abs(f.mediaS - m.mediaS);
           if (d <= PROPOSED_DUPLICATE_MATCH_S + EPS && (hit === undefined || d < Math.abs(hit.mediaS - m.mediaS))) hit = f;
         }
       }
-      out.push({ mediaS: m.mediaS, dropped: hit?.dropped ?? false, resolved: hit !== undefined });
+      out.push({ mediaS: m.mediaS, dropped: hit?.dropped ?? false, resolved: hit !== undefined, ...(m.videoId !== undefined ? { videoId: m.videoId } : {}) });
     }
   }
   return out;
@@ -419,49 +642,76 @@ export function duplicateOutcomes(groups: readonly DuplicateGroup[], frames: rea
 
 // ───────────────────────────── report ─────────────────────────────
 
-export type LabelInfo = { readonly file: string; readonly sha256: string; readonly labels: LabelFile };
+export type LabelInfo = { readonly file: string; readonly sha256: string; readonly labels: AnyLabelFile };
 export type Report = { readonly text: string; readonly overall: "PASS" | "FAIL" | "NOT PASSED"; readonly exitCode: 0 | 1; readonly bars: readonly { readonly name: string; readonly verdict: BarVerdict }[] };
 
 const fmt = (x: number) => String(Number(x.toFixed(3)));
 const pct = (num: number, den: number) => `${fmt((num / den) * 100)}%`;
 
-function watchedIn(watched: readonly (readonly [number, number])[], range: SpanS): number {
-  let sum = 0;
-  for (const [a, b] of watched) sum += Math.max(0, Math.min(b, range.end) - Math.max(a, range.start));
-  return sum;
-}
 const insideWatched = (watched: readonly (readonly [number, number])[], t: number) => watched.some(([a, b]) => t >= a && t < b);
 
 type LectureScore = {
   readonly id: string;
-  readonly range: SpanS;
-  readonly labeledBoundaries: readonly number[];
-  readonly excludedBoundaries: readonly number[];
-  readonly detections: readonly Detection[];
-  readonly matching: Matching;
+  /** True for two or more clips: positions print with their clip number, and the first-window exclusion applies. */
+  readonly set: boolean;
+  readonly clipNo: (videoId: string) => number;
+  readonly splitter: Splitter;
+  readonly half: Half;
+  readonly labeledBoundaries: readonly Place[];
+  readonly excludedBoundaries: readonly Place[];
+  readonly undetectable: readonly Place[];
+  readonly detections: readonly (Detection & { readonly videoId: string })[];
+  readonly matching: PlacedMatching;
   readonly watchedS: number;
-  readonly steps: readonly StepOutcome[];
+  readonly steps: readonly (StepOutcome & Place)[];
   readonly duplicates: readonly DuplicateOutcome[];
 };
 
-function scoreLecture(lecture: LectureRecord, labels: LabelFile, results: ParsedResults): LectureScore {
-  const range = halfRange(lecture.spanS, lecture.half);
-  const inHalf = (t: number) => t >= range.start && t < range.end;
+/**
+ * PROPOSED (Amendment 1): a boundary no model could detect is not in the recall denominator. A detection is the start of a
+ * window that follows another window of the same half, so a label inside the FIRST window of a half has nothing before it
+ * to close. That is the case for the split join, which starts the held-out half. Applies to sets of two or more clips only;
+ * a one-video lecture keeps the schema 1 numbers.
+ */
+export const isInFirstWindow = (label: Place, first: { readonly videoId: string; readonly endS: number } | undefined): boolean => first !== undefined && label.videoId === first.videoId && label.mediaS < first.endS;
+
+function scoreLecture(lecture: LectureRecord, labels: AnyLabelFile, results: ParsedResults): LectureScore {
+  const view = viewOf(labels);
+  const clips = clipsOf(lecture);
+  const splitter = splitterOf(lecture);
+  const set = clips.length > 1;
+  const clipOrder = clips.map((c) => c.videoId);
+  const clipNo = (videoId: string) => clipOrder.indexOf(videoId) + 1;
+  const inHalf = (p: Place) => splitter.halfOf(p.videoId, p.mediaS) === lecture.half;
+  const watchedOf = new Map(clips.map((c) => [c.videoId, c.watched] as const));
+  const windowVideo = new Map(lecture.windows.map((w) => [w.id, w.videoId ?? clips[0]!.videoId] as const));
   const judged = new Map(results.judgments.filter((j) => j.lectureId === lecture.lectureId).map((j) => [`${j.purpose}:${j.subject}`, { p: j.p, error: j.error }] as const));
-  const detections = detectBoundaries(lecture.windows, (id) => judged.get(`boundary:${id}`), results.header.thresholds, results.header.config, lecture.captureStopped).filter((d) => inHalf(d.timeS));
-  const allLabeled = labels.boundaries.map((b) => b.mediaS).filter(inHalf);
-  const labeledBoundaries = allLabeled.filter((t) => insideWatched(lecture.watched, t));
+
+  const detections = detectBoundaries(lecture.windows, (id) => judged.get(`boundary:${id}`), results.header.thresholds, results.header.config, lecture.captureStopped)
+    .map((d) => ({ ...d, videoId: windowVideo.get(d.windowId)! }))
+    .filter((d) => inHalf({ videoId: d.videoId, mediaS: d.timeS }));
+  const allLabeled = view.boundaries.map((b): Place => ({ videoId: b.videoId, mediaS: b.mediaS })).filter(inHalf);
+  const watchedLabeled = allLabeled.filter((p) => insideWatched(watchedOf.get(p.videoId) ?? [], p.mediaS));
+  const firstWindow = [...lecture.windows].sort((a, b) => a.ordinal - b.ordinal)[0];
+  const undetectable = set && firstWindow ? watchedLabeled.filter((p) => isInFirstWindow(p, { videoId: firstWindow.videoId ?? clips[0]!.videoId, endS: firstWindow.endS })) : [];
+  const labeledBoundaries = watchedLabeled.filter((p) => !undetectable.includes(p));
+
   const frames = framesView(lecture, judged, results.header.thresholds);
+  const rangeOf = (videoId: string) => splitter.rangeOf(videoId, lecture.half);
   return {
     id: lecture.lectureId,
-    range,
+    set,
+    clipNo,
+    splitter,
+    half: lecture.half,
     labeledBoundaries,
-    excludedBoundaries: allLabeled.filter((t) => !insideWatched(lecture.watched, t)),
+    excludedBoundaries: allLabeled.filter((p) => !insideWatched(watchedOf.get(p.videoId) ?? [], p.mediaS)),
+    undetectable,
     detections,
-    matching: matchBoundaries(labeledBoundaries, detections.map((d) => d.timeS)),
-    watchedS: watchedIn(lecture.watched, range),
-    steps: stepOutcomes(labels.visualSteps.map((s) => s.mediaS).filter(inHalf), frames, range),
-    duplicates: duplicateOutcomes(labels.duplicateGroups, frames, range),
+    matching: matchPlaced(labeledBoundaries, detections.map((d) => ({ videoId: d.videoId, mediaS: d.timeS })), clipOrder),
+    watchedS: splitter.clipsIn(lecture.half).reduce((a, c) => a + watchedIn(watchedOf.get(c.videoId)!, rangeOf(c.videoId)!), 0),
+    steps: stepOutcomesPlaced(view.visualSteps.filter(inHalf), frames, rangeOf),
+    duplicates: duplicateOutcomes(view.duplicateGroups, frames, { start: 0, end: 0 }, { clipOrder, rangeOf }),
   };
 }
 
@@ -485,10 +735,26 @@ function usageLines(results: ParsedResults): string[] {
   return lines;
 }
 
+function lectureLines(l: LectureRecord): string[] {
+  const clips = clipsOf(l);
+  const tail = `scored ${l.half} half; labels ${l.labelsFile} sha256 ${l.labelsSha256.slice(0, 12)}`;
+  if (clips.length === 1) {
+    const span = clips[0]!.spanS;
+    return [`Lecture ${l.lectureId}: span [${fmt(span.start)}, ${fmt(span.end)}), split at ${fmt(splitPoint(span))}, ${tail}`];
+  }
+  const sp = splitterOf(l);
+  const nos = (h: Half) => sp.clipsIn(h).map((c) => clips.findIndex((x) => x.videoId === c.videoId) + 1);
+  const range = (h: Half) => `clips ${nos(h)[0]}-${nos(h).at(-1)}`;
+  return [
+    `Lecture ${l.lectureId}: ${clips.length} clips in watch order, split at the join before clip ${sp.joinIndex + 1} (watched ${fmt(sp.beforeS)} s before it and ${fmt(sp.afterS)} s after; the midpoint of ${fmt(sp.totalS)} s is ${fmt(sp.midpointS)} s), tune ${range("first")}, held-out ${range("second")}, ${tail}`,
+    ...clips.map((c, i) => `  clip ${i + 1}: ${c.videoId}, span [${fmt(c.spanS.start)}, ${fmt(c.spanS.end)}), watched ${fmt(watchedIn(c.watched, c.spanS))} s`),
+  ];
+}
+
 export function buildReport({ results, labels }: { readonly results: ParsedResults; readonly labels: readonly LabelInfo[] }): Report {
   const { header } = results;
   const scores = results.lectures.map((lecture) => {
-    const info = labels.find((l) => `${l.labels.lecture.captureId}/${l.labels.lecture.videoId}` === lecture.lectureId);
+    const info = labels.find((l) => lectureIdOfLabels(l.labels) === lecture.lectureId);
     if (!info) throw new Error(`no label file was supplied for ${lecture.lectureId}`);
     if (info.sha256 !== lecture.labelsSha256) throw new Error(`${info.file} has changed since the run (sha256 ${info.sha256.slice(0, 12)}, the run used ${lecture.labelsSha256.slice(0, 12)}); a result is only valid for the labels it was run on`);
     return scoreLecture(lecture, info.labels, results);
@@ -505,8 +771,9 @@ export function buildReport({ results, labels }: { readonly results: ParsedResul
           lines: [
             `Measured: ${matched}/${labeled} labeled boundaries detected within ±${TOLERANCE_S}s = ${pct(matched, labeled)}.`,
             ...scores.flatMap((s) => [
-              `  ${s.id}: ${s.matching.pairs.length}/${s.labeledBoundaries.length} detected; missed at ${list(s.matching.missedLabels)}`,
-              ...(s.excludedBoundaries.length > 0 ? [`  ${s.id}: ${s.excludedBoundaries.length} label(s) at ${list(s.excludedBoundaries)} lie outside watched time and are not scored`] : []),
+              `  ${s.id}: ${s.matching.pairs.length}/${s.labeledBoundaries.length} detected; missed at ${list(s, s.matching.missedLabels)}`,
+              ...(s.excludedBoundaries.length > 0 ? [`  ${s.id}: ${s.excludedBoundaries.length} label(s) at ${list(s, s.excludedBoundaries)} lie outside watched time and are not scored`] : []),
+              ...(s.undetectable.length > 0 ? [`  ${s.id}: ${s.undetectable.length} label(s) at ${list(s, s.undetectable)} lie in the first window of the ${s.half} half, so no model could detect them (PROPOSED rule, Amendment 1); excluded from the denominator`] : []),
             ]),
           ],
         };
@@ -522,7 +789,7 @@ export function buildReport({ results, labels }: { readonly results: ParsedResul
           name: "false closes", title: "False closes", bar: BAR_FALSE_CLOSES, verdict: rate.pass ? "PASS" : "FAIL",
           lines: [
             `Measured: ${closes} false close(s) in ${fmt(watchedS)} s watched = ${fmt(rate.rate!)} per ${FALSE_CLOSE_WINDOW_S / 60} min.`,
-            ...poolable.map((s) => `  ${s.id}: ${s.detections.length} Jev close(s), ${s.matching.falseCloses.length} false at ${list(s.matching.falseCloses)} in ${fmt(s.watchedS)} s watched`),
+            ...poolable.map((s) => `  ${s.id}: ${s.detections.length} Jev close(s), ${s.matching.falseCloses.length} false at ${list(s, s.matching.falseCloses)} in ${fmt(s.watchedS)} s watched`),
             ...scores.filter((s) => s.labeledBoundaries.length === 0).map((s) => `  ${s.id}: no labeled boundary in this half, excluded from this measure`),
           ],
         };
@@ -536,7 +803,7 @@ export function buildReport({ results, labels }: { readonly results: ParsedResul
           name: "visual steps", title: "Visual steps", bar: BAR_VISUAL_STEPS, verdict: lostMost <= STEPS_LOST_MAX_PER_LECTURE ? "PASS" : "FAIL",
           lines: [
             `Measured: most lost in one lecture ${lostMost} (limit ${STEPS_LOST_MAX_PER_LECTURE}); this is the scored half only, not a whole lecture.`,
-            ...stepped.map((s) => `  ${s.id}: ${s.steps.filter((x) => x.lost).length}/${s.steps.length} lost${s.steps.some((x) => x.lost) ? ` (${s.steps.filter((x) => x.lost).map((x) => `${fmt(x.mediaS)}s ${x.reason}`).join("; ")})` : ""}`),
+            ...stepped.map((s) => `  ${s.id}: ${s.steps.filter((x) => x.lost).length}/${s.steps.length} lost${s.steps.some((x) => x.lost) ? ` (${s.steps.filter((x) => x.lost).map((x) => `${at(s, x)} ${x.reason}`).join("; ")})` : ""}`),
             ...scores.filter((s) => s.steps.length === 0).map((s) => `  ${s.id}: no visual step labeled in this half, excluded from this measure`),
           ],
         };
@@ -569,7 +836,7 @@ export function buildReport({ results, labels }: { readonly results: ParsedResul
     `Config: ${Object.entries(header.config).map(([k, v]) => `${k}=${v}`).join(", ")}`,
     `Thresholds: yes at or above ${header.thresholds.yesAtOrAbove}, no at or below ${header.thresholds.noAtOrBelow}`,
     `Budget: "${BUDGET_TEXT}"`,
-    ...results.lectures.map((l) => `Lecture ${l.lectureId}: span [${fmt(l.spanS.start)}, ${fmt(l.spanS.end)}), split at ${fmt(splitPoint(l.spanS))}, scored ${l.half} half; labels ${l.labelsFile} sha256 ${l.labelsSha256.slice(0, 12)}`),
+    ...results.lectures.flatMap(lectureLines),
     "",
   ];
   for (const b of blocks) out.push(`${b.title}: ${b.verdict}`, `Bar: "${b.bar}"`, ...b.lines, "");
@@ -582,4 +849,6 @@ export function buildReport({ results, labels }: { readonly results: ParsedResul
 }
 
 type Block = { readonly name: string; readonly title: string; readonly bar: string; readonly verdict: BarVerdict; readonly lines: readonly string[] };
-const list = (xs: readonly number[]) => (xs.length === 0 ? "none" : xs.map((x) => `${fmt(x)}s`).join(", "));
+/** A position as the report prints it: seconds for a one-video lecture, clip number and seconds for a set. */
+const at = (s: LectureScore, p: Place) => (s.set ? `clip ${s.clipNo(p.videoId)} ${fmt(p.mediaS)}s` : `${fmt(p.mediaS)}s`);
+const list = (s: LectureScore, xs: readonly Place[]) => (xs.length === 0 ? "none" : xs.map((x) => at(s, x)).join(", "));

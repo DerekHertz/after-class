@@ -2,7 +2,8 @@
  * Experiment 2, the Jev boundary and visual lab (docs/experiments/02-jev-lab.md is the protocol).
  *
  *   bun run scripts/jev-lab.ts draft-labels --data <dir> --capture <id> [--video <id>] --out <file> [--force]
- *   bun run scripts/jev-lab.ts split   --labels <file>...
+ *   bun run scripts/jev-lab.ts draft-labels-set --data <dir> --capture <id> --out <file> [--force]
+ *   bun run scripts/jev-lab.ts split   [--data <dir>] --labels <file>...      (--data is needed for a set of clips)
  *   bun run scripts/jev-lab.ts plan    --data <dir> --labels <file>...
  *   bun run scripts/jev-lab.ts run     --data <dir> --lab <dir> --labels <file>... --phase tune|score [tuning flags]
  *                                      [--live --max-calls <n> [--keys <path>]]
@@ -36,9 +37,11 @@ import type { CaptureId, EvidenceId, MemoKey, SourceId } from "../src/shared/ids
 import { Material } from "../src/shared/time";
 import { scratchCopy } from "./probe-export";
 import {
-  BUDGET_CALLS, BUDGET_TEXT, DEFAULT_THRESHOLDS, MAX_TUNE_ROUNDS, buildReport, halfOf, parseResults, serializeResults, splitPoint, validateLabels,
+  BUDGET_CALLS, BUDGET_TEXT, DEFAULT_THRESHOLDS, MAX_TUNE_ROUNDS, buildReport, isInFirstWindow, lectureIdOfLabels, makeSplitter, parseResults, serializeResults, validateLabels, viewOf, watchedIn,
 } from "./jev-lab-score";
-import type { CallRecord, FrameRecord, Half, JudgmentRecord, LabelFile, LabelInfo, LectureRecord, Origin, ParsedResults, Phase, Report, RunHeader, Thresholds, WindowRecord } from "./jev-lab-score";
+import type {
+  CallRecord, ClipRecord, FrameRecord, Half, JudgmentRecord, LabelFile, LabelFileV2, LabelInfo, LectureRecord, Origin, ParsedResults, Phase, Place, Report, RunHeader, Splitter, Thresholds, WindowRecord,
+} from "./jev-lab-score";
 
 /** A guard that stopped the lab before a call. The message never contains a key. */
 export class LabRefusal extends Error {
@@ -75,28 +78,86 @@ export function loadLabels(files: readonly string[]): readonly LabelInfo[] {
   const ids = infos.map(lectureIdOf);
   const dup = ids.find((id, i) => ids.indexOf(id) !== i);
   if (dup !== undefined) refuse(`two label files name the lecture ${dup}`);
+  if (infos.some((i) => i.labels.schemaVersion === 2)) {
+    // Amendment 1: a set is the clips of one capture, so a run holding a set holds one capture, and no clip is in two lectures.
+    const captures = [...new Set(infos.map((i) => viewOf(i.labels).captureId))];
+    if (captures.length > 1) refuse(`a run holds the lecture set of one capture; these label files name ${captures.length} captures: ${captures.join(", ")}`);
+    const seen = new Map<string, string>();
+    for (const info of infos) {
+      for (const c of viewOf(info.labels).clips) {
+        const other = seen.get(c.videoId);
+        if (other !== undefined) refuse(`video ${c.videoId} is in two label files (${other} and ${info.file}); a clip belongs to one lecture`);
+        seen.set(c.videoId, info.file);
+      }
+    }
+  }
   return infos;
 }
 
-export const lectureIdOf = (info: LabelInfo): string => `${info.labels.lecture.captureId}/${info.labels.lecture.videoId}`;
+export const lectureIdOf = (info: LabelInfo): string => lectureIdOfLabels(info.labels);
 
-export function describeSplit(infos: readonly LabelInfo[]): string[] {
+/** Counts the labels of each half through the lecture's own splitter, so `split`, `plan` and the report agree on which half a label is in. */
+function labelCounts(info: LabelInfo, sp: Splitter, half: Half) {
+  const view = viewOf(info.labels);
+  const order = view.clips.map((c) => c.videoId);
+  const inHalf = (p: Place) => sp.halfOf(p.videoId, p.mediaS) === half;
+  const later = view.duplicateGroups.flatMap((g) => [...g.frames].sort((x, y) => order.indexOf(x.videoId) - order.indexOf(y.videoId) || x.mediaS - y.mediaS).slice(1));
+  const boundaries = view.boundaries.filter(inHalf);
+  const starts = boundaries.filter((b) => {
+    const at = order.indexOf(b.videoId);
+    return at > 0 && b.mediaS - view.clips[at]!.spanS.start < SEGMENTATION_DEFAULTS.windowNewS;
+  });
+  return { boundaries, starts: starts.length, steps: view.visualSteps.filter(inHalf).length, duplicates: later.filter(inHalf).length };
+}
+
+/**
+ * The tune and held-out counts per lecture. A lecture of one video is split at the midpoint of its span (no capture
+ * needed); a set of clips is split at a clip join by watched seconds, which only the capture knows, so it needs `dataDir`.
+ */
+export function describeSplit(infos: readonly LabelInfo[], dataDir?: string): string[] {
   const lines: string[] = [];
-  for (const info of infos) {
-    const { spanS } = info.labels.lecture;
-    const T = splitPoint(spanS);
-    const count = (times: readonly number[], half: Half) => times.filter((t) => halfOf(t, spanS) === half).length;
-    const b = info.labels.boundaries.map((x) => x.mediaS);
-    const s = info.labels.visualSteps.map((x) => x.mediaS);
-    const d = info.labels.duplicateGroups.flatMap((g) => [...g.frames].sort((x, y) => x.mediaS - y.mediaS).slice(1).map((m) => m.mediaS));
-    lines.push(
-      `${lectureIdOf(info)} (${info.file}, status ${info.labels.status}): span [${spanS.start}, ${spanS.end}), split at ${T}`,
-      `  tune (first half, [${spanS.start}, ${T})): ${count(b, "first")} boundaries, ${count(s, "first")} visual steps, ${count(d, "first")} duplicates`,
-      `  held-out (second half, [${T}, ${spanS.end})): ${count(b, "second")} boundaries, ${count(s, "second")} visual steps, ${count(d, "second")} duplicates`,
-    );
+  let cap: OpenCapture | null = null;
+  try {
+    for (const info of infos) {
+      const view = viewOf(info.labels);
+      const head = `${lectureIdOf(info)} (${info.file}, status ${info.labels.status})`;
+      if (view.clips.length === 1) {
+        const { spanS } = view.clips[0]!;
+        const sp = makeSplitter([{ videoId: view.clips[0]!.videoId, spanS, watchedS: 0 }]);
+        const T = sp.midpointS;
+        const a = labelCounts(info, sp, "first");
+        const b = labelCounts(info, sp, "second");
+        lines.push(
+          `${head}: span [${spanS.start}, ${spanS.end}), split at ${T}`,
+          `  tune (first half, [${spanS.start}, ${T})): ${a.boundaries.length} boundaries, ${a.steps} visual steps, ${a.duplicates} duplicates`,
+          `  held-out (second half, [${T}, ${spanS.end})): ${b.boundaries.length} boundaries, ${b.steps} visual steps, ${b.duplicates} duplicates`,
+        );
+        continue;
+      }
+      if (dataDir === undefined) refuse(`${info.file} is a set of ${view.clips.length} clips: its split counts watched seconds, which only the capture knows. Pass --data <dir>`);
+      cap ??= openCapture(dataDir);
+      const clips = clipRecords(cap, info);
+      const sp = splitOf(clips);
+      const a = labelCounts(info, sp, "first");
+      const b = labelCounts(info, sp, "second");
+      const names = (h: Half) => `clips ${clips.findIndex((c) => c.videoId === sp.clipsIn(h)[0]!.videoId) + 1}-${clips.findIndex((c) => c.videoId === sp.clipsIn(h).at(-1)!.videoId) + 1}`;
+      const secs = (n: number) => Number(n.toFixed(3));
+      lines.push(
+        `${head}: ${clips.length} clips in watch order, ${secs(sp.totalS)} s watched`,
+        ...clips.map((c, i) => `  clip ${i + 1}: ${c.videoId}, span [${c.spanS.start}, ${c.spanS.end}), watched ${secs(watchedIn(c.watched, c.spanS))} s`),
+        `  split at the join before clip ${sp.joinIndex + 1}: the join nearest the watched-time midpoint ${secs(sp.midpointS)} s, with ${secs(sp.beforeS)} s watched before it and ${secs(sp.afterS)} s after`,
+        `  tune (first half, ${names("first")}): ${a.boundaries.length} boundaries (${a.starts} at a clip start), ${a.steps} visual steps, ${a.duplicates} duplicates`,
+        `  held-out (second half, ${names("second")}): ${b.boundaries.length} boundaries (${b.starts} at a clip start), ${b.steps} visual steps, ${b.duplicates} duplicates`,
+        "  a boundary label inside the first window of a half cannot be detected and is excluded from recall (PROPOSED, Amendment 1); `plan` counts them",
+      );
+    }
+  } finally {
+    cap?.close();
   }
   return lines;
 }
+
+const splitOf = (clips: readonly ClipRecord[]): Splitter => makeSplitter(clips.map((c) => ({ videoId: c.videoId, spanS: c.spanS, watchedS: watchedIn(c.watched, c.spanS) })));
 
 // ───────────────────────────── the capture, read-only ─────────────────────────────
 
@@ -128,9 +189,12 @@ export function openCapture(dataDir: string): OpenCapture {
 
 type WindowWork = { readonly record: WindowRecord; readonly input: BoundaryInput; readonly half: Half };
 type FrameWork = { readonly record: FrameRecord; readonly input: FrameChangeInput | null; readonly half: Half };
+type Head<T> = T extends unknown ? Omit<T, "half" | "windows" | "frames"> : never;
 type LectureWork = {
   readonly info: LabelInfo;
-  readonly record: Omit<LectureRecord, "half" | "windows" | "frames">;
+  readonly record: Head<LectureRecord>;
+  readonly clips: readonly ClipRecord[];
+  readonly splitter: Splitter;
   readonly windows: readonly WindowWork[];
   readonly frames: readonly FrameWork[];
 };
@@ -138,54 +202,84 @@ type LectureWork = {
 const passageOf = (e: Evidence | { readonly kind: "deleted" } | undefined): e is Passage => e?.kind === "passage";
 const frameOf = (e: Evidence | { readonly kind: "deleted" } | undefined): e is Frame => e?.kind === "frame";
 
-/** The real windowing (buildWindows, with the run's config) over the whole capture, then the windows and frames of one lecture. */
+/**
+ * The clips of one lecture from the capture: each clip's source and watched intervals. A set must be listed in the
+ * capture's watch order, because the product folds windows in watch order and the join rule depends on it.
+ */
+export function clipRecords(cap: OpenCapture, info: LabelInfo): ClipRecord[] {
+  const view = viewOf(info.labels);
+  const captureId = view.captureId as CaptureId;
+  const capture = cap.evidence.captureView(captureId);
+  const watched = cap.evidence.watchedMaterial(captureId);
+  const clips = view.clips.map((c): ClipRecord => {
+    const sourceId = stableId("src", "youtube", c.videoId);
+    if (!capture.sources.some((s) => s.id === sourceId)) refuse(`capture ${view.captureId} has no source for video ${c.videoId}; check the label file's lecture`);
+    return { videoId: c.videoId, sourceId, spanS: c.spanS, watched: Material.get(watched, sourceId as SourceId).intervals().map((i): [number, number] => [i.start, i.end]) };
+  });
+  if (clips.length > 1) {
+    const listed = new Set(clips.map((c) => c.videoId));
+    const inWatchOrder = capture.sources.map((s) => s.videoId).filter((v) => listed.has(v));
+    if (inWatchOrder.join(",") !== clips.map((c) => c.videoId).join(",")) {
+      refuse(`${info.file} lists its clips as ${clips.map((c) => c.videoId).join(", ")}, but the capture was watched in the order ${inWatchOrder.join(", ")}; a set is listed in watch order`);
+    }
+  }
+  return clips;
+}
+
+/**
+ * The real windowing (buildWindows, with the run's config) over the whole capture, then the windows and frames of one lecture.
+ * One clip: a window is the lecture's when its first new passage is, as before Amendment 1. Two or more clips: a window is
+ * the lecture's when its last new passage is in one of the clips, and it belongs to that clip (PROPOSED): a window that
+ * spans a join is the first window of the clip it ends in, so "the next clip's first window decides" is that window.
+ */
 export function lectureWork(cap: OpenCapture, info: LabelInfo, cfg: SegmentationConfig): LectureWork {
-  const { captureId, videoId, spanS } = info.labels.lecture;
-  const sourceId = stableId("src", "youtube", videoId);
-  const view = cap.evidence.captureView(captureId as CaptureId);
-  if (!view.sources.some((s) => s.id === sourceId)) refuse(`capture ${captureId} has no source for video ${videoId}; check the label file's lecture`);
+  const view = viewOf(info.labels);
+  const captureId = view.captureId as CaptureId;
+  const clips = clipRecords(cap, info);
+  const splitter = splitOf(clips);
+  const set = clips.length > 1;
+  const clipOfSource = new Map(clips.map((c) => [c.sourceId as string, c] as const));
 
-  const order = cap.evidence.watchOrder(captureId as CaptureId);
-  const watched = Material.get(cap.evidence.watchedMaterial(captureId as CaptureId), sourceId as SourceId).intervals().map((i): [number, number] => [i.start, i.end]);
-
+  const order = cap.evidence.watchOrder(captureId);
   const windows: WindowWork[] = [];
-  for (const w of buildWindows(captureId as CaptureId, order, cfg)) {
-    const first = cap.evidence.get([w.newPassages[0]]).get(w.newPassages[0]);
-    if (!passageOf(first) || first.sourceId !== sourceId) continue;
-    const set = Material.get(w.newMaterial, sourceId as SourceId).intervals();
-    const startS = Math.min(...set.map((i) => i.start));
-    const half = halfOf(startS, spanS);
+  for (const w of buildWindows(captureId, order, cfg)) {
+    const decisive = set ? w.newPassages[w.newPassages.length - 1]! : w.newPassages[0];
+    const own = cap.evidence.get([decisive]).get(decisive);
+    if (!passageOf(own)) continue;
+    const clip = clipOfSource.get(own.sourceId);
+    if (clip === undefined) continue;
+    const intervals = Material.get(w.newMaterial, clip.sourceId as SourceId).intervals();
+    const startS = Math.min(...intervals.map((i) => i.start));
+    const half = splitter.halfOf(clip.videoId, startS);
     if (half === null) continue;
-    windows.push({ half, input: boundaryInputOf(cap.evidence, w), record: windowRecord(w, startS, Math.max(...set.map((i) => i.end))) });
+    windows.push({ half, input: boundaryInputOf(cap.evidence, w), record: windowRecord(w, startS, Math.max(...intervals.map((i) => i.end)), clip.videoId) });
   }
 
   cap.frameInputs.length = 0;
-  for (const item of cap.evidence.frameDemand(captureId as CaptureId)) void item.run(new AbortController().signal);
+  for (const item of cap.evidence.frameDemand(captureId)) void item.run(new AbortController().signal);
   const inputOf = new Map(cap.frameInputs.map((i) => [i.after.frame.id as string, i] as const));
   const frames: FrameWork[] = [];
   for (const f of order.frameCandidates) {
-    if (f.sourceId !== sourceId) continue;
-    const half = halfOf(f.mediaS, spanS);
+    const clip = clipOfSource.get(f.sourceId);
+    if (clip === undefined) continue;
+    const half = splitter.halfOf(clip.videoId, f.mediaS);
     if (half === null) continue;
     const input = inputOf.get(f.id) ?? null;
-    frames.push({ half, input, record: { id: f.id, mediaS: f.mediaS, hasBefore: input !== null } });
+    frames.push({ half, input, record: { id: f.id, mediaS: f.mediaS, hasBefore: input !== null, videoId: clip.videoId } });
   }
 
-  return {
-    info,
-    record: {
-      t: "lecture", lectureId: lectureIdOf(info), labelsFile: info.file, labelsSha256: info.sha256, captureId, videoId, sourceId,
-      spanS, captureStopped: order.status.state === "stopped", watched,
-    },
-    windows,
-    frames,
-  };
+  const common = { t: "lecture", lectureId: lectureIdOf(info), labelsFile: info.file, labelsSha256: info.sha256, captureId: view.captureId, captureStopped: order.status.state === "stopped" } as const;
+  const record: Head<LectureRecord> =
+    info.labels.schemaVersion === 1
+      ? { ...common, videoId: clips[0]!.videoId, sourceId: clips[0]!.sourceId, spanS: clips[0]!.spanS, watched: clips[0]!.watched }
+      : { ...common, clips };
+  return { info, record, clips, splitter, windows, frames };
 }
 
-function windowRecord(w: BoundaryWindow, startS: number, endS: number): WindowRecord {
+function windowRecord(w: BoundaryWindow, startS: number, endS: number, videoId: string): WindowRecord {
   return {
     id: w.id, captureId: w.captureId, ordinal: w.ordinal, startS, endS, newPassages: w.newPassages, contextPassages: w.contextPassages, frames: w.frames,
-    newMaterial: Material.canonical(w.newMaterial), watchedSecondsAtEnd: w.watchedSecondsAtEnd,
+    newMaterial: Material.canonical(w.newMaterial), watchedSecondsAtEnd: w.watchedSecondsAtEnd, videoId,
   };
 }
 
@@ -362,7 +456,10 @@ export function planLab(opts: { readonly dataDir: string; readonly labelFiles: r
       const b = keys("second");
       tune += a.windows + a.frames;
       score += b.windows + b.frames;
-      lines.push(`${lectureIdOf(info)}: first half ${a.windows} windows + ${a.frames} frame calls; second half ${b.windows} windows + ${b.frames} frame calls (default config)`);
+      const set = w.clips.length > 1;
+      const clipsOfHalf = (h: Half) => `${set ? ` (clips ${w.clips.findIndex((c) => c.videoId === w.splitter.clipsIn(h)[0]!.videoId) + 1}-${w.clips.findIndex((c) => c.videoId === w.splitter.clipsIn(h).at(-1)!.videoId) + 1})` : ""}`;
+      lines.push(`${lectureIdOf(info)}: first half${clipsOfHalf("first")} ${a.windows} windows + ${a.frames} frame calls; second half${clipsOfHalf("second")} ${b.windows} windows + ${b.frames} frame calls (default config)`);
+      if (set) lines.push(...setPlanLines(info, w));
     }
     const minimum = tune + score;
     const worst = MAX_TUNE_ROUNDS * tune + score;
@@ -378,6 +475,25 @@ export function planLab(opts: { readonly dataDir: string; readonly labelFiles: r
   } finally {
     cap.close();
   }
+}
+
+/** Where a set splits and what that does to its boundary labels, exactly: from the real windows, not an estimate. */
+function setPlanLines(info: LabelInfo, w: LectureWork): string[] {
+  const sp = w.splitter;
+  const view = viewOf(info.labels);
+  const secs = (n: number) => Number(n.toFixed(3));
+  const lines = [`  split at the join before clip ${sp.joinIndex + 1} (watched ${secs(sp.beforeS)} s before, ${secs(sp.afterS)} s after, midpoint of ${secs(sp.totalS)} s is ${secs(sp.midpointS)} s)`];
+  for (const half of ["first", "second"] as const) {
+    const first = w.windows.filter((x) => x.half === half).sort((x, y) => x.record.ordinal - y.record.ordinal)[0]?.record;
+    const labels = view.boundaries.filter((b) => sp.halfOf(b.videoId, b.mediaS) === half);
+    const starts = labels.filter((b) => {
+      const at = view.clips.findIndex((c) => c.videoId === b.videoId);
+      return at > 0 && b.mediaS - view.clips[at]!.spanS.start < SEGMENTATION_DEFAULTS.windowNewS;
+    });
+    const excluded = labels.filter((b) => isInFirstWindow(b, first === undefined ? undefined : { videoId: first.videoId!, endS: first.endS }));
+    lines.push(`  ${half} half: ${labels.length} boundary labels (${starts.length} at a clip start), ${excluded.length} in the half's first window and excluded from recall (PROPOSED, Amendment 1)`);
+  }
+  return lines;
 }
 
 // ───────────────────────────── run ─────────────────────────────
@@ -492,8 +608,8 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
 
     const cache = readCache(dir);
     const subjects = work.flatMap((l) => [
-      ...l.windows.map((w) => ({ lecture: l, purpose: "boundary" as const, subject: w.record.id, key: boundaryKey(tasks, w.input), run: () => judgeBoundary(w.input) })),
-      ...l.frames.flatMap((f) => (f.input === null ? [] : [{ lecture: l, purpose: "frame_change" as const, subject: f.record.id, key: frameKey(tasks, f.input), run: () => judgeFrame(f.input!) }])),
+      ...l.windows.map((w) => ({ lecture: l, videoId: w.record.videoId!, purpose: "boundary" as const, subject: w.record.id, key: boundaryKey(tasks, w.input), run: () => judgeBoundary(w.input) })),
+      ...l.frames.flatMap((f) => (f.input === null ? [] : [{ lecture: l, videoId: f.record.videoId!, purpose: "frame_change" as const, subject: f.record.id, key: frameKey(tasks, f.input), run: () => judgeFrame(f.input!) }])),
     ]);
     const needed = new Set(subjects.filter((s) => !cache.has(s.key)).map((s) => s.key)).size;
     if (opts.live) {
@@ -532,12 +648,12 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
     for (const s of subjects) {
       const hit = cache.get(s.key);
       if (hit) {
-        judgments.push({ ...hit, lectureId: s.lecture.record.lectureId, reused: true });
+        judgments.push({ ...hit, lectureId: s.lecture.record.lectureId, videoId: s.videoId, reused: true });
         continue;
       }
       const done = await s.run();
       const record: JudgmentRecord = {
-        t: "judgment", lectureId: s.lecture.record.lectureId, purpose: s.purpose, subject: s.subject, key: s.key, model: JEV_MODEL,
+        t: "judgment", lectureId: s.lecture.record.lectureId, videoId: s.videoId, purpose: s.purpose, subject: s.subject, key: s.key, model: JEV_MODEL,
         questionVersion: s.purpose === "boundary" ? QUESTIONS.boundary.version : QUESTIONS.frameChange.version, reused: false, calls: done.calls, p: done.p, error: done.error,
       };
       newCalls += done.calls.length;
@@ -559,7 +675,7 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
     const header: RunHeader = { t: "header", version: 1, runId, phase: opts.phase, round, origin, model: JEV_MODEL, config, thresholds };
     const results: ParsedResults = {
       header,
-      lectures: work.map((l): LectureRecord => ({ ...l.record, half: want, windows: l.windows.map((w) => w.record), frames: l.frames.map((f) => f.record) })),
+      lectures: work.map((l): LectureRecord => ({ ...l.record, half: want, windows: l.windows.map((w) => w.record), frames: l.frames.map((f) => f.record) }) as LectureRecord),
       judgments,
       end: { t: "end", newCalls, judgments: judgments.length },
     };
@@ -648,6 +764,73 @@ export function draftLabels(opts: { readonly dataDir: string; readonly captureId
   }
 }
 
+/** Amendment 1, the labeling rule for a visual step (Derek's words, verbatim). A draft cue only suggests; it never decides. */
+export const VISUAL_STEP_RULE = "A visual step is when the actual slide content changes (new text or a new figure shown on screen). The same slide staying up across several transcript passages is not a new step.";
+
+/**
+ * One draft for a whole capture (Amendment 1): the clips in watch order, a boundary candidate at the start of every clip
+ * after the first (no candidate inside a clip: the join is the boundary), and the visual step and duplicate candidates of
+ * `draft-labels`, with frames compared only with the previous frame of their own clip. Every item is unconfirmed.
+ */
+export function draftLabelsSet(opts: { readonly dataDir: string; readonly captureId: string; readonly outPath: string; readonly force?: boolean }): { readonly path: string; readonly notes: readonly string[] } {
+  if (existsSync(opts.outPath) && !opts.force) refuse(`${opts.outPath} already exists; labels are Derek's work, so it is not overwritten (pass --force to replace it)`);
+  const cap = openCapture(opts.dataDir);
+  try {
+    const bundle = cap.evidence.captureBundle(opts.captureId as CaptureId);
+    const view = cap.evidence.captureView(opts.captureId as CaptureId);
+    const clips = view.sources.flatMap((source) => {
+      const intervals = bundle.watched.find((w) => w.sourceId === source.id)?.intervals ?? [];
+      return intervals.length === 0 ? [] : [{ source, spanS: { start: Math.min(...intervals.map(([a]) => a)), end: Math.max(...intervals.map(([, b]) => b)) } }];
+    });
+    if (clips.length === 0) refuse(`capture ${opts.captureId} has no watched time; is the id right?`);
+    const clipNo = new Map(clips.map((c, i) => [c.source.id as string, i] as const));
+
+    const frames = bundle.frames
+      .filter((f) => clipNo.has(f.sourceId) && f.file !== null && existsSync(f.file))
+      .sort((a, b) => clipNo.get(a.sourceId)! - clipNo.get(b.sourceId)! || a.mediaS - b.mediaS);
+    const bytes = frames.map((f) => {
+      const raw = readFileSync(f.file!);
+      return { f, videoId: clips[clipNo.get(f.sourceId)!]!.source.videoId, size: raw.length, hash: new Bun.CryptoHasher("sha256").update(raw).digest("hex") };
+    });
+    const steps = bytes.flatMap((b, i) => {
+      const prev = bytes[i - 1];
+      if (prev === undefined || prev.f.sourceId !== b.f.sourceId || b.hash === prev.hash || Math.abs(b.size - prev.size) / prev.size < DRAFT_SIZE_CHANGE) return [];
+      return [{ videoId: b.videoId, mediaS: b.f.mediaS, change: Math.abs(b.size - prev.size) / prev.size }];
+    });
+    const byHash = new Map<string, typeof bytes>();
+    for (const b of bytes) byHash.set(b.hash, [...(byHash.get(b.hash) ?? []), b]);
+    const groups = [...byHash.values()].filter((g) => g.length >= 2);
+
+    const draft: LabelFileV2 = {
+      schemaVersion: 2,
+      status: "draft",
+      signedOffBy: null,
+      signedOffAt: null,
+      description: "DRAFT labels. Not Derek's labels until he corrects them and signs off.",
+      draftNote:
+        "This is a draft starting point built deterministically from the capture, not truth. No model was used. The lecture is the set of clips of this capture in watch order, so the boundaries are the joins between clips: " +
+        "there is one candidate at the start of every clip after the first, and none inside a clip. " +
+        `${VISUAL_STEP_RULE} Visual step candidates are frames whose JPEG size jumped by ${DRAFT_SIZE_CHANGE * 100}% or more against the previous candidate frame of the same clip; that is a cheap cue and only a suggestion, so confirm only the changes of slide content. ` +
+        "Duplicate candidates are frames with byte-identical JPEGs only (a group may span clips); near-identical frames are not computed because no image decoder is available, so add those by hand. " +
+        "Every item is unconfirmed: set confirmed to true for each you agree with, delete or add the rest, then set status, signedOffBy and signedOffAt.",
+      lecture: { captureId: opts.captureId, videos: clips.map((c) => ({ videoId: c.source.videoId, ...(c.source.title ? { title: c.source.title } : {}), spanS: c.spanS })) },
+      boundaries: clips.slice(1).map((c, i) => ({ videoId: c.source.videoId, mediaS: c.spanS.start, note: "candidate clip join", confirmed: false, cue: `start of clip ${i + 2}: the product treats the next clip's first window as the decision point` })),
+      visualSteps: steps.map((s) => ({
+        videoId: s.videoId, mediaS: s.mediaS, note: "candidate visual step", confirmed: false,
+        cue: `frame whose JPEG size differs ${fmtPct(s.change)} from the previous candidate frame of this clip: a suggestion only, not a judgment. A visual step is when the actual slide content changes (new text or a new figure shown on screen), not when the same slide stays up`,
+      })),
+      duplicateGroups: groups.map((g) => ({ note: "candidate duplicate group", confirmed: false, cue: "byte-identical JPEG files", frames: g.map((b) => ({ videoId: b.videoId, mediaS: b.f.mediaS, frameId: b.f.id })) })),
+    };
+    const checked = validateLabels(draft);
+    if (!checked.ok) throw new Error(`draft-labels-set produced an invalid file: ${checked.errors.join("; ")}`);
+    mkdirSync(dirname(resolve(opts.outPath)), { recursive: true });
+    writeFileSync(opts.outPath, JSON.stringify(draft, null, 2) + "\n");
+    return { path: opts.outPath, notes: [`${clips.length} clip(s) in watch order; ${draft.boundaries.length} join, ${draft.visualSteps.length} visual step and ${draft.duplicateGroups.length} duplicate-group candidates, all unconfirmed`] };
+  } finally {
+    cap.close();
+  }
+}
+
 const fmtPct = (x: number) => `${Number((x * 100).toFixed(0))}%`;
 
 // ───────────────────────────── command line ─────────────────────────────
@@ -679,9 +862,15 @@ async function cli(argv: readonly string[]): Promise<number> {
       console.log(tag(origin, [`Wrote a DRAFT label file to ${done.path}. It is a starting point for Derek to correct, not truth.`, ...done.notes.map((n) => `note: ${n}`)]));
       return 0;
     }
+    case "draft-labels-set": {
+      if (!values.data || !values.capture || !values.out) return usage("draft-labels-set needs --data, --capture and --out");
+      const done = draftLabelsSet({ dataDir: resolve(values.data), captureId: values.capture, outPath: resolve(values.out), ...(values.force ? { force: true } : {}) });
+      console.log(tag(origin, [`Wrote a DRAFT label file for the whole capture to ${done.path}. It is a starting point for Derek to correct, not truth.`, ...done.notes.map((n) => `note: ${n}`)]));
+      return 0;
+    }
     case "split": {
       if (labels.length === 0) return usage("split needs --labels <file>");
-      console.log(tag(origin, ["Tune and held-out split (first half of each lecture span is tune, second half is held-out, scored once):", ...describeSplit(loadLabels(labels))]));
+      console.log(tag(origin, ["Tune and held-out split (a one-video lecture splits at the midpoint of its span, a set of clips at the clip join nearest the midpoint of its watched time; the first half is tune, the second is held-out, scored once):", ...describeSplit(loadLabels(labels), values.data ? resolve(values.data) : undefined)]));
       return 0;
     }
     case "plan": {
@@ -724,7 +913,7 @@ async function cli(argv: readonly string[]): Promise<number> {
       return report.exitCode;
     }
     default:
-      return usage("commands: draft-labels, split, plan, run, report, rescore");
+      return usage("commands: draft-labels, draft-labels-set, split, plan, run, report, rescore");
   }
 }
 
