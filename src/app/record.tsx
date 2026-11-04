@@ -146,11 +146,6 @@ function NoteCard({ api, note, deleted, citations, run }: { readonly api: AppApi
     setOpen(null);
   }
 
-  function closeSource() {
-    if (open !== null) sourceButtons.current.get(open)?.focus();
-    setOpen(null);
-  }
-
   return (
     <article className="record-note">
       <header className="record-note-heading"><h3>{heading}</h3><Link to={{ page: "review", id: note.reviewId }}>Revisit review</Link></header>
