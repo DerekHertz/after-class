@@ -15,7 +15,7 @@ Quoted from `docs/flows/after-class.md`, "Experiments and pass bars":
 | 1 | "every watched interval has evidence or a logged gap" | Automatic, from the exported bundle. For each source, take the watched intervals and remove every passage interval and every gap interval, using half-open `[start, end)`. PASS only if zero seconds remain. A frame is an instant and covers no seconds. If nothing was watched, the result is NOT MEASURED. |
 | 2 | "≥9/10 spot checks caption-to-screen within ±2s" | Derek checks 10 caption samples against the real video. The wizard records yes or no for each. PASS at 9 or more yes. |
 | 3 | "board text readable in ≥9/10 frames" | Derek looks at up to 10 exported frames. PASS at 9 or more readable. |
-| 4 | "zero ad evidence" | See below. |
+| 4 | "zero ad evidence" | Automatic candidate list, then Derek's check of each candidate. See below. |
 
 Bars 2 and 3 need exactly 10 results each. If the capture produced fewer than 10 samples, the bar is NOT MEASURED, not passed on fewer.
 
@@ -23,9 +23,16 @@ Bars 2 and 3 need exactly 10 results each. If the capture produced fewer than 10
 
 An ad has no stretch of lecture time. The extension closes its playback span before an ad starts and records only the point where the lecture stopped (`atContentS`) and how long the ad ran in wall-clock time (`wallDurationMs`). Lecture time resumes afterwards, so lecture evidence just after that point is normal and not ad evidence.
 
-If an ad frame leaked, it would carry the ad video's own clock, which starts at 0. So the probe lists every frame stamped inside `[0, wallDurationMs/1000)` of the same source as a candidate, and Derek looks at each one and says whether it shows an ad. The bar PASSES when no candidate shows an ad (including when there are no candidates), FAILS when one does, and is NOT MEASURED while a candidate is unchecked.
+Evidence leaked from an ad would carry the ad video's own clock, which starts at 0. So the window to inspect is `[0, wallDurationMs/1000 + 5 s)` of the same source. The 5 s is `AD_WINDOW_SLACK_S`, one fixed constant for detection lag (the ad is noticed after it starts, so its clock can run past the measured wall time). It was chosen before any data and is not tuned afterwards.
 
-Two limits follow from this and are printed in the report. The report cannot tell leaked ad time inside the watched intervals from real viewing of a lecture's first seconds, so that overlap is shown but not scored. And an ad cannot be forced. If YouTube serves none, there is no ad record and the bar is reported NOT MEASURED, because no ad occurred in this capture and the bar was not exercised. It is never reported as a pass.
+Every frame stamped in the window, every passage that overlaps it, and every watched interval that overlaps it is a candidate. The wizard shows each one and Derek answers: for a frame, "does this frame show an ad?"; for a passage or interval, "is this the lecture, not an ad?" (the video opens at that media time).
+
+- NOT MEASURED when the capture has no ad record, or when any candidate is unchecked. An ad cannot be forced; if YouTube serves none, no ad occurred in this capture and the bar was not exercised. It is never reported as a pass.
+- FAIL when Derek judges any candidate to be an ad.
+- PASS when there is an ad record, every candidate is checked, and none is an ad. An ad record with zero candidates also passes. The report prints how many candidates were checked.
+
+What the bar scores and does not score is printed in the report's own bar 4 lines: it scores the window, and it does not see ad evidence stamped outside it.
+
 
 ## The perf rule
 
@@ -82,7 +89,7 @@ bun run scripts/probe-report.ts --bundle data/probe/export/bundle.json \
 
 ## What the files are
 
-- `spot-results.json`: `captionChecks` and `frameChecks` (10 each, `index` 0 to 9), `adFrameChecks` for ad candidates, and `observations`.
+- `spot-results.json`: `captionChecks` and `frameChecks` (10 each, `index` 0 to 9), `adChecks` (`{kind: "frame"|"passage"|"span", index, isAd}` per ad candidate), and `observations`.
 - `perf.json`: `{"off": {"dropped", "total"}, "on": {"dropped", "total"}}`.
 - Observations (popup shows the title and caption status; the popup's Review now opens a tab on the review app; whether an ad played) are listed in the report and are not scored. The Review now check has never been made in real Chrome before.
 
@@ -96,5 +103,5 @@ The bar was not exercised, so it is neither passed nor failed. Causes are missin
 - It does not measure learning effectiveness.
 - It covers one lecture on one machine in one browser. It says nothing about other videos, other captions, or other hardware.
 - A pass is evidence that capture worked in that run, not proof it works in general.
-- The ad bar cannot prove that no ad time leaked into a watched interval. It checks stamped frames and relies on Derek's eye.
+- The ad bar checks only the window described above. Ad evidence stamped outside it is not seen, and every candidate verdict is Derek's eye, not a measurement.
 - Data labelled `fixture` shows only that the tools work.

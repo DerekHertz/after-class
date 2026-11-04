@@ -257,26 +257,42 @@ open_file() {
   fi
 }
 
-# latest_control prints the action of the newest control fact the backend stored, or "none".
-latest_control() {
+# max_control_seq prints the highest seq of any control fact stored so far (0 if none), so a stop from an earlier run is not mistaken for this one.
+max_control_seq() {
   DB="$PROBE_DIR/afterclass.sqlite" bun -e '
     import { Database } from "bun:sqlite";
     try {
       const db = new Database(process.env.DB, { readonly: true });
-      const row = db.query("SELECT body_json FROM capture_facts WHERE kind = \u0027control\u0027 ORDER BY seq DESC LIMIT 1").get();
-      console.log(row ? JSON.parse(row.body_json).action : "none");
-    } catch { console.log("none"); }
-  ' 2>/dev/null || echo none
+      console.log(db.query("SELECT COALESCE(MAX(seq), 0) AS m FROM capture_facts WHERE kind = ?").get("control").m);
+    } catch { console.log(0); }
+  ' 2>/dev/null || echo 0
 }
 
+# stop_after SEQ prints yes when a stop control fact newer than SEQ is stored, else no.
+stop_after() {
+  DB="$PROBE_DIR/afterclass.sqlite" AFTER="$1" bun -e '
+    import { Database } from "bun:sqlite";
+    try {
+      const db = new Database(process.env.DB, { readonly: true });
+      const row = db.query("SELECT 1 AS x FROM capture_facts WHERE kind = ? AND seq > ? AND json_extract(body_json, ?) = ? LIMIT 1").get("control", Number(process.env.AFTER), "$.action", "stop");
+      console.log(row ? "yes" : "no");
+    } catch { console.log("no"); }
+  ' 2>/dev/null || echo no
+}
+
+# samples_tsv KIND prints "index, video id, whole seconds, text" rows; a missing video id or text is "-".
 samples_tsv() {
   SAMPLES="$EXPORT_DIR/samples.json" KIND="$1" bun -e '
     const s = JSON.parse(await Bun.file(process.env.SAMPLES).text());
     const clean = (t) => String(t).replace(/\s+/g, " ");
-    const row = (x, text) => [x.index, x.videoId || "-", Math.floor(x.mediaS), text || "-"].join("\t");
-    if (process.env.KIND === "captions") for (const c of s.captions.samples) console.log(row(c, clean(c.text)));
-    else if (process.env.KIND === "frames") for (const f of s.frames.samples) console.log(row(f, ""));
-    else for (const f of s.adFrames) console.log(row(f, ""));
+    const row = (x, at, text) => [x.index, x.videoId || "-", Math.floor(at), text || "-"].join("\t");
+    const range = (x) => "[" + x.start + ", " + x.end + ")";
+    const k = process.env.KIND;
+    if (k === "captions") for (const c of s.captions.samples) console.log(row(c, c.mediaS, clean(c.text)));
+    else if (k === "frames") for (const f of s.frames.samples) console.log(row(f, f.mediaS, ""));
+    else if (k === "ad-frames") for (const f of s.adCandidates.frames) console.log(row(f, f.mediaS, ""));
+    else if (k === "ad-passages") for (const p of s.adCandidates.passages) console.log(row(p, p.start, range(p) + " " + clean(p.text)));
+    else if (k === "ad-spans") for (const p of s.adCandidates.spans) console.log(row(p, p.start, range(p)));
   '
 }
 
@@ -405,6 +421,7 @@ read -r OFF_DROPPED OFF_TOTAL <<< "$OFF_NUMBERS"
 
 # ── Stage 6 ───────────────────────────────────────────────────────────────
 stage "Capture ON, then a longer watch"
+CONTROL_SEQ_AT_START="$(max_control_seq)"
 step "Load the same URL again, fresh (reload the tab)."
 step "Click the After Class toolbar icon (puzzle piece menu if hidden), then Start capture. The headline should read Capturing."
 step "Play the same first 2 minutes without pausing or seeking."
@@ -436,7 +453,7 @@ say "Waiting for the backend to store the stop."
 STOPPED=false
 while [[ "$STOPPED" != true ]]; do
   for _ in $(seq 1 30); do
-    if [[ "$(latest_control)" == "stop" ]]; then STOPPED=true; break; fi
+    if [[ "$(stop_after "$CONTROL_SEQ_AT_START")" == "yes" ]]; then STOPPED=true; break; fi
     sleep 2
   done
   if [[ "$STOPPED" != true ]]; then
@@ -480,20 +497,31 @@ while IFS=$'\t' read -r -u 3 idx vid t _; do
   FRAME_JSON+="${FRAME_JSON:+,}{\"index\":$idx,\"readable\":$YN}"
 done 3< <(samples_tsv frames)
 
-AD_COUNT="$(samples_tsv ads | wc -l)"
+AD_COUNT="$(( $(samples_tsv ad-frames | wc -l) + $(samples_tsv ad-passages | wc -l) + $(samples_tsv ad-spans | wc -l) ))"
 if (( AD_COUNT > 0 )); then
   printf '\n'
-  say "The capture recorded an ad. These $AD_COUNT frame(s) carry a time inside the ad's own clock, so check that none shows an ad."
+  say "The capture recorded an ad. $AD_COUNT item(s) lie where ad evidence would land (the ad's own clock plus 5 s of slack), so check that none is an ad."
   while IFS=$'\t' read -r -u 3 idx vid t _; do
     printf '\n'
     say "Possible ad frame $idx (stamped ${t}s):"
     open_file "$EXPORT_DIR/frames/ad-$idx.jpg"
     yesno "Does this frame show an ad (not the lecture)?"
-    AD_JSON+="${AD_JSON:+,}{\"index\":$idx,\"isAd\":$YN}"
-  done 3< <(samples_tsv ads)
+    AD_JSON+="${AD_JSON:+,}{\"kind\":\"frame\",\"index\":$idx,\"isAd\":$YN}"
+  done 3< <(samples_tsv ad-frames)
+  for kind in passage span; do
+    while IFS=$'\t' read -r -u 3 idx vid t text; do
+      printf '\n'
+      say "Watched $kind $idx, starting at ${t}s:"
+      printf '    %s%s%s\n' "$BOLD" "$text" "$RESET"
+      if [[ "$vid" != "-" ]]; then open_url "https://www.youtube.com/watch?v=$vid&t=${t}s"; else warn "No video id for this item; find ${t}s in the lecture yourself."; fi
+      yesno "Is this the lecture, not an ad?"
+      if [[ "$YN" == true ]]; then IS_AD=false; else IS_AD=true; fi
+      AD_JSON+="${AD_JSON:+,}{\"kind\":\"$kind\",\"index\":$idx,\"isAd\":$IS_AD}"
+    done 3< <(samples_tsv "ad-${kind}s")
+  done
 fi
 
-printf '{"captionChecks":[%s],"frameChecks":[%s],"adFrameChecks":[%s],"observations":[%s]}\n' "$CAPTION_JSON" "$FRAME_JSON" "$AD_JSON" "$OBS_JSON" > "$PROBE_DIR/spot-results.json"
+printf '{"captionChecks":[%s],"frameChecks":[%s],"adChecks":[%s],"observations":[%s]}\n' "$CAPTION_JSON" "$FRAME_JSON" "$AD_JSON" "$OBS_JSON" > "$PROBE_DIR/spot-results.json"
 printf '{"off":{"dropped":%s,"total":%s},"on":{"dropped":%s,"total":%s}}\n' "$OFF_DROPPED" "$OFF_TOTAL" "$ON_DROPPED" "$ON_TOTAL" > "$PROBE_DIR/perf.json"
 say "Saved $PROBE_DIR/spot-results.json and $PROBE_DIR/perf.json (gitignored)."
 

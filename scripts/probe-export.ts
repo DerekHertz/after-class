@@ -33,10 +33,12 @@ export type CaptionSample = {
   readonly watched: readonly [number, number];
 };
 export type FrameSample = { readonly index: number; readonly evidenceId: string; readonly videoId: string | null; readonly sourceId: string; readonly mediaS: number; readonly teaching: string };
+export type IntervalSample = { readonly index: number; readonly videoId: string | null; readonly sourceId: string; readonly start: number; readonly end: number; readonly text: string | null };
 export type Sampling = {
   readonly captions: { readonly requested: number; readonly samples: readonly CaptionSample[] };
   readonly frames: { readonly requested: number; readonly samples: readonly FrameSample[] };
-  readonly adFrames: readonly FrameSample[];
+  /** Everything inside an ad's window (see adCandidates), each for Derek to check. Passages carry text; watched intervals do not. */
+  readonly adCandidates: { readonly frames: readonly FrameSample[]; readonly passages: readonly IntervalSample[]; readonly spans: readonly IntervalSample[] };
   readonly notes: readonly string[];
 };
 
@@ -92,10 +94,15 @@ export function sampleExport(bundle: EvidenceBundleJson, videoIdOf: (sourceId: s
     index, evidenceId: f.id, videoId: videoIdOf(f.sourceId), sourceId: f.sourceId, mediaS: f.mediaS, teaching: f.teaching,
   });
 
+  const ad = adCandidates(bundle);
   return {
     captions: { requested: want, samples: captions },
     frames: { requested: want, samples: picks.map(frameOf) },
-    adFrames: adCandidates(bundle).map(frameOf),
+    adCandidates: {
+      frames: ad.frames.map(frameOf),
+      passages: ad.passages.map((p, index) => ({ index, videoId: videoIdOf(p.sourceId), sourceId: p.sourceId, start: p.start, end: p.end, text: p.text })),
+      spans: ad.spans.map((s, index) => ({ index, videoId: videoIdOf(s.sourceId), sourceId: s.sourceId, start: s.start, end: s.end, text: null })),
+    },
     notes,
   };
 }
@@ -139,7 +146,7 @@ export function exportCapture(opts: { readonly dataDir: string; readonly outDir:
       else writeFileSync(join(opts.outDir, "frames", name), bytes);
     };
     for (const f of sampling.frames.samples) copy(f, `${f.index}.jpg`);
-    for (const f of sampling.adFrames) copy(f, `ad-${f.index}.jpg`);
+    for (const f of sampling.adCandidates.frames) copy(f, `ad-${f.index}.jpg`);
 
     const result = { ...sampling, notes };
     writeFileSync(join(opts.outDir, "bundle.json"), JSON.stringify(bundle, null, 2) + "\n");
@@ -158,6 +165,6 @@ if (import.meta.main) {
     process.exit(2);
   }
   const done = exportCapture({ dataDir: resolve(values.data), outDir: resolve(values.out), captureId: values.capture });
-  console.log(`capture ${done.captureId}: ${done.captions.samples.length} caption sample(s), ${done.frames.samples.length} frame sample(s), ${done.adFrames.length} ad candidate frame(s) -> ${resolve(values.out)}`);
+  console.log(`capture ${done.captureId}: ${done.captions.samples.length} caption sample(s), ${done.frames.samples.length} frame sample(s), ${done.adCandidates.frames.length}+${done.adCandidates.passages.length}+${done.adCandidates.spans.length} ad candidate frame+passage+interval(s) -> ${resolve(values.out)}`);
   for (const note of done.notes) console.log(`note: ${note}`);
 }

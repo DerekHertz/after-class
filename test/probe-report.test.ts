@@ -8,7 +8,7 @@ import type { EvidenceBundleJson } from "../src/backend/evidence";
 import { randomId, stableId } from "../src/shared/ids";
 import type { CaptureFact, CaptureFactBody } from "../src/shared/domain";
 import { media } from "../src/shared/time";
-import { adCandidates, buildReport, parseBundle } from "../scripts/probe-report";
+import { AD_WINDOW_SLACK_S, adCandidates, buildReport, parseBundle } from "../scripts/probe-report";
 import type { PerfInput, ProbeInputs, SpotInput } from "../scripts/probe-report";
 import { exportCapture, sampleExport } from "../scripts/probe-export";
 
@@ -118,22 +118,51 @@ describe("bar 4: zero ad evidence", () => {
     expect(r.text).toContain("no ad occurred in this capture, so the bar was not exercised");
   });
 
-  test("an ad with no frame stamped in its ad-clock window passes", () => {
-    expect(bar(run({ bundle: bundle({ ads: [ad], frames: [frame("ev_f1", 15)] }) }), 4).verdict).toBe("PASS");
+  const windowEnd = 15 + AD_WINDOW_SLACK_S;
+  const passage = (id: string, start: number, end: number) => ({ id, sourceId: SRC, start, end, text: id, origin: "panel", transcriptRevId: "trv_1" });
+  const clear = (kind: "frame" | "passage" | "span", index: number, isAd = false) => ({ kind, index, isAd });
+  const withChecks = (adChecks: { kind: "frame" | "passage" | "span"; index: number; isAd: boolean }[]) => ({ ...spot(), adChecks });
+  const none = { watched: [{ sourceId: SRC, intervals: [[100, 110]] as [number, number][] }], passages: [passage("ev_far", 100, 110)] };
+
+  test("an ad with nothing in its window passes and says zero candidates were checked", () => {
+    const r = run({ bundle: bundle({ ...none, ads: [ad], frames: [frame("ev_f1", windowEnd)] }) });
+    expect(bar(r, 4).verdict).toBe("PASS");
+    expect(r.text).toContain("0 candidates were checked");
   });
 
   test("a frame inside the window is a candidate and needs Derek's check; the window is half-open", () => {
-    const b = bundle({ ads: [ad], frames: [frame("ev_f1", 14.9), frame("ev_f2", 15), frame("ev_f3", 3, "src_b")] });
-    expect(adCandidates(b).map((f) => f.id)).toEqual(["ev_f1"]);
+    const b = bundle({ ...none, ads: [ad], frames: [frame("ev_f1", windowEnd - 0.1), frame("ev_f2", windowEnd), frame("ev_f3", 3, "src_b")] });
+    expect(adCandidates(b).frames.map((f) => f.id)).toEqual(["ev_f1"]);
     expect(bar(run({ bundle: b }), 4).verdict).toBe("NOT MEASURED");
   });
 
-  test("candidates all cleared pass, one marked as an ad fails, an incomplete check is not measured", () => {
-    const b = bundle({ ads: [ad], frames: [frame("ev_f1", 2), frame("ev_f2", 9)] });
-    const checks = (a: boolean, b2: boolean) => ({ ...spot(), adFrameChecks: [{ index: 0, isAd: a }, { index: 1, isAd: b2 }] });
-    expect(bar(run({ bundle: b, spot: checks(false, false) }), 4).verdict).toBe("PASS");
-    expect(bar(run({ bundle: b, spot: checks(false, true) }), 4).verdict).toBe("FAIL");
-    expect(bar(run({ bundle: b, spot: { ...spot(), adFrameChecks: [{ index: 0, isAd: false }] } }), 4).verdict).toBe("NOT MEASURED");
+  test("a leaked passage and watched interval with no frame are NOT MEASURED, then PASS once Derek says they are the lecture", () => {
+    const b = bundle({ ads: [{ ...ad, atContentS: 20 }], watched: [{ sourceId: SRC, intervals: [[0, 15]] }], passages: [passage("ev_p", 0, 15)], frames: [] });
+    expect(bar(run({ bundle: b, spot: spot() }), 4).verdict).toBe("NOT MEASURED");
+    expect(bar(run({ bundle: b, spot: withChecks([clear("passage", 0)]) }), 4).verdict).toBe("NOT MEASURED");
+    const cleared = run({ bundle: b, spot: withChecks([clear("passage", 0), clear("span", 0)]) });
+    expect(bar(cleared, 4).verdict).toBe("PASS");
+    expect(cleared.text).toContain("Checked by Derek: 2/2; 0 judged to be an ad.");
+  });
+
+  test("any candidate judged to be an ad fails, even when others are unchecked", () => {
+    const b = bundle({ ads: [ad], watched: [{ sourceId: SRC, intervals: [[0, 15]] }], passages: [passage("ev_p", 0, 15)], frames: [frame("ev_f1", 2)] });
+    expect(bar(run({ bundle: b, spot: withChecks([clear("frame", 0), clear("passage", 0), clear("span", 0)]) }), 4).verdict).toBe("PASS");
+    expect(bar(run({ bundle: b, spot: withChecks([clear("frame", 0), clear("passage", 0), clear("span", 0, true)]) }), 4).verdict).toBe("FAIL");
+    expect(bar(run({ bundle: b, spot: withChecks([clear("passage", 0, true)]) }), 4).verdict).toBe("FAIL");
+  });
+
+  test("slack boundary: a passage starting exactly at wall + slack is outside, one second inside is a candidate", () => {
+    const edge = bundle({ ...none, ads: [ad], passages: [passage("ev_edge", windowEnd, windowEnd + 5)] });
+    expect(adCandidates(edge).passages).toEqual([]);
+    const inside = bundle({ ...none, ads: [ad], passages: [passage("ev_in", windowEnd - 1, windowEnd + 5)] });
+    expect(adCandidates(inside).passages.map((p) => p.id)).toEqual(["ev_in"]);
+    expect(bar(run({ bundle: inside }), 4).verdict).toBe("NOT MEASURED");
+  });
+
+  test("candidates of another source are not the ad's", () => {
+    const b = bundle({ ...none, ads: [ad], passages: [{ ...passage("ev_o", 0, 10), sourceId: "src_b" }], watched: [{ sourceId: "src_b", intervals: [[0, 10]] }] });
+    expect(adCandidates(b)).toEqual({ frames: [], passages: [], spans: [] });
   });
 });
 
@@ -168,7 +197,7 @@ describe("perf probe: more than 1 percentage point more dropped frames fails", (
 describe("overall", () => {
   const passing = (): Partial<ProbeInputs> => ({
     bundle: bundle({ ads: [{ sourceId: SRC, atContentS: 0, wallDurationMs: 5000, signals: ["dom_class"] }] }),
-    spot: spot(),
+    spot: { ...spot(), adChecks: [{ kind: "passage", index: 0, isAd: false }, { kind: "span", index: 0, isAd: false }] },
     perf: { off: { dropped: 0, total: 1000 }, on: { dropped: 0, total: 1000 } },
   });
 
@@ -323,7 +352,9 @@ describe("probe-export on a data dir", () => {
     expect(done.captions.samples[0]!.videoId).toBe(VIDEO);
     expect(done.frames.samples).toHaveLength(1);
     expect(existsSync(join(out, "frames", "0.jpg"))).toBe(true);
-    expect(done.adFrames.map((f) => f.mediaS)).toEqual([10]);
+    expect(done.adCandidates.frames.map((f) => f.mediaS)).toEqual([10]);
+    expect(done.adCandidates.passages).toHaveLength(4);
+    expect(done.adCandidates.spans.map((s) => [s.start, s.end])).toEqual([[0, 60]]);
     expect(existsSync(join(out, "frames", "ad-0.jpg"))).toBe(true);
     const bundle = parseBundle(JSON.parse(readFileSync(join(out, "bundle.json"), "utf8")));
     expect(buildReport({ bundle, origin: "fixture" }).bars[0]!.verdict).toBe("PASS");

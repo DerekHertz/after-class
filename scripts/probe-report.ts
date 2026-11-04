@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { z } from "zod";
 import type { EvidenceBundleJson } from "../src/backend/evidence";
-import { contains, IntervalSet, media } from "../src/shared/time";
+import { contains, IntervalSet, media, overlaps } from "../src/shared/time";
 import type { Interval } from "../src/shared/time";
 
 export type Origin = "fixture" | "live";
@@ -32,7 +32,7 @@ const bundleSchema = z.object({
 const spotSchema = z.object({
   captionChecks: z.array(z.object({ index: z.number().int(), match: z.boolean() })).optional(),
   frameChecks: z.array(z.object({ index: z.number().int(), readable: z.boolean() })).optional(),
-  adFrameChecks: z.array(z.object({ index: z.number().int(), isAd: z.boolean() })).optional(),
+  adChecks: z.array(z.object({ kind: z.enum(["frame", "passage", "span"]), index: z.number().int(), isAd: z.boolean() })).optional(),
   observations: z.array(z.object({ question: z.string(), answer: z.union([z.boolean(), z.string()]) })).optional(),
 });
 
@@ -115,32 +115,50 @@ function scored<T extends { readonly index: number }>(
 /**
  * An ad has no span of content time: the tracker closes its span before the ad starts and records only the point where
  * content stopped (atContentS) and how long the ad ran (wallDurationMs). Content time keeps flowing afterwards, so a
- * window of content time after atContentS holds legitimate evidence. A frame sampled during an ad would carry the ad
- * video's own clock, which starts at 0, so the frames to inspect are those stamped inside [0, wallDurationMs/1000).
- * That is a candidate list for Derek's eye, not a verdict.
+ * window of content time after atContentS holds legitimate evidence. Evidence leaked from an ad would carry the ad
+ * video's own clock, which starts at 0, so the window to inspect is [0, wallDurationMs/1000 + AD_WINDOW_SLACK_S).
+ * Everything the bundle holds in that window (frames, passages, watched intervals) is a candidate for Derek's eye.
  */
-export function adCandidates(bundle: EvidenceBundleJson): readonly EvidenceBundleJson["frames"][number][] {
-  return bundle.frames.filter((f) => bundle.ads.some((a) => a.sourceId === f.sourceId && contains({ start: 0, end: a.wallDurationMs / 1000 }, f.mediaS)));
+export const AD_WINDOW_SLACK_S = 5;
+
+export type AdCandidates = {
+  readonly frames: readonly EvidenceBundleJson["frames"][number][];
+  readonly passages: readonly EvidenceBundleJson["passages"][number][];
+  readonly spans: readonly { readonly sourceId: string; readonly start: number; readonly end: number }[];
+};
+
+export function adCandidates(bundle: EvidenceBundleJson): AdCandidates {
+  const windows = bundle.ads.map((a) => ({ sourceId: a.sourceId, window: { start: 0, end: a.wallDurationMs / 1000 + AD_WINDOW_SLACK_S } }));
+  const near = (sourceId: string, test: (w: { start: number; end: number }) => boolean) => windows.some((w) => w.sourceId === sourceId && test(w.window));
+  return {
+    frames: bundle.frames.filter((f) => near(f.sourceId, (w) => contains(w, f.mediaS))),
+    passages: bundle.passages.filter((p) => near(p.sourceId, (w) => overlaps(p, w))),
+    spans: bundle.watched.flatMap((w) => w.intervals.map(([start, end]) => ({ sourceId: w.sourceId, start, end }))).filter((s) => near(s.sourceId, (w) => overlaps(s, w))),
+  };
 }
 
-function ads(bundle: EvidenceBundleJson, checks: SpotInput["adFrameChecks"]): Block {
+function ads(bundle: EvidenceBundleJson, checks: SpotInput["adChecks"]): Block {
   const head = { name: "bar 4", title: "Bar 4 (ads)", bar: BAR_ADS };
   if (bundle.ads.length === 0) return { ...head, verdict: "NOT MEASURED", lines: ["Measured: no ad occurred in this capture, so the bar was not exercised."] };
-  const candidates = adCandidates(bundle);
-  const base = [`Measured: ${bundle.ads.length} ad record(s); ${candidates.length} frame(s) stamped inside an ad's own clock window [0, wallDurationMs/1000).`];
-  const watchedInWindow = bundle.ads.reduce((total, a) => {
-    const window = setOf([[0, a.wallDurationMs / 1000]]);
-    return total + setOf(bundle.watched.filter((w) => w.sourceId === a.sourceId).flatMap((w) => w.intervals)).intersect(window).duration();
-  }, 0);
-  const info = `Not scored: ${fmt(watchedInWindow)} s of watched time also lies in those windows; the bundle cannot tell it from real viewing of the lecture's first seconds.`;
-  if (candidates.length === 0) return { ...head, verdict: "PASS", lines: [...base, info] };
-  const expected = new Set(candidates.keys());
-  const given = new Map((checks ?? []).map((c) => [c.index, c.isAd] as const));
-  if (given.size !== expected.size || [...expected].some((i) => !given.has(i))) {
-    return { ...head, verdict: "NOT MEASURED", lines: [...base, `Each candidate frame needs Derek's look (adFrameChecks, indices 0 to ${candidates.length - 1}); ${given.size} supplied.`, info] };
-  }
-  const adFrames = [...given.values()].filter(Boolean).length;
-  return { ...head, verdict: adFrames === 0 ? "PASS" : "FAIL", lines: [...base, `Derek viewed ${candidates.length} candidate frame(s); ${adFrames} showed an ad.`, info] };
+  const c = adCandidates(bundle);
+  const keys = [
+    ...c.frames.map((_, i) => `frame:${i}`),
+    ...c.passages.map((_, i) => `passage:${i}`),
+    ...c.spans.map((_, i) => `span:${i}`),
+  ];
+  const base = [
+    `Measured: ${bundle.ads.length} ad record(s). Window [0, wallDurationMs/1000 + ${AD_WINDOW_SLACK_S} s); the ${AD_WINDOW_SLACK_S} s slack covers detection lag and was fixed before any data.`,
+    `Scored: every frame, passage and watched interval in that window is a candidate Derek checks. Not scored: ad time outside the window.`,
+    `Candidates: ${c.frames.length} frame(s), ${c.passages.length} passage(s), ${c.spans.length} watched interval(s).`,
+  ];
+  if (keys.length === 0) return { ...head, verdict: "PASS", lines: [...base, "Nothing lies in the window, so 0 candidates were checked."] };
+  const given = new Map<string, boolean>((checks ?? []).map((k) => [`${k.kind}:${k.index}`, k.isAd]));
+  const checked = keys.filter((k) => given.has(k));
+  const asAd = checked.filter((k) => given.get(k) === true);
+  const lines = [...base, `Checked by Derek: ${checked.length}/${keys.length}; ${asAd.length} judged to be an ad.`];
+  if (asAd.length > 0) return { ...head, verdict: "FAIL", lines: [...lines, `Ad evidence: ${asAd.join(", ")}.`] };
+  if (checked.length < keys.length) return { ...head, verdict: "NOT MEASURED", lines: [...lines, `Unchecked: ${keys.filter((k) => !given.has(k)).join(", ")}.`] };
+  return { ...head, verdict: "PASS", lines };
 }
 
 function perf(input: PerfInput | undefined): Block {
@@ -170,7 +188,7 @@ export function buildReport({ bundle, spot, perf: perfInput, origin }: ProbeInpu
     coverage(bundle),
     scored({ name: "bar 2", title: "Bar 2 (caption to screen)", bar: BAR_CAPTIONS }, spot?.captionChecks, (c) => c.match, "caption spot check", "caption spot checks matched"),
     scored({ name: "bar 3", title: "Bar 3 (board text)", bar: BAR_FRAMES }, spot?.frameChecks, (c) => c.readable, "frame check", "frames with readable board text"),
-    ads(bundle, spot?.adFrameChecks),
+    ads(bundle, spot?.adChecks),
     perf(perfInput),
   ];
 
