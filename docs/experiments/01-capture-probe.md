@@ -49,7 +49,7 @@ The perf result is reported next to the four bars. A perf FAIL fails the run. A 
 Every line of the report starts with `[fixture]` or `[live]`.
 
 - `fixture` is data made by tests or by hand. It proves the report script works. It says nothing about capture.
-- `live` is data from a real capture in Windows Chrome that Derek ran through the wizard.
+- `live` is data from a real capture in Chrome that Derek ran through the wizard; the `Machine:` line says which machine.
 
 The wizard always passes `--origin live`. The report script defaults to `fixture`, so a hand-run report is never mistaken for a live one.
 
@@ -86,6 +86,20 @@ bun run scripts/probe-report.ts --bundle data/probe/export/bundle.json \
 ```
 
 `probe-export` reads a scratch copy of the database and only reads frame files, so it never writes the data dir and never makes a model call. It samples deterministically: 10 passages spaced evenly over watched time, each wholly inside a watched interval, and up to 10 frames spaced evenly over the frames that are not dropped and still have a file. Without Jev, frames are not judged, so they show as unjudged and all count. The exit code of `probe-report` is 0 only when the overall line reads PASS.
+
+## Running on macOS
+
+The same wizard runs on a Mac, with Mac Chrome and the backend on the same Mac. It picks its mode from `uname`: Darwin is Mac mode, Linux with `wslpath` is the WSL mode above, anything else exits with a message.
+
+Prerequisites: clone the repo, install Bun 1.4.3 (the wizard warns if `bun --version` differs), and run `bun install --frozen-lockfile` in the repo root. No keys are needed: the backend runs in replay mode. Then, from the repo root:
+
+```
+bash scripts/wizards/capture-probe.sh
+```
+
+In Mac mode there is no Windows folder: stage 1 builds with `bun run build:ext` and shows the absolute path of `dist/extension` to pick in Chrome's Load unpacked. Frame images open with `open`, the DevTools Console shortcut is Cmd+Option+J, and stage 3 checks `127.0.0.1:4317/health` on the same machine. macOS ships bash 3.2 and the script is written to run on it.
+
+The probe then measures capture on Mac Chrome, a different machine from the WSL and Windows setup, so its numbers are not comparable to a Windows run. The report prints a `Machine:` line (from `--machine <label>`, `unspecified` when absent) to say which.
 
 ## What the files are
 

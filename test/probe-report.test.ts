@@ -242,6 +242,16 @@ describe("report text", () => {
     expect(run({ origin: "live" }).text.split("\n").filter((l) => l !== "").every((l) => l.startsWith("[live] "))).toBe(true);
   });
 
+  test("prints the machine label on its own line, unspecified when absent, without changing the verdict or exit code", () => {
+    const labelled = run({ spot: spot(), machine: "macOS Chrome, backend on the same Mac" });
+    expect(labelled.text.split("\n")).toContain("[fixture] Machine: macOS Chrome, backend on the same Mac");
+    const plain = run({ spot: spot() });
+    expect(plain.text.split("\n")).toContain("[fixture] Machine: unspecified");
+    expect(labelled.exitCode).toBe(plain.exitCode);
+    expect(labelled.overall).toBe(plain.overall);
+    expect(labelled.bars).toEqual(plain.bars);
+  });
+
   test("is deterministic", () => {
     expect(run({ spot: spot(9, 9) }).text).toBe(run({ spot: spot(9, 9) }).text);
   });

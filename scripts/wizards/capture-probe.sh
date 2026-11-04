@@ -200,6 +200,26 @@ finish() {
 
 run_wizard() {
 
+if (( BASH_VERSINFO[0] < 3 )); then echo "This wizard needs bash 3.2 or newer; this is bash $BASH_VERSION." >&2; exit 1; fi
+
+case "$(uname -s)" in
+  Darwin) MODE=mac ;;
+  Linux)
+    if command -v wslpath >/dev/null 2>&1; then MODE=wsl
+    else echo "On Linux this wizard runs only inside WSL (it needs wslpath to hand files to Windows Chrome). Run it on a Mac or in WSL." >&2; exit 1; fi ;;
+  *) echo "Unsupported system $(uname -s): this wizard runs on macOS or in WSL." >&2; exit 1 ;;
+esac
+
+if [[ "$MODE" == mac ]]; then
+  CHROME_NAME="Mac Chrome"
+  DEVTOOLS_KEYS="Cmd+Option+J"
+  MACHINE_LABEL="macOS Chrome, backend on the same Mac"
+else
+  CHROME_NAME="Windows Chrome"
+  DEVTOOLS_KEYS="Ctrl+Shift+J"
+  MACHINE_LABEL="Windows Chrome, backend in WSL"
+fi
+
 cd "$(dirname "$0")/../.."
 
 TOTAL_STAGES=9
@@ -209,20 +229,26 @@ EXPORT_DIR="$PROBE_DIR/export"
 BACKEND_LOG="$PROBE_DIR/backend.log"
 BACKEND_URL="http://127.0.0.1:4317"
 BACKEND_PID=""
+BACKEND_SETSID=false
 OBS_JSON=""
 GRAB_SNIPPET="(() => { const q = document.querySelector('video').getVideoPlaybackQuality(); return q.droppedVideoFrames + ' ' + q.totalVideoFrames; })()"
 
-command -v wslpath >/dev/null 2>&1 || { echo "This wizard runs in WSL bash: it needs wslpath to hand files to Windows Chrome." >&2; exit 1; }
 command -v bun >/dev/null 2>&1 || { echo "bun is not on PATH." >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || { echo "curl is not on PATH." >&2; exit 1; }
 
-# Stops only the process group this wizard started. SIGTERM lets the backend close its database.
+# Stops only the pid this wizard started, and its process group only when setsid made it a group leader. SIGTERM lets the backend close its database.
 stop_backend() {
   [[ -n "$BACKEND_PID" ]] || return 0
   if kill -0 "$BACKEND_PID" 2>/dev/null; then
-    kill -TERM -- "-$BACKEND_PID" 2>/dev/null || kill -TERM "$BACKEND_PID" 2>/dev/null || true
+    if [[ "$BACKEND_SETSID" == true ]]; then
+      kill -TERM -- "-$BACKEND_PID" 2>/dev/null || kill -TERM "$BACKEND_PID" 2>/dev/null || true
+    else
+      kill -TERM "$BACKEND_PID" 2>/dev/null || true
+    fi
     for _ in $(seq 1 50); do kill -0 "$BACKEND_PID" 2>/dev/null || break; sleep 0.1; done
-    if kill -0 "$BACKEND_PID" 2>/dev/null; then kill -KILL -- "-$BACKEND_PID" 2>/dev/null || true; fi
+    if kill -0 "$BACKEND_PID" 2>/dev/null; then
+      if [[ "$BACKEND_SETSID" == true ]]; then kill -KILL -- "-$BACKEND_PID" 2>/dev/null || true; else kill -KILL "$BACKEND_PID" 2>/dev/null || true; fi
+    fi
   fi
   BACKEND_PID=""
 }
@@ -248,6 +274,11 @@ ask_pair() {
 }
 
 open_file() {
+  if [[ "$MODE" == mac ]]; then
+    printf '  %s↗ opening%s %s\n' "$GREEN" "$RESET" "$1"
+    open "$1" >/dev/null 2>&1 || warn "open failed; open this file yourself: $1"
+    return 0
+  fi
   local win; win="$(wslpath -w "$1")"
   if command -v explorer.exe >/dev/null 2>&1; then
     printf '  %s↗ opening%s %s\n' "$GREEN" "$RESET" "$win"
@@ -305,32 +336,39 @@ if [[ ! -d node_modules ]]; then
   say "node_modules is missing, so installing the pinned dependencies."
   bun install --frozen-lockfile
 fi
-WIN_PROFILE="$( (cd /mnt/c 2>/dev/null && cmd.exe /c 'echo %USERPROFILE%' 2>/dev/null | tr -d '\r') || true )"
-EXT_PARENT=""
-if [[ -n "$WIN_PROFILE" ]] && EXT_PARENT="$(wslpath -u "$WIN_PROFILE" 2>/dev/null)" && [[ -d "$EXT_PARENT" ]]; then
-  note "Windows profile folder: $WIN_PROFILE"
+if [[ "$MODE" == mac ]]; then
+  BUN_VERSION="$(bun --version 2>/dev/null || true)"
+  [[ "$BUN_VERSION" == "1.4.3" ]] || warn "bun is ${BUN_VERSION:-of unknown version}, but this repo pins 1.4.3. Continuing; results on another Bun version are not what was tested."
+  bun run build:ext
+  EXT_SHOW="$PWD/dist/extension"
 else
-  warn "Could not read your Windows profile folder."
-  while true; do
-    ask WIN_PROFILE "Windows folder to hold the extension (like C:\\Users\\you):"
-    EXT_PARENT="$(wslpath -u "$WIN_PROFILE" 2>/dev/null || true)"
-    [[ -n "$EXT_PARENT" && -d "$EXT_PARENT" ]] && break
-    warn "That folder does not exist from WSL."
-  done
+  WIN_PROFILE="$( (cd /mnt/c 2>/dev/null && cmd.exe /c 'echo %USERPROFILE%' 2>/dev/null | tr -d '\r') || true )"
+  EXT_PARENT=""
+  if [[ -n "$WIN_PROFILE" ]] && EXT_PARENT="$(wslpath -u "$WIN_PROFILE" 2>/dev/null)" && [[ -d "$EXT_PARENT" ]]; then
+    note "Windows profile folder: $WIN_PROFILE"
+  else
+    warn "Could not read your Windows profile folder."
+    while true; do
+      ask WIN_PROFILE "Windows folder to hold the extension (like C:\\Users\\you):"
+      EXT_PARENT="$(wslpath -u "$WIN_PROFILE" 2>/dev/null || true)"
+      [[ -n "$EXT_PARENT" && -d "$EXT_PARENT" ]] && break
+      warn "That folder does not exist from WSL."
+    done
+  fi
+  EXT_DIR="$EXT_PARENT/afterclass-extension"
+  EXT_SHOW="$(wslpath -w "$EXT_DIR")"
+  say "Chrome does not load extensions from \\\\wsl\$ paths, so the build is copied to a Windows folder."
+  AFTERCLASS_EXT_OUT="$EXT_DIR" bun run build:ext
 fi
-EXT_DIR="$EXT_PARENT/afterclass-extension"
-EXT_WIN="$(wslpath -w "$EXT_DIR")"
-say "Chrome does not load extensions from \\\\wsl\$ paths, so the build is copied to a Windows folder."
-AFTERCLASS_EXT_OUT="$EXT_DIR" bun run build:ext
 printf '\n'
 say "Folder to pick in Chrome:"
-printf '  %s%s%s\n' "$BOLD" "$EXT_WIN" "$RESET"
+printf '  %s%s%s\n' "$BOLD" "$EXT_SHOW" "$RESET"
 
 # ── Stage 2 ───────────────────────────────────────────────────────────────
 stage "Load the extension in Chrome"
-step "In Windows Chrome, open chrome://extensions (type it in the address bar)."
+step "In $CHROME_NAME, open chrome://extensions (type it in the address bar)."
 step "Turn on Developer mode (top right)."
-step "Click Load unpacked and choose: $EXT_WIN"
+step "Click Load unpacked and choose: $EXT_SHOW"
 note "If you rebuilt into the same folder, click the reload arrow on the After Class card instead."
 step "Copy the 32-letter ID shown on the After Class card. It is public."
 while true; do
@@ -348,10 +386,13 @@ if curl -fsS --max-time 2 "$BACKEND_URL/health" >/dev/null 2>&1; then
 fi
 mkdir -p "$PROBE_DIR"
 : > "$BACKEND_LOG"
-say "Starting: AFTERCLASS_MODE=replay AFTERCLASS_DATA=$PROBE_DIR bun run dev"
+say "Starting: AFTERCLASS_MODE=replay AFTERCLASS_DATA=$PROBE_DIR bun run src/backend/main.ts"
+# bun runs main.ts directly (not through the dev script) so $! is the backend's own pid.
+BACKEND_CMD=(bun run src/backend/main.ts)
+if command -v setsid >/dev/null 2>&1; then BACKEND_SETSID=true; BACKEND_CMD=(setsid "${BACKEND_CMD[@]}"); fi
 # The log is redacted so the pairing token never lands in a file this wizard wrote; the wizard shows it on screen only.
 AFTERCLASS_MODE=replay AFTERCLASS_DATA="$PROBE_DIR" AFTERCLASS_EXTENSION_ID="$AFTERCLASS_EXTENSION_ID" \
-  setsid bun run dev > >(sed -u 's/^pairing token: .*/pairing token: [hidden in this log; shown by the wizard]/' > "$BACKEND_LOG") 2>&1 &
+  "${BACKEND_CMD[@]}" > >(awk '{ if ($0 ~ /^pairing token: /) print "pairing token: [hidden in this log; shown by the wizard]"; else print; fflush() }' > "$BACKEND_LOG") 2>&1 &
 BACKEND_PID=$!
 note "backend pid $BACKEND_PID (the wizard stops this pid and nothing else when it exits)"
 for _ in $(seq 1 240); do
@@ -372,16 +413,29 @@ PAIRING_TOKEN="$(cat "$HOME/.config/afterclass/pairing-token" 2>/dev/null || tru
 [[ -n "$PAIRING_TOKEN" ]] || { warn "Could not read $HOME/.config/afterclass/pairing-token."; exit 1; }
 say "Backend is up in replay mode. Pairing token (shown here only, stored nowhere by this wizard):"
 printf '  %s%s%s\n' "$BOLD" "$PAIRING_TOKEN" "$RESET"
-curl -fsS --max-time 3 "$BACKEND_URL/health" >/dev/null && say "WSL reaches its own backend: $BACKEND_URL/health answered."
-say "Now check that Windows Chrome reaches it too."
-open_url "$BACKEND_URL/health"
-yesno "Did Windows Chrome show a response (not a connection error)?"
-if [[ "$YN" != true ]]; then
-  warn "Windows Chrome could not reach the backend, and I have not diagnosed why."
-  note "What to look at: WSL2 forwards localhost to Windows by default (the localhostForwarding setting in .wslconfig, documented default true)."
-  note "A firewall prompt or rule on Windows, or a networking mode other than the default, can also change this."
-  note "Stop here and tell Claude exactly what Chrome shows; do not continue with a broken link."
-  exit 1
+if [[ "$MODE" == mac ]]; then
+  curl -fsS --max-time 3 "$BACKEND_URL/health" >/dev/null || { warn "The backend did not answer $BACKEND_URL/health. Its log:"; cat "$BACKEND_LOG"; exit 1; }
+  say "$BACKEND_URL/health answered from this Mac."
+  say "Now check that Mac Chrome shows it too."
+  open_url "$BACKEND_URL/health"
+  yesno "Did Mac Chrome show a response (not a connection error)?"
+  if [[ "$YN" != true ]]; then
+    warn "Mac Chrome could not show the backend's health page, and I have not diagnosed why."
+    note "Stop here and tell Claude exactly what Chrome shows; do not continue with a broken link."
+    exit 1
+  fi
+else
+  curl -fsS --max-time 3 "$BACKEND_URL/health" >/dev/null && say "WSL reaches its own backend: $BACKEND_URL/health answered."
+  say "Now check that Windows Chrome reaches it too."
+  open_url "$BACKEND_URL/health"
+  yesno "Did Windows Chrome show a response (not a connection error)?"
+  if [[ "$YN" != true ]]; then
+    warn "Windows Chrome could not reach the backend, and I have not diagnosed why."
+    note "What to look at: WSL2 forwards localhost to Windows by default (the localhostForwarding setting in .wslconfig, documented default true)."
+    note "A firewall prompt or rule on Windows, or a networking mode other than the default, can also change this."
+    note "Stop here and tell Claude exactly what Chrome shows; do not continue with a broken link."
+    exit 1
+  fi
 fi
 
 # ── Stage 4 ───────────────────────────────────────────────────────────────
@@ -410,11 +464,11 @@ done
 write_env LECTURE_URL "$LECTURE_URL"
 say "Capture stays OFF for this step: do not click Start capture."
 open_url "$LECTURE_URL"
-note "It opens in your default Windows browser. If that is not Chrome, paste the URL into Chrome."
+note "It opens in your default browser. If that is not Chrome, paste the URL into Chrome."
 step "Use a fresh page load of the video (the counters start at zero when the page loads)."
 step "If an ad plays first, skip it or reload the page: ad frames would count in the numbers."
 step "Play the first 2 minutes without pausing or seeking."
-step "At 2:00, press F12, open the Console tab, and run this (type 'allow pasting' first if Chrome asks):"
+step "At 2:00, press $DEVTOOLS_KEYS to open the Console, and run this (type 'allow pasting' first if Chrome asks):"
 printf '    %s%s%s\n' "$BOLD" "$GRAB_SNIPPET" "$RESET"
 ask_pair OFF_NUMBERS "Paste the two numbers it printed (dropped total):"
 read -r OFF_DROPPED OFF_TOTAL <<< "$OFF_NUMBERS"
@@ -527,7 +581,7 @@ say "Saved $PROBE_DIR/spot-results.json and $PROBE_DIR/perf.json (gitignored)."
 
 # ── Stage 9 ───────────────────────────────────────────────────────────────
 stage "Report"
-if bun run scripts/probe-report.ts --bundle "$EXPORT_DIR/bundle.json" --spot "$PROBE_DIR/spot-results.json" --perf "$PROBE_DIR/perf.json" --origin live --out "$PROBE_DIR/probe-report.md"; then
+if bun run scripts/probe-report.ts --bundle "$EXPORT_DIR/bundle.json" --spot "$PROBE_DIR/spot-results.json" --perf "$PROBE_DIR/perf.json" --origin live --machine "$MACHINE_LABEL" --out "$PROBE_DIR/probe-report.md"; then
   say "The probe passed."
 else
   say "The probe did not pass. That is a result, not an error."
