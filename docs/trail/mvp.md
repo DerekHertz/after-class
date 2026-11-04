@@ -19,4 +19,4 @@ Short entries: what was decided, by whom, why.
   2. An assumption the code did not enforce: #32 relied on "a saved review is final" while the save route and the turn route accepted a save before the end and a turn after it. Fixed in code (409 on an unended save, `turn_failed` on a turn after the end), with a test for each.
   3. A docs edit left a stale line: #30 (the plan intro still named the dropped skill). Process slip, not a code class; a docs PR that drops a feature greps for the feature's name before it opens.
   Process fix: after a push, `git rev-parse origin/<branch>` must equal the local head. A detached HEAD made one fix push silently not land, and the verifier read the old head.
-  Repeats of retro 1 classes: none. Class 2 here is new (an unenforced assumption), and the M10 resend test caught the one retro-1 repeat (a retry that was not answered from the first attempt) before it shipped.
+  Repeats of retro 1 classes: none. Class 2 here is new (an unenforced assumption), and the M10 resend test caught the one retro-1 repeat (a retry that was not answered from the first attempt); #32 fixed it.
