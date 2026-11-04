@@ -3,7 +3,7 @@
  * against bars that are fixed here, before any result exists. Nothing in this file is tuned after the fact.
  *
  *   bun run scripts/probe-report.ts --bundle bundle.json [--spot spot-results.json] [--perf perf.json]
- *                                   [--origin fixture|live] [--out probe-report.md]
+ *                                   [--origin fixture|live] [--machine <label>] [--out probe-report.md]
  *
  * Exit code 0 only when the four bars all PASS and the perf probe, if measured, did not FAIL.
  */
@@ -43,7 +43,7 @@ const perfSchema = z.object({
 
 export type SpotInput = z.input<typeof spotSchema>;
 export type PerfInput = z.input<typeof perfSchema>;
-export type ProbeInputs = { readonly bundle: EvidenceBundleJson; readonly spot?: SpotInput | undefined; readonly perf?: PerfInput | undefined; readonly origin: Origin };
+export type ProbeInputs = { readonly bundle: EvidenceBundleJson; readonly spot?: SpotInput | undefined; readonly perf?: PerfInput | undefined; readonly origin: Origin; readonly machine?: string | undefined };
 export type Bar = { readonly name: string; readonly verdict: Verdict };
 export type ProbeReport = { readonly bars: readonly Bar[]; readonly overall: "PASS" | "FAIL" | "NOT PASSED"; readonly exitCode: 0 | 1; readonly text: string };
 
@@ -183,7 +183,7 @@ function perf(input: PerfInput | undefined): Block {
 
 const answerText = (a: boolean | string) => (typeof a === "boolean" ? (a ? "yes" : "no") : a);
 
-export function buildReport({ bundle, spot, perf: perfInput, origin }: ProbeInputs): ProbeReport {
+export function buildReport({ bundle, spot, perf: perfInput, origin, machine }: ProbeInputs): ProbeReport {
   const blocks = [
     coverage(bundle),
     scored({ name: "bar 2", title: "Bar 2 (caption to screen)", bar: BAR_CAPTIONS }, spot?.captionChecks, (c) => c.match, "caption spot check", "caption spot checks matched"),
@@ -197,7 +197,7 @@ export function buildReport({ bundle, spot, perf: perfInput, origin }: ProbeInpu
   const overall = failed.length > 0 ? "FAIL" : notMeasured.length > 0 ? "NOT PASSED" : "PASS";
   const perfBlock = blocks[4]!;
 
-  const out: string[] = [`Capture probe report for ${bundle.captureId ?? "(no capture id)"}`, `Data origin: ${origin}`, ""];
+  const out: string[] = [`Capture probe report for ${bundle.captureId ?? "(no capture id)"}`, `Data origin: ${origin}`, `Machine: ${machine?.trim() || "unspecified"}`, ""];
   for (const b of blocks) out.push(`${b.title}: ${b.verdict}`, `Bar: "${b.bar}"`, ...b.lines, "");
   if (spot?.observations?.length) {
     out.push("Observations outside the bars (unscored, from real Chrome)");
@@ -214,10 +214,10 @@ export function buildReport({ bundle, spot, perf: perfInput, origin }: ProbeInpu
 
 if (import.meta.main) {
   const { values } = parseArgs({
-    options: { bundle: { type: "string" }, spot: { type: "string" }, perf: { type: "string" }, origin: { type: "string", default: "fixture" }, out: { type: "string" } },
+    options: { bundle: { type: "string" }, spot: { type: "string" }, perf: { type: "string" }, origin: { type: "string", default: "fixture" }, machine: { type: "string" }, out: { type: "string" } },
   });
   if (!values.bundle) {
-    console.error("usage: bun run scripts/probe-report.ts --bundle bundle.json [--spot spot-results.json] [--perf perf.json] [--origin fixture|live] [--out probe-report.md]");
+    console.error("usage: bun run scripts/probe-report.ts --bundle bundle.json [--spot spot-results.json] [--perf perf.json] [--origin fixture|live] [--machine <label>] [--out probe-report.md]");
     process.exit(2);
   }
   if (values.origin !== "fixture" && values.origin !== "live") {
@@ -230,6 +230,7 @@ if (import.meta.main) {
     spot: values.spot ? parseSpot(read(values.spot)) : undefined,
     perf: values.perf ? parsePerf(read(values.perf)) : undefined,
     origin: values.origin,
+    machine: values.machine,
   });
   process.stdout.write(report.text);
   if (values.out) writeFileSync(values.out, report.text);
