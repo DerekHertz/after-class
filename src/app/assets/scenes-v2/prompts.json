@@ -1,0 +1,68 @@
+[
+  {
+    "asset": "last-desk-stage",
+    "prompt": "Use case: precise-object-edit. Asset type: transparent production 2.5D illustrated scene asset for After Class. Input image 1 is the EXACT approved functional composition reference, image 2 the approved Last Desk room material reference. Extract and faithfully reconstruct ONLY the LEFT illustrated environment as an independent high detail asset. Preserve the honey wooden school desk, mint green chalkboard wall at left, metal desk legs, ring-bound ochre hinged lecture document stand with thin ink outlines, individual screws and wood grain, warm paper texture, detailed shaded metal joints and strong navy cast shadow. The stand must occupy a large front-facing near-rectangular area with its blank cream paper from x12% to88% and y8% to80% of the portrait canvas; suitable for rendering real DOM source text over it. Keep perspective on furniture and stand edges but paper reading area frontal and legible. Canvas portrait 1024x1536 aspect2:3. Bottom20% is honey desk surface and fine dimensional front edge with clear room for separately placed mascot and recorder assets. Keep chalkboard and dimensional desk around the left/back margins. Remove ALL characters, recorder, journal/notebooks, all printed text, diagrams, captions, UI controls, right conversation panel, icons, annotations and UI headings. The paper area must be truly empty textured cream, no hidden text or fake frame. Preserve the exact mature hand-inked painted illustration quality and palette, never flat vector, never glossy clay. Outside the object is genuine transparent alpha. Do not include beige background rectangle or checkerboard pixels. Full scene including shadows visible within canvas with small transparent margin.",
+    "reference": [
+      "docs/design/component-review-2026-11-03/conversation-and-source.png",
+      "docs/design/scene-studies-2026-11-03/last-desk.png"
+    ],
+    "mode": "built-in imagegen",
+    "transparent": true
+  },
+  {
+    "asset": "projection-booth-stage",
+    "prompt": "Use case: precise-object-edit. Asset type: production painted 2.5D source-stage illustration, transparent outside objects. Extract and reconstruct the approved Projection Booth reference as a tall 1024x1536 portrait stage asset for live DOM evidence overlay. Preserve its exact fine hand-inked detailed shaded illustrated materials, navy-charcoal evening wall, amber illumination, mint-green metal analog projector with machined lens, detailed reels and perforated film, warm wood ledge, cream roll-down projection screen with metal top and bottom bars/cords. Arrange a LARGE mostly front-facing blank cream paper screen occupying x21%-92% canvas, y12%-76% canvas. Projector sits bottom-left below the paper's readable area, its amber light gives source-open atmosphere but DOES NOT obscure the blank paper. Dimensional wooden writing ledge across bottom16%. Surrounding edges/background outside stage genuine alpha transparent. Preserve detailed metal joints, inked wood grain, crisp cast shadows and warm paper texture. Remove ALL character/mascot, all lettering/numbers/headings, diagrams/arrows/source content, cup, notebook, microphones, UI buttons. The blank screen must have ZERO baked text/content. Do not reproduce entire screenshot with UI, only the source-stage background asset. Not flat vector, not glossy clay, not photorealism. No added objects. Layout controlled for real evidence text on top, coherent with original approved reference.",
+    "reference": "docs/design/scene-studies-2026-11-03/projection-booth.png",
+    "mode": "built-in imagegen",
+    "transparent": true
+  },
+  {
+    "asset": "study-bench-stage",
+    "prompt": "Use case: precise-object-edit. Asset type: production detailed painted 2.5D study-machine source-stage asset with transparent outside. Use the approved Study Bench screenshot as precise identity/material reference. Reconstruct only its detailed mint enamel study-machine chassis and source paper/drawer stage, no full interface. Tall 1024x1536 portrait. A large blank cream paper sheet at mostly frontal angle occupies x21%-92% and y12%-76% canvas, mounted in precise mint machine side rails with brass roller hardware and clips, so real DOM evidence can be rendered legibly over the blank paper. Mint machine lower chassis on honey wood workbench occupies bottom20%, with visible screw heads, side vents, bevels, small mechanical seams, dark cobalt navy cast shadow, enamel slight hand-painted texture. A real dimensional drawer edge beneath the paper hints source inspection. Preserve exact original hand-inked warm painted construction and fine details, NO simplification to flat vector or glossy 3d clay. Omit character including pencil mechanic, microphone and all buttons/controls/journal for separate layers, omit ALL writing, text, symbols, diagrams and timestamps. No UI screenshot, no invisible-click-target trick. Blank cream paper actual empty texture. Transparent background outside the freestanding machine/bench, no baked checkerboard or solid rectangle.",
+    "reference": "docs/design/scene-studies-2026-11-03/study-bench.png",
+    "mode": "built-in imagegen",
+    "transparent": true
+  },
+  {
+    "asset": "recorder",
+    "prompt": "Use case: background-extraction. Asset type: transparent raster prop for clickable speech input. In the supplied approved After Class component mock, isolate and faithfully reconstruct ONLY the small cobalt blue tape recorder at the lower left on the desk. The recorder has the exact warm hand-inked painted style, 3/4 isometric view from above, rich blue enamel body, ivory top label plate (leave plate blank), large raised coral orange mechanical push key, tiny perforated speaker grille, individual screws, side ventilation slots, beveled side faces, restrained navy cast shadow. Include machine only. No desk, no moth, no other prop, no UI text or labels. Fine detailed ink outlines, subtle painted grain, dimensional highlights/shaded faces match exact original. No simplistic vector or glossy clay. Genuine transparent alpha around the whole silhouette and small cast shadow, no beige matte. Center machine large to fill ~88% of a square 1024x1024 canvas with complete object visible.",
+    "reference": "docs/design/component-review-2026-11-03/conversation-and-source.png",
+    "mode": "built-in imagegen",
+    "transparent": true
+  },
+  {
+    "asset": "journal",
+    "prompt": "Use case: background-extraction. Asset type: transparent raster prop for clickable saved notebook. In supplied approved Last Desk reference, isolate ONLY the small mint/sage green bound journal with blue elastic band sitting near the front of the desk. Preserve exact 3/4 isometric orientation seen from above, fine black hand-inked outlines, warm cream pages detailed page edges and binding, faded mint cloth cover with blank ivory label (NO writing), deep cobalt blue elastic band, shaded ochre/ink side faces and strong navy cast shadow. Match the beautiful richly textured original illustration. No characters, desk, recorder, UI text, surrounding environment, or other object. Center this single closed journal large to fill~88% of a square1024x1024 with small transparent margin. Real alpha transparency, no beige rectangle. This is production art, not a new concept.",
+    "reference": "docs/design/scene-studies-2026-11-03/last-desk.png",
+    "mode": "built-in imagegen",
+    "transparent": true
+  },
+  {
+    "asset": "notebook-paper",
+    "prompt": "Use case: precise-object-edit. Asset type: production blank conversation notebook-paper surface. Extract and faithfully reconstruct ONLY the large right-hand notebook sheet from the approved supplied component reference. Keep the original cream/ivory lightly grained warm paper material, thin brown ink edge, softly irregular rounded/torn corners, subtle thick page stack/navy cast shadow, and six round punched binding notches down the LEFT edge with faint natural shadows. Mostly front-facing perfectly readable sheet, no perspective tilt on reading area. IMPORTANT remove ALL lettering, lines of dialogue, dividers, chips, textbox and buttons, stamps, icons, handwritten markings. The entire large reading area must be empty paper texture. No desk/source stand/moth/room/recorder. Portrait canvas approx1024x1152, paper almost fills canvas with thin genuine transparent margin and subtle bottom-right shadow. Texture subtle not noisy. Match exact paper craftsmanship and dimensional binding detail, not a flat vector rounded rectangle.",
+    "reference": "docs/design/component-review-2026-11-03/conversation-and-source.png",
+    "mode": "built-in imagegen",
+    "transparent": true
+  },
+  {
+    "asset": "bell",
+    "prompt": "Use case: background-extraction. Asset type: transparent raster brand icon. Isolate ONLY the small golden school hand bell from upper-left wordmark of supplied approved reference. Exact tilted brass/golden bell with little dark wooden handle and tiny black hand-inked ring marks, warm painted paper-like grain, clean dimensional shaded metal surfaces, elegant friendly thin dark ink outlines. No lettering, no wordmark, no other objects or background. Single small bell centered but filling80%canvas, square aspect. True transparent alpha, no beige matte, no rectangle. Preserve recognizable exact reference rather than adding a new logo concept.",
+    "reference": "docs/design/component-review-2026-11-03/conversation-and-source.png",
+    "mode": "built-in imagegen",
+    "transparent": true
+  },
+  {
+    "asset": "booth-microphone",
+    "prompt": "Use case: stylized-concept. Asset type: separate transparent production interactive speech-control prop for the approved After Class Projection Booth room. Reference image supplies exact painted hand-inked metal/wood/material style. Create one finely detailed miniature desk microphone in the same 3/4 isometric view: warm brushed nickel grille with delicate mesh holes, bronze hinge screw and short articulated mounting arm, heavy dark cobalt metal base with a small ivory blank name plate on top and a restrained orange press switch, subtle enamel wear and painted texture, precise shaded sides and ink contours, navy cast shadow. The front ivory plate must be blank so a DOM Speak label can overlay it. No text, no person, no scenery, no paper, no UI screenshot. High craftsmanship not flat vector or glossy clay. Object fills85% square canvas, whole silhouette visible. TRUE alpha-transparent background.",
+    "reference": "docs/design/scene-studies-2026-11-03/projection-booth.png",
+    "mode": "built-in imagegen",
+    "transparent": true
+  },
+  {
+    "asset": "bench-microphone",
+    "prompt": "Use case: background-extraction. Asset type: separate transparent speech-key production prop extracted from approved After Class Study Bench. Faithfully reconstruct the reference's chunky coral microphone push key sitting on its visible metal spring with a small mint enamel chassis base and ivory circular microphone grille beside it. Fine ink outlines, shaded coral key faces, tiny screws, hinge and spring detail, cobalt/navy cast shadow and exact warm painted paper texture. 3/4 isometric perspective like original console, precise small mechanical parts, matte enamel. Key face has a blank warm ivory label plate for real DOM Speak text (no baked text or microphone glyph). One compact coherent object only, no room, no character, no full machine, no paper, no interface. Fill85% square canvas preserving full silhouette. Genuine transparent alpha no matte. Do not simplify or change material style.",
+    "reference": "docs/design/scene-studies-2026-11-03/study-bench.png",
+    "mode": "built-in imagegen",
+    "transparent": true
+  }
+]

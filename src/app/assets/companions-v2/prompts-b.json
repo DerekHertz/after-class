@@ -1,0 +1,35 @@
+{
+  "mode": "built-in image_gen",
+  "assets": [
+    {
+      "name": "mote-moonlit",
+      "key": "moonlitResult",
+      "prompt": "Use case: background-extraction. Asset type: transparent production character PNG for After Class. Input image 1 is the exact approved identity and style reference, not a UI to reproduce. Isolate and faithfully recreate ONLY the large left portrait of Moonlit Library Mote as a full-body character cutout, facing three-quarter right. Preserve exact proportions, silhouette, cream fuzzy face and body, dark oval eyes, amber leaf-shaped antennae, folded ivory parchment moth wings with dusty-blue crescent marks and fine wing veins, and the navy bookmark scarf with its small gold-trimmed tail. Preserve fine ink outlines and the reference's rich hand-painted/anime shading, delicate fur tufts, paper fibers and subtle material variation. Character only, no book pedestal, lantern, ground, shadow rectangle, typography, interface, border or extra objects. Leave comfortable transparent margins all around including antennae and feet. This must look like the supplied detailed study, not a generic moth, simplified vector icon, glossy clay toy or geometric approximation. True alpha transparent background.",
+      "reference": "docs/design/mascot-studies-2026-11-03/mote-anime.png",
+      "source": "/Users/derek-workstudy/.codex/generated_images/01a1a542-40b0-7281-9dc8-8f00ec99f318/exec-fa338775-26ee-4102-b802-abfb844471a9.png",
+      "output": "src/app/assets/companions-v2/mote-moonlit.png",
+      "mode": "built-in image_gen",
+      "transparent_background": true
+    },
+    {
+      "name": "mote-pagewing",
+      "key": "pagewingResult",
+      "prompt": "Use case: background-extraction. Asset type: transparent production character PNG for After Class. Input image 1 is the exact approved identity/style reference. Recreate ONLY the large left portrait's Pagewing Spirit Mote as a faithful full-body cutout, three-quarter view facing right, with the same small curious expression and seated feet. Preserve cream fluffy fur, finely inked soft tufts, amber feather antennae, large layered irregular parchment/page wings, dusty-blue crescent wing marking and delicate veins, and the moss-green worn satchel with brown leather strap and gold button. Keep the warm hand-painted paper/fur texture, tiny clothing/material details and nuanced shaded volume of the original study. Remove everything except character and worn satchel. No lamp, book pedestal, leaf bookmark, ground, typography, UI, frame, scenery, glow, vignette, drop-shadow field or background rectangle. True clean alpha transparency outside the silhouette, comfortable transparent margins including antennae and feet. Do not simplify into vector/geometric shapes, clipart, glossy plastic or a generic moth. The reference rendering and identity are mandatory.",
+      "reference": "docs/design/mascot-studies-2026-11-03/mote-pagewing.png",
+      "source": "/Users/derek-workstudy/.codex/generated_images/01a1a542-40b0-7281-9dc8-8f00ec99f318/exec-7a3161c1-97fa-4122-84b9-e07a295e717f.png",
+      "output": "src/app/assets/companions-v2/mote-pagewing.png",
+      "mode": "built-in image_gen",
+      "transparent_background": true
+    },
+    {
+      "name": "yun",
+      "key": "yunResult",
+      "prompt": "Use case: background-extraction. Asset type: transparent production character PNG for After Class. Image 1 is the exact approved Inkcloud Yun identity/style reference. Isolate and faithfully recreate ONLY the large left portrait's ivory-and-jade cloud dragonlet as a full-body cutout, three-quarter view facing right, sitting with tiny front paws held near the chest and its rounded jade cloud tail curled around the front. Preserve precise recognizable proportions: broad fluffy cloud-shaped ivory head with soft curls, two short jade horns, small rosy-inner ears, large dark glossy oval eyes, tiny mouth, muted jade back spines and tail, cinnabar ribbon tied at the neck. Preserve the reference's detailed softly painted donghua/storybook rendering, cream paper-like material texture within the character, fine expressive dark ink contours and nuanced warm shading. Character only. Remove inkstone pedestal, scroll, leaf, all ground/scenery, book, typography, interface, frame, vignette, outer glow and background rectangle. True alpha transparency outside silhouette, comfortable clear margins around horns, ears, tail and feet. Do not simplify to geometric SVG, generic green dinosaur, glossy toy or flat clipart. Faithful exact reference identity and rich detail are the priority.",
+      "reference": "docs/design/mascot-studies-2026-11-03/yun-donghua.png",
+      "source": "/Users/derek-workstudy/.codex/generated_images/01a1a542-40b0-7281-9dc8-8f00ec99f318/exec-1a0108a4-bcf9-42ba-9ba8-eb844dcecc15.png",
+      "output": "src/app/assets/companions-v2/yun.png",
+      "mode": "built-in image_gen",
+      "transparent_background": true
+    }
+  ]
+}

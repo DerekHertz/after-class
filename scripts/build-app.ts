@@ -3,7 +3,7 @@
  * dist/app/ for `http.ts` to serve under /app/. `publicPath` is /app/ so asset URLs stay absolute and still
  * resolve when the SPA fallback answers a deep link such as /app/capture/<id>.
  */
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
@@ -20,6 +20,13 @@ export async function buildApp(outDir: string): Promise<void> {
     throw: false,
   });
   if (!result.success) throw new Error(`build of the review app failed:\n${result.logs.map(String).join("\n")}`);
+  const licenses: [string, string][] = [
+    ["Feather icons", "src/app/assets/icons-v2/LICENSE"],
+    ["Young Serif", "src/app/assets/fonts-v2/young-serif-OFL.txt"],
+    ["DM Sans", "src/app/assets/fonts-v2/dm-sans-OFL.txt"],
+  ];
+  const notices = licenses.map(([name, path]) => `${name}\n\n${readFileSync(join(ROOT, path), "utf8")}`).join("\n\n");
+  writeFileSync(join(out, "asset-notices.txt"), notices);
   console.log(`built the review app into ${out}`);
 }
 

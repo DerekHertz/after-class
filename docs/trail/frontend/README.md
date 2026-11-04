@@ -1,5 +1,7 @@
 # Frontend review
 
+Artwork and visual review evidence are superseded by [the reference fidelity correction](../frontend-v2/README.md). The controller/fixture verification below remains historical evidence.
+
 The implementation stack starts at [PR #44](https://github.com/DerekHertz/after-class/pull/44), above the approved design handoff in [#42](https://github.com/DerekHertz/after-class/pull/42). Follow the dependent PRs in order. Nothing in this stack authorizes merging or deployment. Derek owns final visual approval.
 
 ## Run the full interface
