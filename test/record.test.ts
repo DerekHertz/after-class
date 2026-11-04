@@ -248,6 +248,18 @@ describe("R15: retrying a save never creates a duplicate record", () => {
     expect(h.record.view({ reviewId: REVIEW }).observations.map((o) => o.id)).toEqual([stableId("obs", REVIEW, T1), stableId("obs", REVIEW, T2)]);
   });
 
+  test("a retry of a saved review is answered from the first save: no wrap-up, no write, the first reply, though the claims changed", async () => {
+    let usable = [claim(1), claim(2)];
+    const h = harness({ claims: () => usable });
+    const first = await h.record.save(REVIEW);
+    const once = rows(h);
+    usable = [claim(2)];
+    expect(await h.record.save(REVIEW)).toEqual(first);
+    expect(h.calls.wrapUp).toBe(1);
+    expect(h.calls.snapshots).toHaveLength(1);
+    expect(rows(h)).toEqual(once);
+  });
+
   test("a failed save writes nothing, is retained, and its retry writes the same bundle verbatim", async () => {
     let text = "original claim text";
     const h = harness({ claims: () => [claim(1, text), claim(2)] });
@@ -311,13 +323,12 @@ describe("saveState reads the persisted save state, not what this process saw", 
     expect(first.db.sql.query("SELECT COUNT(*) AS n FROM save_failures").get()).toEqual({ n: 0 });
   });
 
-  test("a saved review stays saved when a later re-save fails", async () => {
+  test("a saved review stays saved on a retry: it writes nothing, so it cannot fail", async () => {
     const h = harness();
     await h.record.save(REVIEW);
     h.failNextSnapshots(1);
-    expect((await h.record.save(REVIEW)).kind).toBe("save_failed");
-    expect(h.record.saveState(REVIEW)).toBe("saved");
     expect((await h.record.save(REVIEW)).kind).toBe("saved");
+    expect(h.record.saveState(REVIEW)).toBe("saved");
   });
 });
 
@@ -368,7 +379,7 @@ describe("the learning record", () => {
     await h.record.save(REVIEW);
     const id = stableId("note", REVIEW, concept(1));
     h.record.deleteNote(id);
-    expect(await h.record.save(REVIEW)).toMatchObject({ kind: "saved", notes: 1 });
+    expect(await h.record.save(REVIEW)).toMatchObject({ kind: "saved", notes: 2 }); // the first save's result
     expect(h.record.view({ reviewId: REVIEW }).notes.map((n) => n.id)).not.toContain(id);
   });
 
@@ -396,25 +407,22 @@ describe("a dispute you settle saves the way you settled it; the tutor's proposa
       .learner({ kind: "end" }, null).tutor({ kind: "wrap_up" }).turns;
   const obsId = stableId("obs", REVIEW, T1);
 
-  test.each(["independent", "partial"] as const)("first proposal %s", async (first) => {
-    let proposed: WrapUpOutput["observations"][number]["proposed"] = first;
+  const savedWith = async (proposed: WrapUpOutput["observations"][number]["proposed"], resolution?: "learner_was_right" | "it_was_my_gap") => {
     const h = harness({ turns: disputedTurns(), wrapUp: async () => ({ observations: [{ threadId: T1, proposed, rationale: "r" }], notes: [] }) });
-    const saved = async () => {
-      await h.record.save(REVIEW);
-      return h.record.view({ reviewId: REVIEW }).observations[0]!;
-    };
-    expect(isLearningGap(await saved())).toBe(false);
+    if (resolution) h.record.resolveDispute(obsId, resolution);
+    await h.record.save(REVIEW);
+    return h.record.view({ reviewId: REVIEW }).observations[0]!;
+  };
 
-    h.record.resolveDispute(obsId, "learner_was_right");
+  test.each(["independent", "partial"] as const)("first proposal %s", async (first) => {
+    expect(isLearningGap(await savedWith(first))).toBe(false);
+
     for (const p of ["independent", "partial", "unresolved"] as const) {
-      proposed = p;
-      expect(isLearningGap(await saved())).toBe(false);
+      expect(isLearningGap(await savedWith(p, "learner_was_right"))).toBe(false);
     }
 
-    h.record.resolveDispute(obsId, "it_was_my_gap");
     for (const [p, status] of [["independent", "unresolved"], ["partial", "partial"], ["after_help", "unresolved"], ["unresolved", "unresolved"]] as const) {
-      proposed = p;
-      const o = await saved();
+      const o = await savedWith(p, "it_was_my_gap");
       expect(o).toMatchObject({ status, dispute: { kind: "resolved_by_learner", outcome: "it_was_my_gap" } });
       expect(isLearningGap(o)).toBe(true);
     }
@@ -443,21 +451,21 @@ describe("R3: a claim that is not assessable at save is not assessed", () => {
   });
 });
 
-describe("a re-save never re-snapshots evidence the user let go", () => {
-  test("evidence only a deleted note cited is not snapshotted again", async () => {
+describe("a save never snapshots evidence the user let go", () => {
+  test("evidence only a deleted note cited is not snapshotted", async () => {
     const h = harness();
-    await h.record.save(REVIEW);
     h.record.deleteNote(stableId("note", REVIEW, concept(1)));
     await h.record.save(REVIEW);
-    expect(h.calls.snapshots).toEqual([[ev(1), ev(2)].sort(), [ev(2)]]);
+    await h.record.save(REVIEW);
+    expect(h.calls.snapshots).toEqual([[ev(2)]]);
   });
 
-  test("evidence the user deleted is not snapshotted again, though a live note still cites it", async () => {
+  test("evidence the user deleted is not snapshotted, though a live note still cites it", async () => {
     const h = harness();
-    await h.record.save(REVIEW);
     h.db.sql.run(`INSERT INTO evidence_deletions (evidence_id, request_id, deleted_ms, seq) VALUES (?, 'req', 42, 1)`, [ev(2)]);
     await h.record.save(REVIEW);
-    expect(h.calls.snapshots).toEqual([[ev(1), ev(2)].sort(), [ev(1)]]);
+    await h.record.save(REVIEW);
+    expect(h.calls.snapshots).toEqual([[ev(1)]]);
     expect(h.record.view({ reviewId: REVIEW }).unavailableEvidence).toEqual([{ kind: "deleted", id: ev(2), deletedAtMs: 42 }]);
   });
 });
