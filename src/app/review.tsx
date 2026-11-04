@@ -23,6 +23,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const speechToggle = useRef<(() => void) | null>(null);
   const history = useRef<HTMLDivElement>(null);
   const sourceHeading = useRef<HTMLHeadingElement>(null);
+  const sourceSurface = useRef<HTMLElement>(null);
+  const sourceColumn = useRef<HTMLDivElement>(null);
   const sourceToggle = useRef<HTMLButtonElement>(null);
   const sourceOrigin = useRef<HTMLButtonElement | null>(null);
   const followHistory = useRef(true);
@@ -31,6 +33,22 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const [listening, setListening] = useState(false);
   const controller = useMemo(() => createReviewController({ api, reviewId, speaker, unsent }), [api, reviewId, speaker, unsent]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
+  const loaded = state.view !== null;
+  useEffect(() => {
+    const surface = sourceSurface.current;
+    const column = sourceColumn.current;
+    if (!loaded || appearance.scene !== "study-bench" || !surface || !column) return;
+    let frame: number | null = null;
+    const paint = () => {
+      column.style.setProperty("--paper-feed", `${surface.scrollTop}px`);
+      column.style.setProperty("--roller-turn", `${surface.scrollTop / 24}rad`);
+      frame = null;
+    };
+    const scroll = () => { if (frame === null) frame = requestAnimationFrame(paint); };
+    paint();
+    surface.addEventListener("scroll", scroll, { passive: true });
+    return () => { surface.removeEventListener("scroll", scroll); if (frame !== null) cancelAnimationFrame(frame); };
+  }, [loaded, appearance.scene, sourceOpen]);
   useEffect(() => {
     void controller.load();
   }, [controller]);
@@ -168,13 +186,13 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             </details>
           )}
         </section>
-        <div className="review-source-column" data-source-open={sourceOpen}>
+        <div ref={sourceColumn} className="review-source-column" data-source-open={sourceOpen}>
         <RoomTools scene={appearance.scene} sourceOpen={sourceOpen} listening={listening} speechAvailable={speech.supported && actions.includes("answer")} onSpeak={() => speechToggle.current?.()} onSource={(origin) => {
           sourceOrigin.current = origin ?? sourceToggle.current;
           if (sourceOpen) closeSource();
           else setSourceOpen(true);
         }} />
-        <aside id="review-source" className="source-stand" aria-labelledby="source-heading" hidden={!sourceOpen}>
+        <aside ref={sourceSurface} id="review-source" className="source-stand" aria-labelledby="source-heading" hidden={!sourceOpen}>
           <div className="source-heading">
             <p className="eyebrow">From the lecture</p>
             <h2 ref={sourceHeading} tabIndex={-1} id="source-heading">Lecture evidence</h2>

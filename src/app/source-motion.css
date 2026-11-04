@@ -8,25 +8,6 @@
 @starting-style {
   .review .source-stand:not([hidden]) { opacity: 0; transform: translateY(22px) scaleY(.97); }
 }
-.source-drawer-art { display: none; pointer-events: none; }
-.room-tools[data-tool-scene="study-bench"] .source-drawer-art {
-  display: block; position: absolute; inset: 0;
-  background: url('./assets/scenes-v2/study-bench-stage.png') center / 100% 100% no-repeat;
-  clip-path: inset(74.3% 10.5% 18.1% 19.3% round 4px);
-  transform-origin: 50% 81%;
-  transition: transform 420ms cubic-bezier(.2,.8,.2,1), filter 420ms ease;
-}
-.room-tools[data-tool-scene="study-bench"][data-source-open="true"] .source-drawer-art {
-  transform: translateY(14px) scale(1.015,1.08);
-  filter: drop-shadow(0 4px 2px #30271f60);
-}
-.scene-shell[data-scene="study-bench"] .review .source-handle {
-  top: 74.3%; right: 11%; width: 69%; min-height: 28px; height: 4.5%;
-  font-size: .8rem; z-index: 1; text-shadow: none;
-  transition: transform 420ms cubic-bezier(.2,.8,.2,1), color 120ms ease;
-}
-.room-tools[data-tool-scene="study-bench"][data-source-open="true"] .source-handle { transform: translateY(14px); }
-@media (max-width: 800px) { .review .recorder-tool { min-height: 95px; } }
 .review .source-handle:focus-visible { outline: 3px solid #284f9b; outline-offset: 3px; }
 .scene-foreground .study-companion > div { text-shadow: none; }
 .scene-foreground .companion-status:not(:empty), .scene-foreground .quiet-status { background: #f7eedb; color: #493b2a; border-radius: 4px; padding: 2px 6px; }
@@ -37,8 +18,8 @@
 .journal-tool > a { perspective: 600px; }
 .scene-shell[data-motion="system"] .record-page { animation: notebook-pages-open 480ms cubic-bezier(.2,.75,.2,1) both; transform-origin: 0 25%; }
 @keyframes notebook-pages-open { from { opacity: .2; transform: perspective(1800px) rotateY(12deg) translateX(12px); } to { opacity: 1; transform: perspective(1800px) rotateY(0) translateX(0); } }
-.scene-shell[data-motion="reduced"] :is(.source-stand,.source-drawer-art,.source-handle) { transition: none; }
+.scene-shell[data-motion="reduced"] :is(.source-stand,.source-handle) { transition: none; }
 @media (prefers-reduced-motion: reduce) {
-  .scene-shell :is(.source-stand,.source-drawer-art,.source-handle) { transition: none; }
+  .scene-shell :is(.source-stand,.source-handle) { transition: none; }
   .scene-shell .record-page { animation: none; }
 }

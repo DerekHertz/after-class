@@ -19,12 +19,11 @@
 .journal-art { display: block; height: 100px; background: url('./assets/scenes-v2/journal.png') center bottom / contain no-repeat; }
 .scene-foreground .quiet-status { position: absolute; bottom: -18px; left: 0; color: #392d23; background: #f8ebd3; padding: 2px 5px; font-size: .75rem; }
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-  .recorder-tool, .journal-tool > a, .source-handle { transition: transform 150ms ease, filter 150ms ease; }
-  .recorder-tool:hover, .journal-tool > a:hover { transform: translate3d(-2px, -4px, 12px) rotateX(3deg) rotateY(-3deg); filter: drop-shadow(2px 5px 3px #30271f35); }
+  .journal-tool > a, .source-handle { transition: transform 150ms ease, filter 150ms ease; }
+  .journal-tool > a:hover { transform: translate3d(-2px, -4px, 12px) rotateX(3deg) rotateY(-3deg); filter: drop-shadow(2px 5px 3px #30271f35); }
   .source-handle:hover { transform: translateY(-2px); }
-  .recorder-tool:active, .journal-tool > a:active, .source-handle:active { transform: translateY(1px); }
+  .journal-tool > a:active, .source-handle:active { transform: translateY(1px); }
 }
-.recorder-tool[aria-pressed="true"] .recorder-art { transform: translateY(2px); }
 .scene-shell[data-motion="reduced"] :is(.recorder-tool,.journal-tool > a,.source-handle,.recorder-art) { transition: none; transform: none; }
 @media (prefers-reduced-motion: reduce) { .scene-shell :is(.recorder-tool,.journal-tool > a,.source-handle,.recorder-art) { transition: none; transform: none; } }
 @media (max-width: 800px) {
