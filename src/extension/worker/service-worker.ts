@@ -358,7 +358,8 @@ async function handleOptions(_req: OptionsRequest): Promise<{ readonly ok: boole
 }
 
 chrome.runtime.onMessage.addListener((msg: PopupRequest | OptionsRequest, sender, sendResponse) => {
-  if (sender.id !== chrome.runtime.id || sender.tab !== undefined) return false;
+  // Content scripts also carry sender.tab; the options page opens in a tab too, so tell them apart by URL.
+  if (sender.id !== chrome.runtime.id || (sender.tab !== undefined && sender.url?.startsWith(chrome.runtime.getURL("")) !== true)) return false;
   const work = msg.type === "test_backend" ? handleOptions(msg) : handlePopup(msg).catch((e: unknown): WorkerResponse => ({ state: null, error: e instanceof Error ? e.message : String(e) }));
   void work.then(sendResponse);
   return true;
