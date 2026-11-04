@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import type { EvidenceId } from "../shared/ids";
+import type { TranscriptOrigin } from "../shared/domain";
 import type { AppApi } from "./api";
-import { formatClock, formatInterval, routePath } from "./core";
-import type { BundleReport, Route, SourceTitles } from "./core";
+import { formatClock, formatInterval, routePath, watchUrl } from "./core";
+import type { BundleReport, Route, SourceTitles, SourceVideos } from "./core";
 
 // ───────────────────────────── Navigation ───────────────────────────────────
 
@@ -79,30 +80,42 @@ export function ErrorNote({ error, retry }: { readonly error: string | null; rea
 // ───────────────────────────── Evidence ─────────────────────────────────────
 
 export function FrameImage({ api, id }: { readonly api: AppApi; readonly id: EvidenceId }) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [image, setImage] = useState<{ id: EvidenceId; src: string | null; failed: boolean }>({ id, src: null, failed: false });
   useEffect(() => {
     let url: string | null = null;
     let live = true;
+    setImage({ id, src: null, failed: false });
     api.frameImage(id).then(
       (blob) => {
         if (!live) return;
         url = URL.createObjectURL(blob);
-        setSrc(url);
+        setImage({ id, src: url, failed: false });
       },
-      () => live && setFailed(true),
+      () => live && setImage({ id, src: null, failed: true }),
     );
     return () => {
       live = false;
       if (url !== null) URL.revokeObjectURL(url);
     };
   }, [api, id]);
-  if (failed) return <p className="muted">Frame not available.</p>;
-  return src === null ? <p className="muted">Loading frame...</p> : <img className="frame" src={src} alt="Lecture frame" />;
+  if (image.id === id && image.failed) return <p className="muted">Frame not available.</p>;
+  return image.id !== id || image.src === null ? <p className="muted">Loading frame...</p> : <img className="frame" src={image.src} alt="Lecture frame" />;
 }
 
 /** The source evidence for a set of ids: transcript passages and frames. An id the backend does not return is shown as unavailable. */
-export function EvidencePane({ api, ids, titles }: { readonly api: AppApi; readonly ids: readonly EvidenceId[]; readonly titles: SourceTitles }) {
+const TRANSCRIPT_ORIGIN: Readonly<Record<TranscriptOrigin, string>> = {
+  panel: "YouTube transcript panel",
+  caption_intercept: "YouTube player captions",
+  asr: "Opt-in transcription",
+};
+
+type EvidenceProps = { readonly api: AppApi; readonly ids: readonly EvidenceId[]; readonly titles: SourceTitles; readonly videos?: SourceVideos };
+
+export function EvidencePane(props: EvidenceProps) {
+  return <EvidenceContents key={props.ids.join(",")} {...props} />;
+}
+
+function EvidenceContents({ api, ids, titles, videos }: EvidenceProps) {
   const key = ids.join(",");
   const bundle = useAsync(() => (ids.length === 0 ? Promise.resolve(null) : api.evidence({ ids })), [api, key]);
   if (ids.length === 0) return <p className="muted">Source evidence appears here when the tutor explains or checks something.</p>;
@@ -116,13 +129,17 @@ export function EvidencePane({ api, ids, titles }: { readonly api: AppApi; reado
       {frames.map((f) => (
         <figure key={f.id}>
           <FrameImage api={api} id={f.id} />
-          <figcaption className="muted">{titles.get(f.sourceId) ?? "Lecture"} at {formatClock(f.mediaS)}</figcaption>
+          <figcaption className="muted">Captured frame · {titles.get(f.sourceId) ?? "Lecture"} at {formatClock(f.mediaS)}
+            {videos?.has(f.sourceId) && <> · <a href={watchUrl(videos.get(f.sourceId)!, f.mediaS)} target="_blank" rel="noreferrer">Open in YouTube ↗</a></>}
+          </figcaption>
         </figure>
       ))}
       {passages.map((p) => (
         <blockquote key={p.id}>
           <p>{p.text}</p>
-          <footer className="muted">{titles.get(p.sourceId) ?? "Lecture"}, {formatInterval(p.interval)}</footer>
+          <footer className="muted">{TRANSCRIPT_ORIGIN[p.origin]} · {titles.get(p.sourceId) ?? "Lecture"}, {formatInterval(p.interval)}
+            {videos?.has(p.sourceId) && <> · <a href={watchUrl(videos.get(p.sourceId)!, p.interval.start)} target="_blank" rel="noreferrer">Open in YouTube ↗</a></>}
+          </footer>
         </blockquote>
       ))}
       {missing.length > 0 && <p className="muted">{missing.length} evidence item{missing.length === 1 ? " is" : "s are"} no longer available.</p>}
