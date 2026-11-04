@@ -9,10 +9,38 @@ import type { BundleReport, Route, SourceTitles, SourceVideos } from "./core";
 // ───────────────────────────── Navigation ───────────────────────────────────
 
 const NAV_EVENT = "afterclass:navigate";
+let openingNotebook: Animation | null = null;
 
 export function navigate(route: Route): void {
-  history.pushState(null, "", routePath(route));
-  window.dispatchEvent(new Event(NAV_EVENT));
+  openingNotebook?.cancel();
+  openingNotebook = null;
+  const commit = () => {
+    history.pushState(null, "", routePath(route));
+    window.dispatchEvent(new Event(NAV_EVENT));
+    if (route.page === "record") requestAnimationFrame(() => document.querySelector<HTMLElement>(".record-page h1")?.focus({ preventScroll: true }));
+  };
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    || document.querySelector('.scene-shell[data-motion="reduced"]') !== null;
+  const cover = document.querySelector<HTMLElement>(".journal-art");
+  if (route.page !== "record" || location.pathname === routePath(route) || reduced || !cover?.animate) {
+    commit();
+    return;
+  }
+  const animation = cover.animate([
+    { transform: "perspective(600px) rotateY(0deg)", opacity: 1 },
+    { transform: "perspective(600px) rotateY(-110deg)", opacity: 0 },
+  ], { duration: 380, easing: "cubic-bezier(.2,.75,.2,1)", fill: "forwards" });
+  openingNotebook = animation;
+  const cancel = () => {
+    if (openingNotebook === animation) openingNotebook = null;
+    animation.cancel();
+  };
+  window.addEventListener("popstate", cancel, { once: true });
+  void animation.finished.then(() => {
+    if (openingNotebook !== animation) return;
+    openingNotebook = null;
+    commit();
+  }, () => undefined).finally(() => window.removeEventListener("popstate", cancel));
 }
 
 export function usePathname(): string {

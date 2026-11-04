@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { SceneId } from "./appearance";
 import { useAppearance } from "./appearance";
 import { Companion } from "./companion";
@@ -18,16 +19,26 @@ export function RoomTools({ scene, onSource, sourceOpen, onSpeak, speechAvailabl
   readonly listening?: boolean;
 }) {
   const { appearance, activity } = useAppearance();
+  const [held, setHeld] = useState(false);
+  useEffect(() => { if (!speechAvailable) setHeld(false); }, [speechAvailable]);
   const tool = TOOLS[scene];
   return <div className="room-tools" data-tool-scene={scene} data-source-open={sourceOpen}>
     <div className="source-stage-art" aria-hidden="true" />
+    <div className="source-drawer-art" aria-hidden="true" />
     <button className="source-handle" type="button" aria-expanded={sourceOpen} aria-controls="review-source" onClick={event => onSource(event.currentTarget)}>
       <span className="room-tool-name">{tool.name}</span>
       <span>{sourceOpen ? "Close lecture source" : tool.action}</span>
     </button>
     <div className="scene-foreground">
       {appearance.visible && <Companion id={appearance.companion} activity={activity} />}
-      <button type="button" className="recorder-tool" aria-label={listening ? "Stop listening with recorder" : "Speak with recorder"} disabled={!speechAvailable} aria-pressed={listening} onClick={onSpeak}>
+      <button type="button" className="recorder-tool" aria-label={listening ? "Stop listening with recorder" : "Speak with recorder"} disabled={!speechAvailable} aria-pressed={listening} data-depressed={speechAvailable && (held || listening)}
+        onPointerDown={event => { if (speechAvailable && event.button === 0) setHeld(true); }}
+        onPointerUp={() => setHeld(false)} onPointerCancel={() => setHeld(false)} onPointerLeave={() => setHeld(false)}
+        onKeyDown={event => {
+          if (event.repeat) { event.preventDefault(); return; }
+          if (speechAvailable && (event.key === " " || event.key === "Enter")) setHeld(true);
+        }}
+        onKeyUp={() => setHeld(false)} onBlur={() => setHeld(false)} onClick={onSpeak}>
         <span className="recorder-art" aria-hidden="true" />
         <span className="physical-tool-label">{listening ? "Stop" : "Speak"}</span>
       </button>
