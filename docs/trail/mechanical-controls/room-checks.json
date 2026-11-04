@@ -1,0 +1,23 @@
+[
+  {
+    "body": "none",
+    "key": "0px 7px",
+    "parent": "none",
+    "pressed": "true",
+    "room": "last-desk"
+  },
+  {
+    "body": "none",
+    "key": "none",
+    "parent": "none",
+    "pressed": "true",
+    "room": "projection-booth"
+  },
+  {
+    "body": "none",
+    "key": "0px 7px",
+    "parent": "none",
+    "pressed": "true",
+    "room": "study-bench"
+  }
+]

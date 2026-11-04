@@ -1,5 +1,7 @@
 # Tactile interaction review
 
+The whole-device press and drawer treatment below were superseded after user annotations: see [mechanical-control correction](../mechanical-controls/README.md).
+
 Preview branch: `codex/tactile-motion`, stacked above the reference-fidelity correction. Final visual acceptance remains on base PR #44. No merge or deployment.
 
 Run `bun scripts/preview-ui.ts` and open http://127.0.0.1:8770/?scenario=review&clean=1. Use Room & companion to choose a room. Motion follows the system preference; Reduce motion is an explicit override. Omit `clean=1` for deterministic scenario controls, fake speech and the request ledger. This preview makes no live microphone/provider calls.
