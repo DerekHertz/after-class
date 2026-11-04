@@ -118,6 +118,19 @@ function scratchCopy(dataDir: string): { readonly dir: string; readonly path: st
   return { dir, path: join(dir, SQLITE) };
 }
 
+const hasEvidence = (b: EvidenceBundleJson): boolean => b.watched.length > 0 || b.passages.length > 0 || b.frames.length > 0;
+
+/**
+ * Default capture when --capture is not given: the one with the most watched time among those with evidence.
+ * Starting capture again after a stop makes a new, usually tiny, capture; "newest" would export that one and
+ * leave the real run unseen. `candidates` come newest first, so a tie goes to the newest.
+ */
+export function pickCapture(candidates: readonly { readonly captureId: string; readonly watchedSeconds: number; readonly hasEvidence: boolean }[]): string | undefined {
+  let best: (typeof candidates)[number] | undefined;
+  for (const c of candidates) if (c.hasEvidence && (best === undefined || c.watchedSeconds > best.watchedSeconds)) best = c;
+  return best?.captureId;
+}
+
 export function exportCapture(opts: { readonly dataDir: string; readonly outDir: string; readonly captureId?: string | undefined }): Sampling & { readonly captureId: string } {
   const scratch = scratchCopy(opts.dataDir);
   const db = openDb(scratch.path);
@@ -130,16 +143,25 @@ export function exportCapture(opts: { readonly dataDir: string; readonly outDir:
       onChange: () => {},
     });
 
-    const captureId = opts.captureId ?? db.sql.query<{ capture_id: string }, []>("SELECT capture_id FROM capture_facts GROUP BY capture_id ORDER BY MAX(seq) DESC LIMIT 1").get()?.capture_id;
-    if (!captureId) throw new Error(`${join(opts.dataDir, SQLITE)} holds no capture`);
+    const all = db.sql.query<{ capture_id: string }, []>("SELECT capture_id FROM capture_facts GROUP BY capture_id ORDER BY MAX(seq) DESC").all().map((r) => r.capture_id);
+    const candidates = all.map((id) => {
+      const b = evidence.captureBundle(id as CaptureId);
+      return { captureId: id, watchedSeconds: b.watchedSeconds, hasEvidence: hasEvidence(b) };
+    });
+    const captureId = opts.captureId ?? pickCapture(candidates);
+    if (!captureId) throw new Error(candidates.length === 0 ? `${join(opts.dataDir, SQLITE)} holds no capture` : `none of the ${candidates.length} capture(s) in ${join(opts.dataDir, SQLITE)} has evidence`);
     const bundle = evidence.captureBundle(captureId as CaptureId);
-    if (bundle.watched.length === 0 && bundle.passages.length === 0 && bundle.frames.length === 0) throw new Error(`capture ${captureId} has no evidence; is the id right?`);
+    if (!hasEvidence(bundle)) throw new Error(`capture ${captureId} has no evidence; is the id right?`);
+    const skipped = opts.captureId === undefined ? candidates.filter((c) => c.captureId !== captureId) : [];
 
     const videoIds = new Map(evidence.captureView(captureId as CaptureId).sources.map((s) => [s.id as string, s.videoId] as const));
     const sampling = sampleExport(bundle, (sourceId) => videoIds.get(sourceId) ?? null);
 
     mkdirSync(join(opts.outDir, "frames"), { recursive: true });
     const notes = [...sampling.notes];
+    if (skipped.length > 0) {
+      notes.push(`exported ${captureId} (${bundle.watchedSeconds.toFixed(0)}s watched), the capture with the most watched time; not exported: ${skipped.map((c) => `${c.captureId} (${c.watchedSeconds.toFixed(0)}s watched${c.hasEvidence ? "" : ", no evidence"})`).join(", ")}. Pass --capture <id> to choose another.`);
+    }
     const copy = (f: FrameSample, name: string) => {
       const bytes = evidence.frameBytes(f.evidenceId as EvidenceId);
       if (bytes === null) notes.push(`frame ${f.evidenceId} has no bytes on disk, so ${name} was not written`);
