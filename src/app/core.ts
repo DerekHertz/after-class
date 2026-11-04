@@ -162,6 +162,7 @@ export type Line = {
   readonly speaker: "tutor" | "you" | "system";
   readonly label: string;
   readonly text: string;
+  readonly evidenceIds: readonly EvidenceId[];
 };
 
 export function learnerActText(act: LearnerAct): string {
@@ -212,13 +213,13 @@ export function conversationLines(turns: readonly Turn[]): Line[] {
   for (const t of turns) {
     switch (t.actor) {
       case "learner":
-        lines.push({ key: t.id, speaker: "you", label: "You", text: learnerActText(t.act) });
+        lines.push({ key: t.id, speaker: "you", label: "You", text: learnerActText(t.act), evidenceIds: [] });
         break;
       case "tutor":
-        if (t.say.trim() !== "") lines.push({ key: t.id, speaker: "tutor", label: MOVE_LABEL[t.move.kind], text: t.say });
+        if (t.say.trim() !== "") lines.push({ key: t.id, speaker: "tutor", label: MOVE_LABEL[t.move.kind], text: t.say, evidenceIds: moveEvidence(t.move) });
         break;
       case "code":
-        lines.push({ key: t.id, speaker: "system", label: "Note", text: noticeText(t) });
+        lines.push({ key: t.id, speaker: "system", label: "Note", text: noticeText(t), evidenceIds: [] });
         break;
     }
   }
@@ -359,6 +360,7 @@ export function moveEvidence(move: TutorMove | null): readonly EvidenceId[] {
 
 /** Evidence for the pane beside the conversation: the live move if one is streaming, else the latest tutor turn that cites some. */
 export function currentEvidenceIds(turns: readonly Turn[], live: Live | null): readonly EvidenceId[] {
+  if (live?.move?.kind === "ask_main") return [];
   const fromLive = live === null ? [] : moveEvidence(live.move);
   if (fromLive.length > 0) return fromLive;
   for (let i = turns.length - 1; i >= 0; i--) {
@@ -517,3 +519,18 @@ export const routePath = (r: Route): string => {
     case "usage": return "/app/usage";
   }
 };
+
+export type SourceSelection =
+  | { readonly kind: "automatic" }
+  | { readonly kind: "pinned"; readonly ids: readonly EvidenceId[]; readonly label: string };
+
+export function selectedEvidenceIds(selection: SourceSelection, automatic: readonly EvidenceId[]): readonly EvidenceId[] {
+  return selection.kind === "pinned" ? selection.ids : automatic;
+}
+
+export function shouldSubmitAnswer(
+  key: { readonly key: string; readonly ctrlKey: boolean; readonly metaKey: boolean; readonly isComposing: boolean; readonly repeat: boolean },
+  hasAnswer: boolean, disabled: boolean, draft: string,
+): boolean {
+  return key.key === "Enter" && (key.ctrlKey || key.metaKey) && !key.isComposing && !key.repeat && hasAnswer && !disabled && draft.trim() !== "";
+}

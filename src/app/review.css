@@ -1,0 +1,11 @@
+.review .source-stand[hidden] { display: none; }
+.review-workspace.source-closed { grid-template-columns: minmax(0, 1fr); max-width: 60rem; margin-inline: auto; }
+.source-closed .conversation-notebook { grid-column: 1; }
+.source-selection-label, .composer-shortcut { font-size: .85rem; color: var(--muted); }
+.review .citation { color: var(--accent); background: transparent; border: 0; text-decoration: underline; padding-inline: 0; text-align: left; }
+.scope-source-list { display: flex; flex-direction: column; gap: 8px; margin-block: 16px; }
+.scope-source-list button { text-align: left; }
+.review .review-help { border-top: 1px solid var(--border); margin-top: 12px; }
+.review .review-help summary { font-style: italic; }
+.source-heading button { margin: 4px 8px 4px 0; }
+.review .notebook-heading button { font-size: .85rem; }
