@@ -1,6 +1,6 @@
 # After Class MVP completion plan
 
-This plan finishes the After Class MVP for Derek. Every module is built or in a fix round. What remains is composition (server, scheduler, wiring), a project verification skill, and the five approved experiments with their reports. The program enforces one rule. Nothing merges without an independent `VERDICT: PASS` at the exact head SHA. PRs are small and stacked where one builds on another, and land bottom-up. Order: M0, M1 and M2 first, then M3 to M8, then M10 (M9 was dropped), then M11 to M15.
+This plan finishes the After Class MVP for Derek. Every module is built or in a fix round. What remains is composition (server, scheduler, wiring) and the five approved experiments with their reports. The program enforces one rule. Nothing merges without an independent `VERDICT: PASS` at the exact head SHA. PRs are small and stacked where one builds on another, and land bottom-up. Order: M0, M1 and M2 first, then M3 to M8, then M10 (M9 was dropped), then M11 to M15.
 
 ## How to read this
 
@@ -735,7 +735,7 @@ No prototype ran for this plan. The open empirical questions (caption access, ca
 
 ## Appendix B. Alternatives rejected
 
-- Ten live lanes on every PR. Rejected as the default because most PRs are small backend units with no UI. Kept for M7 and M9.
+- Ten live lanes on every PR. Rejected as the default because most PRs are small backend units with no UI. Kept for M7 (M9 was dropped).
 - One large composition PR. Rejected because it can't be reviewed in one sitting.
 
 ## Appendix C. Risks
