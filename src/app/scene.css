@@ -34,6 +34,7 @@
 .appearance-preferences input { accent-color: #31558e; width: 18px; height: 18px; }
 .appearance-footnote,.appearance-storage-note { font-size: .8rem; line-height: 1.5; color: #625b50; margin-bottom: 0; }
 .scene-shell :is(a,button,summary,input,textarea,select):focus-visible { outline: 3px solid #cc8c2e; outline-offset: 4px; }
+.scene-shell :is(button, input, textarea, select) { color: #302c25; }
 .room-atmosphere { max-width: 94rem; height: 0; margin: auto; position: relative; z-index: -1; }
 .room-atmosphere > .room-drawing { position: absolute; width: 260px; right: 2%; top: 10px; opacity: .1; }
 .scene-content { position: relative; z-index: 1; }
