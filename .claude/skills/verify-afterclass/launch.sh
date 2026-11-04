@@ -7,15 +7,18 @@ work="${1:-$(mktemp -d "${TMPDIR:-/tmp}/afterclass-verify-XXXXXX")}"
 mkdir -p "$work/home/.config/afterclass" "$work/data"
 # no keys.env in the scratch HOME, so the backend picks replay mode and refuses every live call
 cd "$repo"
-HOME="$work/home" AFTERCLASS_DATA="$work/data" AFTERCLASS_MODE=replay AFTERCLASS_PORT=0 \
+env -u TYPESAFE_API_KEY HOME="$work/home" AFTERCLASS_DATA="$work/data" AFTERCLASS_MODE=replay AFTERCLASS_PORT=0 \
   AFTERCLASS_EXTENSION_ID=abcdefghijklmnopabcdefghijklmnop \
   setsid bun run src/backend/main.ts >"$work/backend.log" 2>&1 &
 echo $! >"$work/pid"
+ok=0
+trap '[ "$ok" = 1 ] || kill "$(cat "$work/pid")" 2>/dev/null || true' EXIT
 for _ in $(seq 1 120); do
   if grep -q '^pairing token: ' "$work/backend.log" 2>/dev/null; then
     port="$(sed -n 's/^.*listening on 127\.0\.0\.1:\([0-9]*\).*$/\1/p' "$work/backend.log" | head -1)"
     token="$(sed -n 's/^pairing token: //p' "$work/backend.log" | head -1)"
     printf 'PORT=%s\nTOKEN=%s\nPID=%s\n' "$port" "$token" "$(cat "$work/pid")" >"$work/env"
+    ok=1
     echo "$work"
     exit 0
   fi

@@ -22,4 +22,4 @@ Derek starts capture on a YouTube watch page; the extension sends facts as he wa
 ## Gotchas
 
 - The capture id must be a `cap_` id; a made-up string is 400.
-- Replay mode starts no preparation here, so `invite` stays `none`.
+- Replay mode runs no preparation here (the log shows a caught `ReplayMiss`), so `invite` stays `none`.

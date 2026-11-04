@@ -38,7 +38,7 @@ Checks: the pid is alive, the log says replay mode, the port is owned by that pi
 .claude/skills/verify-afterclass/call.sh "$WORK" GET /captures/cap_ezfc5wzmacr3v72qohuhllql4k "" app
 ```
 
-Capture ids come from `stableId("cap", name)` in `src/shared/ids.ts`. Replay mode has no recorded or fake tasks, so preparation, claims and reviews do not run from this skill. To prove those, run `bun test test/e2e-replay.test.ts` (it injects scripted tasks) and say which half of the proof each one is.
+Capture ids come from `stableId("cap", name)` in `src/shared/ids.ts`. Replay mode has no recorded or fake tasks, so preparation, claims and reviews do not run from this skill (the log shows a caught `ReplayMiss` after an ingest; that is expected). To prove those, run `bun test test/e2e-replay.test.ts` (it injects scripted tasks) and say which half of the proof each one is.
 
 ## Drive: review app in Chrome
 
