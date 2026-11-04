@@ -1,0 +1,34 @@
+import { useSyncExternalStore } from "react";
+import { createRoot } from "react-dom/client";
+import { AppearanceProvider } from "../../src/app/appearance";
+import { SceneShell } from "../../src/app/scene";
+import { ReviewScreen } from "../../src/app/review";
+import { CaptureScreen } from "../../src/app/capture";
+import { RecordScreen, UsageScreen } from "../../src/app/record";
+import { Link, usePathname } from "../../src/app/ui";
+import { createMemoryUnsent } from "../../src/app/unsent";
+import { api, speech, ids, scenario, scenarios, continueFixture, dictateFixture, requestLedger } from "./fixtures";
+
+const unsent = createMemoryUnsent();
+const speaker = { beginTurn() {}, speak() {}, stop() {} };
+function Preview() {
+  const path = usePathname();
+  const calls = useSyncExternalStore(requestLedger.subscribe, requestLedger.snapshot);
+  const page = path.includes("/record") || scenario.startsWith("record") ? "record" : path.includes("/capture") || scenario.startsWith("capture") ? "capture" : path.includes("/usage") || scenario === "usage" ? "usage" : "review";
+  return <>
+    <aside className="fixture-toolbar" aria-label="Preview fixtures">
+      <strong>Deterministic UI fixture</strong><span>No live lecture or model calls.</span>
+      <label>Scenario <select value={scenario} onChange={event => { location.href = `/?scenario=${event.target.value}`; }}>{scenarios.map(value => <option key={value}>{value}</option>)}</select></label>
+      <button type="button" onClick={continueFixture}>Finish pending fixture operation</button>
+      <button type="button" onClick={dictateFixture}>Simulate speech transcript</button>
+      <Link to={{ page: "review", id: ids.review }}>Review</Link>
+      <Link to={{ page: "capture", id: ids.capture }}>Capture</Link>
+      <Link to={{ page: "record", reviewId: null }}>Notebook</Link>
+      <details><summary>Request ledger</summary><pre>{calls || "No requests"}</pre></details>
+    </aside>
+    <AppearanceProvider><SceneShell>
+      {page === "capture" ? <CaptureScreen api={api} captureId={ids.capture} /> : page === "record" ? <RecordScreen api={api} reviewId={null} /> : page === "usage" ? <UsageScreen api={api} /> : <ReviewScreen api={api} reviewId={ids.review} speaker={speaker} speech={speech} unsent={unsent} />}
+    </SceneShell></AppearanceProvider>
+  </>;
+}
+createRoot(document.getElementById("root")!).render(<Preview />);

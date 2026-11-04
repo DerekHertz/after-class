@@ -1,0 +1,9 @@
+ts	phase	decision	why	evidence	result
+2026-11-04T06:07:38Z	frame	Build the approved frontend as an unmerged PR stack	Derek requested stacked PRs and reserves final visual approval	https://github.com/DerekHertz/after-class/pull/44	open
+2026-11-04T06:13:36Z	architecture	Keep appearance outside the existing review state owners	Room switches must not reset drafts, speech, streams or retry identities	src/app/main.tsx;src/app/appearance.tsx	implemented
+2026-11-04T06:13:36Z	verification	Fix dark-room controls in the appearance layer and restack review	Independent verifier found cream foreground on cream controls	7edbc22;2283821	fixed
+2026-11-04T06:24:12Z	verification	Load CSS from HTML and keep paper-local dark text tokens	CI found unsupported CSS imports and swarm found low-contrast dark-room paper	e909dbf;d741bc5;a08a6cc	CI success on PR44-47
+2026-11-04T06:24:12Z	browser	Exercise all room and companion choices while keeping the same draft	Appearance must not remount ongoing work or issue tutor requests	docs/trail/frontend/appearance-combinations.json	18 combinations passed
+2026-11-04T06:24:12Z	browser	Check speech, stream, retry, save failure and notebook edits through real screens	Pure tests cannot establish mounted state and focus behavior	docs/trail/frontend/README.md	fake-provider browser interactions passed
+2026-11-04T06:26:24Z	verification	Pass complete local checks with no new dependencies or provider calls	The finished interface needs the full existing gates in addition to focused tests	/private/tmp/afterclass-final-stack-tests.log;src/app/index.html	941 pass;4 todo;0 fail;typecheck and both builds pass
+2026-11-04T06:26:25Z	artwork	Use original scalable vector companion and room prop drawings	Approved boards have baked text and cannot serve as production assets	src/app/companion.tsx;src/app/room-tools.tsx	implemented;Derek visual review pending

@@ -1,0 +1,209 @@
+[
+  {
+    "alerts": [],
+    "headings": [
+      "Review",
+      "Conversation",
+      "Lecture evidence"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "review",
+    "viewport": 390
+  },
+  {
+    "alerts": [],
+    "headings": [
+      "Review",
+      "Conversation",
+      "Lecture evidence"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "long-history",
+    "viewport": 390
+  },
+  {
+    "alerts": [],
+    "headings": [
+      "Review",
+      "Conversation",
+      "Lecture evidence"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "unfinished-reply",
+    "viewport": 390
+  },
+  {
+    "alerts": [],
+    "headings": [
+      "Review",
+      "Conversation",
+      "Lecture evidence"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "paused",
+    "viewport": 390
+  },
+  {
+    "alerts": [],
+    "headings": [
+      "Review",
+      "Conversation",
+      "Lecture evidence"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "detour",
+    "viewport": 390
+  },
+  {
+    "alerts": [],
+    "headings": [
+      "Review",
+      "Conversation",
+      "Lecture evidence"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "resource-wait",
+    "viewport": 390
+  },
+  {
+    "alerts": [],
+    "headings": [
+      "Review",
+      "Conversation",
+      "Lecture evidence"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "correction",
+    "viewport": 390
+  },
+  {
+    "alerts": [],
+    "headings": [
+      "Review",
+      "Conversation",
+      "Lecture evidence"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "soft-target",
+    "viewport": 390
+  },
+  {
+    "alerts": [],
+    "headings": [
+      "Review",
+      "Conversation",
+      "Lecture evidence"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "missing-evidence",
+    "viewport": 390
+  },
+  {
+    "alerts": [
+      "Fixture evidence request failed. Retry is available. Retry"
+    ],
+    "headings": [
+      "Review",
+      "Conversation",
+      "Lecture evidence"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "evidence-error",
+    "viewport": 390
+  },
+  {
+    "alerts": [],
+    "headings": [
+      "Your lecture",
+      "Ready to review",
+      "Capture evidence"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "capture-ready",
+    "viewport": 390
+  },
+  {
+    "alerts": [],
+    "headings": [
+      "Your lecture",
+      "Processing",
+      "Capture evidence"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "capture-processing",
+    "viewport": 390
+  },
+  {
+    "alerts": [],
+    "headings": [
+      "Your lecture",
+      "Nothing to review yet",
+      "Capture evidence"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "capture-empty",
+    "viewport": 390
+  },
+  {
+    "alerts": [],
+    "headings": [
+      "My notebook",
+      "Your notes",
+      "What the tutor observed",
+      "Suggested links between concepts"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "record",
+    "viewport": 390
+  },
+  {
+    "alerts": [],
+    "headings": [
+      "My notebook",
+      "Your notes",
+      "What the tutor observed",
+      "Suggested links between concepts"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "record-empty",
+    "viewport": 390
+  },
+  {
+    "alerts": [
+      "Fixture notebook could not load. Retry is available. Retry"
+    ],
+    "headings": [
+      "My notebook"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "record-error",
+    "viewport": 390
+  },
+  {
+    "alerts": [],
+    "headings": [
+      "Usage",
+      "By purpose"
+    ],
+    "main": true,
+    "page": 390,
+    "scenario": "usage",
+    "viewport": 390
+  }
+]
