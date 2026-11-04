@@ -135,6 +135,19 @@ rescore      --results <file> --labels <file> ... [--expect <report.txt>]
 
 Each run writes `<lab>/<origin>/runs/<phase>-<round>.jsonl` (a header, the lecture and window records, one line per judgment, an end record) and `.report.txt`. A file with no end record is not a result and is refused. A judgment line holds the input hash (`key`), purpose, model, question version, raw `p` per question, any error, and per request the start time, duration and token counts. `judgments.jsonl` in the same dir is the append-only store the next run reuses from.
 
+### The labeling sheet
+
+Derek labels from a sheet, not from the videos. `scripts/jev-lab-sheet.ts` writes one static HTML page per lecture from the draft label files, and an `index.html` that lists them. It makes no Jev or Claude call, reads no key, and needs no network or server.
+
+```
+bun run scripts/jev-lab-sheet.ts --data <dir> --labels <draft file> [--labels <draft file> ...] --out <dir>
+```
+
+- It reads the capture through a scratch copy of the database, as `probe-export` does, and refuses an `--out` inside the data dir. Each page holds the transcript with timestamps and the captured frames in time order, a timeline of the watched time, the split midpoint and the draft candidates, with a YouTube "watch at this time" link on every passage and frame. Frames are embedded as they were captured, so a page is as large as its frames (a few MB to about 15 MB). Open the page in Chrome straight from the folder; everything works offline.
+- On a page: "Boundary here" on a passage and "Visual step" on a frame add a mark at that media second. Each draft candidate shows its cue and a Confirm and a Reject toggle (a rejected one is left out of the export). Select two or more frames and "Make group" for a duplicate group. Every mark takes a note. Work is kept in the browser's local storage (the page still works if it is blocked) and "Reset to the draft" discards it.
+- The Export panel shows the label JSON, with Copy and Download. The file is a draft (nulls for name and date) until Derek types his name and an ISO date in the sign-off block and every item is confirmed or rejected, and only then does it say `signed_off`. The panel lists what blocks sign-off. Nothing is pre-filled or signed for him.
+- Save the downloaded file as `docs/experiments/labels/<videoId>.json` (or anywhere) and check it with `bun run scripts/jev-lab.ts split --labels <file>`, which runs the same `validateLabels` as every other command and prints the tune and held-out counts. The scored and live runs still refuse a file that is not `signed_off`.
+
 ## The report
 
 Every line starts with `[fixture]` or `[live]`, like the probe report. A run is `live` only with `--live`; every other output is `fixture`. `plan`, `split` and `draft-labels` take `--origin fixture|live` (default `fixture`).
