@@ -18,7 +18,8 @@ import type { Task, UsageReport } from "./memo";
 import { imageFormat } from "./jev";
 import type { JevAnswer, JevClient, JevImage, JevQuestion } from "./jev";
 
-export const JEV_MODEL = "jev-1.13";
+// The API rejects short ids: "jev-1.13" and "jev-1.14" are 400 "Unknown model"; "jev-1.13.0", "jev-1.14.0" and "jev-latest" work (checked 2026-11-03).
+export const JEV_MODEL = "jev-1.13.0";
 
 /** Starting values, tuned on held-out clips (flow B note). Part of every task's version. */
 export const THRESHOLDS = { yesAtOrAbove: 0.7, noAtOrBelow: 0.3 } as const;
