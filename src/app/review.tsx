@@ -41,7 +41,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     let frame: number | null = null;
     const paint = () => {
       column.style.setProperty("--paper-feed", `${surface.scrollTop}px`);
-      column.style.setProperty("--roller-turn", `${surface.scrollTop / 24}rad`);
+      column.dataset.paperScrolled = String(surface.scrollTop > 0);
       frame = null;
     };
     const scroll = () => { if (frame === null) frame = requestAnimationFrame(paint); };

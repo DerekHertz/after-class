@@ -47,7 +47,6 @@
   .scene-shell .source-paper-grain { background-position: center; }
 }
 @media (max-width: 800px) { .review .recorder-tool { min-height: 0; bottom: -28%; }.scene-shell[data-scene="study-bench"] .review .source-handle { top: 74.7%; font-size: .75rem; } }
-.source-spool { position: absolute; left: 4.4%; top: 11.3%; width: 6.5%; height: 5.8%; border-radius: 50%; overflow: hidden; pointer-events: none; }
-.source-spool > span { display: block; width: 100%; height: 100%; background: url('./assets/controls-v3/source-body.png') 4.706% 11.996% / 1538.462% 1724.138% no-repeat; transform: rotate(var(--roller-turn, 0rad)); }
-.scene-shell[data-motion="reduced"] .source-spool > span { transform: none; }
-@media (prefers-reduced-motion: reduce) { .scene-shell .source-spool > span { transform: none; } }
+.scene-shell[data-scene="study-bench"] .review-source-column[data-paper-scrolled="true"] .source-stand {
+  mask-image: linear-gradient(to bottom, transparent, #000 14px);
+}

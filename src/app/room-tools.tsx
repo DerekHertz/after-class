@@ -26,7 +26,6 @@ export function RoomTools({ scene, onSource, sourceOpen, onSpeak, speechAvailabl
     <div className="source-stage-art" aria-hidden="true" />
     {scene === "study-bench" && <>
       <div className="source-paper-track" aria-hidden="true"><div className="source-paper-art" /><div className="source-paper-grain" /></div>
-      <div className="source-spool" aria-hidden="true"><span /></div>
     </>}
     <button className="source-handle" type="button" aria-label={scene === "study-bench" ? sourceOpen ? "Roll up lecture source" : "Unroll lecture source" : undefined} aria-expanded={sourceOpen} aria-controls="review-source" onClick={event => onSource(event.currentTarget)}>
       <span className="room-tool-name">{tool.name}</span>

@@ -67,3 +67,9 @@ Iteration findings: prior whole-device compression and floating label(P1) replac
 Evidence: `bench-pressed.jpg`, `last-desk-pressed.jpg`, `booth-fixed-desktop.jpg`, `booth-fixed-pressed.jpg`, `paper-retracted.jpg`, `mobile-pressed.jpg`, `browser-checks.json`. Native scrolling updates decorative grain/roller while evidence scrolls once and the typed draft stays intact. Reduced motion removes interpolation/decorative feed. Console error list empty. Full suite 941 pass, 4 pre-existing TODOs; independent exact code head `9030574` passed 99 focused checks, typecheck/build and effect probes.
 
 No remaining actionable P0/P1/P2 proven in the final captures. Mascot roaming/emotes deliberately remain lower priority than these MVP controls, per the user’s annotation. Real microphone/provider behavior and final user visual acceptance remain outside technical QA.
+
+### Content-feed clarification
+
+final result: passed
+
+Removed the rotating side-fitting layer after the user's clarification. Native content now feeds beneath a14px soft upper edge when scrolled; the mask disappears at scrollTop0. Source sheet retraction remains. Fresh1303×954 browser evidence: `docs/trail/mechanical-controls/content-feed-edge.jpg`. Fonts, spacing, tokens and image assets are unchanged; zero spinning layers remain. Typecheck and49 focused tests pass. This small cue does not claim a3D paper curl.

@@ -45,3 +45,9 @@ The existing source artwork supplies the paper and cropped roller face; the exis
 - Independent final screenshot verdict PASS after resolving Booth’s changing-label-on-fixed-plate mismatch. No remaining proven P0/P1/P2 in reviewed captures. Final visual approval remains Derek's; code verification does not substitute for that.
 
 Swarm slices: component asset extraction, independent code/effect verification, independent screenshot comparison and parent browser integration. Agents inherited the available model; per-call dollar costs are unavailable. Existing pending unrelated `.DS_Store` files were preserved.
+
+## Follow-up: content feeds under the upper edge
+
+The next user annotation clarified that the page content should roll upward, rather than the side fitting spinning. Removed the artificial rotating fitting entirely. Native content scrolling and the existing sheet retraction remain; a14px upper-edge mask appears only after scrolling, so content feeds beneath that edge. Returning to the top removes the mask. This is a small feed cue, not a simulated3D paper curl. Earlier roller screenshots/measurements above are historical and superseded by this change.
+
+Verified in the live browser at1303×954: source scrollTop744, scrolled=true, upper-edge mask active, zero spinning layers; Home returns scrollTop0/scrolled=false/mask:none. Typecheck and49 focused tests passed. Fresh evidence: [content feed edge](content-feed-edge.jpg).
