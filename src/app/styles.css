@@ -80,3 +80,59 @@ blockquote { margin: var(--space-2) 0; padding-left: var(--space-3); border-left
 figure { margin: var(--space-2) 0; }
 table { border-collapse: collapse; }
 th, td { border-bottom: 1px solid var(--border); padding: var(--space-1) var(--space-3); text-align: left; }
+
+.review {
+  --bg: #f3ecdc;
+  --fg: #29251f;
+  --muted: #686054;
+  --border: #c6b99f;
+  --surface: #fff8e9;
+  --accent: #254c9b;
+  --danger: #a62d28;
+  --note-bg: #efe3cc;
+  color: var(--fg);
+  background: var(--bg);
+  max-width: 94rem;
+  min-height: 100dvh;
+  padding: clamp(16px, 3vw, 40px);
+  border-inline: 1px solid var(--border);
+}
+.review .review-header { justify-content: space-between; flex-wrap: wrap; border-bottom: 1px solid var(--border); margin-bottom: 24px; padding-bottom: 16px; }
+.review-wordmark { font: bold 1.8rem/1.1 Georgia, serif; margin: 0; }
+.review h1 { font: normal 1rem/1.5 var(--font); margin: 8px 0 0; color: var(--muted); }
+.review-navigation { display: flex; align-items: center; flex-wrap: wrap; gap: 24px; }
+.review-phase { color: var(--muted); text-transform: capitalize; }
+.review-workspace { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: clamp(24px, 3vw, 48px); align-items: start; }
+.conversation-notebook { grid-column: 2; grid-row: 1; min-width: 0; padding: clamp(18px, 2.5vw, 36px); background: var(--surface); border: 1px solid var(--border); border-radius: 24px 10px 24px 10px; box-shadow: 4px 6px 0 #302e3820; }
+.notebook-heading { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: baseline; gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 16px; }
+.review h2 { font: bold 1.4rem/1.25 Georgia, serif; margin: 0; }
+.conversation-history { max-height: min(44dvh, 32rem); min-height: 10rem; overflow: auto; scrollbar-gutter: stable; padding: 12px 8px 16px 0; overflow-wrap: anywhere; }
+.review .line { margin: 20px 0; padding-inline: 16px; border-width: 4px; }
+.review .line strong { display: block; font-size: .8rem; letter-spacing: .07em; text-transform: uppercase; }
+.review .line.tutor { border-color: #c57d56; }
+.review .line.tutor p { font: bold 1.35rem/1.45 Georgia, serif; }
+.review .line.learner { border-color: var(--accent); }
+.review .line p { margin-top: 8px; }
+.review .composer { margin-top: 12px; padding-top: 16px; border-top: 1px solid var(--border); }
+.review .composer label { display: block; font: bold 1.25rem/1.4 Georgia, serif; margin-bottom: 8px; }
+.review textarea { min-height: 8rem; resize: vertical; padding: 14px 16px; line-height: 1.8; background: repeating-linear-gradient(transparent, transparent calc(1.8em - 1px), #d8ddd7 calc(1.8em - 1px), #d8ddd7 1.8em), var(--surface); background-origin: content-box, padding-box; }
+.review button { min-height: 42px; padding: 8px 14px; }
+.review .composer .primary-action { background: var(--accent); border-color: var(--accent); color: #fff; }
+.review :is(button, textarea, summary, a, .conversation-history):focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+.source-stand { grid-column: 1; grid-row: 1; min-width: 0; background: var(--surface); border: 8px solid #c69b55; outline: 1px solid #69513a; border-radius: 18px; padding: clamp(16px, 2vw, 28px); box-shadow: 6px 8px 0 #263b4626; overflow-wrap: anywhere; }
+.source-heading { border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 20px; }
+.eyebrow { color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-size: .75rem; margin: 0 0 8px; }
+.review summary { cursor: pointer; padding: 12px 0; color: var(--accent); }
+.review .source-stand > details { margin-top: 24px; border-top: 1px solid var(--border); }
+.review-observations { margin-top: 16px; border-top: 1px solid var(--border); }
+@media (max-width: 800px) {
+  .review-workspace { grid-template-columns: minmax(0, 1fr); }
+  .conversation-notebook, .source-stand { grid-column: auto; grid-row: auto; }
+  .conversation-history { max-height: 40dvh; }
+  .review-navigation { gap: 16px; }
+}
+@media (max-width: 420px) {
+  .review { padding: 12px; }
+  .conversation-notebook { padding: 16px; }
+  .review .line.tutor p { font-size: 1.15rem; }
+}
