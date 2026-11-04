@@ -1,0 +1,38 @@
+{
+  "desktop": [
+    1440,
+    1024
+  ],
+  "mobile": [
+    390,
+    844
+  ],
+  "sourceToggle": {
+    "draftPreserved": true,
+    "mobileHit": "source-handle",
+    "accidentalSpeech": false
+  },
+  "speech": {
+    "pressed": true,
+    "mascot": "companion-listen",
+    "pauseStops": true
+  },
+  "headerPointer": {
+    "beforeHit": "scene-masthead",
+    "afterPause": "paused",
+    "resume": "active"
+  },
+  "notebook": {
+    "coverMatrixObserved": true,
+    "focus": "My notebook",
+    "citation": "Open transcript 6:42 to 7:03",
+    "closeFocusRestored": true,
+    "rawConceptIdsVisible": false
+  },
+  "reduced": {
+    "mascotAnimation": "none",
+    "sourceTransition": "0s",
+    "notebookAnimation": "none"
+  },
+  "consoleErrors": []
+}

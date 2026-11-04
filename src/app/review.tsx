@@ -168,7 +168,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             </details>
           )}
         </section>
-        <div className="review-source-column">
+        <div className="review-source-column" data-source-open={sourceOpen}>
         <RoomTools scene={appearance.scene} sourceOpen={sourceOpen} listening={listening} speechAvailable={speech.supported && actions.includes("answer")} onSpeak={() => speechToggle.current?.()} onSource={(origin) => {
           sourceOrigin.current = origin ?? sourceToggle.current;
           if (sourceOpen) closeSource();
@@ -297,6 +297,9 @@ export function Composer({
   const submitting = useRef(false);
   useEffect(() => { onListeningChange?.(listening); }, [listening, onListeningChange]);
   useEffect(() => () => { speech.stop(); }, [speech]);
+  useEffect(() => {
+    if (!hasText && listening) { speech.stop(); setListening(false); }
+  }, [hasText, listening, speech]);
 
   function toggleListening() {
     if (listening) {
@@ -361,7 +364,7 @@ export function Composer({
           />
           <div className="actions">
             {speech.supported ? (
-              <button type="button" aria-pressed={listening} onClick={toggleListening}>{listening ? "Stop listening" : "Speak"}</button>
+              <button type="button" aria-pressed={listening} onKeyDown={event => { if (event.repeat) event.preventDefault(); }} onClick={toggleListening}>{listening ? "Stop listening" : "Speak"}</button>
             ) : (
               <span className="muted">Speech input is not available in this browser.</span>
             )}
