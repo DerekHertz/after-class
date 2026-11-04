@@ -2,7 +2,7 @@
 
 The capture probe checks one thing: whether the extension, running in Derek's Windows Chrome on a real lecture, hands the backend watched time and evidence that match what Derek saw. It costs nothing. The backend runs in replay mode, so no Jev call and no Claude call is made. The bars below are fixed. They were adopted on 2026-11-03 before any result existed, and nothing is tuned after a run.
 
-This file is the protocol. It has no results section yet. Results come from Derek's run, and they are pasted in chat, not edited.
+This file is the protocol and, under "Results", the reports from Derek's runs. Results come from Derek's run, and they are pasted in chat, not edited.
 
 ## The four bars
 
@@ -119,3 +119,59 @@ The bar was not exercised, so it is neither passed nor failed. Causes are missin
 - A pass is evidence that capture worked in that run, not proof it works in general.
 - The ad bar checks only the window described above. Ad evidence stamped outside it is not seen, and every candidate verdict is Derek's eye, not a measurement.
 - Data labelled `fixture` shows only that the tools work.
+
+
+## Results
+
+### Run 1 (2026-11-04, Windows Chrome, backend in WSL)
+
+This is the first real-Chrome run of the capture probe. The report below is pasted unedited from `data/probe/probe-report.md`. Nothing was tuned after seeing it; the bars are the ones adopted on 2026-11-03.
+
+What was captured, from the run's own database (not from the report):
+
+- One capture, `cap_z7m3abizdfotkmmhuqqulie5t4`, of six consecutive videos from one Georgia Tech Advanced Operating Systems playlist "Introduction" (`-nY-8shbqOo`, the URL entered at the wizard), "Routing on the Internet", "An Example", "How to Implement the Vision", "ANTS Toolkit", "ANTS Capsule and API". Their listed durations sum to about 1154 s; the report counts 853.713 s watched.
+- This is not one of the two lectures named under "How to run it". It is a set of six short clips, so the run says nothing about a single long lecture. The protocol's "one lecture" limit below applies, and the sources are listed above so the choice is visible.
+- The spot checks (10 captions, 10 frames) are Derek's answers in the wizard. The report script scores them; it does not verify them.
+- An earlier attempt the same day, on the Lamport clocks video (`QgWz_s7uugE`), stopped at stage 8: the exporter picked the newest capture, which was a 70-second capture started after Stop, instead of the 10-minute one. That is fixed in PR #55 (the default is now the capture with the most watched time). That attempt was not scored and no report from it exists. Run 1 used the fixed exporter.
+
+```text
+[live] Capture probe report for cap_z7m3abizdfotkmmhuqqulie5t4
+[live] Data origin: live
+[live] Machine: Windows Chrome, backend in WSL
+
+[live] Bar 1 (coverage): PASS
+[live] Bar: "every watched interval has evidence or a logged gap"
+[live] Measured: 0 s uncovered of 853.713 s watched, across 6 source(s).
+[live] Covered means inside a passage interval or a gap interval, half-open [start, end). A frame is an instant and covers no seconds.
+
+[live] Bar 2 (caption to screen): PASS
+[live] Bar: "≥9/10 spot checks caption-to-screen within ±2s"
+[live] Measured: 10/10 caption spot checks matched.
+
+[live] Bar 3 (board text): PASS
+[live] Bar: "board text readable in ≥9/10 frames"
+[live] Measured: 10/10 frames with readable board text.
+
+[live] Bar 4 (ads): NOT MEASURED
+[live] Bar: "zero ad evidence"
+[live] Measured: no ad occurred in this capture, so the bar was not exercised.
+
+[live] Perf probe (capture overhead): PASS
+[live] Bar: "Capture overhead on playback (dropped video frames). Chrome media stats with capture on and off, same clip. Baseline: capture off first. Rule: fail above 1 percent more dropped frames."
+[live] Interpretation: (dropped/total with capture on) minus (dropped/total with capture off) above 1 percentage point fails.
+[live] Measured: off 0/3743 = 0%, on 5/3646 = 0.137%, difference 0.137 percentage points.
+
+[live] Observations outside the bars (unscored, from real Chrome)
+[live]   Does the popup show the video title and a caption status such as Captions found? yes
+[live]   Did Review now open a tab on the review app at 127.0.0.1:4317 that shows this capture? yes
+[live]   Did an ad play during the capture? no
+
+[live] OVERALL: NOT PASSED (not measured: bar 4)
+```
+
+Reading it, without going beyond it:
+
+- Bars 1, 2 and 3 and the perf probe passed in this run. Bar 4 was NOT MEASURED because YouTube served no ad, so by the rule above the overall line is NOT PASSED and the probe is not complete.
+- The perf probe is one measurement (capture off 0 of 3743 dropped, on 5 of 3646) on one machine. It is not evidence about other hardware or longer sessions.
+- Observations outside the bars: the popup showed the title and a captions status, and Review now opened a tab on the review app showing this capture. Both are noted as `yes` by Derek, the first real-Chrome check of either.
+- Still open: bar 4 needs a capture in which an ad plays (it cannot be forced), and a run on one of the two approved single lectures would answer the "one lecture" limit. Derek also reported running it on a Mac earlier; that run is not recorded here.
