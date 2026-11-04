@@ -300,6 +300,26 @@ const until = async (done: () => Promise<boolean> | boolean, ms = 15_000): Promi
   }
 };
 
+/**
+ * Quiet means nothing in flight and no memo, frozen-input or usage row added for 300 ms. The scheduler debounces 50 ms
+ * before it starts work, so an empty in-flight list alone can mean "about to start": CI once ran a restarted copy with
+ * one fewer preparation task than the plain run because the counts were taken in that window.
+ */
+const settled = async (s: Session): Promise<void> => {
+  const rows = () => (s.r.modules.db.sql.query("SELECT (SELECT COUNT(*) FROM memo) + (SELECT COUNT(*) FROM prep_inputs) + (SELECT COUNT(*) FROM usage_events) AS n").get() as { n: number }).n;
+  let last = -1;
+  let since = 0;
+  await until(() => {
+    const n = rows();
+    if (s.r.modules.scheduler.inflight().length > 0 || n !== last) {
+      last = n;
+      since = Date.now();
+      return false;
+    }
+    return Date.now() - since >= 300;
+  });
+};
+
 const get = (name: string, path: string, origin: Origin = "app"): Req => ({ name, origin, method: "GET", path });
 const post = (name: string, path: string, body?: unknown, origin: Origin = "app"): Req => ({ name, origin, method: "POST", path, ...(body === undefined ? {} : { body }) });
 
@@ -356,7 +376,7 @@ async function runProduct(opts: { restartAfterTurn: number | null }): Promise<Pr
   // 2. the backend prepares it with the fake tasks: boundaries, frames, claims
   const optionsReq = get("review options", `/captures/${CAP}/review-options`);
   await until(async () => reviewOptionsResponse.parse((await peek(optionsReq)).json).kind === "ready");
-  await until(() => s.r.modules.scheduler.inflight().length === 0);
+  await settled(s);
   expect(reviewOptionsResponse.parse((await send(optionsReq)).json)).toMatchObject({ kind: "ready", scope: { supportedClaims: 3 } });
 
   // 3. the invite: chunk 0 closed at a boundary while the capture ran; the learner says yes
@@ -428,7 +448,7 @@ async function withCopy<T>(p: Product, use: (s: Session, copy: string) => Promis
 
 const idle = async (s: Session) => {
   await Bun.sleep(150);
-  await until(() => s.r.modules.scheduler.inflight().length === 0);
+  await settled(s);
 };
 
 /** Row count of every table in the sqlite file, listed from sqlite_master. */
