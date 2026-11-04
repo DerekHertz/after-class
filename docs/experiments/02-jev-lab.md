@@ -2,13 +2,13 @@
 
 The lab measures whether Jev, asked the product's own questions about windows of a real lecture and about changes between frames, finds the topic boundaries and keeps the visual steps that Derek labeled. It runs the product's windowing and the product's `boundaryTask` and `frameChangeTask` through `scripts/jev-lab.ts`.
 
-This file is a pre-registered protocol. It was written before any Jev call, and nothing here is tuned after a result. The numbers in the bar text and the budget are Derek's, adopted 2026-11-03. Every other definition is marked PROPOSED until Derek says yes.
+This file is a pre-registered protocol. It was written before any Jev call, and nothing here is tuned after a result. The numbers in the bar text and the budget are Derek's, adopted 2026-11-03. Every other definition was proposed, and Derek adopted all ten as proposed on 2026-11-04 (see "Decisions").
 
 The tooling is finished and has made no Jev call. No key exists on the machine that built it. Results come from Derek's run, and they are pasted under "Results", not edited.
 
-## Decisions for Derek
+## Decisions (adopted by Derek, 2026-11-04)
 
-Each item below is a definition the bar text leaves open. Each is `PROPOSED, needs Derek's OK before any paid call`. A numeric one is a named constant in `scripts/jev-lab-score.ts`, so changing it after his OK is a one-line edit. Anything not in this list is fixed by the bar text, the budget or the flow doc.
+Each item below is a definition the bar text leaves open. Derek adopted all ten exactly as written, one at a time, on 2026-11-04, before any paid call. A numeric one is a named constant in `scripts/jev-lab-score.ts` (the `PROPOSED_` prefix in the constant names is a leftover from the proposal stage; they are adopted). Changing any of them after a result is not allowed. Anything not in this list is fixed by the bar text, the budget or the flow doc.
 
 1. **What a detected boundary is.** A chunk that the product's `planChunks` closes with provenance `boundary` or `boundary_revised` (Jev said "new concept" yes and "stopping point" yes). Its time is the media start of the first window of the next chunk. Time-cap closes and session-end closes are not Jev's and are not detections.
 2. **How labels and detections pair.** One-to-one: each label takes at most one detection, each detection serves at most one label. "Within ±60s" is inclusive: exactly 60 s apart matches.
@@ -54,7 +54,7 @@ Not scored and not claimed: the product's cross-clip behavior ("Video ends → d
 - `SEGMENTATION_DEFAULTS`: `windowNewS`, `contextS`, `timeCapS`, `maxFramesPerWindow`, `reviseOnNextNoNo`.
 - The Jev verdict thresholds in `THRESHOLDS`: `yesAtOrAbove` and `noAtOrBelow`.
 
-**Off limits:** question wording (`QUESTIONS`), the model (`JEV_MODEL`), the routing table (`route`), the labels, the label rules above, the split, the lecture set, the bar text, the tolerance, the budget, the frame sampler in the extension, and the scoring code. A threshold change is a round like any other: there is no way to re-score a tune run with different thresholds, so offline exploration cannot dodge the cap.
+**Off limits** (Derek confirmed on 2026-11-04 that question wording stays off limits in this lab; rewriting criteria after seeing results is a separate, labeled follow-up experiment that needs his OK, and any Claude call in it is outside the five approved experiments): question wording (`QUESTIONS`), the model (`JEV_MODEL`), the routing table (`route`), the labels, the label rules above, the split, the lecture set, the bar text, the tolerance, the budget, the frame sampler in the extension, and the scoring code. A threshold change is a round like any other: there is no way to re-score a tune run with different thresholds, so offline exploration cannot dodge the cap.
 
 **Cap and halves:**
 
