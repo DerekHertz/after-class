@@ -6,15 +6,18 @@ Read this first in a new session, then `CLAUDE.md`, `docs/flows/after-class.md` 
 After Class MVP for Derek: a Chrome MV3 extension captures YouTube lectures in Windows Chrome, a Bun backend in WSL prepares them with Jev (narrow typed judgments) and Claude (`claude -p`), and a React review app runs source-grounded Socratic reviews with a faithful learning record. Repo: https://github.com/DerekHertz/after-class (public, default branch `master`). Code lives only in `/home/dhertzell/AfterClass`, never in Derek's Obsidian vault.
 
 ## State at the end of this session
-- Master was `a63a576` (retro 4 docs) plus this handoff. Typecheck clean. `bun test`: 926 pass, 4 todo, 0 fail (930 tests, 28 files) at the last full run on this head. No open PRs besides this one.
+- Master was `1a74e68` when this was refreshed. Typecheck clean. `bun test`: 927 pass, 4 todo, 0 fail at the last full run. No open PRs. One unexplained single failure (925 pass, 1 fail, test not named) was seen once in a verifier's run; 14 full reruns on master all passed. If CI fails again, take the failing test's name from the log first.
+- Since the first write-up: the replay e2e wait was fixed (a flaky quiescence check, #39); Derek's `derek-mode` and `grill-the-flow` skills are in `.claude/skills/` and `docs/setup-new-machine.md` explains a new machine (#40); the capture-probe wizard runs on macOS as well as WSL, and the report prints a `Machine:` line (#41).
 - Built and merged: CI (M0), route table (M1), small fixes (M2), interval helper (M2b), HTTP server (M3), ingest (M4), scheduler (M5), composition root (M6), review routes (M7a), record and evidence routes (M7b), review app follow-ups (M8, Derek approved screenshots), replay end-to-end test (M10), capture probe tooling (M11 tooling), plus fixes: detour answers no longer credit the main thread (R12, R13), a retry of a saved review is answered from the first save (R15), a code-written disclosure when the model fails twice, one bad claim no longer sinks a whole interpretation.
 - Dropped by Derek: M9 (the `verify-afterclass` skill; PR #29 failed two verifier rounds on `cleanup.sh`'s `rm -rf` guard). Verifiers boot the backend by hand: `HOME=<scratch> AFTERCLASS_MODE=replay AFTERCLASS_PORT=0 AFTERCLASS_EXTENSION_ID=<dummy> AFTERCLASS_DATA=<scratch> bun run src/backend/main.ts`, then read the port and token from its log.
 - Nothing has run in real Chrome yet. Not verified: `getVideoData().video_id` timing, YouTube navigation event order, the popup "Review now" button opening a tab, the real 5-minute stream deadline, the M11 wizard end to end, any live Jev or Claude call.
 
 ## The next thing: Derek runs the capture probe (M11)
+From the repo root, in WSL (Windows Chrome) or on a Mac (Mac Chrome; see `docs/setup-new-machine.md` and the macOS section of `docs/experiments/01-capture-probe.md`). The wizard picks its mode itself and the report says which machine it ran on.
 ```bash
-cd ~/AfterClass && scripts/wizards/capture-probe.sh
+scripts/wizards/capture-probe.sh
 ```
+Not verified: real macOS, bash 3.2 on a real Mac, BSD awk/sed, Mac Chrome. If port 4317 is already in use (it was on the WSL machine), the wizard stops before starting its backend; the extension hardcodes that port.
 Nine stages, about 15 to 20 minutes, Windows Chrome, free (replay mode, no Jev, no Claude). Derek supplies a lecture URL (MIT 18.06 Lecture 1 for chalkboard; do not guess a video id) and pastes the final `data/probe/probe-report.md` back unedited. Protocol and bar text: `docs/experiments/01-capture-probe.md`. If an ad does not play, the zero-ads bar reports NOT MEASURED, never PASS. If the wizard breaks, ask which stage and what it printed; the first real run is the first test of it. Do not tune any bar after seeing results. Record the result in `docs/experiments/01-capture-probe.md` (a results section) through a small docs PR.
 
 ## After M11 (all need Derek's go; paid or subscription calls only inside the five approved experiments)
@@ -47,7 +50,7 @@ Nine stages, about 15 to 20 minutes, Windows Chrome, free (replay mode, no Jev, 
 - After every push, check `git rev-parse HEAD` equals `git rev-parse origin/<branch>`. A detached HEAD once made a fix push silently not land and a verifier read the old head.
 - Verifiers must use their own `git worktree add`, never another agent's worktree; one was switched to another branch mid-run.
 - `gh pr merge` fails while the `ci` check is pending; wait for it. Use the `mcp__ccd_pr` tools, not `gh pr checks` polling. Never enable auto-merge unless Derek asks.
-- Retro every 3 merged worker PRs (tally repeated failure classes, fix the cause in code before wording). Retro 5 is due after three worker PRs merged after #37. Known classes so far: non-idempotent retry; state checked then used later; half-open interval off by one; stale id or snapshot; a guard on an unnormalized path; a rule assumed but not enforced; a check that passes on silence.
+- Retro every 3 merged worker PRs (tally repeated failure classes, fix the cause in code before wording). Retro 5 is in `docs/trail/mvp.md`; retro 6 is due after three more worker PRs merged after #41. Known classes so far: non-idempotent retry; state checked then used later; half-open interval off by one; stale id or snapshot; a guard on an unnormalized path; a rule assumed but not enforced; a check that passes on silence.
 - `.claude/worktrees/` holds dozens of stale agent worktrees (gitignored). Clean them when Derek agrees.
 
 ## Follow-up backlog (none blocks M11 to M14; small PRs when convenient)
