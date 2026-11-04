@@ -9,6 +9,7 @@
 import type { DisputeState, Observation, ObservationStatus, RecordedStatus, Seq, ThreadFacts, TutorMove, Turn } from "../../shared/domain";
 import type { ThreadId, TurnId } from "../../shared/ids";
 import { HELP_MOVES } from "../../shared/domain";
+import { detourTracker } from "./detour";
 
 const HELP: ReadonlySet<TutorMove["kind"]> = new Set(HELP_MOVES);
 
@@ -19,13 +20,22 @@ const GAP: ReadonlySet<RecordedStatus> = new Set(["unresolved", "partial"]);
  * Turns in seq order, each learner turn sent with no thread attributed to the
  * thread open at that point. The tutor's state, the clamp and the record all
  * read turns through this, so they agree on which thread a learner act is about.
+ * While a detour is active only a dispute is attributed: an answer, skip or
+ * "don't know" there is about the detour, and crediting it to the main thread
+ * would let it stand as evidence for an observation it never addressed.
+ * R12: "If the tutor helped before my answer, it can't count as independent."
+ * R13: "A skipped or unanswered question is never counted as understood."
  */
 export function attributeTurns(turns: readonly Turn[]): readonly Turn[] {
   let open: ThreadId | null = null;
+  const detours = detourTracker();
   return [...turns].sort((a, b) => a.seq - b.seq).map((t) => {
     if (t.actor === "tutor" && t.move.kind === "ask_main") open = t.move.threadId;
     else if (t.actor === "tutor" && t.move.kind === "close_thread" && t.move.threadId === open) open = null;
-    return t.actor === "learner" && t.threadId === null && open !== null ? { ...t, threadId: open } : t;
+    const duringDetour = detours.state.kind === "active";
+    detours.step(t);
+    if (t.actor !== "learner" || t.threadId !== null || open === null) return t;
+    return duringDetour && t.act.kind !== "dispute" ? t : { ...t, threadId: open };
   });
 }
 
