@@ -36,4 +36,5 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 - `POST /reviews/:reviewId/turns` runs one turn per review: a second post with a different `turnId` while one runs answers 409; the same `turnId` joins and replays. A stream still open after 5 minutes ends with `turn_failed` (retryable) while the turn finishes; its resend replays it.
 - `ReviewView.saved` is `LearningRecord.saveState(reviewId)`: `saved` once `saved_reviews` has the review, `save_pending` after a failed save with none since (`save_failures`, survives a restart), else `unsaved`.
 - A `Material` crosses JSON as `Material.canonical` rows. Use `encodeMaterial` and `decodeMaterial`; the `GET /evidence?material=` value is `encodeURIComponent(encodeMaterial(m))`.
-- Response schemas live in `wire.ts`. `src/app/decode.ts` still holds its own copies until the app switches to import them.
+- Response schemas live in `wire.ts`. `src/app/decode.ts` re-exports them as aliases.
+- Frozen exports that changed after the Tutor and record row was written: `RecordBundle.observations` carries `assessable` per observation, and `clampStatus(proposed, facts, dispute, assessable)` takes a fourth argument; when a thread's claim is not assessable at save, the status is `not_assessed` (R3).

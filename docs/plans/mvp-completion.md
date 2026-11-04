@@ -1,6 +1,6 @@
 # After Class MVP completion plan
 
-This plan finishes the After Class MVP for Derek. Every module is built or in a fix round. What remains is composition (server, scheduler, wiring), a project verification skill, and the five approved experiments with their reports. The program enforces one rule. Nothing merges without an independent `VERDICT: PASS` at the exact head SHA. PRs are small and stacked where one builds on another, and land bottom-up. Order: M0, M1 and M2 first, then M3 to M8, then M9 and M10, then M11 to M15.
+This plan finishes the After Class MVP for Derek. Every module is built or in a fix round. What remains is composition (server, scheduler, wiring) and the five approved experiments with their reports. The program enforces one rule. Nothing merges without an independent `VERDICT: PASS` at the exact head SHA. PRs are small and stacked where one builds on another, and land bottom-up. Order: M0, M1 and M2 first, then M3 to M8, then M10 (M9 was dropped), then M11 to M15.
 
 ## How to read this
 
@@ -33,10 +33,10 @@ Lane budget (Derek, 2026-11-03: lean). Three lanes per PR, run in sequence by on
   - [ ] M3 stacks on M1. M4 stacks on M3. M5 stacks on M1.
   - [ ] M6 stacks on M4 and M5 (rebased onto whichever lands second).
   - [ ] M7 stacks on M6. M8 stacks on M7.
-  - [ ] M9 and M10 stack on M8.
-  - [ ] M11 stacks on M9. M12 after M11's data exists. M13 after M12. M14 after M13. M15 after M14.
+  - [ ] M10 stacks on M8. M9 was dropped (below).
+  - [ ] M11 stacks on M10. M12 after M11's data exists. M13 after M12. M14 after M13. M15 after M14.
 - [ ] Hold the file boundaries named in each PR's **Files.** block.
-- [ ] Hold the review gate. M8 and M9 change an interaction. They wait for Derek's review with screenshots before merge.
+- [ ] Hold the review gate. M8 changes an interaction. It waits for Derek's review with screenshots before merge.
 
 ### PR mechanics, for every PR
 
@@ -50,7 +50,7 @@ Lane budget (Derek, 2026-11-03: lean). Three lanes per PR, run in sequence by on
 ### Verdict and merge, for every PR
 
 - [ ] One gates lane re-runs typecheck, tests and, where touched, `bun run build:ext` and the TLC `check.sh`.
-- [ ] Live lanes per the PR's block drive the real surface through the `verify-afterclass` skill once M9 lands, and through `bun test` harnesses plus the Claude in Chrome tools before then.
+- [ ] Live lanes per the PR's block drive the real surface through `bun test` harnesses plus the Claude in Chrome tools. A verifier boots the backend itself: `HOME=<scratch dir> AFTERCLASS_MODE=replay AFTERCLASS_PORT=0 AFTERCLASS_EXTENSION_ID=<dummy id> AFTERCLASS_DATA=<scratch dir> bun run src/backend/main.ts`, then reads the port and pairing token from its log.
 - [ ] One audit lane reads the diff and receipts and distrusts the PR body.
 - [ ] A rebase or minor fix gets a single verifier at the new head. A wording-only change gets none.
 - [ ] Block only for a problem shown by a failing run at the head or a doc line the PR made wrong. Everything else is a follow-up.
@@ -445,7 +445,9 @@ Lane budget (Derek, 2026-11-03: lean). Three lanes per PR, run in sequence by on
 
 - [ ] Root's clean verdict at the exact head SHA.
 
-## Create the verify-afterclass skill (M9)
+## Create the verify-afterclass skill (M9) — dropped
+
+Derek dropped M9 on 2026-11-03 after PR #29 failed two verifier rounds on `cleanup.sh`'s `rm -rf` guard (path traversal, then a trailing slash). The section below is kept as the record; nothing in it is scheduled.
 
 **Depends on.** M8.
 
@@ -527,7 +529,7 @@ Lane budget (Derek, 2026-11-03: lean). Three lanes per PR, run in sequence by on
 
 ## Run the capture probe with Derek (M11, experiment 1)
 
-**Depends on.** M9.
+**Depends on.** M10.
 
 **Files.**
 
@@ -733,7 +735,7 @@ No prototype ran for this plan. The open empirical questions (caption access, ca
 
 ## Appendix B. Alternatives rejected
 
-- Ten live lanes on every PR. Rejected as the default because most PRs are small backend units with no UI. Kept for M7 and M9.
+- Ten live lanes on every PR. Rejected as the default because most PRs are small backend units with no UI. Kept for M7 (M9 was dropped).
 - One large composition PR. Rejected because it can't be reviewed in one sitting.
 
 ## Appendix C. Risks
