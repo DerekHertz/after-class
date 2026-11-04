@@ -1,0 +1,20 @@
+.review .room-tools { position: relative; min-width: 0; margin: 16px auto 0; width: min(100%, 330px); isolation: isolate; }
+.review .room-tools-setting { position: absolute; top: 8px; right: -12px; width: 114px; opacity: .25; z-index: -1; pointer-events: none; }
+.review .room-source-tool { display: flex; flex-direction: column; align-items: center; width: 100%; padding: 4px 10px 14px; color: var(--fg); background: transparent; border: 1px solid transparent; border-radius: 10px; }
+.review .room-source-tool:hover { background: color-mix(in srgb, var(--surface) 70%, transparent); border-color: var(--border); }
+.review .room-source-tool:hover { color: #302c25; --accent: #284f9b; }
+.review-source-column { grid-column: 1; grid-row: 1; min-width: 0; }
+.review-workspace.source-closed { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); max-width: none; }
+.source-closed .conversation-notebook { grid-column: 2; }
+.review .room-source-tool:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+.review .room-source-drawing { width: 100%; height: auto; max-height: 230px; display: block; pointer-events: none; }
+.room-tool-name { font: bold 1.05rem/1.4 Georgia, serif; }
+.room-tool-action { font: .85rem/1.5 system-ui, sans-serif; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 800px) {
+  .review-workspace.source-closed { grid-template-columns: minmax(0, 1fr); }
+  .review-source-column { grid-column: 1; grid-row: 2; }
+  .source-closed .conversation-notebook { grid-column: 1; grid-row: 1; }
+  .review .room-tools { width: min(100%, 260px); margin-top: 8px; }
+  .review .room-source-drawing { max-height: 160px; }
+  .review .room-tools-setting { width: 86px; }
+}

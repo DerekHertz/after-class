@@ -1,7 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { EvidenceId, ReviewId } from "../shared/ids";
 import type { AppApi } from "./api";
-import { useSceneActivity } from "./appearance";
+import { useAppearance, useSceneActivity } from "./appearance";
+import { RoomTools } from "./room-tools";
 import { createReviewController } from "./controller";
 import type { SessionState } from "./controller";
 import {
@@ -16,6 +17,7 @@ import { BundleInspector, ErrorNote, EvidencePane, Link, useAsync } from "./ui";
 export type ReviewDeps = { readonly api: AppApi; readonly speaker: Speaker; readonly speech: SpeechInput; readonly unsent: UnsentStore };
 
 export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewDeps & { readonly reviewId: ReviewId }) {
+  const { appearance } = useAppearance();
   const history = useRef<HTMLDivElement>(null);
   const sourceHeading = useRef<HTMLHeadingElement>(null);
   const sourceToggle = useRef<HTMLButtonElement>(null);
@@ -161,6 +163,11 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             </details>
           )}
         </section>
+        <div className="review-source-column">
+        <RoomTools scene={appearance.scene} sourceOpen={sourceOpen} onSource={() => {
+          if (sourceOpen) closeSource();
+          else { sourceOrigin.current = sourceToggle.current; setSourceOpen(true); }
+        }} />
         <aside id="review-source" className="source-stand" aria-labelledby="source-heading" hidden={!sourceOpen}>
           <div className="source-heading">
             <p className="eyebrow">From the lecture</p>
@@ -172,6 +179,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           <EvidencePane key={evidenceIds.join(",")} api={api} ids={evidenceIds} titles={titles} videos={videos} />
           <ScopeEvidence api={api} view={view} titles={titles} onSource={openSource} />
         </aside>
+        </div>
       </div>
     </main>
   );
