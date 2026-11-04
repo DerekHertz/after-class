@@ -11,7 +11,7 @@ This experiment is outside the five approved in `docs/flows/after-class.md`. Der
 3. **Rounds.** At most 3 optimizer rounds per arm. PROPOSED.
 4. **What an optimizer may change.** The wording of the three bool questions (`newConcept`, `stoppingPoint`, `teachingChange`), the Jev verdict thresholds, and `SEGMENTATION_DEFAULTS`. Question types stay bool. Not the model, the routing table, the labels, the split, the scoring, or the frame sampler. PROPOSED.
 5. **How a round is picked.** Per arm, the round whose first-half report passes the most of the four bar clauses; ties go to the higher boundary recall, then fewer false closes, then the earlier round. The held-out half is never used to pick. PROPOSED.
-6. **Budgets.** Jev: a hard 3,000 calls across the whole experiment, retries included (about 250 per round per arm on the first halves, plus three held-out runs). Claude: a hard 150 calls, retries included (labelers about 2 x 40, optimizers 2 x 3 plus retries, plus a 3-call timing pilot per model). PROPOSED.
+6. **Budgets.** Jev: a hard 3,000 calls across the whole experiment, retries included. On the assembled 11-clip set `plan` counts about 195 calls for a first-half run and about 256 for a held-out run, so a baseline round, 2 arms x 3 rounds and three held-out runs come to about 2,130 before retries. Claude: a hard 150 calls, retries included (labelers about 2 x 40, optimizers 2 x 3 plus retries, plus a 3-call timing pilot per model). PROPOSED.
 7. **Held-out scoring.** Each of the three arms is scored once on the held-out half. PROPOSED.
 
 ## What it does and does not show
