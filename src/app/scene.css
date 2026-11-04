@@ -4,7 +4,7 @@
   min-height: 100dvh; background: var(--bg); color: var(--fg); position: relative; isolation: isolate;
 }
 .scene-shell[data-scene="projection-booth"] {
-  --bg: #292c39; --fg: #f1e6cf; --muted: #bcb29e; --border: #696252; --surface: #fff2d8; --accent: #31558e; --danger: #a52f28; --note-bg: #f0e3ca;
+  --bg: #292c39; --fg: #f1e6cf; --muted: #bcb29e; --border: #696252; --surface: #fff2d8; --accent: #a9c6ff; --danger: #a52f28; --note-bg: #f0e3ca;
   --scene-frame: #9b8060; --scene-edge: #5d5043; --scene-depth: #11152280;
   background: radial-gradient(ellipse at 14% 8%, #a16f3830, transparent 55%), var(--bg);
 }
