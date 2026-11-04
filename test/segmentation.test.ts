@@ -418,15 +418,15 @@ describe("segmentation over the database", () => {
     expect(() => f.db.sql.run("UPDATE chunk_revisions SET provenance = 'time' WHERE id = ?", [rev1.id])).toThrow(/append-only/);
   });
 
-  test("demand lists windows with no judgment in watch order, not those in flight or already settled", () => {
+  test("demand lists windows with no judgment in watch order, including those in flight, not those already settled", () => {
     const f = fixture(4);
     f.show(4);
     f.judge(0, "no/no");
     f.inflight(1);
     const { demand } = f.seg.sync(CAP);
-    expect(demand.map((i) => f.ids.indexOf(i.window.id))).toEqual([2, 3]);
+    expect(demand.map((i) => f.ids.indexOf(i.window.id))).toEqual([1, 2, 3]);
     f.judge(2, "failed");
-    expect(f.seg.sync(CAP).demand.map((i) => f.ids.indexOf(i.window.id))).toEqual([3]);
+    expect(f.seg.sync(CAP).demand.map((i) => f.ids.indexOf(i.window.id))).toEqual([1, 3]);
   });
 
   test("a failed judgment folds as continue and closes nothing", () => {
