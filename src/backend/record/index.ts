@@ -15,7 +15,10 @@
  * transaction, skipping tombstoned notes. A failed save keeps its bundle as
  * the pending save, and the retry writes that bundle verbatim. Across a
  * restart the pending bundle is rebuilt from durable inputs (turns, the
- * wrap-up memo), which gives the same bundle. Saved = a saved_reviews row;
+ * wrap-up memo), which gives the same bundle. A retry of a save that already
+ * succeeded is answered from that first save's rows with no wrap-up call: the
+ * usable claims may have changed since (evidence deleted), which would key a
+ * second paid call. Saved = a saved_reviews row;
  * pending = a failed save with no success since (save_failures), which a
  * restart keeps; a review with neither is unsaved.
  * While a review has no saved_reviews row, db.ts triggers hold its capture's
@@ -99,6 +102,11 @@ export function createRecord(db: Db, deps: {
       `INSERT INTO link_suggestions (id, review_id, from_concept, to_concept, type, evidence_json, rationale, saved_ms)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
        ON CONFLICT (id) DO UPDATE SET evidence_json = excluded.evidence_json, rationale = excluded.rationale`,
+    ),
+    savedCounts: db.sql.query<{ notes: number; observations: number; links: number }, [string, string, string]>(
+      `SELECT (SELECT COUNT(*) FROM notes WHERE review_id = ?1) AS notes,
+              (SELECT COUNT(*) FROM observations WHERE review_id = ?2) AS observations,
+              (SELECT COUNT(*) FROM link_suggestions WHERE review_id = ?3) AS links`,
     ),
     savedAt: db.sql.query<{ n: number }, [string]>(`SELECT COUNT(*) AS n FROM saved_reviews WHERE review_id = ?`),
     failedAt: db.sql.query<{ n: number }, [string]>(`SELECT COUNT(*) AS n FROM save_failures WHERE review_id = ?`),
@@ -201,6 +209,8 @@ export function createRecord(db: Db, deps: {
   }
 
   async function save(reviewId: ReviewId): Promise<SaveResult> {
+    // R15: "Retrying a save never creates a duplicate record." The rows are the first save's result, tombstoned notes included.
+    if (q.savedAt.get(reviewId)!.n > 0) return { kind: "saved", ...q.savedCounts.get(reviewId, reviewId, reviewId)! };
     let bundle: RecordBundle;
     try {
       bundle = await bundleFor(reviewId);

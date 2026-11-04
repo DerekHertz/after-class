@@ -208,7 +208,8 @@ describe("main, the live backend serves save, retry-preparation, the record and 
   test("save and retry-preparation answer instead of 501; a failed save reads save_pending across a restart, and retrying it twice saves one record (R15)", async () => {
     const fakes = fakeTasks();
     const wrapUp = wrapUpScript(1);
-    const tasks = { ...fakes.tasks, wrapUp } as unknown as TaskSet;
+    const tutor = scripted("tutor_turn", "claude", () => "tutor", () => ok({ move: { kind: "wrap_up" }, say: "That is the end of this review." }));
+    const tasks = { ...fakes.tasks, wrapUp, tutor } as unknown as TaskSet;
     const configDir = dir("afterclass-config-");
     const env = { AFTERCLASS_DATA: dir("afterclass-data-"), AFTERCLASS_MODE: "replay" };
     const first = await boot({ tasks, configDir }, env);
@@ -224,6 +225,13 @@ describe("main, the live backend serves save, retry-preparation, the record and 
     const started = await post(first, `/captures/${CAP}/reviews`, { reviewId, choice: "prepared_only" });
     expect(started.body.kind).toBe("started");
     expect((await get(first, `/reviews/${reviewId}`)).body.saved).toBe("unsaved");
+
+    // a review must have ended before it can be saved: the learner ends it, and with no model the code wraps it up
+    expect((await post(first, `/reviews/${reviewId}/save`)).status).toBe(409);
+    const ending = await fetch(`${first.base}/reviews/${reviewId}/turns`, { method: "POST", headers: authed(first.r.token), body: JSON.stringify({ turnId: stableId("turn", "main-test-end"), act: { kind: "end" } }) });
+    expect(ending.status).toBe(200);
+    expect(await ending.text()).toContain("turn_complete");
+    expect((await get(first, `/reviews/${reviewId}`)).body.state.phase).toBe("ended");
 
     expect((await post(first, `/reviews/${reviewId}/save`)).body).toMatchObject({ kind: "save_failed", retryable: true });
     expect((await get(first, `/reviews/${reviewId}`)).body.saved).toBe("save_pending");

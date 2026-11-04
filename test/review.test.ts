@@ -883,6 +883,17 @@ describe("turn", () => {
     expect(reviews.view(r.reviewId).turns.at(-1)).toMatchObject({ actor: "tutor", move: { kind: "wrap_up" } });
   });
 
+  test("an ended review takes no new learner turn, so a saved record stays final (R15)", async () => {
+    const r = startedRig(() => reply({ kind: "wrap_up" }, "Done."));
+    await collect(r.reviews.turn(r.reviewId, randomId("turn"), answer()));
+    expect(r.reviews.view(r.reviewId).state.phase).toBe("ended");
+    const before = r.reviews.view(r.reviewId).turns.length;
+
+    const late = await collect(r.reviews.turn(r.reviewId, randomId("turn"), answer()));
+    expect(late).toEqual([{ type: "turn_failed", error: "this review has ended", retryable: false }]);
+    expect(r.reviews.view(r.reviewId).turns).toHaveLength(before);
+  });
+
   test("with a thread open the fallback closes the thread", async () => {
     const r = startedRig();
     let call = 0;

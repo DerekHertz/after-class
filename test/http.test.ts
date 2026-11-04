@@ -1255,7 +1255,7 @@ describe("the record routes", () => {
     expect(r.status).toBe(204);
     expect((await rig.record()).notes).toEqual([]);
     const again = saveResponse.parse(await (await post(rig.base, `/reviews/${rig.reviewId}/save`, {})).json());
-    expect(again).toMatchObject({ kind: "saved", notes: 0 });
+    expect(again).toMatchObject({ kind: "saved", notes: 1 }); // the first save's result; the tombstone hides the note
     expect((await rig.record()).notes).toEqual([]);
   });
 
@@ -1265,8 +1265,9 @@ describe("the record routes", () => {
     expect(note.evidence.length).toBeGreaterThan(0);
     expect(rig.snapshots.at(-1)).toEqual([...note.evidence].sort());
     await send(rig.base, "DELETE", `/record/notes/${note.id}`);
+    const snapshotted = rig.snapshots.length;
     await post(rig.base, `/reviews/${rig.reviewId}/save`, {});
-    expect(rig.snapshots.at(-1)).toEqual([]);
+    expect(rig.snapshots).toHaveLength(snapshotted);
   });
 
   test("POST /record/links/:id accepts, rejects or corrects a suggestion; an unknown decision is 400", async () => {

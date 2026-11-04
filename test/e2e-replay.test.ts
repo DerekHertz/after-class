@@ -671,21 +671,22 @@ describe("REPLAY DATA (fake tasks, no live call): retro 1, resending every reque
     });
   }, 30_000);
 
-  // PRODUCT BUG (not fixed here, M10 is test-only): saving again after the learner deleted evidence a claim cites
-  // changes the wrap-up input (that claim is no longer usable), so the memo key changes and a second, paid wrap-up
-  // call runs. Retro 1 classes 1 and 4: a retry must be answered from the first attempt's result.
-  test.failing("re-saving after the learner deleted cited evidence runs no further model task and adds no memo row", async () => {
+  test("re-saving after the learner deleted cited evidence runs no further wrap-up and adds no row to any table", async () => {
     const product = await plainRun();
     const del = deleteSlide(product);
     const save = product.sent.find((r) => r.name === "save")!;
     await withCopy(product, async (s, copy) => {
       expect((await call(s, del)).status).toBe(204);
       const calledBefore = product.fakes.callCounts();
-      const memoBefore = tableCounts(copy).memo;
-      expect(saveResponse.parse((await call(s, save)).json).kind).toBe("saved");
+      const before = tableCounts(copy);
+      const first = saveResponse.parse(product.replies.get("save")!.json);
+      const again = saveResponse.parse((await call(s, save)).json);
       await idle(s);
+      expect(product.fakes.callCounts().wrapUp).toBe(calledBefore.wrapUp);
       expect(product.fakes.callCounts()).toEqual(calledBefore);
-      expect(tableCounts(copy).memo).toBe(memoBefore);
+      expect(tableCounts(copy).memo).toBe(before.memo);
+      expect(tableCounts(copy)).toEqual(before);
+      expect(again).toEqual(first);
     });
   }, 30_000);
 });
