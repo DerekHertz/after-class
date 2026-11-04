@@ -29,7 +29,7 @@ import { ProviderError } from "../src/backend/providers/memo";
 import type { Task } from "../src/backend/providers/memo";
 import { SEGMENTATION_DEFAULTS } from "../src/backend/segmentation";
 import type { SegmentationConfig } from "../src/backend/segmentation";
-import { buildWindows } from "../src/backend/segmentation/core";
+import { buildWindows } from "../src/backend/segmentation";
 import type { BoundaryWindow, Evidence, Frame, Passage } from "../src/shared/domain";
 import { canonicalJson, stableId } from "../src/shared/ids";
 import type { CaptureId, EvidenceId, MemoKey, SourceId } from "../src/shared/ids";

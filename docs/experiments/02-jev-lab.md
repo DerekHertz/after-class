@@ -43,7 +43,7 @@ For each label file, the lab opens a scratch copy of the data dir's database (th
 - A boundary judgment is the pair of probabilities `p(new concept)` and `p(stopping point)` Jev returned. The lab stores the raw `p`, and maps it to yes, no or uncertain with `toVerdict`'s rule at the run's thresholds when it scores.
 - A failed judgment reads as uncertain, which routes to "continue" for a window and keeps a frame, as the product does.
 - A frame with no earlier frame in its source is kept without a call, as the product does.
-- The lab imports `buildWindows` and `planChunks` from `src/backend/segmentation/core.ts` directly from the script. `src/MODULES.md` says a `core.ts` is importable only by its own module and `test/`; `test/boundaries.test.ts` scans `src/` only, so it does not fail, but this is a stated exception, made so the lab measures the code the product runs and not a copy of it.
+- The lab imports `buildWindows` and `planChunks` through `src/backend/segmentation/index.ts`, which now re-exports them (and `src/MODULES.md` lists them as public). It does not import `core.ts`, so the lab measures the code the product runs and not a copy of it.
 
 Not scored and not claimed: the product's cross-clip behavior ("Video ends → do NOT close; the next clip's first window decides"). Each lecture is folded alone.
 

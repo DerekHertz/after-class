@@ -13,7 +13,7 @@ import type { CaptureId, EvidenceId, WindowId } from "../src/shared/ids";
 import { Material } from "../src/shared/time";
 import { THRESHOLDS } from "../src/backend/providers/jev-tasks";
 import type { SegmentationConfig } from "../src/backend/segmentation";
-import { planChunks } from "../src/backend/segmentation/core";
+import { planChunks } from "../src/backend/segmentation";
 
 export type Origin = "fixture" | "live";
 export type Phase = "tune" | "score";
