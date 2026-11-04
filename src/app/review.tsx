@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReviewId } from "../shared/ids";
 import type { AppApi } from "./api";
 import { createReviewController } from "./controller";
@@ -15,6 +15,7 @@ import { BundleInspector, ErrorNote, EvidencePane, Link, useAsync } from "./ui";
 export type ReviewDeps = { readonly api: AppApi; readonly speaker: Speaker; readonly speech: SpeechInput; readonly unsent: UnsentStore };
 
 export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewDeps & { readonly reviewId: ReviewId }) {
+  const history = useRef<HTMLDivElement>(null);
   const controller = useMemo(() => createReviewController({ api, reviewId, speaker, unsent }), [api, reviewId, speaker, unsent]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
   useEffect(() => {
@@ -45,21 +46,28 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const canRetry = !streaming && (state.unsent.length > 0 || unanswered !== null || state.live?.status === "failed");
 
   return (
-    <main className="review">
-      <header>
-        <h1>Review</h1>
-        <span className="muted">{view.state.phase}</span>
+    <main className="review" data-scene="last-desk">
+      <header className="review-header">
+        <div>
+          <p className="review-wordmark">After Class</p>
+          <h1>Review</h1>
+        </div>
+        <div className="review-navigation">
+          <span className="review-phase">{view.state.phase}</span>
+          <Link to={{ page: "record", reviewId: null }}>My notebook</Link>
+        </div>
       </header>
       <SaveBanner state={state} onRetry={() => void controller.save()} reviewId={reviewId} />
       <ErrorNote error={state.loadError} retry={() => void controller.load()} />
-      <div className="split">
-        <aside>
-          <h2>Source</h2>
-          <EvidencePane api={api} ids={evidenceIds} titles={titles} />
-          <ScopeEvidence api={api} view={view} titles={titles} />
-        </aside>
-        <section>
-          <h2>Conversation</h2>
+      <div className="review-workspace">
+        <section className="conversation-notebook" aria-labelledby="conversation-heading">
+          <div className="notebook-heading">
+            <h2 id="conversation-heading">Conversation</h2>
+            <button type="button" onClick={() => {
+              if (history.current) history.current.scrollTop = history.current.scrollHeight;
+            }}>Latest exchange</button>
+          </div>
+          <div ref={history} className="conversation-history" role="region" aria-label="Conversation history" tabIndex={0}>
           <ol className="lines">
             {lines.map((l) => <LineItem key={l.key} line={l} />)}
             {state.live && state.live.status !== "complete" && (
@@ -70,6 +78,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
               </li>
             )}
           </ol>
+          </div>
           {canRetry && (
             <UndeliveredNote
               unsent={state.unsent.length}
@@ -93,8 +102,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             send={(id, text, modality) => controller.send(toAct(id, text, modality))}
           />
           {view.observations.length > 0 && (
-            <div>
-              <h2>What the tutor observed</h2>
+            <details className="review-observations">
+              <summary>What the tutor observed</summary>
               <ul>
                 {view.observations.map((o) => {
                   const row = observationRow(o);
@@ -106,9 +115,17 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
                   );
                 })}
               </ul>
-            </div>
+            </details>
           )}
         </section>
+        <aside className="source-stand" aria-labelledby="source-heading">
+          <div className="source-heading">
+            <p className="eyebrow">From the lecture</p>
+            <h2 id="source-heading">Source evidence</h2>
+          </div>
+          <EvidencePane api={api} ids={evidenceIds} titles={titles} />
+          <ScopeEvidence api={api} view={view} titles={titles} />
+        </aside>
       </div>
     </main>
   );
@@ -191,7 +208,7 @@ function Actions({ ids, disabled, send }: { readonly ids: readonly ActionId[]; r
   );
 }
 
-function Composer({
+export function Composer({
   actions, disabled, sendError, speech, onSpeaking, send,
 }: {
   readonly actions: readonly ActionId[];
@@ -201,6 +218,7 @@ function Composer({
   readonly onSpeaking: () => void;
   readonly send: (id: ActionId, text: string, modality: "speech" | "text") => Promise<boolean>;
 }) {
+  const responseId = useId();
   const [draft, setDraft] = useState("");
   const [listening, setListening] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
@@ -243,10 +261,12 @@ function Composer({
       {sendError !== null && <p className="note note-error" role="alert">{sendError}</p>}
       {hasText && (
         <>
+          <label htmlFor={responseId}>Your response</label>
           <textarea
+            id={responseId}
             value={draft}
             rows={3}
-            placeholder="Speak or type your answer"
+            placeholder="Think it through, in your own words..."
             onChange={(e) => {
               modality.current = "text";
               setDraft(e.target.value);
@@ -264,8 +284,8 @@ function Composer({
       )}
       <div className="actions">
         {actions.map((id) => (
-          <button key={id} type="button" disabled={disabled || (NEEDS_TEXT.has(id) && empty)} onClick={() => void fire(id)}>
-            {ACTION_LABEL[id]}
+          <button key={id} type="button" className={id === "answer" ? "primary-action" : undefined} disabled={disabled || (NEEDS_TEXT.has(id) && empty)} onClick={() => void fire(id)}>
+            {id === "answer" ? "Share my thinking" : ACTION_LABEL[id]}
           </button>
         ))}
       </div>

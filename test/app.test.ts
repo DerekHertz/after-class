@@ -24,7 +24,7 @@ import {
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { StreamError, ndjson, tutorEvents } from "../src/app/ndjson";
 import { UsageTable } from "../src/app/record";
-import { SaveBanner, UndeliveredNote } from "../src/app/review";
+import { Composer, SaveBanner, UndeliveredNote } from "../src/app/review";
 import { createSpeechInput, createSynthSpeaker } from "../src/app/speech";
 import type { RecognitionLike, Speaker } from "../src/app/speech";
 import { BundleInspector, EvidencePane } from "../src/app/ui";
@@ -1065,5 +1065,35 @@ describe("review session controller", () => {
     expect(await h.unsent.forReview(reviewId)).toEqual([]);
     expect(h.controller.getState().unsent).toEqual([]);
     expect(h.controller.getState().sendError).toContain("8000");
+  });
+});
+
+
+describe("review composer", () => {
+  const composer = (actions: Parameters<typeof Composer>[0]["actions"], disabled = false) => renderToStaticMarkup(createElement(Composer, {
+    actions, disabled, sendError: null,
+    speech: { supported: false, start() {}, stop() {} },
+    onSpeaking() {}, send: async () => true,
+  }));
+
+  test("the answer field has a visible label and empty answers cannot be sent", () => {
+    const out = composer(["answer", "hint", "end"]);
+    const label = out.match(/<label for="([^"]+)">Your response<\/label>/);
+    expect(label).not.toBeNull();
+    expect(out).toContain(`id="${label![1]}"`);
+    expect(out).toMatch(/<button[^>]*disabled=""[^>]*>Share my thinking<\/button>/);
+    expect(out).toContain("Speech input is not available in this browser.");
+    expect(out).toContain(">End review</button>");
+  });
+
+  test("a pending turn disables every action and a phase without answering has no answer field", () => {
+    const pending = composer(["answer", "hint", "end"], true);
+    const buttons = pending.match(/<button[^>]*>/g) ?? [];
+    expect(buttons).toHaveLength(3);
+    expect(buttons.every((button) => button.includes('disabled=""'))).toBe(true);
+    const paused = composer(["resume", "end"]);
+    expect(paused).not.toContain("<textarea");
+    expect(paused).toContain(">Resume</button>");
+    expect(paused).toContain(">End review</button>");
   });
 });
