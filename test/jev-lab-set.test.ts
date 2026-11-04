@@ -13,8 +13,9 @@ import type { CaptureFact, CaptureFactBody } from "../src/shared/domain";
 import { randomId, stableId } from "../src/shared/ids";
 import type { CaptureId, MemoKey } from "../src/shared/ids";
 import { media } from "../src/shared/time";
-import { reportFromFile, runLab } from "../scripts/jev-lab";
+import { LabRefusal, describeSplit, draftLabelsSet, loadLabels, planLab, reportFromFile, runLab } from "../scripts/jev-lab";
 import type { RunOptions } from "../scripts/jev-lab";
+import { makeSplitter, matchPlaced, parseResults, validateLabels } from "../scripts/jev-lab-score";
 
 const cleanup: string[] = [];
 afterEach(() => {
@@ -254,5 +255,386 @@ describe("schema 1 label files score exactly as before Amendment 1", () => {
     writeFileSync(score.resultsPath, rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
     expect(readFileSync(score.resultsPath, "utf8")).not.toContain('"videoId":"bbbbbbbbbbb","purpose"');
     expect(reportFromFile(score.resultsPath, o.files).text).toBe(score.report.text);
+  });
+});
+
+// ───────────────────────────── the five-clip lecture ─────────────────────────────
+
+/** Watched seconds 184, 229, 403, 339 and 194: the shape of Derek's playlist. Every clip opens a topic, so every join is a new concept. */
+const FIVE: ClipSpec[] = [
+  { videoId: A, len: 184 },
+  { videoId: B, len: 229 },
+  { videoId: C, len: 403 },
+  { videoId: D, len: 339, frames: [{ id: "d50", at: 50, tag: 5 }, { id: "d120", at: 120, tag: 1 }, { id: "d130", at: 130, tag: 2 }, { id: "d200", at: 200, tag: 6 }] },
+  { videoId: E, len: 194, frames: [{ id: "e30", at: 30, tag: 3 }, { id: "e100", at: 100, tag: 2 }] },
+];
+const VIDEOS = FIVE.map((c) => ({ videoId: c.videoId, spanS: { start: 0, end: c.len } }));
+const at = (videoId: string, mediaS: number, extra: Record<string, unknown> = {}) => item(mediaS, { videoId, ...extra });
+
+const fiveLabels = (captureId: string, over: Record<string, unknown> = {}, videos: unknown = VIDEOS): Record<string, unknown> => ({
+  schemaVersion: 2, ...signed, lecture: { captureId, videos },
+  boundaries: [at(B, 0), at(C, 0), at(D, 0), at(E, 0)],
+  visualSteps: [at(D, 45), at(D, 118), at(E, 28), at(E, 150)],
+  duplicateGroups: [
+    { note: "", confirmed: true, frames: [{ videoId: D, mediaS: 120 }, { videoId: D, mediaS: 130 }] },
+    // Listed latest first: the original is the earliest in WATCH order (clip D at 200 s), not the smallest media time (clip E at 100 s).
+    { note: "", confirmed: true, frames: [{ videoId: E, mediaS: 100 }, { videoId: D, mediaS: 200, frameId: "d200" }] },
+  ],
+  ...over,
+});
+const five = (over: Record<string, unknown> = {}) => labRun(FIVE, (captureId, dir) => [writeLabels(dir, fiveLabels(captureId, over), "set.json")]);
+
+describe("the split of a set of clips", () => {
+  const clips = (...watched: number[]) => watched.map((w, i) => ({ videoId: `v${i + 1}`, spanS: { start: 0, end: w }, watchedS: w }));
+
+  test("five clips of 184, 229, 403, 339 and 194 s: the midpoint of 1349 s is 674.5 s, the nearest join is after the third clip", () => {
+    const sp = makeSplitter(clips(184, 229, 403, 339, 194));
+    // cumulative watched time at the four joins: 184, 413, 816, 1155; distances to 674.5: 490.5, 261.5, 141.5, 480.5
+    expect(sp.kind).toBe("join");
+    expect(sp.totalS).toBe(1349);
+    expect(sp.midpointS).toBe(674.5);
+    expect(sp.joinIndex).toBe(3);
+    expect([sp.beforeS, sp.afterS]).toEqual([816, 533]);
+    expect(sp.clipsIn("first").map((c) => c.videoId)).toEqual(["v1", "v2", "v3"]);
+    expect(sp.clipsIn("second").map((c) => c.videoId)).toEqual(["v4", "v5"]);
+  });
+
+  test("windows, labels and frames belong to the half of their clip, wherever they fall in it; no clip is cut", () => {
+    const sp = makeSplitter(clips(184, 229, 403, 339, 194));
+    expect(sp.halfOf("v3", 0)).toBe("first");
+    expect(sp.halfOf("v3", 402.9)).toBe("first");
+    expect(sp.halfOf("v4", 0)).toBe("second");
+    expect(sp.halfOf("v5", 193.9)).toBe("second");
+    expect(sp.halfOf("v5", 194)).toBeNull();
+    expect(sp.halfOf("nope", 0)).toBeNull();
+    expect(sp.rangeOf("v3", "first")).toEqual({ start: 0, end: 403 });
+    expect(sp.rangeOf("v3", "second")).toBeNull();
+  });
+
+  test("a tie between two joins goes to the earlier one", () => {
+    const sp = makeSplitter(clips(100, 100, 200, 200));
+    // joins at 100, 200 and 400 of 600; the midpoint 300 is 100 from the join at 200 and 100 from the join at 400
+    expect(sp.joinIndex).toBe(2);
+    expect(makeSplitter(clips(10, 90)).joinIndex).toBe(1);
+  });
+
+  test("two clips always split between them; one clip keeps the schema 1 midpoint of its span", () => {
+    expect(makeSplitter(clips(500, 5)).joinIndex).toBe(1);
+    const one = makeSplitter([{ videoId: "v", spanS: { start: 100, end: 400 }, watchedS: 123 }]);
+    expect(one.kind).toBe("midpoint");
+    expect(one.midpointS).toBe(250);
+    expect(one.halfOf("v", 249.9)).toBe("first");
+    expect(one.halfOf("v", 250)).toBe("second");
+    expect(one.rangeOf("v", "second")).toEqual({ start: 250, end: 400 });
+  });
+
+  test("split prints the real shape: clips, the join, and the boundary labels of each half; a set needs the capture to be split", () => {
+    const o = five();
+    const infos = loadLabels(o.files);
+    expect(() => describeSplit(infos)).toThrow("Pass --data <dir>");
+    const text = describeSplit(infos, o.dataDir).join("\n");
+    expect(text).toContain("5 clips in watch order, 1349 s watched");
+    expect(text).toContain("clip 3: ccccccccccc, span [0, 403), watched 403 s");
+    expect(text).toContain("split at the join before clip 4: the join nearest the watched-time midpoint 674.5 s, with 816 s watched before it and 533 s after");
+    expect(text).toContain("tune (first half, clips 1-3): 2 boundaries (2 at a clip start), 0 visual steps, 0 duplicates");
+    expect(text).toContain("held-out (second half, clips 4-5): 2 boundaries (2 at a clip start), 4 visual steps, 2 duplicates");
+  });
+});
+
+describe("a set of clips: validation", () => {
+  const errs = (x: unknown) => {
+    const r = validateLabels(x);
+    return r.ok ? [] : r.errors;
+  };
+  const draft = (over: Record<string, unknown> = {}) => ({
+    ...fiveLabels("cap_x", {}), status: "draft", signedOffBy: null, signedOffAt: null,
+    boundaries: [at(B, 0, { confirmed: false })], visualSteps: [at(D, 45, { confirmed: false })],
+    duplicateGroups: [{ note: "", confirmed: false, frames: [{ videoId: D, mediaS: 120 }, { videoId: D, mediaS: 130 }] }],
+    ...over,
+  });
+
+  test("a well-formed set is valid, signed off or draft", () => {
+    expect(errs(draft())).toEqual([]);
+    expect(errs(fiveLabels("cap_x"))).toEqual([]);
+  });
+
+  test("the videos are the clips of the lecture in watch order: non-empty, each once, each with a valid span", () => {
+    expect(errs(draft({ lecture: { captureId: "cap_x", videos: [] } })).join("\n")).toContain("lecture.videos: expected a non-empty array");
+    expect(errs(draft({ lecture: { captureId: "cap_x", videos: [VIDEOS[0], VIDEOS[0]] } })).join("\n")).toContain("lecture.videos[1].videoId: aaaaaaaaaaa is listed twice");
+    expect(errs(draft({ lecture: { captureId: "cap_x", videos: [{ videoId: A, spanS: { start: 5, end: 5 } }] } })).join("\n")).toContain("lecture.videos[0].spanS");
+    expect(errs(draft({ lecture: { captureId: "cap_x", videos: [{ videoId: A, spanS: { start: 0, end: 9 }, title: 3 }] } })).join("\n")).toContain("lecture.videos[0].title");
+  });
+
+  test("an item names its clip, the clip must be one of the lecture's, and the time must lie in THAT clip's span", () => {
+    expect(errs(draft({ boundaries: [item(5, { confirmed: false })] })).join("\n")).toContain("boundaries[0].videoId: expected the id of one of lecture.videos");
+    expect(errs(draft({ boundaries: [at("zzzzzzzzzzz", 5, { confirmed: false })] })).join("\n")).toContain("boundaries[0].videoId: zzzzzzzzzzz is not one of lecture.videos");
+    // 200 s is inside clip C (403 s) but outside clip A (184 s)
+    expect(errs(draft({ boundaries: [at(C, 200, { confirmed: false })] }))).toEqual([]);
+    expect(errs(draft({ boundaries: [at(A, 200, { confirmed: false })] })).join("\n")).toContain("boundaries[0].mediaS: 200 lies outside the span of video aaaaaaaaaaa [0, 184)");
+    expect(errs(draft({ visualSteps: [at(A, 184, { confirmed: false })] })).join("\n")).toContain("visualSteps[0].mediaS");
+  });
+
+  test("duplicate group frames carry a clip too; a group may span clips (PROPOSED); a group of one is an error", () => {
+    const group = (...frames: Record<string, unknown>[]) => draft({ duplicateGroups: [{ note: "", confirmed: false, frames }] });
+    expect(errs(group({ videoId: D, mediaS: 200 }, { videoId: E, mediaS: 100, frameId: "e100" }))).toEqual([]);
+    expect(errs(group({ videoId: D, mediaS: 200 })).join("\n")).toContain("duplicateGroups[0].frames: expected at least 2 frames");
+    expect(errs(group({ mediaS: 200 }, { videoId: E, mediaS: 100 })).join("\n")).toContain("duplicateGroups[0].frames[0].videoId");
+    expect(errs(group({ videoId: A, mediaS: 200 }, { videoId: E, mediaS: 100 })).join("\n")).toContain("duplicateGroups[0].frames[0].mediaS: 200 lies outside the span of video aaaaaaaaaaa");
+  });
+
+  test("the schemas do not mix: videoId and spanS in a schema 2 lecture, videos or an item videoId in schema 1, and misspellings are errors", () => {
+    expect(errs(draft({ lecture: { captureId: "cap_x", videoId: A, videos: VIDEOS } })).join("\n")).toContain("lecture.videoId: unknown field");
+    expect(errs(draft({ lecture: { captureId: "cap_x", videos: VIDEOS, spanS: { start: 0, end: 5 } } })).join("\n")).toContain("lecture.spanS: unknown field");
+    expect(errs({ ...draft(), schemaVersion: 1 }).join("\n")).toContain("lecture.videos: unknown field");
+    expect(errs(draft({ boundries: [] })).join("\n")).toContain("labels.boundries: unknown field");
+    expect(errs(draft({ boundaries: [at(B, 0, { confirmed: false, vidoeId: A })] })).join("\n")).toContain("boundaries[0].vidoeId: unknown field");
+  });
+
+  test("the sign-off rules are the same: a name, an ISO date, every item confirmed", () => {
+    expect(errs(fiveLabels("cap_x", { signedOffBy: "" })).join("\n")).toContain("signedOffBy");
+    expect(errs(fiveLabels("cap_x", { signedOffAt: "someday" })).join("\n")).toContain("signedOffAt");
+    expect(errs(fiveLabels("cap_x", { boundaries: [at(B, 0, { confirmed: false })] })).join("\n")).toContain("boundaries[0].confirmed: unconfirmed in a signed_off file");
+  });
+
+  test("a run refuses clips listed out of watch order, a video the capture never saw, two captures, and one clip in two lectures", () => {
+    const wrongOrder = labRun(FIVE, (captureId, dir) => [writeLabels(dir, fiveLabels(captureId, {}, [VIDEOS[1], VIDEOS[0], ...VIDEOS.slice(2)]), "set.json")]);
+    expect(() => planLab({ dataDir: wrongOrder.dataDir, labelFiles: wrongOrder.files })).toThrow("a set is listed in watch order");
+    const unseen = labRun(FIVE, (captureId, dir) => [writeLabels(dir, fiveLabels(captureId, {}, [...VIDEOS, { videoId: "zzzzzzzzzzz", spanS: { start: 0, end: 9 } }]), "set.json")]);
+    expect(() => planLab({ dataDir: unseen.dataDir, labelFiles: unseen.files })).toThrow("has no source for video zzzzzzzzzzz");
+
+    const dir = tmp("labels");
+    const one = writeLabels(dir, fiveLabels("cap_one"), "one.json");
+    const other = writeLabels(dir, { ...fiveLabels("cap_two"), lecture: { captureId: "cap_two", videos: [VIDEOS[0]] }, boundaries: [], visualSteps: [], duplicateGroups: [] }, "two.json");
+    expect(() => loadLabels([one, other])).toThrow("a run holds the lecture set of one capture");
+    const overlap = writeLabels(dir, { ...fiveLabels("cap_one"), lecture: { captureId: "cap_one", videos: [VIDEOS[0]] }, boundaries: [], visualSteps: [], duplicateGroups: [] }, "overlap.json");
+    expect(() => loadLabels([one, overlap])).toThrow("video aaaaaaaaaaa is in two label files");
+    expect(() => loadLabels([one, overlap])).toThrow(LabRefusal);
+  });
+});
+
+describe("matching inside a set", () => {
+  const P = (videoId: string, mediaS: number) => ({ videoId, mediaS });
+  const order = [A, B, C];
+
+  test("a detection never matches a label of another clip, however close the media seconds or the watch time", () => {
+    const m = matchPlaced([P(B, 0)], [P(A, 0)], order);
+    expect(m.pairs).toEqual([]);
+    expect(m.missedLabels).toEqual([P(B, 0)]);
+    expect(m.falseCloses).toEqual([P(A, 0)]);
+    // the last second of clip A is one watched second from the start of clip B, and still does not match it
+    expect(matchPlaced([P(B, 0)], [P(A, 183)], order).pairs).toEqual([]);
+  });
+
+  test("inside one clip it is the adopted rule: one to one, inclusive 60 s", () => {
+    expect(matchPlaced([P(B, 100)], [P(B, 160)], order).pairs).toEqual([[P(B, 100), P(B, 160)]]);
+    expect(matchPlaced([P(B, 100)], [P(B, 160.001)], order).pairs).toEqual([]);
+    const m = matchPlaced([P(B, 100)], [P(B, 90), P(B, 110)], order);
+    expect(m.pairs).toHaveLength(1);
+    expect(m.falseCloses).toHaveLength(1);
+  });
+
+  test("the same media second in different clips are different places: each clip matches on its own", () => {
+    const m = matchPlaced([P(A, 50), P(C, 50)], [P(C, 55), P(A, 45)], order);
+    expect(m.pairs).toEqual([[P(A, 50), P(A, 45)], [P(C, 50), P(C, 55)]]);
+    expect(m.falseCloses).toEqual([]);
+  });
+});
+
+describe("a run over the five clips", () => {
+  test("plan: the windows and calls by half, from the real windowing over the whole watch order, and where the split lands", () => {
+    const o = five();
+    const plan = planLab({ dataDir: o.dataDir, labelFiles: o.files });
+    const text = plan.lines.join("\n");
+    // 45 windows in all: 6 + 7 + 13 + 11 + 8 by clip (a window that spans a join belongs to the clip it ends in)
+    expect(plan.tuneRoundCalls).toBe(26);
+    expect(plan.scoreCalls).toBe(19 + 4);
+    expect(text).toContain("first half (clips 1-3) 26 windows + 0 frame calls; second half (clips 4-5) 19 windows + 4 frame calls");
+    expect(text).toContain("split at the join before clip 4 (watched 816 s before, 533 s after, midpoint of 1349 s is 674.5 s)");
+    expect(text).toContain("first half: 2 boundary labels (2 at a clip start), 0 in the half's first window");
+    expect(text).toContain("second half: 2 boundary labels (2 at a clip start), 1 in the half's first window and excluded from recall");
+    expect(text).toContain("49 of 800 budgeted: within budget");
+  });
+
+  test("tune: judges the clips before the split only; each join is detected where the next clip starts", async () => {
+    const o = five();
+    const client = scripted();
+    const run = await runLab({ ...o.base(client), phase: "tune" });
+    expect(run.newCalls).toBe(26);
+    const lastClip = (r: JevRequest<string>) => (r.state as { passage: { text: string }[] }).passage.at(-1)!.text.split(" ")[1];
+    expect(new Set(client.requests.map(lastClip))).toEqual(new Set([A, B, C]));
+    const text = run.report.text;
+    expect(text).toContain("5 clips in watch order, split at the join before clip 4 (watched 816 s before it and 533 s after; the midpoint of 1349 s is 674.5 s), tune clips 1-3, held-out clips 4-5, scored first half");
+    expect(text).toContain("Measured: 2/2 labeled boundaries detected within ±60s = 100%.");
+    expect(text).toContain("Measured: 0 false close(s) in 816 s watched = 0 per 15 min.");
+    expect(text).toContain("OVERALL (tuning round, not a result)");
+  });
+
+  test("score: judges the held-out clips only; the join that starts the half cannot be detected and is excluded, the other join is detected", async () => {
+    const o = five();
+    await runLab({ ...o.base(), phase: "tune" });
+    const client = scripted();
+    const run = await runLab({ ...o.base(client), phase: "score" });
+    expect(run.newCalls).toBe(23);
+    const lastClip = (r: JevRequest<string>) => (r.state as { passage?: { text: string }[] }).passage?.at(-1)?.text.split(" ")[1];
+    expect(new Set(client.requests.filter((r) => "new_concept" in r.questions).map(lastClip))).toEqual(new Set([D, E]));
+    const text = run.report.text;
+    expect(text).toContain("scored second half");
+    expect(text).toContain("Boundary recall: PASS");
+    expect(text).toContain("Measured: 1/1 labeled boundaries detected within ±60s = 100%.");
+    expect(text).toContain("1 label(s) at clip 4 0s lie in the first window of the second half, so no model could detect them (PROPOSED rule, Amendment 1); excluded from the denominator");
+    expect(text).toContain("Measured: 0 false close(s) in 533 s watched = 0 per 15 min.");
+    expect(text).toContain("1 Jev close(s), 0 false at none in 533 s watched");
+    // 2 of the 4 steps are lost in the SET (118 s in clip 4: its frame was dropped; 150 s in clip 5: no frame), one per clip: a per-clip count would pass
+    expect(text).toContain("Visual steps: FAIL");
+    expect(text).toContain("most lost in one lecture 2 (limit 1)");
+    expect(text).toContain("2/4 lost (clip 4 118s every candidate frame dropped; clip 5 150s no candidate frame)");
+    // the second group lists the later clip first; its original is the earlier clip's frame, so the duplicate is the clip 5 frame (dropped)
+    expect(text).toContain("Duplicates: PASS");
+    expect(text).toContain("Measured: 2/2 labeled duplicates dropped = 100%.");
+    expect(text).toContain("OVERALL: FAIL (failed: visual steps)");
+  });
+
+  test("a join label put on the last second of the PREVIOUS clip is not matched by the join detection: another clip, another place", async () => {
+    const o = five({ boundaries: [at(B, 0), at(C, 0), at(D, 0), at(D, 338)] });
+    await runLab({ ...o.base(), phase: "tune" });
+    const run = await runLab({ ...o.base(), phase: "score" });
+    expect(run.report.text).toContain("Measured: 0/1 labeled boundaries detected within ±60s = 0%.");
+    expect(run.report.text).toContain("missed at clip 4 338s");
+    expect(run.report.text).toContain("1 false at clip 5 0s");
+  });
+
+  test("a label in the first window of the FIRST clip is excluded in the tune half too, with its reason", async () => {
+    const o = five({ boundaries: [at(A, 5), at(B, 0), at(C, 0), at(D, 0), at(E, 0)] });
+    const run = await runLab({ ...o.base(), phase: "tune" });
+    expect(run.report.text).toContain("1 label(s) at clip 1 5s lie in the first window of the first half");
+    expect(run.report.text).toContain("Measured: 2/2 labeled boundaries");
+  });
+
+  test("a half with no detectable labeled boundary is left out of the false-close measure and listed", async () => {
+    const o = five({ boundaries: [at(D, 0)] });
+    await runLab({ ...o.base(), phase: "tune" });
+    const run = await runLab({ ...o.base(), phase: "score" });
+    expect(run.report.text).toContain("Boundary recall: NOT MEASURED");
+    expect(run.report.text).toContain("False closes: NOT MEASURED");
+  });
+
+  test("rescore from the stored file reproduces the report byte for byte; judgments and windows record their clip", async () => {
+    const o = five();
+    await runLab({ ...o.base(), phase: "tune" });
+    const run = await runLab({ ...o.base(), phase: "score" });
+    expect(reportFromFile(run.resultsPath, o.files).text).toBe(readFileSync(run.reportPath, "utf8"));
+    expect(reportFromFile(run.resultsPath, o.files).text).toBe(run.report.text);
+    const results = parseResults(readFileSync(run.resultsPath, "utf8"));
+    expect(results.lectures).toHaveLength(1);
+    const lecture = results.lectures[0]!;
+    expect("clips" in lecture && lecture.clips.map((c) => c.videoId)).toEqual([A, B, C, D, E]);
+    expect(new Set(lecture.windows.map((w) => w.videoId))).toEqual(new Set([D, E]));
+    expect(new Set(results.judgments.map((j) => j.videoId))).toEqual(new Set([D, E]));
+    expect(results.judgments.filter((j) => j.purpose === "frame_change").map((j) => j.videoId).sort()).toEqual([D, D, D, E]);
+    writeFileSync(o.files[0]!, readFileSync(o.files[0]!, "utf8").replace('"mediaS": 118', '"mediaS": 119'));
+    expect(() => reportFromFile(run.resultsPath, o.files)).toThrow("has changed since the run");
+  });
+
+  test("it never writes the data dir", async () => {
+    const o = five();
+    const before = new Bun.CryptoHasher("sha256").update(readFileSync(join(o.dataDir, "afterclass.sqlite"))).digest("hex");
+    await runLab({ ...o.base(), phase: "tune" });
+    expect(new Bun.CryptoHasher("sha256").update(readFileSync(join(o.dataDir, "afterclass.sqlite"))).digest("hex")).toBe(before);
+  });
+});
+
+describe("a lecture of one clip keeps the schema 1 rules", () => {
+  test("a schema 2 file with one video scores exactly like the same labels in schema 1", async () => {
+    const clip: ClipSpec[] = [{ videoId: A, len: 360, topics: [120, 240], opening: false, frames: [{ id: "a95", at: 95, tag: 5 }, { id: "a205", at: 205, tag: 1 }, { id: "a215", at: 215, tag: 2 }] }];
+    const body = { ...signed, boundaries: [item(120), item(181), item(240)], visualSteps: [item(200)], duplicateGroups: [{ note: "", confirmed: true, frames: [{ mediaS: 205 }, { mediaS: 215 }] }] };
+    const tag = (rows: Record<string, unknown>[], extra: Record<string, unknown>) => rows.map((r) => ({ ...r, ...extra }));
+    const v1 = labRun(clip, (captureId, dir) => [writeLabels(dir, { schemaVersion: 1, ...body, lecture: { captureId, videoId: A, spanS: { start: 0, end: 360 } } }, "l.json")]);
+    const v2 = labRun(clip, (captureId, dir) => [writeLabels(dir, {
+      schemaVersion: 2, ...body, lecture: { captureId, videos: [{ videoId: A, spanS: { start: 0, end: 360 } }] },
+      boundaries: tag(body.boundaries, { videoId: A }), visualSteps: tag(body.visualSteps, { videoId: A }),
+      duplicateGroups: [{ note: "", confirmed: true, frames: [{ videoId: A, mediaS: 205 }, { videoId: A, mediaS: 215 }] }],
+    }, "l.json")]);
+    const reports: string[] = [];
+    for (const o of [v1, v2]) {
+      await runLab({ ...o.base(), phase: "tune" });
+      reports.push(normalize((await runLab({ ...o.base(), phase: "score" })).report.text));
+    }
+    expect(reports[1]).toBe(reports[0]);
+    expect(reports[0]).toContain("split at 180, scored second half");
+    expect(reports[0]).not.toContain("no model could detect");
+    expect(reports[0]).toContain("Measured: 1/2 labeled boundaries"); // 181 and 240 against the one close at 240: the schema 1 sweep, unchanged
+  });
+});
+
+describe("draft-labels-set", () => {
+  const DRAFT_CLIPS: ClipSpec[] = [
+    { videoId: A, len: 120, frames: [{ id: "g1", at: 5, tag: 1 }, { id: "g2", at: 60, tag: 2, pad: 40 }] },
+    { videoId: B, len: 90, frames: [{ id: "h1", at: 5, tag: 1 }, { id: "h2", at: 50, tag: 3, pad: 90 }] },
+    { videoId: C, len: 60 },
+  ];
+
+  test("one draft for the capture: clips in watch order, a join candidate at the start of every later clip, nothing else inside a clip", () => {
+    const { dir, captureId } = makeCapture(DRAFT_CLIPS);
+    const out = join(tmp("draft"), "set-draft.json");
+    const done = draftLabelsSet({ dataDir: dir, captureId, outPath: out });
+    const draft = JSON.parse(readFileSync(out, "utf8")) as Record<string, any>;
+    expect(validateLabels(draft).ok).toBe(true);
+    expect(draft.schemaVersion).toBe(2);
+    expect(draft.status).toBe("draft");
+    expect(draft.signedOffBy).toBeNull();
+    expect(draft.draftNote).toContain("not truth");
+    expect(draft.lecture.captureId).toBe(captureId);
+    expect(draft.lecture.videos).toEqual([
+      { videoId: A, title: "Clip a", spanS: { start: 0, end: 120 } },
+      { videoId: B, title: "Clip b", spanS: { start: 0, end: 90 } },
+      { videoId: C, title: "Clip c", spanS: { start: 0, end: 60 } },
+    ]);
+    expect(draft.boundaries).toEqual([
+      { videoId: B, mediaS: 0, note: "candidate clip join", confirmed: false, cue: "start of clip 2: the product treats the next clip's first window as the decision point" },
+      { videoId: C, mediaS: 0, note: "candidate clip join", confirmed: false, cue: "start of clip 3: the product treats the next clip's first window as the decision point" },
+    ]);
+    expect(done.notes.join(" ")).toContain("all unconfirmed");
+  });
+
+  test("visual step candidates are per clip, with the slide-change rule; byte-identical frames group, across clips too; every item is unconfirmed", () => {
+    const { dir, captureId } = makeCapture(DRAFT_CLIPS);
+    const out = join(tmp("draft"), "set-draft.json");
+    draftLabelsSet({ dataDir: dir, captureId, outPath: out });
+    const draft = JSON.parse(readFileSync(out, "utf8")) as Record<string, any>;
+    // h1 is much smaller than g2, but frames are compared with the previous frame of their OWN clip, so h1 is not a step
+    expect(draft.visualSteps.map((s: { videoId: string; mediaS: number }) => [s.videoId, s.mediaS])).toEqual([[A, 60], [B, 50]]);
+    for (const s of draft.visualSteps) {
+      expect(s.cue).toContain("a suggestion only");
+      expect(s.cue).toContain("A visual step is when the actual slide content changes");
+    }
+    expect(draft.duplicateGroups).toHaveLength(1);
+    expect(draft.duplicateGroups[0].frames.map((f: { videoId: string; mediaS: number }) => [f.videoId, f.mediaS])).toEqual([[A, 5], [B, 5]]);
+    expect(draft.draftNote).toContain("A visual step is when the actual slide content changes");
+    const items = [...draft.boundaries, ...draft.visualSteps, ...draft.duplicateGroups];
+    expect(items.every((i: { confirmed: boolean }) => i.confirmed === false)).toBe(true);
+  });
+
+  test("deterministic, and never overwrites a label file without --force", () => {
+    const { dir, captureId } = makeCapture(DRAFT_CLIPS);
+    const a = join(tmp("draft"), "a.json");
+    const b = join(tmp("draft"), "b.json");
+    draftLabelsSet({ dataDir: dir, captureId, outPath: a });
+    draftLabelsSet({ dataDir: dir, captureId, outPath: b });
+    expect(readFileSync(a, "utf8")).toBe(readFileSync(b, "utf8"));
+    writeFileSync(a, "Derek's work");
+    expect(() => draftLabelsSet({ dataDir: dir, captureId, outPath: a })).toThrow("not overwritten");
+    expect(readFileSync(a, "utf8")).toBe("Derek's work");
+    draftLabelsSet({ dataDir: dir, captureId, outPath: a, force: true });
+    expect(readFileSync(a, "utf8")).toBe(readFileSync(b, "utf8"));
+  });
+
+  test("a drafted set cannot be run signed off until every item is confirmed, and it loads for split", () => {
+    const { dir, captureId } = makeCapture(DRAFT_CLIPS);
+    const out = join(tmp("draft"), "set-draft.json");
+    draftLabelsSet({ dataDir: dir, captureId, outPath: out });
+    const draft = JSON.parse(readFileSync(out, "utf8")) as Record<string, unknown>;
+    const r = validateLabels({ ...draft, status: "signed_off", signedOffBy: "x", signedOffAt: "2026-11-05" });
+    expect(r.ok ? [] : r.errors.join("\n")).toContain("unconfirmed in a signed_off file");
+    expect(describeSplit(loadLabels([out]), dir).join("\n")).toContain("3 clips in watch order, 270 s watched");
   });
 });
