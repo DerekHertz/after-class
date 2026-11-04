@@ -43,7 +43,7 @@ export type Segmentation = {
   /**
    * Derive the plan, append changed chunk revisions, return:
    *  - closed: revisions newly appended this call (invites and preparation react to these)
-   *  - demand: windows needing a Jev judgment (memo missing), in watch order
+   *  - demand: windows needing a Jev judgment (memo missing or in flight), in watch order. In flight stays demanded: the scheduler aborts a running call that is not.
    */
   sync(captureId: CaptureId): { readonly closed: readonly ChunkRevision[]; readonly demand: readonly BoundaryInput[] };
   current(captureId: CaptureId): readonly ChunkRevision[];
@@ -123,7 +123,7 @@ export function createSegmentation(db: Db, deps: {
         for (const r of closed) {
           insert.run(r.id, r.chunkId, r.captureId, r.ordinal, r.revisionNo, JSON.stringify(Material.canonical(r.material)), JSON.stringify(r.windows), r.provenance, r.closedAtSeq, r.supersedes);
         }
-        return { closed, demand: looked.filter((l) => l.lookup.kind === "missing").map((l) => l.input) };
+        return { closed, demand: looked.filter((l) => l.lookup.kind === "missing" || l.lookup.kind === "inflight").map((l) => l.input) };
       });
     },
 
