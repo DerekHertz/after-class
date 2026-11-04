@@ -93,6 +93,46 @@ describe("R13: skipped or unanswered is not_assessed", () => {
   });
 });
 
+describe("an answer given during an active detour is not evidence for the main thread", () => {
+  const proposal: TutorMove = { kind: "propose_detour", topic: "row picture", reason: "seems unsure about rows", needsResource: null };
+  const inDetour = () => log().tutor(ask(T1, 1)).tutor(proposal).learner({ kind: "detour_accept" }, null).tutor({ kind: "detour_step" });
+
+  test("R13: a threadless detour answer does not lift an unanswered main question out of not_assessed", () => {
+    const l = inDetour().learner(answer("a row is horizontal"), null);
+    expect(facts(l).firstSubstantiveAnswerSeq).toBeNull();
+    expect(clamp(l, "independent")).toBe("not_assessed");
+  });
+
+  test("R13: a main question skipped before the detour stays not_assessed whatever is said in it", () => {
+    const l = log().tutor(ask(T1, 1)).learner({ kind: "skip" }, T1).tutor(proposal).learner({ kind: "detour_accept" }, null).tutor({ kind: "detour_step" }).learner(answer("a row is horizontal"), null);
+    expect(facts(l).endedBySkip).toBe(true);
+    expect(clamp(l, "independent")).toBe("not_assessed");
+  });
+
+  test("R12: a detour answer after tutor help does not turn into the independent answer", () => {
+    const l = log().tutor(ask(T1, 1)).tutor({ kind: "hint", threadId: T1 }).tutor(proposal).learner({ kind: "detour_accept" }, null).tutor({ kind: "detour_step" }).learner(answer("rows"), null);
+    expect(facts(l).firstSubstantiveAnswerSeq).toBeNull();
+  });
+
+  test("a dispute during the detour still counts against the open main thread", () => {
+    const l = inDetour().learner({ kind: "dispute", text: "the board said columns" }, null);
+    expect(threadDispute(T1, l.turns)).toEqual({ kind: "open", turnId: stableId("turn", 5) });
+  });
+
+  test("an answer after the detour ends is credited to the main thread again", () => {
+    const l = inDetour().learner(answer("detour answer"), null).tutor({ kind: "ask_followup", threadId: T1 }).learner(answer("rows meet"), null);
+    expect(facts(l).firstSubstantiveAnswerSeq).toBe(testSeq(7));
+    expect(clamp(l, "independent")).toBe("independent");
+  });
+
+  test("a proposed or declined detour does not stop the answer being credited", () => {
+    const proposed = log().tutor(ask(T1, 1)).tutor(proposal).learner(answer("rows meet"), null);
+    const declined = log().tutor(ask(T1, 1)).tutor(proposal).learner({ kind: "detour_decline" }, null).learner(answer("rows meet"), null);
+    expect(clamp(proposed, "independent")).toBe("independent");
+    expect(clamp(declined, "independent")).toBe("independent");
+  });
+});
+
 describe("R14: a disputed assessment is never a learning gap unless the learner resolves it so", () => {
   const disputed = () => log().tutor(ask(T1, 1)).learner(answer("x"), T1).learner({ kind: "dispute", text: "the board said columns" }, T1);
 

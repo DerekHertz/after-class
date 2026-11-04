@@ -25,14 +25,9 @@ import { ProviderError } from "../providers/memo";
 import type { Task } from "../providers/memo";
 import type { ClaudeCli, ClaudeRequest } from "../providers/claude";
 import { attributeTurns, moveThreads } from "./clamp";
+import { detourTracker } from "./detour";
 
 export const MAX_MAIN_QUESTIONS = 3;
-
-/** Tutor moves that bring an active detour back to the lecture. */
-const RETURNS_TO_LECTURE: ReadonlySet<TutorMoveKind> = new Set(["ask_main", "ask_followup", "diagnose", "close_thread", "wrap_up"]);
-
-/** Learner acts that leave a proposed detour standing. Any other act declines it. */
-const KEEPS_PROPOSAL: ReadonlySet<LearnerActKind> = new Set(["pause", "resume", "detour_accept", "detour_decline", "detour_wait", "detour_continue_without_resource"]);
 
 /** A learner request the next tutor move must answer, whatever else is going on. */
 const FORCED_RESPONSE: Partial<Record<LearnerActKind, TutorMoveKind>> = {
@@ -61,12 +56,10 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
   let mainQuestions = 0;
   let openThread: ThreadId | null = null;
   let lastLearnerAct: Extract<Turn, { actor: "learner" }> | null = null;
-  let detour: DetourState = { kind: "none" };
-  let acceptedTurnId: TurnId | null = null;
+  const detours = detourTracker();
   let openDispute: ThreadId | null = null;
   let softTargetOffered = false;
   let wrapUpRequested = false;
-  const readyResources = new Set<ResourceId>();
   const disclosed = new Set<string>();
   const sorted = attributeTurns(turns);
   let activeMs = 0;
@@ -80,7 +73,6 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
     if (t.actor === "learner") {
       lastLearnerAct = t;
       const act = t.act;
-      if (detour.kind === "proposed" && !KEEPS_PROPOSAL.has(act.kind)) detour = { kind: "none" };
       switch (act.kind) {
         case "pause":
           if (phase === "active") {
@@ -104,28 +96,12 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
         case "dispute":
           openDispute = t.threadId;
           break;
-        case "detour_accept":
-          if (detour.kind === "proposed") {
-            acceptedTurnId = t.id;
-            const needs: ResourceId | null = detour.needsResource;
-            detour = needs !== null && !readyResources.has(needs)
-              ? { kind: "awaiting_resource", resourceId: needs, topic: detour.topic }
-              : { kind: "active", topic: detour.topic, acceptedTurnId: t.id };
-          }
-          break;
-        case "detour_decline":
-          if (detour.kind === "proposed") detour = { kind: "none" };
-          break;
-        case "detour_continue_without_resource":
-          if (detour.kind === "awaiting_resource" && acceptedTurnId !== null) detour = { kind: "active", topic: detour.topic, acceptedTurnId };
-          break;
         default:
           break;
       }
     } else if (t.actor === "tutor") {
       lastLearnerAct = null;
       const move = t.move;
-      if (detour.kind === "active" && RETURNS_TO_LECTURE.has(move.kind)) detour = { kind: "none" };
       switch (move.kind) {
         case "ask_main":
           mainQuestions += 1;
@@ -133,9 +109,6 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
           break;
         case "close_thread":
           if (openThread === move.threadId) openThread = null;
-          break;
-        case "propose_detour":
-          detour = { kind: "proposed", turnId: t.id, topic: move.topic, needsResource: move.needsResource };
           break;
         case "answer_dispute":
           if (openDispute === move.threadId) openDispute = null;
@@ -150,16 +123,10 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
         default:
           break;
       }
-    } else {
-      const notice = t.notice;
-      if (notice.kind === "soft_target_reached") softTargetOffered = true;
-      if (notice.kind === "resource_ready") {
-        readyResources.add(notice.resourceId);
-        if (detour.kind === "awaiting_resource" && detour.resourceId === notice.resourceId && acceptedTurnId !== null) {
-          detour = { kind: "active", topic: detour.topic, acceptedTurnId };
-        }
-      }
+    } else if (t.notice.kind === "soft_target_reached") {
+      softTargetOffered = true;
     }
+    detours.step(t);
   }
   if (activeSince !== null) activeMs += Math.max(0, nowMs - activeSince);
 
@@ -169,7 +136,7 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
     mainQuestions,
     openThread,
     lastLearnerAct,
-    detour,
+    detour: detours.state,
     openDispute,
     corrections: corrections.map((c) => (c.disclosed || !disclosed.has(c.id) ? c : { ...c, disclosed: true })),
     activeSeconds: activeMs / 1000,
