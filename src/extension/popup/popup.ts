@@ -7,7 +7,7 @@
  * `describePopup` is the pure view model (unit-tested); `renderPopup` only draws it.
  */
 import type { CaptureView, InviteAnswer, InviteState } from "../../shared/domain";
-import { isWatchUrl } from "../worker/control";
+import { isWatchUrl, safeReviewUrl } from "../worker/control";
 import type { PopupRequest, TabCaptureState } from "../worker/service-worker";
 
 export type PopupAction = "start" | "pause" | "resume" | "stop";
@@ -28,6 +28,8 @@ export type PopupView = {
   /** Review now is always first; Later, Wait and Stop early join it while an invite is invited or waiting. */
   readonly inviteAnswers: readonly InviteAnswer[];
   readonly retries: readonly PopupRetry[];
+  /** The capture's screen in the review app, or null before the backend has acknowledged a capture. */
+  readonly reviewUrl: string | null;
   readonly problem: string | null;
   /** Facts the backend refused and the outbox set aside; each is a logged gap, shown so it is never silent. */
   readonly deadLetters: string | null;
@@ -40,6 +42,22 @@ const CAPTION_TEXT: Readonly<Record<CaptureView["transcript"], string>> = {
   asr_running: "Transcribing (opt-in)",
   unknown: "Checking captions",
 };
+
+const REVIEW_ORIGIN = "http://127.0.0.1:4317";
+
+/** The backend's reviewAppUrl when it is this capture's screen on the local backend, else the same address built from the capture id. */
+function reviewLink(ack: TabCaptureState["lastAck"]): string | null {
+  const captureId = ack?.capture?.captureId;
+  if (!captureId) return null;
+  const path = `/app/capture/${captureId}`;
+  const fallback = `${REVIEW_ORIGIN}${path}`;
+  const url = safeReviewUrl(ack.reviewAppUrl, fallback);
+  try {
+    return new URL(url).pathname === path ? url : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 function formatSeconds(s: number): string {
   const m = Math.floor(s / 60);
@@ -105,6 +123,7 @@ export function describePopup(state: TabCaptureState | null, tab: { readonly url
     invite,
     inviteAnswers,
     retries,
+    reviewUrl: reviewLink(state?.lastAck ?? null),
     problem,
     deadLetters,
   };
@@ -127,7 +146,15 @@ const ANSWER_LABEL: Readonly<Record<InviteAnswer, string>> = { review_now: "Revi
 const RETRY_LABEL: Readonly<Record<PopupRetry, string>> = { start: "Retry start", observe: "Retry frames and playback", transcript: "Retry captions" };
 const POLL_MS = 1500;
 
-export function renderPopup(root: HTMLElement, send: (req: PopupRequest) => Promise<TabCaptureState | null>, tab: { readonly id: number; readonly url: string | undefined }): () => void {
+/** A plain link from this page reaches the backend as a cross-site navigation and is refused, so the tab is opened with the tabs API, as the worker does for Review now. */
+const openInTab = (url: string): void => void chrome.tabs.create({ url });
+
+export function renderPopup(
+  root: HTMLElement,
+  send: (req: PopupRequest) => Promise<TabCaptureState | null>,
+  tab: { readonly id: number; readonly url: string | undefined },
+  openTab: (url: string) => void = openInTab,
+): () => void {
   let state: TabCaptureState | null = null;
   let error: string | null = null;
   let busy = false;
@@ -199,6 +226,7 @@ export function renderPopup(root: HTMLElement, send: (req: PopupRequest) => Prom
         : null,
       invite,
       v.invite.state === "invited" ? null : inviteButtons(),
+      v.reviewUrl === null ? null : h("button", { text: "Open the review page", onclick: () => openTab(v.reviewUrl!) }),
       retryButtons,
       v.problem ? h("div", { class: "error", text: v.problem }) : null,
       v.deadLetters ? h("div", { class: "error", text: v.deadLetters }) : null,

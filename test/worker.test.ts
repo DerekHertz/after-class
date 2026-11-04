@@ -480,6 +480,17 @@ describe("popup view", () => {
     expect(v.watched).toBe("2 min 5 s");
   });
 
+  test("the review link is the capture screen, the backend's reviewAppUrl when it is that, otherwise built from the capture id", () => {
+    const url = (ack: Partial<IngestAck>) => describePopup({ ...withAck(state(), {}), lastAck: { ...withAck(state(), {}).lastAck!, ...ack } }, watch).reviewUrl;
+    const mine = `http://127.0.0.1:4317/app/capture/${CAP}`;
+    expect(url({ reviewAppUrl: mine })).toBe(mine);
+    expect(url({ reviewAppUrl: `http://localhost:4317/app/capture/${CAP}` })).toBe(`http://localhost:4317/app/capture/${CAP}`);
+    expect(url({ reviewAppUrl: "http://127.0.0.1:4317/app/" })).toBe(mine);
+    expect(url({ reviewAppUrl: "https://evil.example/app/capture/" + CAP })).toBe(mine);
+    expect(url({ reviewAppUrl: "http://127.0.0.1:4317/app/capture/cap_other" })).toBe(mine);
+    expect(describePopup(null, watch).reviewUrl).toBeNull();
+  });
+
   test("unusable captions offer the opt-in transcription choice", () => {
     expect(describePopup(withAck(state(), { transcript: "unavailable_offer_asr" }), watch).offerTranscription).toBe(true);
     expect(describePopup(withAck(state(), { transcript: "available" }), watch).offerTranscription).toBe(false);

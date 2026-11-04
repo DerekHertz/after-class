@@ -31,6 +31,8 @@ export type SessionState = {
   readonly loadError: string | null;
   readonly live: Live | null;
   readonly unsent: readonly UnsentTurn[];
+  /** The browser would not keep unsent turns (IndexedDB missing, blocked or failing): they live in this page only. */
+  readonly storageDegraded: boolean;
   /** Why the last `send` was refused, or null. */
   readonly sendError: string | null;
   readonly saving: boolean;
@@ -47,6 +49,11 @@ export type ReviewController = {
   send(act: LearnerAct): Promise<boolean>;
   /** Resend the oldest unsent turn, or the stored turn the tutor never answered. Same id as before. */
   retryTurn(): Promise<void>;
+  /**
+   * Drop every unsent turn and the failure it left. The backend never stored them, so nothing is counted for them
+   * (R13: "A skipped or unanswered question is never counted as understood.").
+   */
+  discardUnsent(): Promise<void>;
   save(): Promise<void>;
   /** The learner started speaking: the tutor goes quiet. */
   learnerSpeaking(): void;
@@ -67,7 +74,7 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
   const { api, reviewId, speaker, unsent } = deps;
   const mint = deps.mintTurnId ?? (() => randomId("turn"));
   const now = deps.nowMs ?? Date.now;
-  let state: SessionState = { view: null, loadError: null, live: null, unsent: [], sendError: null, saving: false, saveError: null, savedSummary: null };
+  let state: SessionState = { view: null, loadError: null, live: null, unsent: [], storageDegraded: false, sendError: null, saving: false, saveError: null, savedSummary: null };
   const listeners = new Set<() => void>();
   let streaming = false;
 
@@ -86,7 +93,8 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
   }
 
   async function refreshUnsent(): Promise<void> {
-    set({ unsent: await unsent.forReview(reviewId) });
+    const turns = await unsent.forReview(reviewId);
+    set({ unsent: turns, storageDegraded: unsent.degraded });
   }
 
   /** One turn at a time, claimed before the first await so a double click cannot start two. */
@@ -180,6 +188,13 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
         const waiting = state.view ? unansweredLearnerTurn(state.view.turns) : null;
         if (waiting) return runTurn(waiting.id, waiting.act);
       }),
+    discardUnsent: async () => {
+      await exclusive(async () => {
+        for (const t of await unsent.forReview(reviewId)) await unsent.remove(t.turnId);
+        set({ live: state.live?.status === "failed" ? null : state.live, sendError: null });
+        await refreshUnsent();
+      });
+    },
     save,
     learnerSpeaking: () => speaker.stop(),
   };

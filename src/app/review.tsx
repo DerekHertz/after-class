@@ -71,14 +71,12 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             )}
           </ol>
           {canRetry && (
-            <p className="note">
-              {state.unsent.length > 0
-                ? "Your last message was not delivered."
-                : state.live?.status === "failed"
-                  ? "The tutor's reply did not finish."
-                  : "The tutor has not replied to your last message."}{" "}
-              <button type="button" onClick={() => void controller.retryTurn()}>Retry</button>
-            </p>
+            <UndeliveredNote
+              unsent={state.unsent.length}
+              failed={state.live?.status === "failed"}
+              onRetry={() => void controller.retryTurn()}
+              onDiscard={() => void controller.discardUnsent()}
+            />
           )}
           {soft && (
             <div className="note">
@@ -116,6 +114,22 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   );
 }
 
+/** Discard is the way out of a message the backend refuses for good; End is offered again once it is gone. */
+export function UndeliveredNote({ unsent, failed, onRetry, onDiscard }: { readonly unsent: number; readonly failed: boolean; readonly onRetry: () => void; readonly onDiscard: () => void }) {
+  return (
+    <p className="note">
+      {unsent > 0 ? "Your last message was not delivered." : failed ? "The tutor's reply did not finish." : "The tutor has not replied to your last message."}{" "}
+      <button type="button" onClick={onRetry}>Retry</button>
+      {unsent > 0 && (
+        <>
+          {" "}
+          <button type="button" onClick={onDiscard}>Discard message</button> <span className="muted">Drops it. It is not counted as an answer.</span>
+        </>
+      )}
+    </p>
+  );
+}
+
 function LineItem({ line }: { readonly line: Line }) {
   return (
     <li className={`line ${line.speaker}`}>
@@ -125,24 +139,29 @@ function LineItem({ line }: { readonly line: Line }) {
   );
 }
 
-function SaveBanner({ state, onRetry, reviewId }: { readonly state: SessionState; readonly onRetry: () => void; readonly reviewId: ReviewId }) {
+export function SaveBanner({ state, onRetry, reviewId }: { readonly state: SessionState; readonly onRetry: () => void; readonly reviewId: ReviewId }) {
   const pending = state.saveError !== null || state.view?.saved === "save_pending";
-  if (pending) {
-    return (
-      <p className="note note-error" role="alert">
-        This review is not saved yet{state.saveError ? `: ${state.saveError}` : ""}. Your turns are kept on this computer. Retrying never makes a duplicate.{" "}
-        <button type="button" disabled={state.saving} onClick={onRetry}>{state.saving ? "Saving..." : "Retry save"}</button>
-      </p>
-    );
-  }
-  if (state.view?.saved === "saved") {
-    return (
-      <p className="note">
-        Saved. <Link to={{ page: "record", reviewId }}>Open the record</Link>
-      </p>
-    );
-  }
-  return null;
+  return (
+    <>
+      {state.storageDegraded && (
+        <p className="note note-error" role="alert">
+          This browser is not keeping your unsent messages (local storage is unavailable). If you reload or close this page, a message that has not been delivered is lost.
+        </p>
+      )}
+      {pending ? (
+        <p className="note note-error" role="alert">
+          This review is not saved yet{state.saveError ? `: ${state.saveError}` : ""}. Retrying never makes a duplicate.{" "}
+          <button type="button" disabled={state.saving} onClick={onRetry}>{state.saving ? "Saving..." : "Retry save"}</button>
+        </p>
+      ) : (
+        state.view?.saved === "saved" && (
+          <p className="note">
+            Saved. <Link to={{ page: "record", reviewId }}>Open the record</Link>
+          </p>
+        )
+      )}
+    </>
+  );
 }
 
 function ScopeEvidence({ api, view, titles }: { readonly api: AppApi; readonly view: NonNullable<SessionState["view"]>; readonly titles: ReturnType<typeof sourceTitles> }) {

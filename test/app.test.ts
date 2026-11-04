@@ -13,9 +13,10 @@ import type { ReviewId, TurnId } from "../src/shared/ids";
 import { Material, interval } from "../src/shared/time";
 import { ApiError, createApi, evidenceParams } from "../src/app/api";
 import type { Api } from "../src/app/api";
-import { OptionsView } from "../src/app/capture";
+import { OptionsView, checkAgain } from "../src/app/capture";
 import type { AppApi } from "../src/app/api";
 import { createReviewController } from "../src/app/controller";
+import type { SessionState } from "../src/app/controller";
 import {
   availableActions, conversationLines, currentEvidenceIds, estimateText, formatClock, inspectBundle, liveText, noteView, observationRow,
   optionsScreen, parseRoute, reduceLive, routePath, softTargetPrompt, startLive, toAct, unansweredLearnerTurn, usageRows,
@@ -23,6 +24,7 @@ import {
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { StreamError, ndjson, tutorEvents } from "../src/app/ndjson";
 import { UsageTable } from "../src/app/record";
+import { SaveBanner, UndeliveredNote } from "../src/app/review";
 import { createSpeechInput, createSynthSpeaker } from "../src/app/speech";
 import type { RecognitionLike, Speaker } from "../src/app/speech";
 import { BundleInspector, EvidencePane } from "../src/app/ui";
@@ -197,6 +199,13 @@ describe("createApi", () => {
     expect(calls[0]).toMatchObject({ method: "POST", url: `/captures/${captureId}/reviews`, body: { reviewId, choice: "stop_early" } });
   });
 
+  test("retryPreparation posts to the retry-preparation route with no body and accepts 204", async () => {
+    const { calls, fetchFn } = fakeFetch(() => new Response(null, { status: 204 }));
+    await createApi("t", { fetch: fetchFn }).retryPreparation(captureId);
+    expect(calls[0]).toMatchObject({ method: "POST", url: `/captures/${captureId}/retry-preparation`, body: undefined });
+    expect(calls[0]!.headers.get("authorization")).toBe("Bearer t");
+  });
+
   test("sendTurn validates the act locally, then streams validated events", async () => {
     const turnId = randomId("turn");
     const { calls, fetchFn } = fakeFetch(() => new Response(streamOf(line({ type: "learner_turn_stored", turnId }), line(sentence("Good.")), line({ type: "turn_complete", turnId }))));
@@ -323,6 +332,22 @@ describe("review options screens", () => {
     expect(button.map((b) => (b.props as { children?: unknown }).children)).toEqual(["Check again"]);
     (button[0]!.props as { onClick: () => void }).onClick();
     expect(retried).toBe(1);
+  });
+
+  test("Check again asks the backend to retry preparation, then reloads the options; a failed retry is reported and still reloads", async () => {
+    const order: string[] = [];
+    const api = { retryPreparation: async (id: string) => void order.push(`retry ${id}`) } as unknown as AppApi;
+    const errors: (string | null)[] = [];
+    await checkAgain(api, captureId, { reload: () => order.push("reload"), onError: (m) => errors.push(m) });
+    expect(order).toEqual([`retry ${captureId}`, "reload"]);
+    expect(errors).toEqual([null]);
+
+    order.length = 0;
+    errors.length = 0;
+    const failing = { retryPreparation: async () => { throw new ApiError("backend down", 503); } } as unknown as AppApi;
+    await checkAgain(failing, captureId, { reload: () => order.push("reload"), onError: (m) => errors.push(m) });
+    expect(order).toEqual(["reload"]);
+    expect(errors).toEqual([null, "backend down"]);
   });
 
   test("an unverified claim shows the evidence it cited, in the evidence pane", () => {
@@ -633,6 +658,101 @@ describe("unsent turns", () => {
   });
 });
 
+type FakeTx = { oncomplete: (() => void) | null; onerror: (() => void) | null; onabort: (() => void) | null; error: unknown };
+
+/** An IndexedDB whose open and transactions the test releases by hand. Requests succeed on the next tick, as in a browser. */
+function fakeIdb(opts: { opens?: boolean } = {}) {
+  const rows = new Map<string, unknown>();
+  const txs: FakeTx[] = [];
+  const db = {
+    close() {},
+    transaction() {
+      const tx: FakeTx = { oncomplete: null, onerror: null, onabort: null, error: null };
+      txs.push(tx);
+      const request = <T,>(result: T, apply: () => void) => {
+        const r: { result: T; error: unknown; onsuccess: (() => void) | null; onerror: (() => void) | null } = { result, error: null, onsuccess: null, onerror: null };
+        queueMicrotask(() => {
+          apply();
+          r.onsuccess?.();
+        });
+        return r;
+      };
+      return Object.assign(tx, {
+        objectStore: () => ({
+          put: (v: { turnId: string }) => request(undefined, () => void rows.set(v.turnId, v)),
+          delete: (k: string) => request(undefined, () => void rows.delete(k)),
+          getAll: () => request([...rows.values()], () => {}),
+        }),
+      });
+    },
+  };
+  const factory = {
+    open() {
+      const r: { result: unknown; error: unknown; onsuccess: (() => void) | null; onerror: (() => void) | null; onupgradeneeded: (() => void) | null; onblocked: (() => void) | null } =
+        { result: { ...db, createObjectStore() {} }, error: null, onsuccess: null, onerror: null, onupgradeneeded: null, onblocked: null };
+      if (opts.opens !== false) queueMicrotask(() => r.onsuccess?.());
+      return r;
+    },
+  } as unknown as IDBFactory;
+  return { factory, rows, txs, complete: (i = txs.length - 1) => txs[i]!.oncomplete?.(), abort: (i = txs.length - 1) => { txs[i]!.error = new Error("QuotaExceededError"); txs[i]!.onabort?.(); } };
+}
+
+describe("IndexedDB unsent turns", () => {
+  const turn = { turnId: tid("idb1"), reviewId, act: { kind: "skip" } as LearnerAct, createdAtMs: 1 };
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+
+  test("a write resolves when its transaction completes, not when the request succeeds", async () => {
+    const idb = fakeIdb();
+    const store = createIndexedDbUnsent(idb.factory, 1000);
+    let done = false;
+    const put = store.put(turn).then(() => (done = true));
+    await tick();
+    expect(idb.rows.has(turn.turnId)).toBe(true);
+    expect(done).toBe(false);
+    idb.complete();
+    await put;
+    expect(store.degraded).toBe(false);
+  });
+
+  test("a transaction that aborts (quota, a closing database) degrades the store and loses nothing already accepted", async () => {
+    const idb = fakeIdb();
+    const store = createIndexedDbUnsent(idb.factory, 1000);
+    const put = store.put(turn);
+    await tick();
+    idb.abort();
+    await put;
+    expect(store.degraded).toBe(true);
+    expect((await store.forReview(reviewId)).map((t) => t.turnId)).toEqual([turn.turnId]);
+  });
+
+  test("a blocked open cannot hang the app: it times out into memory", async () => {
+    const store = createIndexedDbUnsent(fakeIdb({ opens: false }).factory, 20);
+    await store.put(turn);
+    expect(store.degraded).toBe(true);
+    expect((await store.forReview(reviewId)).map((t) => t.turnId)).toEqual([turn.turnId]);
+  });
+
+  test("a browser whose indexedDB getter throws still gets a working, degraded store", async () => {
+    Object.defineProperty(globalThis, "indexedDB", { get() { throw new Error("SecurityError"); }, configurable: true });
+    try {
+      const store = createIndexedDbUnsent();
+      await store.put(turn);
+      expect(store.degraded).toBe(true);
+      expect((await store.forReview(reviewId)).map((t) => t.turnId)).toEqual([turn.turnId]);
+    } finally {
+      delete (globalThis as { indexedDB?: unknown }).indexedDB;
+    }
+  });
+
+  test("a transaction that never finishes times out into memory", async () => {
+    const store = createIndexedDbUnsent(fakeIdb().factory, 20);
+    await store.put(turn);
+    expect(store.degraded).toBe(true);
+    await store.remove(turn.turnId);
+    expect(await store.forReview(reviewId)).toEqual([]);
+  });
+});
+
 // ───────────────────────────── Session controller ───────────────────────────
 
 type SendCall = { readonly turnId: TurnId; readonly act: LearnerAct };
@@ -674,6 +794,30 @@ async function* events(...list: TurnEvent[]): AsyncGenerator<TurnEvent> {
 }
 
 const answer: LearnerAct = { kind: "answer", text: "An ordering of events.", modality: "speech" };
+
+describe("save banner", () => {
+  const session = (o: Partial<SessionState>): SessionState => ({
+    view: parsedReview(), loadError: null, live: null, unsent: [], sendError: null, saving: false, saveError: null, savedSummary: null, storageDegraded: false, ...o,
+  });
+  const banner = (o: Partial<SessionState>) => renderToStaticMarkup(createElement(SaveBanner, { state: session(o), onRetry: () => {}, reviewId }));
+
+  test("it says Saved only when the backend reports the review saved", () => {
+    expect(banner({ view: parsedReview({ saved: "saved" }) })).toContain("Saved.");
+    expect(banner({ view: parsedReview({ saved: "unsaved" }) })).not.toContain("Saved");
+    expect(banner({ view: parsedReview({ saved: "save_pending" }) })).not.toContain("Saved.");
+    expect(banner({ saveError: "offline" })).toContain("not saved yet: offline");
+  });
+
+  test("degraded local storage is stated, with the consequence, whatever the save state; healthy storage claims nothing about it", () => {
+    for (const saved of ["unsaved", "saved", "save_pending"] as const) {
+      const out = banner({ storageDegraded: true, view: parsedReview({ saved }) });
+      expect(out).toContain("not keeping your unsent messages");
+      expect(out).toContain("reload");
+    }
+    expect(banner({ storageDegraded: true, saveError: "offline" })).not.toContain("kept on this computer");
+    expect(banner({ saveError: "offline" })).not.toContain("not keeping your unsent messages");
+  });
+});
 
 describe("review session controller", () => {
   test("a sent turn is kept until the backend stores it, its sentences are spoken, and the view is refreshed", async () => {
@@ -852,6 +996,65 @@ describe("review session controller", () => {
     expect(await h.controller.send({ kind: "answer", text: "A newer answer.", modality: "text" })).toBe(true);
     expect(h.sends.map((c) => c.act.kind === "answer" && c.act.text)).toEqual(["An ordering of events.", "A newer answer."]);
     expect(h.controller.getState().sendError).toBeNull();
+  });
+
+  test("a turn the backend rejects for good can be discarded, and the review can then be ended", async () => {
+    const h = setup({
+      sendTurn: ({ turnId, act }) => {
+        if (act.kind === "answer") {
+          return (async function* () {
+            throw new ApiError("another turn on this review is still running", 409);
+          })();
+        }
+        return events({ type: "learner_turn_stored", turnId }, { type: "turn_complete", turnId });
+      },
+    });
+    await h.controller.send(answer);
+    expect(h.controller.getState().live).toMatchObject({ status: "failed", retryable: false });
+    expect(h.controller.getState().unsent).toHaveLength(1);
+    expect(await h.controller.send({ kind: "end" })).toBe(false);
+
+    await h.controller.discardUnsent();
+    const after = h.controller.getState();
+    expect(after.unsent).toEqual([]);
+    expect(after.live).toBeNull();
+    expect(after.sendError).toBeNull();
+    expect(await h.unsent.forReview(reviewId)).toEqual([]);
+
+    expect(await h.controller.send({ kind: "end" })).toBe(true);
+    expect(h.sends.map((c) => c.act.kind)).toEqual(["answer", "end"]);
+  });
+
+  test("an undelivered message offers Retry and Discard; a tutor reply that stalled offers Retry only", () => {
+    const buttons = (props: Parameters<typeof UndeliveredNote>[0]) =>
+      findElements(UndeliveredNote(props), (e) => e.type === "button").map((b) => (b.props as { children?: unknown }).children);
+    const base = { unsent: 1, failed: true, onRetry: () => {}, onDiscard: () => {} };
+    expect(buttons(base)).toEqual(["Retry", "Discard message"]);
+    expect(buttons({ ...base, unsent: 0 })).toEqual(["Retry"]);
+    let discarded = 0;
+    const [, discard] = findElements(UndeliveredNote({ ...base, onDiscard: () => discarded++ }), (e) => e.type === "button");
+    (discard!.props as { onClick: () => void }).onClick();
+    expect(discarded).toBe(1);
+  });
+
+  test("the session says when local storage is degraded, and not before", async () => {
+    const h = setup({ sendTurn: ({ turnId }) => events({ type: "learner_turn_stored", turnId }, { type: "turn_complete", turnId }) });
+    await h.controller.load();
+    expect(h.controller.getState().storageDegraded).toBe(false);
+
+    const degraded = { ...createMemoryUnsent(), degraded: true };
+    const api = { review: async () => parsedReview() } as unknown as Api;
+    const speaker: Speaker = { beginTurn() {}, speak() {}, stop() {} };
+    const controller = createReviewController({ api, reviewId, speaker, unsent: degraded });
+    await controller.load();
+    expect(controller.getState().storageDegraded).toBe(true);
+  });
+
+  test("discarding with nothing unsent does nothing, and never touches a turn that is streaming", async () => {
+    const h = setup({ sendTurn: ({ turnId }) => events({ type: "learner_turn_stored", turnId }, { type: "turn_complete", turnId }) });
+    await h.controller.discardUnsent();
+    expect(h.controller.getState().unsent).toEqual([]);
+    expect(h.sends).toEqual([]);
   });
 
   test("an over-length answer is rejected up front with a message and never reaches the unsent store", async () => {

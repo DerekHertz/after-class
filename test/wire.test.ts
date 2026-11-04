@@ -268,7 +268,7 @@ describe("ROUTES", () => {
 describe("both clients stay inside ROUTES", () => {
   const appCalls: Record<RouteName, ((api: AppApi) => Promise<unknown>) | null> = {
     ingest: null,
-    retryPreparation: null, // the app's "Check again" button gets wired to it in a later PR
+    retryPreparation: (a) => a.retryPreparation(cap),
     captureView: (a) => a.captureView(cap),
     answerInvite: (a) => a.answerInvite(cap, "later"),
     reviewOptions: (a) => a.reviewOptions(cap),

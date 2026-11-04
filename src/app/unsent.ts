@@ -46,10 +46,24 @@ export function createMemoryUnsent(): UnsentStore {
 const DB_NAME = "afterclass-app";
 const STORE = "unsent_turns";
 
-function request<T>(r: IDBRequest<T>): Promise<T> {
+const OPEN_TIMEOUT_MS = 3000;
+
+function timeout<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${what} timed out`)), ms);
+    work.then(
+      (v) => (clearTimeout(timer), resolve(v)),
+      (e) => (clearTimeout(timer), reject(e)),
+    );
+  });
+}
+
+/** Resolves on the transaction's `complete`: a request's `success` only means the write is queued, and an abort after it (quota) would be missed. */
+function settle<T>(tx: IDBTransaction, r: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = () => reject(r.error ?? new Error("IndexedDB request failed"));
+    tx.oncomplete = () => resolve(r.result);
+    tx.onerror = () => reject(tx.error ?? r.error ?? new Error("IndexedDB transaction failed"));
+    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
   });
 }
 
@@ -65,7 +79,16 @@ function openDatabase(idb: IDBFactory): Promise<IDBDatabase> {
   });
 }
 
-export function createIndexedDbUnsent(idb: IDBFactory | undefined = globalThis.indexedDB): UnsentStore {
+/** Reading `indexedDB` itself throws in some contexts (storage blocked, sandboxed frames). */
+function browserIdb(): IDBFactory | undefined {
+  try {
+    return globalThis.indexedDB;
+  } catch {
+    return undefined;
+  }
+}
+
+export function createIndexedDbUnsent(idb: IDBFactory | undefined = browserIdb(), timeoutMs: number = OPEN_TIMEOUT_MS): UnsentStore {
   const memory = createMemoryUnsent();
   let degraded = idb === undefined;
   let db: Promise<IDBDatabase> | null = null;
@@ -74,9 +97,15 @@ export function createIndexedDbUnsent(idb: IDBFactory | undefined = globalThis.i
   async function run(mode: IDBTransactionMode, make: (s: IDBObjectStore) => IDBRequest): Promise<{ readonly value: unknown } | null> {
     if (degraded || idb === undefined) return null;
     try {
-      db ??= openDatabase(idb);
+      if (db === null) {
+        const opening = openDatabase(idb);
+        db = timeout(opening, timeoutMs, "opening IndexedDB");
+        // A blocked open that finally succeeds after we gave up must not keep the database connection.
+        db.catch(() => opening.then((late) => late.close(), () => {}));
+      }
       const handle = await db;
-      return { value: await request(make(handle.transaction(STORE, mode).objectStore(STORE))) };
+      const tx = handle.transaction(STORE, mode);
+      return { value: await timeout(settle(tx, make(tx.objectStore(STORE))), timeoutMs, "an IndexedDB transaction") };
     } catch {
       degraded = true;
       return null;
