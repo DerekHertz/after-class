@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
+import { AppearanceProvider } from "./appearance";
+import { SceneShell } from "./scene";
 import { parseId } from "../shared/ids";
 import { createApi } from "./api";
 import type { AppApi } from "./api";
@@ -64,7 +66,7 @@ function App() {
     }
     case "review": {
       const id = parseId("rvw", route.id);
-      return id ? <ReviewScreen api={api} reviewId={id} speaker={speaker} speech={speech} unsent={unsent} /> : <Home />;
+      return id ? <ReviewScreen key={id} api={api} reviewId={id} speaker={speaker} speech={speech} unsent={unsent} /> : <Home />;
     }
     case "record":
       return <RecordScreen api={api} reviewId={route.reviewId === null ? null : parseId("rvw", route.reviewId)} />;
@@ -75,4 +77,4 @@ function App() {
   }
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(<AppearanceProvider><SceneShell><App /></SceneShell></AppearanceProvider>);
