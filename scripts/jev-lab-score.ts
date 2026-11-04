@@ -465,6 +465,7 @@ function scoreLecture(lecture: LectureRecord, labels: LabelFile, results: Parsed
   };
 }
 
+/** R17: "Every paid call records a usage event; unknown cost is stored as unknown, not zero." Tokens come from the stored calls; cost is never invented. */
 function usageLines(results: ParsedResults): string[] {
   const fresh = results.judgments.filter((j) => !j.reused);
   const reused = results.judgments.length - fresh.length;
