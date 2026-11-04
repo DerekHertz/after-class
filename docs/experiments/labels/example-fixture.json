@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "status": "draft",
+  "signedOffBy": null,
+  "signedOffAt": null,
+  "description": "FIXTURE: a format example made by hand. It is not Derek's labels and names no real capture. Real label files go next to this one, one per lecture.",
+  "lecture": {
+    "captureId": "cap_example_fixture",
+    "videoId": "exampleVideo",
+    "title": "Example lecture (fixture)",
+    "spanS": { "start": 0, "end": 1200 }
+  },
+  "boundaries": [
+    { "mediaS": 312, "note": "moves from the definition of a basis to dimension", "confirmed": false },
+    { "mediaS": 745.5, "note": "starts the worked example", "confirmed": false, "cue": "caption pause of 4.2s before this point" }
+  ],
+  "visualSteps": [
+    { "mediaS": 400, "note": "the 2x2 system is written on the board", "confirmed": false }
+  ],
+  "duplicateGroups": [
+    {
+      "note": "the same board shown twice, the second after the presenter moved",
+      "confirmed": false,
+      "frames": [
+        { "mediaS": 410 },
+        { "mediaS": 431.5, "frameId": "ev_example_frame_id" }
+      ]
+    }
+  ]
+}

@@ -110,7 +110,7 @@ export function sampleExport(bundle: EvidenceBundleJson, videoIdOf: (sourceId: s
 const SQLITE = "afterclass.sqlite";
 
 /** Copies the database (and its WAL, if the backend left one) so opening it cannot touch the real files. */
-function scratchCopy(dataDir: string): { readonly dir: string; readonly path: string } {
+export function scratchCopy(dataDir: string): { readonly dir: string; readonly path: string } {
   const source = join(dataDir, SQLITE);
   if (!existsSync(source)) throw new Error(`${source} does not exist; pass the backend's data dir with --data`);
   const dir = mkdtempSync(join(tmpdir(), "afterclass-probe-"));

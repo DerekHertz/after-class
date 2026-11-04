@@ -21,6 +21,9 @@ import { appliesBefore } from "../providers/memo";
 import type { Lookup } from "../providers/memo";
 import { buildWindows, planChunks, reconcile, route } from "./core";
 
+/** Re-exported so the experiment 2 lab measures the windowing and chunk planning the product runs, without importing core.ts. */
+export { buildWindows, planChunks } from "./core";
+
 /** Starting values (flow B: tune on held-out clips). */
 export type SegmentationConfig = {
   readonly windowNewS: number; // 30
