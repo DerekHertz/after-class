@@ -125,14 +125,15 @@ The bar was not exercised, so it is neither passed nor failed. Causes are missin
 
 ### Run 1 (2026-11-04, Windows Chrome, backend in WSL)
 
-This is the first real-Chrome run of the capture probe. The report below is pasted unedited from `data/probe/probe-report.md`. Nothing was tuned after seeing it; the bars are the ones adopted on 2026-11-03.
+This is the first real-Chrome run of the capture probe that produced a report. The report below is pasted unedited from `data/probe/probe-report.md`. Nothing was tuned after seeing it; the bars are the ones adopted on 2026-11-03.
 
-What was captured, from the run's own database (not from the report):
+What was captured, from the run's own database (it records the six sources, not playlist membership or order):
 
-- One capture, `cap_z7m3abizdfotkmmhuqqulie5t4`, of six consecutive videos from one Georgia Tech Advanced Operating Systems playlist "Introduction" (`-nY-8shbqOo`, the URL entered at the wizard), "Routing on the Internet", "An Example", "How to Implement the Vision", "ANTS Toolkit", "ANTS Capsule and API". Their listed durations sum to about 1154 s; the report counts 853.713 s watched.
+- One capture, `cap_z7m3abizdfotkmmhuqqulie5t4`, of six videos, all titled '... - Georgia Tech - Advanced Operating Systems': "Introduction" (`-nY-8shbqOo`, the URL entered at the wizard, a link into a playlist), "Routing on the Internet", "An Example", "How to Implement the Vision", "ANTS Toolkit", "ANTS Capsule and API". Their listed durations sum to about 1154 s; the report counts 853.713 s watched.
 - This is not one of the two lectures named under "How to run it". It is a set of six short clips, so the run says nothing about a single long lecture. The protocol's "one lecture" limit below applies, and the sources are listed above so the choice is visible.
 - The spot checks (10 captions, 10 frames) are Derek's answers in the wizard. The report script scores them; it does not verify them.
-- An earlier attempt the same day, on the Lamport clocks video (`QgWz_s7uugE`), stopped at stage 8: the exporter picked the newest capture, which was a 70-second capture started after Stop, instead of the 10-minute one. That is fixed in PR #55 (the default is now the capture with the most watched time). That attempt was not scored and no report from it exists. Run 1 used the fixed exporter.
+
+Not from this database: an earlier attempt the same day, on the Lamport clocks video (`QgWz_s7uugE`), stopped at stage 8: the exporter picked the newest capture, which was a 70-second capture started after Stop, instead of the 10-minute one. That is fixed in PR #55 (the default is now the capture with the most watched time). That attempt was not scored and no report from it exists. Run 1 used the fixed exporter.
 
 ```text
 [live] Capture probe report for cap_z7m3abizdfotkmmhuqqulie5t4
@@ -173,5 +174,5 @@ Reading it, without going beyond it:
 
 - Bars 1, 2 and 3 and the perf probe passed in this run. Bar 4 was NOT MEASURED because YouTube served no ad, so by the rule above the overall line is NOT PASSED and the probe is not complete.
 - The perf probe is one measurement (capture off 0 of 3743 dropped, on 5 of 3646) on one machine. It is not evidence about other hardware or longer sessions.
-- Observations outside the bars: the popup showed the title and a captions status, and Review now opened a tab on the review app showing this capture. Both are noted as `yes` by Derek, the first real-Chrome check of either.
+- Observations outside the bars: the popup showed the title and a captions status, and Review now opened a tab on the review app showing this capture. Both are noted as `yes` by Derek. The protocol says the Review now check had never been made in real Chrome before.
 - Still open: bar 4 needs a capture in which an ad plays (it cannot be forced), and a run on one of the two approved single lectures would answer the "one lecture" limit. Derek also reported running it on a Mac earlier; that run is not recorded here.
