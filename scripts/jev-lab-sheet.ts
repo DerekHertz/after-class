@@ -128,7 +128,10 @@ export async function generateSheet(opts: { readonly dataDir: string; readonly l
   const outDir = canonical(opts.outDir);
   if (outDir === dataDir || outDir.startsWith(dataDir + sep)) refuse(`--out ${opts.outDir} is inside the data dir ${opts.dataDir}; the data dir is never written, so choose another place`);
 
-  const infos = loadLabels(opts.labelFiles);
+  const infos = loadLabels(opts.labelFiles).map((i) => {
+    if (i.labels.schemaVersion !== 1) return refuse(`${i.file} is a schema 2 set of clips; the sheet makes one page per video and reads schema 1 files only (a set has no sheet yet)`);
+    return { ...i, labels: i.labels };
+  });
   const ids = infos.map((i) => i.labels.lecture.videoId);
   for (const id of ids) if (!isVideoId(id)) refuse(`"${id}" is not a YouTube video id (11 characters of A-Z a-z 0-9 _ -); it is used in a file name and a link, so no sheet is written`);
   const twice = ids.find((id, i) => ids.indexOf(id) !== i);

@@ -12,14 +12,112 @@ Each item below is a definition the bar text leaves open. Derek adopted all ten 
 
 1. **What a detected boundary is.** A chunk that the product's `planChunks` closes with provenance `boundary` or `boundary_revised` (Jev said "new concept" yes and "stopping point" yes). Its time is the media start of the first window of the next chunk. Time-cap closes and session-end closes are not Jev's and are not detections.
 2. **How labels and detections pair.** One-to-one: each label takes at most one detection, each detection serves at most one label. "Within ±60s" is inclusive: exactly 60 s apart matches.
-3. **What a false close is.** A detection that no label took (so a second close beside an already matched label is false). Computed over the held-out half of the lectures that have at least one labeled boundary there; a lecture with none is excluded and listed, never counted as "no boundaries".
+3. **What a false close is.** A detection that no label took (so a second close beside an already matched label is false). Computed over the held-out half of the lectures that have at least one labeled boundary there; a lecture with none is excluded and listed, never counted as "no boundaries". **[Amended: "lecture" is now a set of clips; see Amendment 1.]**
 4. **"Per 15 min" is watched time.** `false closes x 900 / watched seconds in the held-out halves`, pooled over those lectures. PASS at exactly 1.0 or less. Watched time, because evidence exists only for watched time.
-5. **Pooled recall.** `matched / labeled` pooled over lectures, PASS at exactly 70%. A label that lies outside watched time cannot be detected by any model, so it is excluded from the denominator and printed.
+5. **Pooled recall.** `matched / labeled` pooled over lectures, PASS at exactly 70%. A label that lies outside watched time cannot be detected by any model, so it is excluded from the denominator and printed. **[Amended: a second class of label is excluded for sets; see Amendment 1.]**
 6. **When an important visual step is lost.** A labeled step at media time `s` is shown by the candidate frames in `[s, s + 30 s)` of the same half (`PROPOSED_STEP_CATCH_S = 30`). It is lost when there is no such frame, or when every such frame was dropped. Both causes count as lost and are printed separately, because the product loses the step either way.
-7. **Steps lost "per lecture".** The scored half is half a lecture. The count is not scaled: PASS only if every lecture that has labeled steps in the held-out half lost 1 or fewer.
+7. **Steps lost "per lecture".** The scored half is half a lecture. The count is not scaled: PASS only if every lecture that has labeled steps in the held-out half lost 1 or fewer. **[Amended: "lecture" is now a set of clips; see Amendment 1.]**
 8. **What a duplicate is.** A labeled duplicate group is frames showing the same content. The earliest member (by media time) is the original, every later member is a duplicate. A duplicate is dropped when Jev's verdict on its frame is "no". "Uncertain" keeps the frame (flow B: "Uncertain visual → keep the frame."). A label with no frame id resolves to the nearest candidate frame within 2 s (`PROPOSED_DUPLICATE_MATCH_S = 2`); a duplicate that resolves to no frame counts as not dropped. Pooled, PASS at exactly 50%.
-9. **The split.** The midpoint of the lecture span in the label file. Each half is folded by the product's `planChunks` on its own, with no state carried across the split, so a boundary at the very first window of the second half cannot be detected. A window belongs to the lecture and half of its first new passage and its earliest new media second.
+9. **The split.** The midpoint of the lecture span in the label file. Each half is folded by the product's `planChunks` on its own, with no state carried across the split, so a boundary at the very first window of the second half cannot be detected. A window belongs to the lecture and half of its first new passage and its earliest new media second. **[SUPERSEDED for sets of two or more clips by Amendment 1, which keeps this wording only for a one-video lecture.]**
 10. **The budget.** "~800 Jev calls" is read as a hard ceiling of 800 that counts every request, retries included (`BUDGET_CALLS = 800`). One tune round is one `run --phase tune`, whatever it changes. The scored run uses the config of the last tune round. A stored judgment with the same input is reused at no call, but a round that reuses everything still counts as a round.
+
+## Amendment 1 (Derek, 2026-11-04, before any paid call): a lecture is the set of clips
+
+**Why.** The adopted design scores each video as its own lecture. Derek's real material is a set of pre-split clips (a course playlist), so the topic boundaries are the joins between clips. The product's own rule is that a video ending does not close a chunk and the next clip's first window decides (flow B: "Video ends → do NOT close; the next clip's first window decides."). Under the adopted rule (definition 9: each lecture alone, each half folded alone) the first window of every clip has nothing before it, so a clip join can never be detected and the boundary bar is unmeasurable. Derek, 2026-11-04: "it should be the set of clips ... there are NO boundaries [within a clip], the split is the boundary", and "visual steps should only be when the actual slide content changes ... it's ok to record transcript between the slide changes (new text shown on screen counts as a visual step)". He told the agent to amend the lab. No Jev or Claude call has been made. The bar text, the budget and the other adopted definitions are not changed.
+
+Items marked **PROPOSED** below are the agent's details for the parts Derek's decision left open. They are not adopted until he says so, and none may change after a result.
+
+**What it changes.** Definitions 3, 5, 7 and 9. Definitions 1, 2, 4, 6, 8 and 10 keep their meaning with "lecture" read as the set. The superseded wording stays above, marked.
+
+| Definition | Adopted wording (still above) | Under Amendment 1 |
+| --- | --- | --- |
+| 9, the split | midpoint of the lecture span; windows belong to the lecture and half of their first new passage | a set of 2+ clips splits at a clip join (below); a one-video lecture keeps the midpoint rule |
+| 3, false close | held-out half of lectures with at least one labeled boundary | held-out half of sets with at least one labeled, detectable boundary |
+| 5, recall | labels outside watched time are excluded | also excluded: a boundary no model could detect (PROPOSED, below) |
+| 7, steps lost per lecture | per lecture | per set, not scaled |
+
+### The lecture
+
+A lecture is the set of clips (videos) of one capture, in WATCH ORDER. A capture of one video is a lecture of one video, and every number the lab produced for it before this amendment is reproduced exactly (a regression test pins the reports line for line).
+
+### Windowing and folding
+
+Windows are the product's: `buildWindows` over the whole capture in watch order, folded by `planChunks`, both through `src/backend/segmentation/index.ts`. So the clip-join rule is the product's: a video ending does not close, and the next clip's first window decides. A detected boundary keeps its adopted meaning (definition 1: a Jev-driven close, time = media start of the next chunk's first window) and is now reported as a place, (videoId, mediaS).
+
+**PROPOSED, which clip a window belongs to.** A window is cut from ~30 s of new passages in watch order, so the last seconds of one clip and the first seconds of the next usually share one window. For a set, a window belongs to the clip where its new material ENDS, and its place is the earliest second of its new material in that clip. That window is "the next clip's first window", and its place is the start of the clip (on Derek's five clips, 0 to 3 s). Under the one-video rule (first new passage) it would sit at the end of the earlier clip and could never match a join label.
+
+### Matching
+
+One-to-one and +-60 s inclusive (definition 2), and only within the SAME videoId: the distance between places in different clips is undefined, so a detection never matches a label of another clip, however close in watch time. A join label is a boundary labeled at the start of clip N (the videoId of clip N, mediaS inside its first window), so a Jev-driven close whose next chunk starts at that clip's start matches it. The first clip's start is not a boundary.
+
+### The split (replaces definition 9 for sets of two or more clips)
+
+> Superseded wording of definition 9: "The split. The midpoint of the lecture span in the label file. Each half is folded by the product's `planChunks` on its own, with no state carried across the split, so a boundary at the very first window of the second half cannot be detected. A window belongs to the lecture and half of its first new passage and its earliest new media second."
+
+1. Total the watched seconds of every clip, in watch order (watched time inside the clip's labeled span).
+2. Split at the clip JOIN nearest the midpoint of that total; a tie goes to the earlier join.
+3. The clips before the join are the first half (tune). The clips after it are the second half (held-out, scored once). No clip is cut.
+4. No state is carried across the split: each half is folded by `planChunks` on its own. A window, a frame and a label belong to the half of their clip.
+
+Worked example, the real shape: five clips with watched seconds about 184, 229, 403, 339 and 194. The total is 1349 and its midpoint 674.5. The four joins sit at 184, 413, 816 and 1155 watched seconds, which are 490.5, 261.5, 141.5 and 480.5 from the midpoint. The nearest is 816, so the split is after the third clip: clips 1 to 3 tune, clips 4 and 5 held-out.
+
+A lecture of one video (schema 1, or schema 2 with one video) keeps the adopted rule: the midpoint of its span.
+
+### A boundary no model could detect (PROPOSED)
+
+A detection is the start of a window that follows another window of the same half, so a label inside the FIRST window of a half has nothing before it to close. That is the case for the split join, which starts the held-out half. For a set of two or more clips such a label (same clip as the half's first window, mediaS before that window's end) is excluded from the recall denominator, counts in no other measure, and is printed with the reason. A one-video lecture keeps the schema 1 numbers, so it does not exclude it. The exclusion is lenient to the model by up to one window: a close at the second window would still fall within 60 s of such a label, so it is a rule about what the half cannot see, not about the tolerance.
+
+### Other definitions, with "lecture" read as the set
+
+- False closes per 15 min: unmatched detections over the pooled watched seconds of the held-out half, counted only when that half has at least one labeled, detectable boundary (a half with none is excluded and listed).
+- Recall pooled; visual steps lost: at most 1 per set (not scaled); duplicates dropped pooled.
+- Budget 800 hard, 3 tune rounds, score once, and every safety rail are unchanged.
+
+### The visual-step rule (Derek's wording, verbatim)
+
+> A visual step is when the actual slide content changes (new text or a new figure shown on screen). The same slide staying up across several transcript passages is not a new step.
+
+The JPEG-size cue in the deterministic drafts is only a suggestion. It can fire on a change that is not new content and miss one that is, and it decides nothing: Derek keeps only the changes of slide content.
+
+### Label format, schemaVersion 2
+
+```json
+{
+  "schemaVersion": 2,
+  "status": "draft | signed_off",
+  "signedOffBy": null,
+  "signedOffAt": null,
+  "lecture": {
+    "captureId": "cap_...",
+    "videos": [
+      { "videoId": "clipOne1111", "title": "...", "spanS": { "start": 0, "end": 184.3 } },
+      { "videoId": "clipTwo2222", "title": "...", "spanS": { "start": 0, "end": 229.4 } }
+    ]
+  },
+  "boundaries":  [{ "videoId": "clipTwo2222", "mediaS": 0, "note": "...", "confirmed": true }],
+  "visualSteps": [{ "videoId": "clipTwo2222", "mediaS": 120, "note": "...", "confirmed": true }],
+  "duplicateGroups": [{ "note": "...", "confirmed": true, "frames": [
+    { "videoId": "clipOne1111", "mediaS": 80 },
+    { "videoId": "clipTwo2222", "mediaS": 5, "frameId": "ev_..." }
+  ] }]
+}
+```
+
+- `lecture.videos` lists the clips in watch order, each once, each with its own `spanS`. A run refuses a set whose order differs from the order in which the capture first saw those videos, and a video the capture never saw.
+- Every boundary, visual step and duplicate frame carries a `videoId` of one of the clips, and its `mediaS` must lie in that clip's `spanS` (half-open, as in schema 1).
+- A duplicate group needs at least 2 frames, and a group of one is an error. **PROPOSED:** a group may span clips, because the same slide shown at the end of one clip and the start of the next is a real duplicate. Its earliest member is the earliest in watch order (clip order, then media time), and each later member is scored in its own clip's half.
+- Sign-off is unchanged: a typed name and an ISO date, every item confirmed, every problem listed with its field path, a misspelled field an error, and the run stores each label file's sha256.
+- Schema 1 files stay valid and unchanged. A run holding a schema 2 file refuses label files of another capture, and a video that is in two label files. Schema 1 files alone run as before.
+- The lecture id in reports is `<captureId>/<videoId>` for one video and `<captureId>/set:<first videoId>+<other clips>` for a set (PROPOSED).
+
+### Commands
+
+```
+draft-labels-set --data <dir> --capture <id> --out <file> [--force]
+split            [--data <dir>] --labels <file> ...        (a set needs --data: its split counts watched seconds)
+```
+
+`draft-labels-set` writes ONE schema 2 draft for the whole capture, clips in watch order, and no model is used. It puts a boundary candidate at the start of every clip after the first (cue: "start of clip N: the product treats the next clip's first window as the decision point"), nothing inside a clip, the visual-step and duplicate candidates of `draft-labels` per clip (a step candidate compares a frame with the previous candidate frame of its own clip), and every item `confirmed: false` with status draft. `split`, `plan`, `run`, `report` and `rescore` accept both schemas and print per-set and per-half counts. `plan` counts the windows, frame calls and boundary labels of each half from the real windowing, including the labels excluded for lying in a half's first window. Stored judgments record their `videoId`. `rescore` stays byte-identical to the original report. The labeling sheet reads schema 1 files only: a set has no sheet yet.
 
 ## The four bars
 
@@ -45,7 +143,7 @@ For each label file, the lab opens a scratch copy of the data dir's database (th
 - A frame with no earlier frame in its source is kept without a call, as the product does.
 - The lab imports `buildWindows` and `planChunks` through `src/backend/segmentation/index.ts`, which now re-exports them (and `src/MODULES.md` lists them as public). It does not import `core.ts`, so the lab measures the code the product runs and not a copy of it.
 
-Not scored and not claimed: the product's cross-clip behavior ("Video ends → do NOT close; the next clip's first window decides"). Each lecture is folded alone.
+Not scored and not claimed: the product's cross-clip behavior ("Video ends → do NOT close; the next clip's first window decides"). Each lecture is folded alone. **[SUPERSEDED by Amendment 1: a lecture is now the set of clips, so the clip-join rule is scored.]**
 
 ## Tuning
 
@@ -66,7 +164,7 @@ Not scored and not claimed: the product's cross-clip behavior ("Video ends → d
 
 ## Labels
 
-One file per lecture in `docs/experiments/labels/<name>.json`. A lecture is one video of one capture. `docs/experiments/labels/example-fixture.json` is a hand-made format example (a fixture, not Derek's labels).
+One file per lecture in `docs/experiments/labels/<name>.json`. In schema 1, described here, a lecture is one video of one capture. **[Amendment 1 adds schema 2, where a lecture is the set of clips of one capture; see its label format.]** `docs/experiments/labels/example-fixture.json` is a hand-made format example (a fixture, not Derek's labels).
 
 ```json
 {
@@ -116,7 +214,8 @@ All commands are `bun run scripts/jev-lab.ts <command> ...`.
 
 ```
 draft-labels --data <dir> --capture <id> [--video <id>] --out <file> [--force]
-split        --labels <file> [--labels <file> ...]
+draft-labels-set --data <dir> --capture <id> --out <file> [--force]       (Amendment 1)
+split        [--data <dir>] --labels <file> [--labels <file> ...]
 plan         --data <dir> --labels <file> ...
 run          --data <dir> --lab <dir> --labels <file> ... --phase tune|score
              [--window-new-s N --context-s N --time-cap-s N --max-frames-per-window N

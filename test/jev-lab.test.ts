@@ -189,7 +189,7 @@ describe("label validation", () => {
     expect(errorsOf(validLabels({ boundaries: [{ mediaS: 5, note: "", confirmed: "yes" }] }))[0]).toContain("boundaries[0].confirmed");
     expect(errorsOf(validLabels({ lecture: { captureId: "", videoId: "v", spanS: { start: 5, end: 5 } } })).join("\n")).toContain("lecture.captureId");
     expect(errorsOf(validLabels({ duplicateGroups: [{ note: "", confirmed: false, frames: [{ mediaS: 1 }] }] }))[0]).toContain("at least 2 frames");
-    expect(errorsOf(validLabels({ schemaVersion: 2 }))[0]).toContain("schemaVersion");
+    expect(errorsOf(validLabels({ schemaVersion: 3 }))[0]).toContain("schemaVersion: expected 1 or 2");
   });
 
   test("a misspelled field is an error, never silently dropped", () => {
