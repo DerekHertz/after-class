@@ -8,6 +8,7 @@ Status: MVP under construction. Nothing here claims capture reliability, model a
 - Approved flow, rules and pass bars: `docs/flows/after-class.md`
 - Formal lifecycle models (TLA+): `docs/flows/model/`
 - Architecture: `docs/design/SYNTHESIS.md`, `src/MODULES.md`
+- Approved scene/mascot UI handoff: [implementation guide](docs/design/IMPLEMENTATION-HANDOFF.md) and [visual gallery](docs/design/index.html)
 
 ```sh
 bun install --frozen-lockfile
