@@ -1,0 +1,51 @@
+{
+  "annotationViewport": [
+    1676,
+    954
+  ],
+  "comparisonViewport": [
+    1440,
+    1024
+  ],
+  "mobile": {
+    "pageWidth": 390,
+    "keySize": [
+      70.1,
+      57.9
+    ],
+    "labelInsideKey": true
+  },
+  "benchKey": {
+    "beforeParentTransform": "none",
+    "afterParentTransform": "none",
+    "bodyTransform": "none",
+    "keyTranslate": "0px 7px",
+    "nativeCenterHit": "recorder-key",
+    "labelInsideKey": true
+  },
+  "booth": {
+    "nativeTarget": [
+      44,
+      44
+    ],
+    "bodyTransform": "none",
+    "keyTranslate": "0px 3px",
+    "legend": "Voice",
+    "stateIcon": "mic/pause"
+  },
+  "paper": {
+    "scrollTop": 276,
+    "feed": "276px",
+    "rollerTurn": "11.5rad",
+    "nativeScroll": true,
+    "draftRetained": true,
+    "sourceControlDoesNotStartSpeech": true
+  },
+  "reduced": {
+    "keyTransition": "0s",
+    "paperTransition": "0s",
+    "spoolTransform": "none",
+    "texture": "50% 50%"
+  },
+  "consoleErrors": []
+}

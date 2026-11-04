@@ -53,3 +53,23 @@ All five fidelity surfaces rechecked: review typography, paper/grid rhythm and p
 New audit findings and post-fix evidence: masthead intercepted header pointer actions (P1); pointer Pause/Resume verified after empty masthead area passed events through. Mobile recorder overlapped drawer handle (P2); final 390px center hit is source-handle, drawer opens without speech. Notebook IDs/citation ambiguity (P2); visible IDs removed in favor of actual wording/rationale, citation timestamps resolved in08-notebook. Pending notebook animation could commit after Back in a completion ordering edge (P2); independently reproduced and fixed by invalidating pending navigation before cancel.
 
 Physical drawer/speech/cover motion, repeated-key guard, active speech shutdown on pause, draft continuity, citation focus return, manual reduced motion, all three room skins and no console errors verified. Details and fresh screenshot sequence are in `docs/trail/frontend-motion/README.md`. No remaining actionable P0/P1/P2 established by the final checks; P3 notes remain in the guide. This technical verdict is separate from Derek's final visual acceptance.
+
+## Annotated mechanical correction (2026-11-04)
+
+final result: passed
+
+Source target is the five user-supplied browser annotations on PR53 at 1676×954. Fresh implementation captures in `docs/trail/mechanical-controls/` use 1676×954 and 390×844; the combined before/after `comparison.jpg` uses previous PR53 and revised Study Bench at 1440×1024, 1×CSS pixels, captured through the browser. Both active/source-open states and notebook composition match; fixture content retained. Full comparison was opened and inspected. A separate focused montage was unnecessary: both control labels/actuators are legible in this combined input, and each generated component layer and full-resolution pressed capture was additionally opened for alignment inspection.
+
+Five surfaces: fonts/hierarchy and cream/cobalt/mint tokens retained; notebook spacing and reading rhythm retained; key/body registration and transparency inspected; actual DOM Speak/Stop label aligned to the moving cap; source copy simplified to Lecture source with explicit Roll up/Unroll accessible actions. New physical assets preserve the approved ink/grain/detail direction. New source body removes paper only; fixed posts, rollers, chassis and table remain visually registered.
+
+Iteration findings: prior whole-device compression and floating label(P1) replaced with independent body/key layers. Copied drawer-front movement(P2) removed in favor of sheet retraction. First native button covered the full sprite canvas, so centered pointer activation missed its clipped cap(P2); native button bounds now match the key, verified by real center clicks. Paper texture modulo 128 caused a discontinuity(P2); raw scrollTop now feeds it continuously. Booth intermediate live Stop label on a fixed plate(P2) replaced by static Voice legend and an icon on its independently moving orange actuator, with 44px native target. Fresh booth-fixed desktop/mobile captures were independently rechecked.
+
+Evidence: `bench-pressed.jpg`, `last-desk-pressed.jpg`, `booth-fixed-desktop.jpg`, `booth-fixed-pressed.jpg`, `paper-retracted.jpg`, `mobile-pressed.jpg`, `browser-checks.json`. Native scrolling updates decorative grain/roller while evidence scrolls once and the typed draft stays intact. Reduced motion removes interpolation/decorative feed. Console error list empty. Full suite 941 pass, 4 pre-existing TODOs; independent exact code head `9030574` passed 99 focused checks, typecheck/build and effect probes.
+
+No remaining actionable P0/P1/P2 proven in the final captures. Mascot roaming/emotes deliberately remain lower priority than these MVP controls, per the user’s annotation. Real microphone/provider behavior and final user visual acceptance remain outside technical QA.
+
+### Content-feed clarification
+
+final result: passed
+
+Removed the rotating side-fitting layer after the user's clarification. Native content now feeds beneath a14px soft upper edge when scrolled; the mask disappears at scrollTop0. Source sheet retraction remains. Fresh1303×954 browser evidence: `docs/trail/mechanical-controls/content-feed-edge.jpg`. Fonts, spacing, tokens and image assets are unchanged; zero spinning layers remain. Typecheck and49 focused tests pass. This small cue does not claim a3D paper curl.

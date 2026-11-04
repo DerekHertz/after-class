@@ -1,0 +1,11 @@
+{
+  "mode": "built-in imagegen edit",
+  "source": "../scenes-v2/study-bench-stage.png",
+  "output": "source-body.png",
+  "prompt": "Use case: precise-object-edit. Edit target: supplied study-bench-stage.png. Production UI animation layer, same 1024x1536 full canvas. Remove ONLY the large central cream paper sheet, including its upper curled paper surface, so the machine has an open clear window between the two green upright posts, from the top axle down to the bottom gold bar. Make that window truly transparent alpha; retain a narrow gold top roller/axle where paper was curled, aligned to existing side knobs. Preserve every existing hardware element in its EXACT original pixel position, scale, geometry and painted rendering: mint-green posts, left and right endcaps, side knobs, bottom gold roller and two metal paper clips, chassis, cream drawer, wood base, feet, shadows. Do not move/resize/reframe/recenter or redraw machine. Keep original canvas framing. Background outside the machine should also be transparent alpha, no replacement scene, no checkerboard pixels. No text. The only changed object is paper removal, never remove structural posts/chassis.",
+  "inspection": {
+    "size": "1024x1536",
+    "geometry": "Hardware visually closely registered to original, not pixel-identical. Central paper removed, gold top axle revealed. Alpha verified by PNG decode: center500,700 alpha0; outer10,10 alpha0; leftpost80,600 alpha253; drawer500,1200 alpha253.",
+    "use": "Transparent machine base for independent DOM paper animation; retain original canvas dimensions. No claim of exact pixel identity."
+  }
+}

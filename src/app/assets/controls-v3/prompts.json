@@ -1,0 +1,47 @@
+{
+  "mode": "built-in image_gen edit",
+  "created": "2026-11-04",
+  "canvas": {
+    "width": 1254,
+    "height": 1254,
+    "alpha": true
+  },
+  "notes": [
+    "Original normalized canvas placement retained visually; no deterministic image resizing, cropping or editing performed.",
+    "Built-in returned1254x1254 despite1024prompt; same dimensions as inputs.",
+    "Generated edits are not pixel-exact extractions. Bench key left silhouette varies slightly; inspect final composite.",
+    "Bench cream key plate and recorder body cream plate are blank. Recorder key remains orange without added plate."
+  ],
+  "assets": [
+    {
+      "path": "src/app/assets/controls-v3/bench-body.png",
+      "input": "src/app/assets/scenes-v2/bench-microphone.png",
+      "prompt": "Use case: precise-object-edit. Asset type: independent animation layer for an existing illustrated UI prop. Input image is the EDIT TARGET. Produce a square 1024x1024 transparent PNG. Remove ONLY the large coral-red upper key cap and its cream label plate from this mint green microphone prop. Keep the exposed steel coil spring, its supports, the mint body, cream speaker grill, screws, feet and blue cast shadow. Where the cap hid the spring top, complete the exposed spring and its small mounting support plausibly in exactly the same ink-and-watercolor style. CRITICAL geometry invariant: keep all retained pixels/objects at their SAME normalized x/y coordinates, original scale, perspective and framing. Do not zoom, recenter, crop, rotate, redesign or move the body. The empty region formerly occupied by the red cap should be genuinely transparent except retained spring/support behind it. Preserve detailed fine dark outlines, watercolor grain, colors and existing body silhouette. No letters, no text, no new objects. True transparent background."
+    },
+    {
+      "path": "src/app/assets/controls-v3/bench-key.png",
+      "input": "src/app/assets/scenes-v2/bench-microphone.png",
+      "prompt": "Use case: background-extraction. Asset type: independent moving key layer for existing illustrated UI prop. Input image is EDIT TARGET. Output square 1024x1024 transparent PNG. Keep ONLY the big coral-red key cap, including its blank cream label plate, all red bevel side faces and original fine dark outline. Remove absolutely everything else: mint body, speaker, steel spring, supports, feet, ground shadow. CRITICAL: do NOT recenter or resize the retained key. Its exact normalized bounding box stays x43.1% to86.2%, y16.1% to51.2% of the full transparent canvas, matching source. Keep same original scale, x/y position, perspective, silhouette, detailed watercolor grain, warm highlights, dark lower red face, cream paper label plate. Entire full square canvas outside that key silhouette must have alpha0. The label plate is totally blank, NO letters or symbols. Do not draw new background, shadows outside key, pedestal or duplicate object. This layer will overlay the original body at precisely the same canvas geometry."
+    },
+    {
+      "path": "src/app/assets/controls-v3/recorder-body.png",
+      "input": "src/app/assets/scenes-v2/recorder.png",
+      "prompt": "Use case: precise-object-edit. Asset type: fixed base animation layer for existing illustrated recorder UI prop. Input image is EDIT TARGET. Output full square transparent PNG with same original canvas geometry. Remove ONLY the orange raised rectangular key at lower-right of blue recorder top. Reconstruct the dark recessed key socket beneath it, black/dark-blue opening and thin rim in same perspective and painterly style. Keep every other part: cobalt blue wedge body, blank cream top label plate, speaker holes, silver screws, feet edge and shadow. CRITICAL: all retained parts at exactly SAME normalized x/y location, original scale, perspective, framing and silhouette. Do not zoom, recenter, rotate, crop or redesign. Preserve watercolor grain, fine dark ink and blue white edge highlights. No letters/text; cream label plate stays absolutely blank. True transparent background outside original recorder silhouette."
+    },
+    {
+      "path": "src/app/assets/controls-v3/recorder-key.png",
+      "input": "src/app/assets/scenes-v2/recorder.png",
+      "prompt": "Use case: background-extraction. Asset type: independent moving orange key animation layer for existing illustrated recorder UI. Input image is EDIT TARGET. Keep ONLY the orange raised rectangular key cap, including its orange top, bevel highlight, darker orange side faces and thin dark original outline. Remove EVERYTHING ELSE: blue recorder body, speaker, screws, cream label plate, dark-blue socket rim and ground shadow. CRITICAL preserve exact original scale, perspective and SAME normalized x/y position on full original square canvas. Do NOT center this cutout: original orange key occupies x53.7% to84.5%, y43.1% to60.6% of full square. No zoom, recenter, resize, rotation or crop. Output full square1024x1024 with actual transparent alpha everywhere outside the key itself. Preserve fine dark ink outlines and warm grainy watercolor texture and white-gold highlights of original. Key face remains orange and BLANK, no letters/symbols, no added cream plate, no added objects. This layer overlays fixed body at identical canvas coordinates."
+    },
+    {
+      "path": "src/app/assets/controls-v3/booth-body.png",
+      "input": "src/app/assets/scenes-v2/booth-microphone.png",
+      "prompt": "Use case: precise-object-edit. Asset type: fixed body layer of existing detailed illustrated microphone prop. Input image is EDIT TARGET. Preserve full1254x1254square transparent canvas and original composition. Remove ONLY the small orange raised rectangular button cap on base lower-right (x60%-71%,y70%-79%). Leave empty dark recessed socket and its brass rim, reconstruct its concealed interior in same perspective. Keep ALL other original parts unchanged: large bronze microphone grill, neck, stand, chipped navy base, screws, blank cream plate, feet, shadow. CRITICAL original normalized coordinates, scale, framing, angle, perspective, silhouettes unchanged. No recenter, zoom, crop, rotation or redesign. Keep watercolor papergrain, precise ink hatching, patina, lighting and colors. No letters, symbols or text; baseplate completelyblank. True transparent background outside original silhouette."
+    },
+    {
+      "path": "src/app/assets/controls-v3/booth-key.png",
+      "input": "src/app/assets/scenes-v2/booth-microphone.png",
+      "prompt": "Use case: background-extraction. Asset type: independent moving key layer for existing illustrated microphone UI. Input image is EDIT TARGET. Keep ONLY the small orange raised rectangular key cap at lower-right of navy base, including orange top, darker side faces, white-gold beveled edge and fine dark outline. Delete EVERYTHING else: large microphone, stand, base, cream plate, screws, socket brass rim, shadow. CRITICAL retain original full1254x1254square canvas, original key's SAME normalized location and size: key approximately x61.0%-71.0%, y71.6%-79.8%. Do not recenter, zoom, enlarge, rotate or crop; most of output is transparent and key remains tiny in lower-right. Preserve exact source perspective with top edge angled slightly upward right, watercolor grain, ink outline and orange color. No text/letters/symbols; keyface staysblankorange. Actual alpha0 everywhere outside key. No backdrop, socket, rim, stand, groundshadow or new labelplate."
+    }
+  ]
+}
