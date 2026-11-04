@@ -4,15 +4,16 @@ import type { CaptureId, ChunkRevisionId, IdPart, MemoKey } from "../src/shared/
 import type { ChunkRevision, ClaimDraft, ClaimStatus, Frame, Passage, Purpose, Provider, ResourceConnection, Verdict } from "../src/shared/domain";
 import { Material, interval, media } from "../src/shared/time";
 import { createMemo } from "../src/backend/providers/memo";
-import type { Lookup } from "../src/backend/providers/memo";
+import type { Lookup, Task } from "../src/backend/providers/memo";
+import type { ClaudeCli } from "../src/backend/providers/claude";
 import type { ClaimSupportInput } from "../src/backend/providers/jev-tasks";
 import type { WorkItem } from "../src/backend/scheduler";
 import { createPreparation } from "../src/backend/preparation";
 import { assessable, deriveClaimStatus, validateDraft } from "../src/backend/preparation/core";
 import type { Check } from "../src/backend/preparation/core";
-import { canonicalInterpretation, canonicalResourceSearch, canonicalRevision } from "../src/backend/preparation/tasks";
+import { canonicalInterpretation, canonicalResourceSearch, canonicalRevision, interpretTask } from "../src/backend/preparation/tasks";
 import type { InterpretationInput, InterpretationOutput, ResourceSearchInput, RevisionInput } from "../src/backend/preparation/tasks";
-import { deferred, fail, fakeTask, ok, testDb, testSeq } from "./fakes";
+import { deferred, fail, fakeTask, ok, testDb, testSeq, usage } from "./fakes";
 import type { FakeStep, FakeTask } from "./fakes";
 
 // ───────────────────────────── evidence fixtures ─────────────────────────────
@@ -63,7 +64,7 @@ const checkCanonical = (i: ClaimSupportInput): IdPart => ({
   frames: i.frames.map((f) => f.frame.id),
 });
 
-function world() {
+function world(opts: { readonly interpret?: Task<InterpretationInput, InterpretationOutput> } = {}) {
   const db = testDb();
   const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
   const captureId = randomId("cap") as CaptureId;
@@ -83,7 +84,7 @@ function world() {
   };
 
   const tasks = {
-    interpret: scripted("interpretation", "claude", canonicalInterpretation, () => script.interpret),
+    interpret: (opts.interpret ?? scripted("interpretation", "claude", canonicalInterpretation, () => script.interpret)) as FakeTask<InterpretationInput, InterpretationOutput>,
     revise: scripted("claim_revision", "claude", canonicalRevision, () => script.revise),
     checkClaim: scripted("claim_check", "jev", checkCanonical, () => script.check),
     searchResources: scripted("resource_search", "claude", canonicalResourceSearch, () => script.resources),
@@ -484,5 +485,109 @@ describe("preparation", () => {
     await w.drain();
     expect([w.tasks.interpret.calls.length, w.tasks.checkClaim.calls.length, w.tasks.searchResources.calls.length]).toEqual(calls);
     expect(w.prep.demand(w.captureId)).toEqual([]);
+  });
+});
+
+describe("a claim citing evidence the model was never shown", () => {
+  const UNSEEN = stableId("ev", "never-shown");
+
+  /** The Claude CLI's structured call, scripted by attempt number. Output is re-validated by the task's own schema, as in production. */
+  function fakeClaude(answer: (attemptNo: number) => unknown): ClaudeCli & { calls: number } {
+    const claude = {
+      calls: 0,
+      async structured<O>(_req: unknown, schema: { parse(x: unknown): O }) {
+        claude.calls += 1;
+        return { output: schema.parse(answer(claude.calls)), usage: usage() };
+      },
+      async streamText() {
+        throw new Error("unused");
+      },
+    };
+    return claude as unknown as ClaudeCli & { calls: number };
+  }
+
+  const raw = (claims: readonly { text: string; evidence: readonly string[] }[]) => ({
+    concepts: [{ label: "A", summary: "A summary", claims: claims.map((c) => ({ ...c, visualDependent: false, assumptions: [] })), confusions: [] }],
+    links: [],
+    supersedes: [],
+  });
+  const good = (text: string, k: number) => ({ text, evidence: [P[k]!.id as string] });
+  const bad = (text: string) => ({ text, evidence: [UNSEEN as string] });
+
+  test("one bad claim among three: the two good claims are kept, the bad one is dropped and reported, and it is never assessable", async () => {
+    const claude = fakeClaude(() => raw([good("first", 0), bad("ghost"), good("second", 1)]));
+    const w = world({ interpret: interpretTask(claude, () => null) });
+    const r1 = w.close(0, 0, 20);
+    await w.drain();
+
+    expect(w.prep.prep(r1.id)).toMatchObject({ interpretation: "done", finished: true, supportedCount: 2 });
+    expect(w.prep.prep(r1.id).claims.map((c) => c.original.text)).toEqual(["first", "second"]);
+    expect(w.usable(r1.material)).toEqual(["first", "second"]);
+    expect(w.tasks.checkClaim.calls.map((c) => c.claim.text)).not.toContain("ghost");
+    expect(w.tasks.revise.calls).toHaveLength(0);
+
+    // The first attempt is still retried; only the final one drops.
+    expect(claude.calls).toBe(2);
+    const unit = w.db.sql.query<{ memo_key: string }, []>(`SELECT memo_key FROM prep_inputs WHERE kind = 'interpretation'`).get()!;
+    const stored = w.memo.inspect(unit.memo_key as MemoKey)!;
+    expect(stored.failure).toBeNull();
+    expect((stored.output as { dropped: unknown }).dropped).toEqual([
+      { text: "ghost", evidence: [UNSEEN], reason: `cites unknown evidence: ${UNSEEN}` },
+    ]);
+  });
+
+  test("a first attempt with a bad claim is retried, and a clean second attempt keeps every claim", async () => {
+    const claude = fakeClaude((n) => (n === 1 ? raw([good("first", 0), bad("ghost")]) : raw([good("first", 0), good("second", 1)])));
+    const w = world({ interpret: interpretTask(claude, () => null) });
+    const r1 = w.close(0, 0, 20);
+    await w.drain();
+
+    expect(claude.calls).toBe(2);
+    expect(w.usable(r1.material)).toEqual(["first", "second"]);
+    const unit = w.db.sql.query<{ memo_key: string }, []>(`SELECT memo_key FROM prep_inputs WHERE kind = 'interpretation'`).get()!;
+    expect(w.memo.inspect(unit.memo_key as MemoKey)!.output).not.toHaveProperty("dropped");
+  });
+
+  test("every claim bad: the same recorded, retryable failure as before, and no claims", async () => {
+    let answer: () => unknown = () => raw([bad("ghost one"), bad("ghost two")]);
+    const claude = fakeClaude(() => answer());
+    const w = world({ interpret: interpretTask(claude, () => null) });
+    const r1 = w.close(0, 0, 20);
+    await w.drain();
+
+    expect(w.prep.prep(r1.id)).toMatchObject({ interpretation: "failed", finished: true, supportedCount: 0, claims: [] });
+    expect(claude.calls).toBe(2);
+    const unit = w.db.sql.query<{ memo_key: string }, []>(`SELECT memo_key FROM prep_inputs WHERE kind = 'interpretation'`).get()!;
+    const failure = w.memo.inspect(unit.memo_key as MemoKey)!.failure;
+    expect(failure).toMatchObject({ attempts: 2, terminal: true });
+    expect(failure!.lastError).toBe(`ProviderError: claim "ghost one" cites unknown evidence: ${UNSEEN}`);
+    expect(w.usable(r1.material)).toEqual([]);
+
+    answer = () => raw([good("recovered", 0)]);
+    w.prep.retry(w.captureId, [r1.id]);
+    await w.drain();
+    expect(w.prep.prep(r1.id)).toMatchObject({ interpretation: "done", supportedCount: 1 });
+  });
+
+  test("a fully valid interpretation takes one call, stores exactly what it did before, and keeps its memo key", async () => {
+    const claude = fakeClaude(() => raw([good("first", 0), good("second", 1)]));
+    const task = interpretTask(claude, () => null);
+    const w = world({ interpret: task });
+    const r1 = w.close(0, 0, 20);
+    await w.drain();
+
+    expect(claude.calls).toBe(1);
+    expect(w.usable(r1.material)).toEqual(["first", "second"]);
+    const unit = w.db.sql.query<{ memo_key: string }, []>(`SELECT memo_key FROM prep_inputs WHERE kind = 'interpretation'`).get()!;
+    const stored = w.memo.inspect(unit.memo_key as MemoKey)!;
+    expect(stored.version).toBe("interpret-v1");
+    expect(Object.keys(stored.output as object).sort()).toEqual(["concepts", "links", "supersedes"]);
+    const input: InterpretationInput = {
+      chunkRevisionId: r1.id,
+      newMaterial: { material: r1.material, passages: [P[0]!, P[1]!], frames: [BOARD], gaps: [], ads: [] },
+      existingClaims: [],
+      gaps: [],
+    };
+    expect(w.memo.key(task, input)).toBe(unit.memo_key as MemoKey);
   });
 });

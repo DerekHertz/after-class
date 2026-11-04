@@ -31,6 +31,12 @@ export type InterpretationOutput = {
   readonly links: readonly { readonly fromLabel: string; readonly toLabel: string; readonly type: SubjectLinkSuggestion["type"]; readonly evidence: readonly EvidenceId[]; readonly rationale: string }[];
   /** Existing claims that later context qualifies: the source of correction disclosures. */
   readonly supersedes: readonly { readonly claimId: ClaimId; readonly reason: string }[];
+  /**
+   * Claims dropped from the final attempt because they cite evidence the model was never shown.
+   * Absent when nothing was dropped, so a fully valid interpretation stores exactly what it always did.
+   * Plain strings, not EvidenceId: these IDs are not evidence of this chunk and must never be used as such.
+   */
+  readonly dropped?: readonly { readonly text: string; readonly evidence: readonly string[]; readonly reason: string }[];
 };
 
 /**
@@ -112,6 +118,7 @@ const interpretationSchema = z.object({
     rationale: z.string(),
   })),
   supersedes: z.array(z.object({ claimId: z.string(), reason: z.string() })),
+  dropped: z.array(z.object({ text: z.string(), evidence: z.array(z.string()), reason: z.string() })).optional(),
 });
 
 const resourceSchema = z.object({
@@ -181,22 +188,27 @@ Links relate two concepts by label (prerequisite_of, part_of, example_of, contra
 Existing claims come from earlier material of the same lecture. Do not restate them. If the new material qualifies or corrects one, list its ID under supersedes with the reason. Otherwise leave supersedes empty.`;
 
 const INTERPRET_VERSION = "interpret-v1";
+const INTERPRET_MAX_ATTEMPTS = 2;
 
 /** System prompt states gaps are missing capture, never to be filled; claims cite evidence IDs only. */
 export function interpretTask(claude: ClaudeCli, frameBytes: FrameBytes): Task<InterpretationInput, InterpretationOutput> {
+  // The memo does not tell an attempt which one it is; one run reuses the same input object, so count by it.
+  const tries = new WeakMap<InterpretationInput, number>();
   return {
     provider: "claude",
     purpose: "interpretation",
     model: "opus",
     version: INTERPRET_VERSION,
-    maxAttempts: 2,
+    maxAttempts: INTERPRET_MAX_ATTEMPTS,
     canonicalInput: canonicalInterpretation,
     async attempt(input, ctx) {
+      const attemptNo = (tries.get(input) ?? 0) + 1;
+      tries.set(input, attemptNo);
       const evidence = describeEvidence(input.newMaterial, input.gaps, frameBytes);
       const existing = input.existingClaims.length > 0 ? input.existingClaims.map((c) => `- ${c.id}: ${c.text}`).join("\n") : "- none";
       const prompt = `${evidence.text}\n\nExisting claims:\n${existing}`;
       const { output, usage } = await claude.structured(request(INTERPRET_SYSTEM, prompt, evidence.images, { effort: "high", webTools: false }), interpretationSchema, ctx.signal);
-      return { output: toInterpretation(output, bundleIds(input.newMaterial), new Set(input.existingClaims.map((c) => c.id)), usage), usage };
+      return { output: toInterpretation(output, bundleIds(input.newMaterial), new Set(input.existingClaims.map((c) => c.id)), usage, attemptNo >= INTERPRET_MAX_ATTEMPTS), usage };
     },
     decode: (stored) => {
       const raw = interpretationSchema.parse(stored);
@@ -205,18 +217,39 @@ export function interpretTask(claude: ClaudeCli, frameBytes: FrameBytes): Task<I
   };
 }
 
-function toInterpretation(raw: z.infer<typeof interpretationSchema>, allowed: ReadonlySet<string>, existing: ReadonlySet<string>, usage: UsageReport): InterpretationOutput {
+/**
+ * A claim that cites evidence outside the material is retried on earlier attempts. On the final one it is
+ * dropped and reported, and the rest of the interpretation stands: the flow checks claims one at a time, and
+ * R3: "A claim can be used to judge my answers only if it passed the evidence check." A dropped claim never
+ * becomes a Claim, so nothing can assess it, and its citations are never trimmed or swapped for others.
+ * If nothing survives the drop, the interpretation fails as it always did.
+ */
+function toInterpretation(raw: z.infer<typeof interpretationSchema>, allowed: ReadonlySet<string>, existing: ReadonlySet<string>, usage: UsageReport, dropBad: boolean): InterpretationOutput {
   const unknownClaims = raw.supersedes.filter((s) => !existing.has(s.claimId));
   if (unknownClaims.length > 0) throw new ProviderError(`supersedes unknown claims: ${unknownClaims.map((s) => s.claimId).join(", ")}`, usage, true);
+  const dropped: NonNullable<InterpretationOutput["dropped"]>[number][] = [];
+  let firstError: ProviderError | null = null;
+  const concepts = raw.concepts.map((c) => ({
+    label: c.label,
+    summary: c.summary,
+    claims: c.claims.flatMap((d) => {
+      try {
+        return [toDraft(d, allowed, usage)];
+      } catch (err) {
+        if (!(dropBad && err instanceof ProviderError)) throw err;
+        firstError ??= err;
+        dropped.push({ text: d.text, evidence: d.evidence, reason: `cites unknown evidence: ${d.evidence.filter((id) => !allowed.has(id)).join(", ")}` });
+        return [];
+      }
+    }),
+    confusions: c.confusions.map((x) => ({ text: x.text, evidence: knownIds(allowed, x.evidence, "confusion", usage) })),
+  }));
+  if (firstError !== null && concepts.every((c) => c.claims.length === 0)) throw firstError;
   return {
-    concepts: raw.concepts.map((c) => ({
-      label: c.label,
-      summary: c.summary,
-      claims: c.claims.map((d) => toDraft(d, allowed, usage)),
-      confusions: c.confusions.map((x) => ({ text: x.text, evidence: knownIds(allowed, x.evidence, "confusion", usage) })),
-    })),
+    concepts,
     links: raw.links.map((l) => ({ ...l, evidence: knownIds(allowed, l.evidence, "link", usage) })),
     supersedes: raw.supersedes.map((s) => ({ claimId: s.claimId as ClaimId, reason: s.reason })),
+    ...(dropped.length > 0 ? { dropped } : {}),
   };
 }
 
