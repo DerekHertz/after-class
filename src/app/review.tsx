@@ -2,7 +2,6 @@ import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } fro
 import type { EvidenceId, ReviewId } from "../shared/ids";
 import type { AppApi } from "./api";
 import { useSceneActivity } from "./appearance";
-import "./review.css";
 import { createReviewController } from "./controller";
 import type { SessionState } from "./controller";
 import {
