@@ -439,7 +439,9 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
       }
       case "save": {
         if (!record) return null;
-        if (!reviewOf(reviews, reviewId!)) return failure(404, "unknown review", cors);
+        const toSave = reviewOf(reviews, reviewId!);
+        if (!toSave) return failure(404, "unknown review", cors);
+        if (toSave.state.phase !== "ended") return failure(409, "the review has not ended, so it cannot be saved", cors);
         return reply("save", await record.save(reviewId!), cors);
       }
       case "retryPreparation": {

@@ -468,6 +468,11 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
 
     if (!hasTurn(turnId)) {
       const { state } = stateOf(reviewId, review, loadTurns(reviewId));
+      // A saved review is final (record.save answers a retry from its first save), so an ended review takes no new turn.
+      if (state.phase === "ended") {
+        yield { type: "turn_failed", error: "this review has ended", retryable: false };
+        return;
+      }
       appendTurn(reviewId, turnId, "learner", state.openThread, { act });
     }
     yield { type: "learner_turn_stored", turnId };
