@@ -3,7 +3,6 @@ import { COMPANIONS, SCENES, useAppearance } from "./appearance";
 import type { CompanionId, SceneId } from "./appearance";
 import { Companion, CompanionDrawing } from "./companion";
 import { Link } from "./ui";
-import "./scene.css";
 
 export function RoomDrawing({ id }: { readonly id: SceneId }) {
   return <svg viewBox="0 0 180 112" aria-hidden="true" focusable="false" className="room-drawing">
