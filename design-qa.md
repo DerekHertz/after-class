@@ -41,3 +41,15 @@ P3 polish: faint idle companion caption and redundant lower source label at mobi
 - Narrow width and scroll access: complete.
 - License output and independent follow-up: complete.
 - Final visual acceptance: reserved for Derek on PR #44.
+
+## Tactile motion follow-up (2026-11-04)
+
+final result: passed
+
+Code `167caaa` preserves the chosen artwork/layout and adds object motion. Fresh combined comparison: `docs/trail/frontend-motion/reference-comparison.jpg`, source 1487×1058 normalized to 1440×1024; implementation 1440×1024 at 1×. Same active review/source-open state; original fixture-content differences above still apply. The full paired input was opened and inspected. Focused character/typography comparison from the previous round remains applicable because those assets and review type/layout were preserved; the new companion motion changes pose over time only.
+
+All five fidelity surfaces rechecked: review typography, paper/grid rhythm and palette retained; notebook now shares Young Serif/DM Sans; source/drawer/character image quality retained; actual evidence/type/time copy replaces record IDs. Fresh screenshot evidence: `docs/trail/frontend-motion/{study-bench,08-notebook,09-mobile-listening}.jpg`. Settled notebook capture confirmed opacity 1 and resolved timestamp labels. Viewports 1440×1024 desktop and 390×844 mobile; final preview override reset.
+
+New audit findings and post-fix evidence: masthead intercepted header pointer actions (P1); pointer Pause/Resume verified after empty masthead area passed events through. Mobile recorder overlapped drawer handle (P2); final 390px center hit is source-handle, drawer opens without speech. Notebook IDs/citation ambiguity (P2); visible IDs removed in favor of actual wording/rationale, citation timestamps resolved in08-notebook. Pending notebook animation could commit after Back in a completion ordering edge (P2); independently reproduced and fixed by invalidating pending navigation before cancel.
+
+Physical drawer/speech/cover motion, repeated-key guard, active speech shutdown on pause, draft continuity, citation focus return, manual reduced motion, all three room skins and no console errors verified. Details and fresh screenshot sequence are in `docs/trail/frontend-motion/README.md`. No remaining actionable P0/P1/P2 established by the final checks; P3 notes remain in the guide. This technical verdict is separate from Derek's final visual acceptance.

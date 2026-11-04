@@ -1,5 +1,7 @@
 # Reference fidelity correction
 
+For the newer tactile controls, living mascot and UI consistency review, see [the motion follow-up](../frontend-motion/README.md).
+
 This supersedes the original frontend artwork in the first implementation stack. PR #42 is the visual source; Derek owns final visual approval on base PR #44. Nothing here authorizes merging or deployment.
 
 ## Preview

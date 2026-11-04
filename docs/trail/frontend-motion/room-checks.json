@@ -1,0 +1,26 @@
+[
+  {
+    "activity": "listening",
+    "animation": "companion-listen",
+    "page": 1440,
+    "pressed": "true",
+    "room": "last-desk",
+    "width": 1440
+  },
+  {
+    "activity": "listening",
+    "animation": "companion-listen",
+    "page": 1440,
+    "pressed": "true",
+    "room": "projection-booth",
+    "width": 1440
+  },
+  {
+    "activity": "listening",
+    "animation": "companion-listen",
+    "page": 1440,
+    "pressed": "true",
+    "room": "study-bench",
+    "width": 1440
+  }
+]
