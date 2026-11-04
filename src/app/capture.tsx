@@ -7,6 +7,7 @@ import { formatClock, inspectBundle, optionsScreen, sourceTitles, sourceVideos }
 import type { OptionsScreen, SourceTitles, StartOffer } from "./core";
 import { BundleInspector, ErrorNote, EvidencePane, Link, navigate, useAsync } from "./ui";
 
+
 const POLL_MS = 3000;
 
 export type OptionsViewProps = {
@@ -23,8 +24,9 @@ export function OptionsView({ screen, busy, onStart, onRetry, api, titles }: Opt
   switch (screen.kind) {
     case "ready":
       return (
-        <section>
-          <h2>Ready to review</h2>
+        <section className="invitation-paper" aria-labelledby="invitation-heading">
+          <p className="page-kicker">A little space to think</p>
+          <h2 id="invitation-heading">Ready to review</h2>
           <p>{screen.supportedClaims} claim{screen.supportedClaims === 1 ? "" : "s"} supported by the lecture evidence.</p>
           <Partial items={screen.partial} />
           <Offers offers={screen.offers} busy={busy} onStart={onStart} />
@@ -32,8 +34,9 @@ export function OptionsView({ screen, busy, onStart, onRetry, api, titles }: Opt
       );
     case "processing":
       return (
-        <section>
-          <h2>Processing</h2>
+        <section className="invitation-paper" aria-labelledby="invitation-heading">
+          <p className="page-kicker">Getting your lecture ready</p>
+          <h2 id="invitation-heading">Processing</h2>
           <p>
             {screen.pendingChunks} section{screen.pendingChunks === 1 ? " is" : "s are"} still being prepared.
             {screen.estimate !== null && <> Estimated time left: {screen.estimate}.</>}
@@ -51,8 +54,9 @@ export function OptionsView({ screen, busy, onStart, onRetry, api, titles }: Opt
       );
     case "nothing":
       return (
-        <section>
-          <h2>Nothing to review yet</h2>
+        <section className="invitation-paper" aria-labelledby="invitation-heading">
+          <p className="page-kicker">Only what the source supports</p>
+          <h2 id="invitation-heading">Nothing to review yet</h2>
           <p>No claim from this capture has passed the evidence check, so there is nothing fair to ask you about.</p>
           {screen.gaps.length > 0 && (
             <>
@@ -96,7 +100,7 @@ export function OptionsView({ screen, busy, onStart, onRetry, api, titles }: Opt
 function Partial({ items }: { readonly items: readonly string[] }) {
   if (items.length === 0) return null;
   return (
-    <div className="note">
+    <div className="note partial-notice">
       <strong>This review is partial.</strong>
       <ul>{items.map((t, i) => <li key={i}>{t}</li>)}</ul>
     </div>
@@ -105,10 +109,10 @@ function Partial({ items }: { readonly items: readonly string[] }) {
 
 function Offers({ offers, busy, onStart }: { readonly offers: readonly StartOffer[]; readonly busy: boolean; readonly onStart: (c: StartChoice) => void }) {
   return (
-    <div className="actions">
+    <div className="invitation-offers">
       {offers.map((o) => (
-        <div key={o.choice}>
-          <button type="button" disabled={busy} onClick={() => onStart(o.choice)}>{o.label}</button>
+        <div className="invitation-offer" key={o.choice}>
+          <button className={o.choice === "prepared_only" ? "page-primary" : undefined} type="button" disabled={busy} onClick={() => onStart(o.choice)}>{o.label}</button>
           <span className="muted"> {o.note}</span>
         </div>
       ))}
@@ -138,6 +142,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
   const [starting, setStarting] = useState(false);
   const [refused, setRefused] = useState<ReviewOptions | null>(null);
   const [showEvidence, setShowEvidence] = useState(false);
+  const actionPending = useRef(false);
   // One id per choice until the start settles, so a retried start is the same review.
   const pendingIds = useRef(new Map<StartChoice, ReviewId>());
 
@@ -154,6 +159,8 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
   const shown = refused ?? options.data;
 
   async function start(choice: StartChoice) {
+    if (actionPending.current) return;
+    actionPending.current = true;
     const reviewId = pendingIds.current.get(choice) ?? randomId("rvw");
     pendingIds.current.set(choice, reviewId);
     setStarting(true);
@@ -168,40 +175,55 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
     } catch (e) {
       setStartError(e instanceof Error ? e.message : String(e));
     } finally {
+      actionPending.current = false;
       setStarting(false);
     }
   }
 
   async function answer(kind: "later" | "wait") {
+    if (actionPending.current) return;
+    actionPending.current = true;
+    setStarting(true);
+    setStartError(null);
     try {
       await api.answerInvite(captureId, kind);
       capture.reload();
     } catch (e) {
       setStartError(e instanceof Error ? e.message : String(e));
+    } finally {
+      actionPending.current = false;
+      setStarting(false);
     }
   }
 
   return (
-    <main>
-      <h1>Review</h1>
+    <main className="notebook-page capture-page">
+      <header className="page-heading">
+        <div><p className="page-kicker">After Class</p><h1>Your lecture</h1></div>
+        <nav aria-label="Capture navigation"><Link to={{ page: "record", reviewId: null }}>My notebook</Link> <Link to={{ page: "usage" }}>Usage</Link></nav>
+      </header>
       <ErrorNote error={capture.error} retry={capture.reload} />
       {capture.data && (
-        <p className="muted">
+        <p className="capture-summary">
           {capture.data.capture.sources.map((s) => s.title).join("; ") || "No source yet"} · capture {capture.data.capture.status.state} ·{" "}
           {formatClock(capture.data.capture.watchedSeconds)} watched · captions {capture.data.capture.transcript.replaceAll("_", " ")}
         </p>
       )}
       <ErrorNote error={options.error} retry={options.reload} />
       <ErrorNote error={startError} />
+      {options.data === null && options.error === null && <p className="page-loading" role="status">Looking for prepared lecture material...</p>}
+      {starting && <p className="page-loading" role="status">Saving your choice...</p>}
       {shown && (
         <OptionsView
           screen={optionsScreen(shown, titles, videos)}
           busy={starting}
           onStart={start}
           onRetry={() => {
+            if (actionPending.current) return;
+            actionPending.current = true;
             setRefused(null);
             setStarting(true);
-            void checkAgain(api, captureId, { reload: options.reload, onError: setStartError }).finally(() => setStarting(false));
+            void checkAgain(api, captureId, { reload: options.reload, onError: setStartError }).finally(() => { actionPending.current = false; setStarting(false); });
           }}
           api={api}
           titles={titles}
@@ -209,20 +231,20 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
       )}
       {shown?.kind === "ready" && (
         <p>
-          <button type="button" onClick={() => answer("later")}>Later</button> <span className="muted">Keeps preparing; you will be invited again at the next boundary.</span>
+          <button type="button" disabled={starting} onClick={() => answer("later")}>Later</button> <span className="muted">Keeps preparing; you will be invited again at the next boundary.</span>
         </p>
       )}
       {shown?.kind === "processing" && (
         <p>
-          <button type="button" onClick={() => answer("wait")}>Wait</button> <span className="muted">Stay here until it is ready.</span>
+          <button type="button" disabled={starting} onClick={() => answer("wait")}>Wait</button> <span className="muted">Stay here until it is ready.</span>
         </p>
       )}
-      <section>
-        <h2>Capture evidence</h2>
-        <button type="button" onClick={() => setShowEvidence((v) => !v)}>{showEvidence ? "Hide" : "Inspect"} evidence bundle</button>
-        {showEvidence && <CaptureEvidence api={api} captureId={captureId} titles={titles} />}
+      <section className="capture-source-paper" aria-labelledby="capture-evidence-heading">
+        <h2 id="capture-evidence-heading">Capture evidence</h2>
+        <p className="muted">Inspect the watched intervals, source material, and any missing coverage.</p>
+        <button type="button" aria-expanded={showEvidence} aria-controls="capture-evidence" onClick={() => setShowEvidence((v) => !v)}>{showEvidence ? "Hide" : "Inspect"} evidence bundle</button>
+        <div id="capture-evidence" hidden={!showEvidence}>{showEvidence && <CaptureEvidence api={api} captureId={captureId} titles={titles} />}</div>
       </section>
-      <p><Link to={{ page: "usage" }}>Usage</Link> · <Link to={{ page: "record", reviewId: null }}>Saved record</Link></p>
     </main>
   );
 }

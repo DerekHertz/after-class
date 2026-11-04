@@ -1,0 +1,51 @@
+.notebook-page { max-width: 80rem; padding: clamp(20px, 4vw, 56px); color: var(--fg); }
+.notebook-page h1, .notebook-page h2, .notebook-page h3 { font-family: Georgia, "Times New Roman", serif; }
+.notebook-page h1 { font-size: clamp(2rem, 4vw, 3rem); margin: 8px 0; }
+.page-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+.page-heading nav { display: flex; flex-wrap: wrap; gap: 20px; }
+.page-kicker { margin: 0 0 8px; font-size: .75rem; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
+.capture-summary { max-width: 70ch; color: var(--muted); margin-block: 20px; }
+.invitation-paper, .capture-source-paper, .record-section { background: var(--surface); border: 1px solid var(--border); border-radius: 14px 5px 14px 5px; padding: clamp(20px, 3vw, 36px); margin-block: 24px; box-shadow: 3px 4px 0 color-mix(in srgb, var(--fg) 8%, transparent); overflow-wrap: anywhere; }
+.invitation-paper, .capture-source-paper, .record-section { --fg: #302c25; --muted: #6a6256; --accent: #284f9b; --border: #c7bca4; color: var(--fg); }
+.invitation-paper h2 { font-size: 1.8rem; }
+.invitation-paper p { max-width: 65ch; }
+.invitation-offers { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 28px; }
+.invitation-offer { flex: 1 1 14rem; max-width: 24rem; }
+.invitation-offer button { display: block; margin-bottom: 8px; }
+.invitation-offer .muted { display: block; font-size: .9rem; }
+.notebook-page button, .notebook-page select { min-height: 44px; }
+.notebook-page .page-primary { background: var(--accent); border-color: var(--accent); color: var(--surface); padding: 10px 24px; }
+.notebook-page :is(button, select, textarea, a, summary):focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.page-loading { color: var(--muted); padding-block: 12px; }
+.record-content { padding: 0; margin: 0; border: 0; min-width: 0; }
+.record-section > h2 { margin-top: 0; }
+.record-note { padding: 24px 0; border-bottom: 1px solid var(--border); }
+.record-note:last-child { border-bottom: 0; padding-bottom: 0; }
+.record-note-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.record-note-heading h3, .record-note-heading h4 { margin: 0; }
+.note-reference { font-size: .75rem; color: var(--muted); margin: 8px 0 20px; }
+.record-note :is(.author-learner, .author-tutor, .author-source) { padding-left: 16px; border-left: 3px solid var(--border); white-space: pre-wrap; }
+.record-note .author-learner { border-color: var(--accent); }
+.record-note .author-tutor { border-color: #b27d55; }
+.record-note .author-source { border-color: #63816d; }
+.record-note textarea { display: block; margin: 12px 0; min-height: 8rem; line-height: 1.7; padding: 12px; resize: vertical; }
+.record-note label { display: block; font-weight: 600; }
+.record-evidence { border: 1px solid var(--border); border-radius: 6px; padding: 20px; margin-top: 20px; }
+.record-list { padding-left: 20px; }
+.record-list > li { padding: 16px 0; border-bottom: 1px solid var(--border); }
+.record-list > li:last-child { border-bottom: 0; }
+.notebook-empty { padding: 24px 0; max-width: 60ch; }
+.notebook-empty h3 { font-size: 1.5rem; }
+.usage-table-scroll { max-width: 100%; overflow-x: auto; }
+.usage-table-scroll table { width: 100%; }
+.usage-table-scroll caption { text-align: left; color: var(--muted); padding: 12px 0; }
+.usage-table-scroll th, .usage-table-scroll td { padding: 12px 16px; }
+@media (max-width: 600px) {
+  .notebook-page { padding: 16px; }
+  .page-heading { align-items: flex-start; }
+  .invitation-paper, .capture-source-paper, .record-section { padding: 20px 16px; }
+  .invitation-offer { max-width: none; }
+  .record-evidence { padding: 12px; }
+  .record-note-heading { align-items: flex-start; }
+  .notebook-page .actions > label, .notebook-page .actions > select { max-width: 100%; }
+}
