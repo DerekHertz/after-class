@@ -102,7 +102,10 @@ A model call needs all of the following. Each is enforced in code and has a test
 | The 800 budget | A persisted counter in the lab dir, written before each request, across all phases. A run that would cross 800 refuses up front, and a request that would cross it is never sent, retries included. |
 | `signed_off` labels | For a live run and for any scored run. |
 | 3 tune rounds | A fourth refuses. |
-| Score once | A second score run refuses and points at `rescore`. |
+| Score once | A second score run refuses and points at `rescore`. A scored run in which any Jev call failed writes no result and does not use up the scoring: re-run the same command and only the failed judgments are retried. |
+| Failed calls | A tune or score run in which any judgment failed (a network error, a 5xx) throws before writing results, and uses up no tuning round. If the same judgment keeps failing, stop and ask Derek; there is no flag to score around it. |
+| Tune after score | Refuses once the held-out half is scored: tuning after seeing it would tune on the held-out data. |
+| A deleted or damaged `state.json` | A malformed file is refused. A deleted one does not reset the rails: tune and score result files and cached judgments in the run directory set a floor under the round, score and call counters. |
 | Halves | Tune work may hold only first-half items, score work only second-half items. |
 
 State lives under `<lab>/<origin>/`: `fixture` and `live` runs have separate counters, so a dry run never spends a live round.

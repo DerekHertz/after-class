@@ -647,21 +647,89 @@ describe("safety rails", () => {
     expect(readState(join(o.labDir, "live"))).toMatchObject({ callsUsed: 7, tuneRounds: 1 });
   });
 
-  test("a transport error that echoes the key is redacted from the stored judgment, the report and the thrown text", async () => {
+  test("a transport error that echoes the key is redacted from the thrown text and from everything stored", async () => {
     const o = lab();
     const f = stubFetch({ fail: "leak" });
     const lines: string[] = [];
-    const run = await runLab(live(o, { fetch: f.fn, out: (l) => lines.push(l), maxCalls: 100 }));
+    const err = await runLab(live(o, { fetch: f.fn, out: (l) => lines.push(l), maxCalls: 100 })).catch((e: unknown) => e as Error);
     expect(f.seen.length).toBeGreaterThan(0);
+    expect(String((err as Error).message)).toContain("[redacted]");
     const stored = walk(o.labDir).map((p) => readFileSync(p, "utf8")).join("\n");
-    expect(stored).toContain("[redacted]");
-    expect([stored, ...lines, run.report.text].join("\n")).not.toContain(SECRET);
+    expect([stored, ...lines, String((err as Error).message)].join("\n")).not.toContain(SECRET);
 
     const o2 = lab();
     const f2 = stubFetch({ fail: "503" });
-    const err = await runLab(live(o2, { fetch: f2.fn, maxCalls: 7 })).catch((e: unknown) => e as Error);
-    expect(String((err as Error).message)).not.toContain(SECRET);
+    const err2 = await runLab(live(o2, { fetch: f2.fn, maxCalls: 7 })).catch((e: unknown) => e as Error);
+    expect(String((err2 as Error).message)).not.toContain(SECRET);
     expect(walk(o2.labDir).map((p) => readFileSync(p, "utf8")).join("\n")).not.toContain(SECRET);
+  });
+});
+
+describe("failed calls and a deleted or damaged state file (an irreversible run must not be burned)", () => {
+  const down: JevClient = { ask: () => Promise.reject(new Error("network down")) };
+  const firstCallFails = (): JevClient => {
+    const inner = scripted();
+    let n = 0;
+    return { ask: (req, signal) => (n++ === 0 ? Promise.reject(new Error("one blip")) : inner.ask(req, signal)) };
+  };
+
+  test("a tune run whose Jev calls fail writes no result and uses up no tuning round", async () => {
+    const o = lab();
+    const dir = join(o.labDir, "fixture");
+    await expect(runLab({ ...o.base(down), phase: "tune" })).rejects.toThrow("judgments failed");
+    expect(readState(dir).tuneRounds).toBe(0);
+    expect(existsSync(join(dir, "runs"))).toBe(false);
+    const run = await runLab({ ...o.base(), phase: "tune" });
+    expect(readState(dir).tuneRounds).toBe(1);
+    expect(run.resultsPath).toContain("tune-1");
+  });
+
+  test("a scored run whose Jev calls fail does not burn the held-out half; the retry redoes only the failures", async () => {
+    const o = lab();
+    const dir = join(o.labDir, "fixture");
+    await runLab({ ...o.base(), phase: "tune" });
+    await expect(runLab({ ...o.base(down), phase: "score" })).rejects.toThrow("nothing was scored");
+    expect(readState(dir).scoreStatus).toBe("in_progress");
+    expect(existsSync(join(dir, "runs", "score-1.jsonl"))).toBe(false);
+
+    await expect(runLab({ ...o.base(firstCallFails()), phase: "score" })).rejects.toThrow("1 of");
+    const retry = await runLab({ ...o.base(), phase: "score" });
+    expect(retry.newCalls).toBe(1);
+    expect(readState(dir).scoreStatus).toBe("complete");
+    expect(retry.report.text).toContain("held-out second halves");
+  });
+
+  test("deleting state.json does not reopen a scored half or a used-up tuning budget", async () => {
+    const o = lab();
+    const dir = join(o.labDir, "fixture");
+    await runLab({ ...o.base(), phase: "tune" });
+    await runLab({ ...o.base(), phase: "score" });
+    rmSync(join(dir, "state.json"));
+    await expect(runLab({ ...o.base(), phase: "score" })).rejects.toThrow("already scored once");
+    await expect(runLab({ ...o.base(), phase: "tune" })).rejects.toThrow("tuning after seeing it");
+
+    const p = lab();
+    const pdir = join(p.labDir, "fixture");
+    for (let i = 0; i < 3; i++) await runLab({ ...p.base(), phase: "tune" });
+    rmSync(join(pdir, "state.json"));
+    await expect(runLab({ ...p.base(), phase: "tune" })).rejects.toThrow("no fourth");
+  });
+
+  test("a malformed or unreadable state.json is refused, never read as zero", async () => {
+    const o = lab();
+    const dir = join(o.labDir, "fixture");
+    mkdirSync(dir, { recursive: true });
+    for (const body of ["{}", '{"version":1,"callsUsed":"7"}', "not json", '{"version":1,"callsUsed":-1,"tuneRounds":0,"lastTune":null,"scoreStatus":"none"}']) {
+      writeFileSync(join(dir, "state.json"), body);
+      await expect(runLab({ ...o.base(), phase: "tune" })).rejects.toThrow(/malformed|not valid JSON/);
+    }
+  });
+
+  test("tuning after the held-out half was scored is refused", async () => {
+    const o = lab();
+    await runLab({ ...o.base(), phase: "tune" });
+    await runLab({ ...o.base(), phase: "score" });
+    await expect(runLab({ ...o.base(), phase: "tune" })).rejects.toThrow("tuning after seeing it");
   });
 });
 

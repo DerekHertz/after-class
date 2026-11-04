@@ -13,7 +13,7 @@
  * Jev call unless --live, a 0600 keys file with TYPESAFE_API_KEY, --max-calls within the budget and signed_off labels
  * all hold. Without --live it uses a deterministic fake and everything it prints is tagged [fixture].
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -247,9 +247,44 @@ export type LabState = {
 
 const EMPTY_STATE: LabState = { version: 1, callsUsed: 0, tuneRounds: 0, lastTune: null, scoreStatus: "none" };
 
+const isCount = (x: unknown): x is number => typeof x === "number" && Number.isInteger(x) && x >= 0;
+
+function validState(x: unknown): x is LabState {
+  if (typeof x !== "object" || x === null) return false;
+  const s = x as Record<string, unknown>;
+  const lt = s.lastTune as Record<string, unknown> | null | undefined;
+  const lastTuneOk = lt === null || (typeof lt === "object" && lt !== undefined && isCount(lt.round) && typeof lt.config === "object" && lt.config !== null && typeof lt.thresholds === "object" && lt.thresholds !== null);
+  return s.version === 1 && isCount(s.callsUsed) && isCount(s.tuneRounds) && lastTuneOk && (s.scoreStatus === "none" || s.scoreStatus === "in_progress" || s.scoreStatus === "complete");
+}
+
 export function readState(dir: string): LabState {
   const path = join(dir, "state.json");
-  return existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as LabState) : EMPTY_STATE;
+  if (!existsSync(path)) return EMPTY_STATE;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new LabRefusal(`${path} is not valid JSON; refusing to guess the lab's counters. Restore it or ask Derek.`);
+  }
+  if (!validState(parsed)) throw new LabRefusal(`${path} is malformed (not a version 1 lab state); refusing to guess the lab's counters. Restore it or ask Derek.`);
+  return parsed;
+}
+
+/**
+ * state.json is the only counter, so deleting it must not reset the rails: what the run directory itself proves
+ * (tune and score result files, cached judgments) sets a floor under the counters.
+ */
+function withFloors(dir: string, state: LabState, cachedJudgments: number): LabState {
+  const runs = join(dir, "runs");
+  const files = existsSync(runs) ? readdirSync(runs) : [];
+  const tuneFiles = files.filter((f) => /^tune-\d+\.jsonl$/.test(f)).length;
+  const scored = files.includes("score-1.jsonl");
+  return {
+    ...state,
+    tuneRounds: Math.max(state.tuneRounds, tuneFiles),
+    callsUsed: Math.max(state.callsUsed, cachedJudgments),
+    scoreStatus: scored ? "complete" : state.scoreStatus,
+  };
 }
 
 function writeState(dir: string, state: LabState): void {
@@ -385,7 +420,7 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
   const infos = loadLabels(opts.labelFiles);
   const origin: Origin = opts.live ? "live" : "fixture";
   const dir = join(opts.labDir, origin);
-  let state = readState(dir);
+  let state = withFloors(dir, readState(dir), readCache(dir).size);
 
   if (opts.phase === "score") {
     if (opts.overrides !== undefined && Object.keys(opts.overrides).length > 0) refuse("a scored run takes no tuning flags: it uses the config of the last tune round");
@@ -393,7 +428,10 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
     if (state.lastTune === null) refuse("no tune round has run yet; run a tune round first (a tune round with the defaults counts as one)");
     const unsigned = infos.filter((i) => i.labels.status !== "signed_off");
     if (unsigned.length > 0) refuse(`the scored run needs signed_off labels; not signed off: ${unsigned.map((i) => i.file).join(", ")}`);
-  } else if (state.tuneRounds >= MAX_TUNE_ROUNDS) refuse(`${MAX_TUNE_ROUNDS} tuning rounds are already used; there is no fourth`);
+  } else {
+    if (state.scoreStatus === "complete") refuse("the held-out half was already scored; tuning after seeing it would tune on the held-out data. Read it back with: rescore --results <file> --labels <files>");
+    if (state.tuneRounds >= MAX_TUNE_ROUNDS) refuse(`${MAX_TUNE_ROUNDS} tuning rounds are already used; there is no fourth`);
+  }
 
   let apiKey: string | null = null;
   if (opts.live) {
@@ -463,8 +501,10 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
       if (state.callsUsed + needed > BUDGET_CALLS) refuse(`this run needs ${needed} new calls and ${state.callsUsed} of ${BUDGET_CALLS} are used; no call was made`);
     }
 
-    state = opts.phase === "tune" ? { ...state, tuneRounds: round } : { ...state, scoreStatus: "in_progress" };
-    writeState(dir, state);
+    if (opts.phase === "score") {
+      state = { ...state, scoreStatus: "in_progress" };
+      writeState(dir, state);
+    }
 
     const attempt = async <I>(task: Task<I, unknown>, input: I): Promise<{ readonly calls: CallRecord[]; readonly p: Record<string, number | null>; readonly error: string | null }> => {
       calls.current = [];
@@ -508,6 +548,14 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
       judgments.push(record);
     }
 
+    const failed = judgments.filter((j) => j.error !== null);
+    if (failed.length > 0) {
+      throw new LabRefusal(
+        `${failed.length} of ${judgments.length} judgments failed (first: ${failed[0]!.error}); nothing was scored and no ${opts.phase === "tune" ? "tuning round" : "scoring"} was used up. ` +
+          `Run the same command again: only the failed judgments are retried, the rest are reused. If the same one keeps failing, stop and ask Derek.`,
+      );
+    }
+
     const header: RunHeader = { t: "header", version: 1, runId, phase: opts.phase, round, origin, model: JEV_MODEL, config, thresholds };
     const results: ParsedResults = {
       header,
@@ -522,7 +570,7 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
     const reportPath = join(dir, "runs", `${runId}.report.txt`);
     writeFileSync(reportPath, report.text);
 
-    state = opts.phase === "tune" ? { ...state, lastTune: { round, config, thresholds } } : { ...state, scoreStatus: "complete" };
+    state = opts.phase === "tune" ? { ...state, tuneRounds: round, lastTune: { round, config, thresholds } } : { ...state, scoreStatus: "complete" };
     writeState(dir, state);
     for (const line of report.text.split("\n")) if (line !== "") say(line);
     return { report, resultsPath, reportPath, newCalls };
