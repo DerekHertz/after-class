@@ -6,6 +6,7 @@
 .page-kicker { margin: 0 0 8px; font-size: .75rem; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
 .capture-summary { max-width: 70ch; color: var(--muted); margin-block: 20px; }
 .invitation-paper, .capture-source-paper, .record-section { background: var(--surface); border: 1px solid var(--border); border-radius: 14px 5px 14px 5px; padding: clamp(20px, 3vw, 36px); margin-block: 24px; box-shadow: 3px 4px 0 color-mix(in srgb, var(--fg) 8%, transparent); overflow-wrap: anywhere; }
+.invitation-paper, .capture-source-paper, .record-section { --fg: #302c25; --muted: #6a6256; --accent: #284f9b; --border: #c7bca4; color: var(--fg); }
 .invitation-paper h2 { font-size: 1.8rem; }
 .invitation-paper p { max-width: 65ch; }
 .invitation-offers { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 28px; }

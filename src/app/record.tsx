@@ -6,7 +6,6 @@ import { noteView, observationRow, STATUS_LABEL, usageRows } from "./core";
 import type { SourceTitles } from "./core";
 import { ErrorNote, EvidencePane, Link, useAsync } from "./ui";
 
-import "./pages.css";
 
 const LINK_TYPES: readonly LinkType[] = ["prerequisite_of", "part_of", "example_of", "contrasts_with", "related_to"];
 const OVERRIDES: readonly ObservationStatus[] = ["independent", "partial", "after_help", "unresolved", "not_assessed"];

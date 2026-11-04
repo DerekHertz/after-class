@@ -7,7 +7,6 @@ import { formatClock, inspectBundle, optionsScreen, sourceTitles, sourceVideos }
 import type { OptionsScreen, SourceTitles, StartOffer } from "./core";
 import { BundleInspector, ErrorNote, EvidencePane, Link, navigate, useAsync } from "./ui";
 
-import "./pages.css";
 
 const POLL_MS = 3000;
 
