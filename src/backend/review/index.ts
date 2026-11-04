@@ -307,8 +307,38 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
   const codeTurnId = (reviewId: ReviewId, cause: string) => stableId("turn", reviewId, cause, "code");
   const threadOf = (move: TutorMove): ThreadId | null => ("threadId" in move ? move.threadId : null);
 
-  /** What the learner hears when the model cannot produce a valid move: code's own, never a stuck review. */
-  function codeMove(input: TutorInput): { move: TutorMove; say: string } | null {
+  /**
+   * A pending correction written from its own data: the claim it names, what
+   * changed, and only the evidence that claim carries now (none once withdrawn).
+   * R3: "A claim can be used to judge my answers only if it passed the evidence check."
+   * A withdrawn claim is named from the text frozen at start and is never used to judge; a
+   * reworded or newly usable claim is in `input.claims`, so it has passed the check.
+   */
+  function disclosure(input: TutorInput, review: Stored): { move: TutorMove; say: string } | null {
+    const pending = input.state.corrections.find((c) => !c.disclosed);
+    if (!pending) return null;
+    const now = input.claims.find((c) => c.id === pending.claimId);
+    const before = review.claimTexts.get(pending.claimId);
+    const shown = new Set<EvidenceId>([...input.evidence.passages.map((p) => p.id), ...input.evidence.frames.map((f) => f.id)]);
+    const threadIds = [...new Set(input.turns.flatMap((t) => (t.actor === "tutor" && t.move.kind === "ask_main" && t.move.claimIds.includes(pending.claimId) ? [t.move.threadId] : [])))];
+    const evidence = pending.change === "withdrawn" || !now ? [] : now.evidence.filter((e) => shown.has(e));
+    const say =
+      pending.change === "withdrawn"
+        ? `I need to correct something. I can no longer confirm this point against the lecture${before ? `: "${before}"` : ""}. I won't use it to judge your answers.`
+        : pending.change === "text_changed" && now
+          ? `I need to correct something. A point I was using has been reworded${before ? `: it said "${before}"` : ""}. It now says "${now.text}", and I'll use that version from here on.`
+          : now
+            ? `I need to correct something. A new point has passed the check for this part of the lecture: "${now.text}". I may use it from here on.`
+            : "I need to correct something about a point I was using.";
+    return { move: { kind: "disclose_correction", correctionId: pending.id, threadIds, evidence }, say };
+  }
+
+  /** What the learner hears when the model cannot produce a valid move: code's own, never a stuck review. A pending correction is disclosed before anything else. */
+  function codeMove(input: TutorInput, review: Stored): { move: TutorMove; say: string } | null {
+    if (input.allowed.includes("disclose_correction")) {
+      const disclosed = disclosure(input, review);
+      if (disclosed) return disclosed;
+    }
     const thread = input.state.openThread;
     if (input.allowed.includes("close_thread") && thread) return { move: { kind: "close_thread", threadId: thread }, say: CLOSE_THREAD_LINE };
     if (input.allowed.includes("wrap_up")) return { move: { kind: "wrap_up" }, say: WRAP_UP_LINE };
@@ -517,7 +547,7 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
       return;
     }
 
-    const fallback = codeMove(input);
+    const fallback = codeMove(input, review);
     if (!fallback) {
       yield { type: "turn_failed", error: `no valid move: ${input.repairNote}`, retryable: !replayed };
       return;
