@@ -34,7 +34,7 @@ function AppearancePicker() {
 }
 export function SceneShell({ children }: { readonly children: ReactNode }) {
   const { appearance, activity } = useAppearance();
-  return <div className="scene-shell" data-scene={appearance.scene} data-motion={appearance.motion}>
+  return <div className="scene-shell" data-scene={appearance.scene} data-motion={appearance.motion} data-detail={appearance.detail}>
     <header className="scene-masthead">
       <Link to={{ page: "home" }}><span className="bell-mark" aria-hidden="true" /><span>After Class</span></Link>
       <span className="room-name">{SCENES[appearance.scene].name}</span><AppearancePicker />

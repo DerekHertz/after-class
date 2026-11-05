@@ -2,6 +2,8 @@
 
 Design approval: Derek, 2026-11-03. This handoff packages approved visual references and a proposed implementation sequence. The scene skins, companions, and redesigned components are not implemented by this commit.
 
+For the HD pixel-art treatment, exterior breeze, and companion asset requirements, use the [HD pixel rooms and ambient animation specification](hd-pixel-room/README.md).
+
 ## Start here
 
 Implement one tutoring experience with three selectable room skins and six selectable companion options. Room and companion selection are independent. Use **The Last Desk + original Mote** as the recommended initial defaults; Derek explicitly favored Mote, while the exact default combination is an engineering recommendation.

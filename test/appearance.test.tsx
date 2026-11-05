@@ -11,10 +11,15 @@ describe("local appearance preferences", () => {
   });
   test("room and companion are independent, with per-field recovery", () => {
     for (const scene of Object.keys(SCENES) as (keyof typeof SCENES)[]) for (const companion of Object.keys(COMPANIONS) as (keyof typeof COMPANIONS)[]) {
-      expect(parseAppearance(JSON.stringify({ scene, companion, visible: false, motion: "reduced" }))).toEqual({ scene, companion, visible: false, motion: "reduced" });
+      expect(parseAppearance(JSON.stringify({ scene, companion, visible: false, motion: "reduced" }))).toEqual({ detail: "hd-pixel", scene, companion, visible: false, motion: "reduced" });
     }
     expect(parseAppearance('{"scene":"__proto__","companion":"lumi","visible":"no","motion":"anything"}')).toEqual({ ...DEFAULT_APPEARANCE, companion: "lumi" });
     expect(parseAppearance('{"scene":"study-bench","companion":"constructor"}')).toEqual({ ...DEFAULT_APPEARANCE, scene: "study-bench" });
+  });
+  test("detail recovers older records and validates stored values", () => {
+    expect(parseAppearance('{"scene":"last-desk"}').detail).toBe("hd-pixel");
+    expect(parseAppearance('{"detail":"painted","companion":"pip"}')).toEqual({ ...DEFAULT_APPEARANCE, companion: "pip" });
+    expect(parseAppearance('{"detail":"unknown"}').detail).toBe(DEFAULT_APPEARANCE.detail);
   });
   test("storage denial leaves an in-memory appearance usable", () => {
     const denied = { getItem() { throw new Error("denied"); }, setItem() { throw new Error("denied"); } };

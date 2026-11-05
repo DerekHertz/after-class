@@ -1,3 +1,4 @@
+import { RecordScreen } from "./record";
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { MutableRefObject } from "react";
 import { Material } from "../shared/time";
@@ -5,6 +6,7 @@ import type { EvidenceId, ReviewId } from "../shared/ids";
 import type { AppApi } from "./api";
 import { useAppearance, useSceneActivity } from "./appearance";
 import { RoomTools } from "./room-tools";
+import { reactToCompanion } from "./companion-reaction";
 import { createReviewController } from "./controller";
 import type { SessionState } from "./controller";
 import {
@@ -30,6 +32,9 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const followHistory = useRef(true);
   const [selection, setSelection] = useState<SourceSelection>({ kind: "automatic" });
   const [sourceOpen, setSourceOpen] = useState(true);
+  const [notebookOpen, setNotebookOpen] = useState(false);
+  const [studyOpen, setStudyOpen] = useState(false);
+  const roomLanding = !studyOpen && appearance.detail === "hd-pixel";
   const [listening, setListening] = useState(false);
   const controller = useMemo(() => createReviewController({ api, reviewId, speaker, unsent }), [api, reviewId, speaker, unsent]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
@@ -64,17 +69,19 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   }, [automaticKey]);
   useEffect(() => {
     if (followHistory.current && history.current) history.current.scrollTop = history.current.scrollHeight;
-  }, [state.view?.turns.length, state.live?.deltaText, state.live?.sentences.length]);
+  }, [state.view?.turns.length, state.live?.deltaText, state.live?.sentences.length, studyOpen]);
   useSceneActivity(state.saving ? "saving" : listening ? "listening" : state.view?.state.phase === "paused" ? "paused" : state.live?.status === "streaming" ? "waiting" : "idle");
 
   function openSource(ids: readonly EvidenceId[], label: string, origin: HTMLButtonElement) {
     sourceOrigin.current = origin;
     setSelection({ kind: "pinned", ids, label });
+    if (!sourceOpen) reactToCompanion("draw");
     setSourceOpen(true);
     requestAnimationFrame(() => sourceHeading.current?.focus());
   }
 
   function closeSource() {
+    setStudyOpen(false);
     setSelection({ kind: "automatic" });
     setSourceOpen(false);
     const origin = sourceOrigin.current;
@@ -103,7 +110,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const canRetry = !streaming && (state.unsent.length > 0 || unanswered !== null || state.live?.status === "failed");
 
   return (
-    <main className="review">
+    <main className="review" data-view={roomLanding ? "room" : "study"}>
+      {notebookOpen && <dialog className="room-notebook-dialog" ref={node => { if (node && !node.open) node.showModal(); }} onClose={() => setNotebookOpen(false)}><button onClick={() => setNotebookOpen(false)}>Back to room</button><RecordScreen indexed api={api} reviewId={null} /></dialog>}
       <header className="review-header">
         <div>
           <h1>{[...titles.values()].join("; ") || "Review"}</h1>
@@ -111,23 +119,34 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
         </div>
         <div className="review-navigation">
           <span className="review-phase">{view.state.phase}</span>
-          <Link to={{ page: "record", reviewId: null }}>My notebook</Link>
+          <button type="button" onClick={() => setNotebookOpen(true)}>My notebook</button>
           <Actions ids={actions.filter(id => id === "pause" || id === "resume" || id === "end")} disabled={streaming || state.unsent.length > 0} send={id => void controller.send(toAct(id, "", "text"))} />
         </div>
       </header>
       <SaveBanner state={state} onRetry={() => void controller.save()} reviewId={reviewId} />
       <ErrorNote error={state.loadError} retry={() => void controller.load()} />
       <div className={`review-workspace${sourceOpen ? "" : " source-closed"}`}>
-        <section className="conversation-notebook" aria-labelledby="conversation-heading">
+        <section className="conversation-notebook" aria-labelledby="conversation-heading" hidden={roomLanding}>
           <div className="notebook-heading">
-            <h2 id="conversation-heading">Conversation</h2><span className="question-marker">Question {view.state.mainQuestions}</span>
+            <h2 id="conversation-heading">Conversation</h2>
+            {studyOpen && appearance.detail === "hd-pixel" && (
+              <button type="button" onClick={() => {
+                setStudyOpen(false);
+                requestAnimationFrame(() => {
+                  const target = window.matchMedia("(max-width: 800px)").matches
+                    ? ".hd-mobile-tools button" : ".hd-card, .source-handle";
+                  sourceColumn.current?.querySelector<HTMLButtonElement>(target)?.focus();
+                });
+              }}>Back to room</button>
+            )}
+            <span className="question-marker">Question {view.state.mainQuestions}</span>
             <button type="button" onClick={() => {
               followHistory.current = true;
               if (history.current) history.current.scrollTop = history.current.scrollHeight;
             }}>Latest exchange</button>
             <button ref={sourceToggle} type="button" aria-expanded={sourceOpen} aria-controls="review-source" onClick={(e) => {
               if (sourceOpen) closeSource();
-              else { sourceOrigin.current = e.currentTarget; setSourceOpen(true); }
+              else { sourceOrigin.current = e.currentTarget; reactToCompanion("draw"); setSourceOpen(true); }
             }}>{sourceOpen ? "Close source" : "Open source"}</button>
           </div>
           <div ref={history} onScroll={() => {
@@ -187,12 +206,16 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           )}
         </section>
         <div ref={sourceColumn} className="review-source-column" data-source-open={sourceOpen}>
-        <RoomTools scene={appearance.scene} sourceOpen={sourceOpen} listening={listening} speechAvailable={speech.supported && actions.includes("answer")} onSpeak={() => speechToggle.current?.()} onSource={(origin) => {
+        <RoomTools onNotebook={() => setNotebookOpen(true)} scene={appearance.scene} sourceOpen={!roomLanding && sourceOpen} listening={listening} speechAvailable={speech.supported && actions.includes("answer")} onSpeak={() => { speechToggle.current?.(); }} onSource={(origin) => {
           sourceOrigin.current = origin ?? sourceToggle.current;
-          if (sourceOpen) closeSource();
+          if (roomLanding) {
+            setStudyOpen(true);
+            setSourceOpen(true);
+            requestAnimationFrame(() => sourceHeading.current?.focus());
+          } else if (sourceOpen) closeSource();
           else setSourceOpen(true);
         }} />
-        <aside ref={sourceSurface} id="review-source" className="source-stand" aria-labelledby="source-heading" hidden={!sourceOpen}>
+        <aside ref={sourceSurface} id="review-source" className="source-stand" aria-labelledby="source-heading" hidden={roomLanding || !sourceOpen}>
           <div className="source-heading">
             <p className="eyebrow">From the lecture</p>
             <h2 ref={sourceHeading} tabIndex={-1} id="source-heading">Lecture evidence</h2>

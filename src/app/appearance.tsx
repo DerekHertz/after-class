@@ -17,9 +17,9 @@ export const COMPANIONS = {
 export type SceneId = keyof typeof SCENES;
 export type CompanionId = keyof typeof COMPANIONS;
 export type CompanionActivity = "idle" | "listening" | "waiting" | "paused" | "saving";
-export type Appearance = { readonly scene: SceneId; readonly companion: CompanionId; readonly visible: boolean; readonly motion: "system" | "reduced" };
+export type Appearance = { readonly detail: "painted" | "hd-pixel"; readonly scene: SceneId; readonly companion: CompanionId; readonly visible: boolean; readonly motion: "system" | "reduced" };
 export const APPEARANCE_KEY = "afterclass.appearance.v1";
-export const DEFAULT_APPEARANCE: Appearance = { scene: "last-desk", companion: "mote", visible: true, motion: "system" };
+export const DEFAULT_APPEARANCE: Appearance = { detail: "hd-pixel", scene: "last-desk", companion: "mote", visible: true, motion: "system" };
 
 export function parseAppearance(raw: string | null): Appearance {
   try {
@@ -27,6 +27,7 @@ export function parseAppearance(raw: string | null): Appearance {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return DEFAULT_APPEARANCE;
     const v = value as Record<string, unknown>;
     return {
+      detail: "hd-pixel",
       scene: typeof v.scene === "string" && Object.hasOwn(SCENES, v.scene) ? v.scene as SceneId : DEFAULT_APPEARANCE.scene,
       companion: typeof v.companion === "string" && Object.hasOwn(COMPANIONS, v.companion) ? v.companion as CompanionId : DEFAULT_APPEARANCE.companion,
       visible: typeof v.visible === "boolean" ? v.visible : DEFAULT_APPEARANCE.visible,

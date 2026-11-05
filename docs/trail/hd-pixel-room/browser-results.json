@@ -1,0 +1,77 @@
+{
+  "status": "PASS",
+  "fixture": true,
+  "viewportWidths": [
+    1440,
+    390
+  ],
+  "pairingsDecoded": 18,
+  "scenes": [
+    {
+      "scene": "last-desk",
+      "status": "PASS",
+      "checks": [
+        "Full room landing with direct notebook route",
+        "Card and stand open workspace",
+        "Back to room and reentry preserve draft on desktop and mobile",
+        "Fixed camera",
+        "Detail change preserves draft",
+        "Six HD idle/draw/read frame sets decode at matching dimensions",
+        "Keyboard source reaction and settle",
+        "Desktop and mobile notebook navigation",
+        "System/app reduced motion including all visible animated descendants",
+        "Synthetic visibility pauses/resumes all animation",
+        "Hidden companion",
+        "390px no horizontal overflow and 44px mobile controls",
+        "Source, draft and notebook usable with HD artwork removed"
+      ]
+    },
+    {
+      "scene": "study-bench",
+      "status": "PASS",
+      "checks": [
+        "Full room landing with direct notebook route",
+        "Card and stand open workspace",
+        "Back to room and reentry preserve draft on desktop and mobile",
+        "Fixed camera",
+        "Detail change preserves draft",
+        "Six HD idle/draw/read frame sets decode at matching dimensions",
+        "Keyboard source reaction and settle",
+        "Desktop and mobile notebook navigation",
+        "System/app reduced motion including all visible animated descendants",
+        "Synthetic visibility pauses/resumes all animation",
+        "Hidden companion",
+        "390px no horizontal overflow and 44px mobile controls",
+        "Source, draft and notebook usable with HD artwork removed"
+      ]
+    },
+    {
+      "scene": "projection-booth",
+      "status": "PASS",
+      "checks": [
+        "Full room landing with direct notebook route",
+        "Card and stand open workspace",
+        "Back to room and reentry preserve draft on desktop and mobile",
+        "Fixed camera",
+        "Detail change preserves draft",
+        "Six HD idle/draw/read frame sets decode at matching dimensions",
+        "Keyboard source reaction and settle",
+        "Desktop and mobile notebook navigation",
+        "System/app reduced motion including all visible animated descendants",
+        "Synthetic visibility pauses/resumes all animation",
+        "Hidden companion",
+        "390px no horizontal overflow and 44px mobile controls",
+        "Source, draft and notebook usable with HD artwork removed"
+      ]
+    }
+  ],
+  "additional": [
+    "Draft survives changes across all three rooms",
+    "Projection Booth source heading contrast meets 4.5:1"
+  ],
+  "limitations": [
+    "Visibility tested with synthetic visibilitychange, OS tab suspension untested.",
+    "Artwork bundled inline, missing-image behavior simulated through CSS image removal."
+  ],
+  "pageErrors": []
+}

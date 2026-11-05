@@ -1,0 +1,64 @@
+{
+  "exterior": {
+    "file": "exterior-breeze.webp",
+    "width": 2172,
+    "height": 724,
+    "frames": 4,
+    "frameWidth": 543,
+    "frameHeight": 724,
+    "layout": "horizontal",
+    "notes": "Generated poses clipped to individually traced window pane openings. Complete opaque frame provides backing beneath moved leaf silhouettes."
+  },
+  "companions": {
+    "ids": [
+      "mote",
+      "pip",
+      "lumi",
+      "yun",
+      "mote-moonlit",
+      "mote-pagewing"
+    ],
+    "poses": [
+      "idle",
+      "draw",
+      "read"
+    ],
+    "filePattern": "companions/{id}.png, companions/{id}-draw.png, companions/{id}-read.png",
+    "width": 255,
+    "height": 228,
+    "groundY": 223,
+    "notes": "New generated fine-detail three-pose atlas, extracted to lossless PNG. Alpha below170 removed, poses fit within245x215 bounds and aligned to shared ground. Each identity requires visual review at scene scale."
+  },
+  "provenance": {
+    "method": "ImageGen redraws from existing companion references and approved HD Last Desk",
+    "generated": "2026-11-04",
+    "atlasSource": "exec-747c2455-d4cd-434d-873c-0a1b28e4d1eb.png",
+    "exteriorSource": "exec-1721819d-0238-46a5-a175-ad3542ea7804.png",
+    "approval": "Last Desk approved in chat. Study Bench and Projection Booth implementation requested after approval. New plates ready for visual review in PR.",
+    "studyBenchSource": "exec-f17e62fb-9485-4475-93f9-0ecfd35d6233.png",
+    "projectionBoothSource": "exec-1f998277-05a9-490b-bcc3-f9247793614e.png"
+  },
+  "rooms": [
+    {
+      "id": "last-desk",
+      "file": "last-desk.webp",
+      "width": 1672,
+      "height": 941,
+      "reference": "docs/design/hd-pixel-room/last-desk.webp"
+    },
+    {
+      "id": "study-bench",
+      "file": "study-bench.webp",
+      "width": 1672,
+      "height": 941,
+      "animation": "Shared exterior canopy poses through room-specific pane masks and delayed worktop shadow"
+    },
+    {
+      "id": "projection-booth",
+      "file": "projection-booth.webp",
+      "width": 1672,
+      "height": 941,
+      "animation": "Registered auditorium and desk lamp glow with sparse ambient dust"
+    }
+  ]
+}
