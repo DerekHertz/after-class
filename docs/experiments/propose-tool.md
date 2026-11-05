@@ -47,7 +47,7 @@ Deterministic, no model call. Items both models proposed (same video, times with
 ## Safety rails (all enforced in code and tested)
 
 - No Claude call without `--live-claude` AND `--max-claude-calls N` (a positive integer). Without them only an injected scripted client runs (tests); `propose` and `pilot` refuse the real client. `plan` makes no call and prints the planned count.
-- A persisted counter `claude-state.<origin>.json` in the parent of `--out` (validated; malformed refuses). A deleted state file cannot reset it: every attempt writes a `calls/<n>.meta.json` BEFORE the call, and the metas of all sibling output dirs are a floor. Hard ceiling `BUDGET_CLAUDE_CALLS` = 150 for the whole experiment (PROPOSED in the protocol, decision 6), checked before every call, retries included; `--max-claude-calls` is checked the same way. A run refuses up front if its planned calls exceed N or would pass the ceiling.
+- A persisted counter `claude-state.<origin>.json` in the parent of `--out` (validated; malformed refuses). A deleted state file cannot reset it: every attempt writes a `calls/<n>.meta.json` BEFORE the call, and the metas of all sibling output dirs are a floor. Hard ceiling `BUDGET_CLAUDE_CALLS` = 250 for the whole experiment (150 in the protocol's first draft; raised to 250 by Derek on 2026-11-05 for the 43-clip set, see the amendment under decision 6), checked before every call, retries included; `--max-claude-calls` is checked the same way. A run refuses up front if its planned calls exceed N or would pass the ceiling.
 - Claude only through the product's client (`createClaudeCli`, reused unchanged): `claude -p --restricted --tools Read --strict-mcp-config --disable-slash-commands --no-session-persistence`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` stripped from the child env (and `TYPESAFE_API_KEY` too), frames copied to a per-call temp dir that the client deletes. The child runs in a fresh empty temp dir as its cwd. The tool uses `streamText` so the reply text is stored verbatim.
 - The data dir is read through a scratch copy of its database (`openCapture`) and frame files are only read; it is byte-identical afterwards. `--out` inside the data dir (also via a symlink) or non-empty is refused.
 - Stored text has the values of the secret env vars replaced by `[redacted]`. No Jev call, no key file, no network code of the tool's own.
@@ -55,3 +55,7 @@ Deterministic, no model call. Items both models proposed (same video, times with
 ## Planned calls on the assembled 11-clip capture
 
 `plan` on a copy of `data/lab/assembled` (393 frames, 11 clips): 23 calls per model for `propose` (clips of 17, 33, 19, 28, 37, 3, 33, 35, 93, 62 and 33 frames take 1, 2, 1, 2, 2, 1, 2, 2, 5, 3 and 2 calls), 46 for both models, plus 3 pilot calls per model: 52 minimum, within the 150 ceiling, with 98 left for retries and the optimizers. The protocol's rough figure of "about 2 x 40" for the labelers is higher than this because it assumed smaller chunks.
+
+## Planned calls on the assembled 43-clip capture (2026-11-05)
+
+`plan` on `data/lab/assembled-2` (43 clips, the seven topic-boundary windows): 62 calls per model for `propose`, 124 for both models, no pilot. With the 52 calls already used on the 11-clip set the minimum is 176, within the 250 ceiling.

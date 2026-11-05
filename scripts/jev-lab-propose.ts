@@ -31,7 +31,7 @@ import type { Origin } from "./jev-lab-score";
 // ───────────────────────────── constants (PROPOSED unless the brief fixes them) ─────────────────────────────
 
 /** The hard ceiling of Claude calls across the whole experiment, retries included (PROPOSED in the protocol, decision 6). */
-export const BUDGET_CLAUDE_CALLS = 150;
+export const BUDGET_CLAUDE_CALLS = 250;
 /** The brief: a call carries at most 24 frames. */
 export const MAX_FRAMES_PER_CALL = 24;
 /** Frames repeated between two calls of one clip, so a change at the seam is seen by both (PROPOSED). */
