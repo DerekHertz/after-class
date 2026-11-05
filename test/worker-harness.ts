@@ -200,10 +200,13 @@ export async function boot(env: Env): Promise<{ c: FakeChrome; errors: string[] 
       onRemoved: event(),
       create: async (o: Any) => void c.created.push(o.url),
       get: async (id: number) => ({ id, url: env.urls[id] }),
+      update: async (id: number, o: Any) => void c.updated.push({ tab: id, ...o }),
     },
     scripting: { executeScript: async () => {} },
     alarms: { create: async () => {}, onAlarm: event() },
+    windows: { update: async (id: number, o: Any) => void c.updated.push({ window: id, ...o }) },
     created: [] as string[],
+    updated: [] as Any[],
   };
   g.chrome = c;
   g.indexedDB = env.idb;

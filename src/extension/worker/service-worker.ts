@@ -275,7 +275,8 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
 /**
  * TEST BUILD ONLY. `AFTERCLASS_TEST_AUTOSTART=1 bun run build:ext` replaces this constant with true; the normal build
  * replaces it with false and the bundler drops this block. Capture starts on its own only for a watch page opened with
- * `ac_autostart=1` in its URL, so a tab the person opens normally is never captured. It exists so an unattended
+ * `ac_autostart=1` in its URL, so a tab the person opens normally is never captured. It also brings that tab and its
+ * window to the front, and restarts a tab left paused by an earlier run. It exists so an unattended
  * experiment (a driven playlist) needs no click on the popup, which no automation tool can reach.
  */
 declare const __AFTERCLASS_TEST_AUTOSTART__: boolean;
@@ -284,8 +285,13 @@ if (typeof __AFTERCLASS_TEST_AUTOSTART__ !== "undefined" && __AFTERCLASS_TEST_AU
   chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
     if (change.status !== "complete" || !isWatchUrl(tab.url) || new URL(tab.url!).searchParams.get("ac_autostart") !== "1") return;
     void readState(tabId).then(async (state) => {
-      if (state?.state === "capturing" || state?.state === "paused") return;
+      if (state?.state === "capturing") return;
+      // Leaving a watch page pauses; a driven run reuses its tab, so end that capture and begin a new one.
+      if (state?.state === "paused") await handlePopup({ type: "stop", tabId });
       await handlePopup({ type: "start", tabId });
+      // The extension only sees frames from a visible tab, so a driven tab must not sit in the background or behind another window.
+      await chrome.tabs.update(tabId, { active: true }).catch(() => {});
+      if (tab.windowId !== undefined) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
     }).catch((e: unknown) => console.error("After Class test autostart failed", e));
   });
 }
