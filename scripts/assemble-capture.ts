@@ -13,7 +13,7 @@
  * <out>/ASSEMBLED.md say so, and `readProvenance` lets other tools surface it.
  *
  * What changes from the inputs (and nothing else): one fresh capture id; every input's own `control start` and
- * `control stop` is dropped and one `start` is put first and one `stop` last (pause and resume are kept); clientSeq is
+ * `control stop` is dropped (and so is a final pause with reason left_watch_page: that capture ended when its tab left the watch page) and one `start` is put first and one `stop` last (other pause and resume are kept); clientSeq is
  * renumbered 0..n-1; wallMs of each later input is shifted so it follows the earlier ones, relative timing inside an input
  * unchanged; a frameId is prefixed only if two inputs use the same one in this capture (the evidence id is derived from it).
  * Afterwards each input's per-video evidence is compared with the assembled capture's, and the run is refused (output
@@ -38,6 +38,24 @@ export const ASSEMBLED_ORIGIN = "assembled (replayed live data)";
 /** Wall-time gap put between the end of one input and the start of the next. */
 export const JOIN_GAP_MS = 1000;
 
+/**
+ * A capture whose tab navigated away from the watch page ends PAUSED (reason left_watch_page), not stopped. That pause
+ * is the end of that capture, so it is dropped like a stop; carried into the stream it would leave every later input
+ * outside capture. Only that exact case: a user pause with no resume is still kept, and the comparison still refuses it.
+ */
+function endedByLeavingWatchPage(facts: readonly CaptureFact[]): CaptureFact | null {
+  let last: CaptureFact | null = null;
+  for (const f of [...facts].sort((a, b) => a.clientSeq - b.clientSeq)) if (f.kind === "control" && (f.action === "pause" || f.action === "resume")) last = f;
+  return last !== null && last.kind === "control" && last.action === "pause" && last.reason === "left_watch_page" ? last : null;
+}
+
+/** Channel failures still open at the end of a capture: the last health fact of a (channel, video) pair is not ok. */
+function openChannelFailures(facts: readonly CaptureFact[]): readonly Extract<CaptureFact, { kind: "channel" }>[] {
+  const last = new Map<string, Extract<CaptureFact, { kind: "channel" }>>();
+  for (const f of [...facts].sort((a, b) => a.clientSeq - b.clientSeq)) if (f.kind === "channel") last.set(`${f.channel}|${f.videoId ?? ""}`, f);
+  return [...last.values()].filter((f) => f.health !== "ok");
+}
+
 export type InputSpec = { readonly dataDir: string; readonly captureId: string };
 
 export type InputProvenance = {
@@ -51,6 +69,8 @@ export type InputProvenance = {
   readonly videoIds: readonly string[];
   readonly watchedSeconds: number;
   readonly droppedControls: readonly string[];
+  /** Facts the assembler added: a recovery for each channel failure still open when this input ended (the product records one when capture resumes). */
+  readonly addedFacts: readonly string[];
   readonly wallShiftMs: number;
   readonly renamedFrameIds: number;
   readonly videosDeduped: readonly string[];
@@ -263,11 +283,13 @@ export function assembleCaptures(opts: { readonly inputs: readonly InputSpec[]; 
   let wallEnd = Number.NEGATIVE_INFINITY;
   let firstWall = Number.POSITIVE_INFINITY;
   read.forEach((input, k) => {
+    const ending = endedByLeavingWatchPage(input.facts);
+    const isDropped = (f: CaptureFact): boolean => f.kind === "control" && (f.action === "start" || f.action === "stop" || f === ending);
     const kept = input.facts.filter((f) => {
       const v = videoOf(f);
-      return !(v !== null && dedupe[k]!.has(v)) && !(f.kind === "control" && (f.action === "start" || f.action === "stop"));
+      return !(v !== null && dedupe[k]!.has(v)) && !isDropped(f);
     });
-    const dropped = input.facts.filter((f) => f.kind === "control" && (f.action === "start" || f.action === "stop")).map((f) => `${(f as Extract<CaptureFact, { kind: "control" }>).action}@clientSeq ${f.clientSeq}`);
+    const dropped = input.facts.filter(isDropped).map((f) => `${(f as Extract<CaptureFact, { kind: "control" }>).action}@clientSeq ${f.clientSeq}${f === ending ? " (the pause that ended the capture when its tab left the watch page)" : ""}`);
     const min = Math.min(...input.facts.map((f) => f.wallMs));
     const max = Math.max(...input.facts.map((f) => f.wallMs));
     const shift = k === 0 ? 0 : wallEnd + JOIN_GAP_MS - min;
@@ -289,10 +311,19 @@ export function assembleCaptures(opts: { readonly inputs: readonly InputSpec[]; 
       }
       stream.push({ ...fact, captureId: captureId as CaptureId, wallMs: f.wallMs + shift });
     }
+    // An input that ended by leaving the watch page ends with its failure episodes open (nothing resumed capture). Carried on, they
+    // would mark the next input's clips as failed; the product closes them when capture resumes, so close them here, and say so.
+    const added: string[] = [];
+    if (ending !== null && k < read.length - 1) {
+      for (const open of openChannelFailures(input.facts)) {
+        stream.push({ captureId: captureId as CaptureId, clientSeq: 0, wallMs: max + shift, kind: "channel", channel: open.channel, health: "ok", videoId: open.videoId, atMediaS: null, detail: "assembled: capture resumed in the next input" });
+        added.push(`channel ${open.channel} ok${open.videoId ? ` (${open.videoId})` : ""} closing a ${open.health} episode that was open when this input ended`);
+      }
+    }
     for (const f of stream) if (f.kind === "frame") usedFrameIds.add(f.frameId);
     perInput.push({
       order: k + 1, dataDir: input.dataDir, captureId: input.spec.captureId, sqliteSha256: input.sqliteSha256, sqliteBytes: input.sqliteBytes, walSha256: input.walSha256,
-      factCount: input.facts.length, droppedControls: dropped, wallShiftMs: shift, renamedFrameIds: renamed, videosDeduped: [...dedupe[k]!],
+      factCount: input.facts.length, droppedControls: dropped, addedFacts: added, wallShiftMs: shift, renamedFrameIds: renamed, videosDeduped: [...dedupe[k]!],
     });
   });
   const control = (action: "start" | "stop", wallMs: number): CaptureFact => ({ captureId: captureId as CaptureId, clientSeq: 0, wallMs, kind: "control", action, reason: "user" });
@@ -432,7 +463,7 @@ export function renderProvenance(p: Provenance): string {
     ...p.inputs.flatMap((i) => [
       `${i.order}. data dir \`${i.dataDir}\`, capture \`${i.captureId}\``,
       `   - sqlite sha256 \`${i.sqliteSha256}\`${i.walSha256 ? ` (WAL sha256 \`${i.walSha256}\`)` : ""}, ${i.factCount} facts, ${i.watchedSeconds.toFixed(1)} s watched`,
-      `   - dropped controls: ${i.droppedControls.length === 0 ? "none" : i.droppedControls.join(", ")}; wall shift ${i.wallShiftMs} ms; frame ids renamed: ${i.renamedFrameIds}${i.videosDeduped.length ? `; videos taken from an earlier input: ${i.videosDeduped.join(", ")}` : ""}`,
+      `   - dropped controls: ${i.droppedControls.length === 0 ? "none" : i.droppedControls.join(", ")}; added facts: ${i.addedFacts.length === 0 ? "none" : i.addedFacts.join(", ")}; wall shift ${i.wallShiftMs} ms; frame ids renamed: ${i.renamedFrameIds}${i.videosDeduped.length ? `; videos taken from an earlier input: ${i.videosDeduped.join(", ")}` : ""}`,
     ]),
     "",
     "## What was done",
