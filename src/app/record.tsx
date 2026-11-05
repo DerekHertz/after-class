@@ -14,7 +14,7 @@ type CitationDetails = Pick<EvidenceBundle, "frames" | "passages">;
 
 const decisionText = (d: LinkDecision): string => (typeof d === "string" ? d : `corrected to ${d.corrected.replaceAll("_", " ")}`);
 
-export function RecordScreen({ api, reviewId }: { readonly api: AppApi; readonly reviewId: ReviewId | null }) {
+export function RecordScreen({ api, reviewId, indexed = false }: { readonly indexed?: boolean; readonly api: AppApi; readonly reviewId: ReviewId | null }) {
   const record = useAsync(() => api.record(reviewId === null ? {} : { reviewId }), [api, reviewId]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -36,7 +36,21 @@ export function RecordScreen({ api, reviewId }: { readonly api: AppApi; readonly
     }
   }
 
+  const [page, setPage] = useState("index");
   const data = record.data;
+  const pages = data ? [
+    ...data.notes.map((note, index) => {
+      const view = noteView(note);
+      const title = view.userEdit?.trim() || view.segments.find(segment => segment.author === "learner")?.text || view.segments[0]?.text;
+      return { id: String(note.id), title: title?.slice(0, 100) || `Review note ${index + 1}` };
+    }),
+    { id: "observations", title: "Tutor observations" },
+    { id: "links", title: "Concept connections" },
+  ] : [];
+  function turnPage(id: string) {
+    setPage(id);
+    document.querySelector("dialog.room-notebook-dialog")?.scrollTo(0, 0);
+  }
   return (
     <main className="notebook-page record-page">
       <header className="page-heading">
@@ -49,7 +63,9 @@ export function RecordScreen({ api, reviewId }: { readonly api: AppApi; readonly
       <ErrorNote error={error} />
       {record.data === null && record.error === null && <p className="page-loading" role="status">Opening your notebook...</p>}
       {saving && <p className="page-loading" role="status">Saving your change...</p>}
-      {data && <fieldset className="record-content" disabled={saving} aria-label="Saved learning record"><RecordBody api={api} data={data} run={run} /></fieldset>}
+      {indexed && page === "index" && data && <nav aria-label="Notebook index"><h2>Index</h2><ol>{pages.map(entry => <li key={entry.id}><button onClick={() => turnPage(entry.id)}>{entry.title}</button></li>)}</ol></nav>}
+      {indexed && page !== "index" && <button onClick={() => turnPage("index")}>Return to index</button>}
+      {data && (!indexed || page !== "index") && <fieldset key={page} data-notebook-page={indexed ? (["links", "observations"].includes(page) ? page : "note") : undefined} className="record-content" disabled={saving} aria-label="Saved learning record"><RecordBody api={api} data={indexed ? { ...data, notes: data.notes.filter(note => note.id === page) } : data} run={run} /></fieldset>}
     </main>
   );
 }

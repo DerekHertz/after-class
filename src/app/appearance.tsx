@@ -27,7 +27,7 @@ export function parseAppearance(raw: string | null): Appearance {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return DEFAULT_APPEARANCE;
     const v = value as Record<string, unknown>;
     return {
-      detail: v.detail === "painted" ? "painted" : "hd-pixel",
+      detail: "hd-pixel",
       scene: typeof v.scene === "string" && Object.hasOwn(SCENES, v.scene) ? v.scene as SceneId : DEFAULT_APPEARANCE.scene,
       companion: typeof v.companion === "string" && Object.hasOwn(COMPANIONS, v.companion) ? v.companion as CompanionId : DEFAULT_APPEARANCE.companion,
       visible: typeof v.visible === "boolean" ? v.visible : DEFAULT_APPEARANCE.visible,

@@ -63,3 +63,53 @@
 }
 .scene-shell[data-detail="hd-pixel"] .review .notebook-heading { flex-wrap: wrap; }
 .scene-shell[data-detail="hd-pixel"] .review[data-view="room"] .review-phase { color: #f2e5c9; }
+
+/* Light moves across the room's own foliage, preserving its registration. */
+.hd-room .hd-room-exterior {
+  background: #ffe4a0;
+  mix-blend-mode: soft-light;
+  animation: hd-window-light 12s ease-in-out infinite;
+}
+@keyframes hd-window-light {
+  0%, 20%, 75%, 100% { opacity: 0; }
+  39% { opacity: .12; }
+  55% { opacity: .05; }
+}
+.scene-shell[data-motion="reduced"] .hd-room-exterior { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .hd-room-exterior { opacity: 0; } }
+.scene-shell[data-detail="hd-pixel"] .review[data-view="study"] .review-workspace { display:block; position:relative; padding:0 }
+.scene-shell[data-detail="hd-pixel"] .review[data-view="study"] .review-source-column { width:100%; margin:0 }
+.review[data-view="study"] .hd-room { filter:brightness(.44) }
+.scene-shell[data-detail="hd-pixel"] .review[data-view="study"] :is(.conversation-notebook,.source-stand:not([hidden])) { position:absolute; inset:5% auto auto 50%; transform:translateX(-50%); z-index:4; width:min(90%,760px); margin:0; max-height:90%; overflow:auto; background:#fff1d8; color:#35261c; padding:20px; border-radius:9px; box-shadow:0 10px 40px #21170970 }
+.scene-shell[data-detail="hd-pixel"] .review[data-view="study"] .source-stand:not([hidden]) {z-index:5}
+.review-workspace:has(.source-stand:not([hidden])) .conversation-notebook { visibility:hidden }
+.room-notebook-dialog {width:min(85vw,780px); max-height:78vh; overflow:auto; border:1px solid #8e744d; border-radius:8px; background:#fff1d8; padding:18px}
+.room-notebook-dialog::backdrop {background:#231a12a8}
+
+.room-notebook-dialog {background:repeating-linear-gradient(to bottom,#fff4d9 0 27px,#b9c5b6 28px,#fff4d9 29px); border-left:12px double #664932; box-shadow:3px 3px #c1ac86,6px 6px #80694d}
+.room-notebook-dialog > button:first-child {position:sticky; top:0; z-index:3; background:#fff1ce; color:#392c1c; box-shadow:0 2px 4px #47311c36}
+.room-notebook-dialog .record-page {background:transparent; padding-left:clamp(22px,4vw,48px); border-left:4px double #c68776}
+.room-notebook-dialog::before {content:""; position:absolute; top:18px; left:3px; bottom:0; width:18px; pointer-events:none; background:repeating-linear-gradient(172deg,transparent 0 21px,#514638 22px,#d9cfba 24px,#736453 26px,transparent 28px 34px)}
+.room-notebook-dialog [aria-label="Notebook index"] li {padding:.35rem}
+.room-notebook-dialog [data-notebook-page] {animation:paper-turn .24s ease-out;transform-origin:left center}
+@keyframes paper-turn {from{transform:perspective(900px) rotateY(-9deg);opacity:.6}}
+[data-notebook-page="note"] .record-section:not(:first-child),[data-notebook-page="observations"] .record-section:not(:nth-child(2)),[data-notebook-page="links"] .record-section:not(:nth-child(3)){display:none}
+.scene-shell .hd-room-friend .study-companion[data-activity] > .companion-raster {opacity:1}
+.hd-room-friend .study-companion:is([data-activity="listening"],[data-activity="paused"])::after {position:absolute;top:0;right:8%;border-radius:1em;background:#392f24;color:#fff1bc;padding:4px 10px;font:700 19px sans-serif;content:"Ⅱ"}
+.hd-room-friend .study-companion[data-activity="listening"]::after {content:"Listening"}
+.hd-room-hotspot::before {content:"";position:absolute;pointer-events:none;background-size:1672px 941px;background-repeat:no-repeat;transition:transform .2s, filter .2s;transform-origin:left center}
+.hd-card:is(:hover,:focus-visible)::before {transform:translateY(-15px)}
+.hd-journal:is(:hover,:focus-visible)::before {transform:perspective(900px) rotateY(-15deg) skewY(-3deg);filter:brightness(1.1)}
+.hd-recorder:is(:hover,:focus-visible,[aria-pressed="true"])::before {filter:brightness(1.65) saturate(1.4)}
+.hd-recorder:active::before {transform:translateY(3px)}
+.hd-room[data-scene="last-desk"] .hd-card::before {left:80px;top:51px;width:168px;height:60px;background-image:url("./assets/hd-pixel/last-desk.webp");background-position:-570px -568px;clip-path:polygon(0px 6px,158px 0px,168px 6px,168px 54px,0px 60px)}
+.hd-room[data-scene="last-desk"] .hd-journal::before {left:3px;top:-2px;width:292px;height:142px;background-image:url("./assets/hd-pixel/last-desk.webp");background-position:-810px -672px;clip-path:polygon(0px 6px,190px 0px,292px 132px,286px 140px,44px 142px)}
+.hd-room[data-scene="last-desk"] .hd-recorder::before {left:141px;top:9px;width:50px;height:32px;background-image:url("./assets/hd-pixel/last-desk.webp");background-position:-618px -756px;clip-path:polygon(0px 0px,36px 0px,50px 30px,12px 32px)}
+.hd-room[data-scene="study-bench"] .hd-card::before {left:74px;top:47px;width:142px;height:80px;background-image:url("./assets/hd-pixel/study-bench.webp");background-position:-544px -610px;clip-path:polygon(0px 10px,134px 0px,142px 10px,142px 64px,2px 80px)}
+.hd-room[data-scene="study-bench"] .hd-journal::before {left:-3px;top:-2px;width:288px;height:144px;background-image:url("./assets/hd-pixel/study-bench.webp");background-position:-794px -706px;clip-path:polygon(0px 22px,198px 0px,288px 114px,282px 124px,64px 144px)}
+.hd-room[data-scene="study-bench"] .hd-recorder::before {left:125px;top:-2px;width:40px;height:26px;background-image:url("./assets/hd-pixel/study-bench.webp");background-position:-588px -768px;clip-path:polygon(6px 0px,34px 0px,40px 8px,32px 26px,0px 24px)}
+.hd-room[data-scene="projection-booth"] .hd-card::before {left:71px;top:42px;width:170px;height:62px;background-image:url("./assets/hd-pixel/projection-booth.webp");background-position:-466px -554px;clip-path:polygon(2px 10px,160px 0px,170px 10px,170px 50px,0px 62px)}
+.hd-room[data-scene="projection-booth"] .hd-journal::before {left:6px;top:2px;width:304px;height:138px;background-image:url("./assets/hd-pixel/projection-booth.webp");background-position:-736px -700px;clip-path:polygon(0px 10px,212px 0px,304px 120px,296px 128px,54px 138px)}
+.hd-room[data-scene="projection-booth"] .hd-recorder::before {left:129px;top:96px;width:60px;height:30px;background-image:url("./assets/hd-pixel/projection-booth.webp");background-position:-514px -794px;clip-path:polygon(0px 6px,42px 0px,60px 20px,18px 30px)}
+@media(prefers-reduced-motion:reduce){.room-notebook-dialog [data-notebook-page],.hd-room-hotspot::before{animation:none;transition:none}}
+.scene-shell[data-motion="reduced"] :is([data-notebook-page],.hd-room-hotspot::before){animation:none;transition:none}

@@ -12,8 +12,9 @@ const TOOLS = {
   "study-bench": { name: "Lecture paper feed", action: "Unroll lecture source" },
 } as const;
 
-export function RoomTools({ scene, onSource, sourceOpen, onSpeak, speechAvailable = false, listening = false }: {
+export function RoomTools({ scene, onNotebook, onSource, sourceOpen, onSpeak, speechAvailable = false, listening = false }: {
   readonly scene: SceneId;
+  readonly onNotebook?: () => void;
   readonly onSource: (origin?: HTMLButtonElement) => void;
   readonly sourceOpen: boolean;
   readonly onSpeak?: () => void;
@@ -31,7 +32,7 @@ export function RoomTools({ scene, onSource, sourceOpen, onSpeak, speechAvailabl
     clearTimeout(notebookTimer.current);
     reactToCompanion("read");
     const reduced = appearance.motion === "reduced" || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const open = () => navigate({ page: "record", reviewId: null });
+    const open = onNotebook ?? (() => navigate({ page: "record", reviewId: null }));
     if (reduced || !appearance.visible) open();
     else notebookTimer.current = setTimeout(open, 500);
   }

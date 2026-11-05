@@ -1,3 +1,4 @@
+import { RecordScreen } from "./record";
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { MutableRefObject } from "react";
 import { Material } from "../shared/time";
@@ -31,6 +32,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const followHistory = useRef(true);
   const [selection, setSelection] = useState<SourceSelection>({ kind: "automatic" });
   const [sourceOpen, setSourceOpen] = useState(true);
+  const [notebookOpen, setNotebookOpen] = useState(false);
   const [studyOpen, setStudyOpen] = useState(false);
   const roomLanding = !studyOpen && appearance.detail === "hd-pixel";
   const [listening, setListening] = useState(false);
@@ -79,6 +81,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   }
 
   function closeSource() {
+    setStudyOpen(false);
     setSelection({ kind: "automatic" });
     setSourceOpen(false);
     const origin = sourceOrigin.current;
@@ -108,6 +111,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
 
   return (
     <main className="review" data-view={roomLanding ? "room" : "study"}>
+      {notebookOpen && <dialog className="room-notebook-dialog" ref={node => { if (node && !node.open) node.showModal(); }} onClose={() => setNotebookOpen(false)}><button onClick={() => setNotebookOpen(false)}>Back to room</button><RecordScreen indexed api={api} reviewId={null} /></dialog>}
       <header className="review-header">
         <div>
           <h1>{[...titles.values()].join("; ") || "Review"}</h1>
@@ -115,7 +119,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
         </div>
         <div className="review-navigation">
           <span className="review-phase">{view.state.phase}</span>
-          <Link to={{ page: "record", reviewId: null }}>My notebook</Link>
+          <button type="button" onClick={() => setNotebookOpen(true)}>My notebook</button>
           <Actions ids={actions.filter(id => id === "pause" || id === "resume" || id === "end")} disabled={streaming || state.unsent.length > 0} send={id => void controller.send(toAct(id, "", "text"))} />
         </div>
       </header>
@@ -202,7 +206,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           )}
         </section>
         <div ref={sourceColumn} className="review-source-column" data-source-open={sourceOpen}>
-        <RoomTools scene={appearance.scene} sourceOpen={!roomLanding && sourceOpen} listening={listening} speechAvailable={speech.supported && actions.includes("answer")} onSpeak={() => { setStudyOpen(true); speechToggle.current?.(); }} onSource={(origin) => {
+        <RoomTools onNotebook={() => setNotebookOpen(true)} scene={appearance.scene} sourceOpen={!roomLanding && sourceOpen} listening={listening} speechAvailable={speech.supported && actions.includes("answer")} onSpeak={() => { speechToggle.current?.(); }} onSource={(origin) => {
           sourceOrigin.current = origin ?? sourceToggle.current;
           if (roomLanding) {
             setStudyOpen(true);

@@ -18,7 +18,7 @@ describe("local appearance preferences", () => {
   });
   test("detail recovers older records and validates stored values", () => {
     expect(parseAppearance('{"scene":"last-desk"}').detail).toBe("hd-pixel");
-    expect(parseAppearance('{"detail":"painted","companion":"pip"}')).toEqual({ ...DEFAULT_APPEARANCE, detail: "painted", companion: "pip" });
+    expect(parseAppearance('{"detail":"painted","companion":"pip"}')).toEqual({ ...DEFAULT_APPEARANCE, companion: "pip" });
     expect(parseAppearance('{"detail":"unknown"}').detail).toBe(DEFAULT_APPEARANCE.detail);
   });
   test("storage denial leaves an in-memory appearance usable", () => {
