@@ -23,7 +23,7 @@ Each item below is a definition the bar text leaves open. Derek adopted all ten 
 
 ## Amendment 1 (Derek, 2026-11-04, before any paid call): a lecture is the set of clips
 
-**Why.** The adopted design scores each video as its own lecture. Derek's real material is a set of pre-split clips (a course playlist), so the topic boundaries are the joins between clips. The product's own rule is that a video ending does not close a chunk and the next clip's first window decides (flow B: "Video ends → do NOT close; the next clip's first window decides."). Under the adopted rule (definition 9: each lecture alone, each half folded alone) the first window of every clip has nothing before it, so a clip join can never be detected and the boundary bar is unmeasurable. Derek, 2026-11-04: "it should be the set of clips ... there are NO boundaries [within a clip], the split is the boundary", and "visual steps should only be when the actual slide content changes ... it's ok to record transcript between the slide changes (new text shown on screen counts as a visual step)". He told the agent to amend the lab. No Jev or Claude call has been made. The bar text, the budget and the other adopted definitions are not changed.
+**Why.** The adopted design scores each video as its own lecture. Derek's real material is a set of pre-split clips (a course playlist), so the topic boundaries are the joins between clips. **[SUPERSEDED by Amendment 2: a join is a boundary candidate only, and it is a boundary only when the topic changes there.]** The product's own rule is that a video ending does not close a chunk and the next clip's first window decides (flow B: "Video ends → do NOT close; the next clip's first window decides."). Under the adopted rule (definition 9: each lecture alone, each half folded alone) the first window of every clip has nothing before it, so a clip join can never be detected and the boundary bar is unmeasurable. Derek, 2026-11-04: "it should be the set of clips ... there are NO boundaries [within a clip], the split is the boundary", and "visual steps should only be when the actual slide content changes ... it's ok to record transcript between the slide changes (new text shown on screen counts as a visual step)". He told the agent to amend the lab. No Jev or Claude call has been made. The bar text, the budget and the other adopted definitions are not changed.
 
 Items marked **PROPOSED** below are the agent's details for the parts Derek's decision left open. They are not adopted until he says so, and none may change after a result.
 
@@ -48,7 +48,7 @@ Windows are the product's: `buildWindows` over the whole capture in watch order,
 
 ### Matching
 
-One-to-one and +-60 s inclusive (definition 2), and only within the SAME videoId: the distance between places in different clips is undefined, so a detection never matches a label of another clip, however close in watch time. A join label is a boundary labeled at the start of clip N (the videoId of clip N, mediaS inside its first window), so a Jev-driven close whose next chunk starts at that clip's start matches it. The first clip's start is not a boundary.
+One-to-one and +-60 s inclusive (definition 2), and only within the SAME videoId: the distance between places in different clips is undefined, so a detection never matches a label of another clip, however close in watch time. **[SUPERSEDED by Amendment 2 for what makes a join a boundary: Derek labels a join as a boundary only when the topic changes there, not every join.]** A join label is a boundary labeled at the start of clip N (the videoId of clip N, mediaS inside its first window), so a Jev-driven close whose next chunk starts at that clip's start matches it. The first clip's start is not a boundary.
 
 ### The split (replaces definition 9 for sets of two or more clips)
 
@@ -118,6 +118,30 @@ split            [--data <dir>] --labels <file> ...        (a set needs --data: 
 ```
 
 `draft-labels-set` writes ONE schema 2 draft for the whole capture, clips in watch order, and no model is used. It puts a boundary candidate at the start of every clip after the first (cue: "start of clip N: the product treats the next clip's first window as the decision point"), nothing inside a clip, the visual-step and duplicate candidates of `draft-labels` per clip (a step candidate compares a frame with the previous candidate frame of its own clip), and every item `confirmed: false` with status draft. `split`, `plan`, `run`, `report` and `rescore` accept both schemas and print per-set and per-half counts. `plan` counts the windows, frame calls and boundary labels of each half from the real windowing, including the labels excluded for lying in a half's first window. Stored judgments record their `videoId`. `rescore` stays byte-identical to the original report. The labeling sheet reads schema 1 files only: a set has no sheet yet.
+
+## Amendment 2 (Derek, 2026-11-05, after the first scored run): a topic boundary is a change of topic
+
+Why. After run 1's held-out scoring (recall 0 of 3), Derek said what a boundary is. His words, verbatim:
+
+> typically within a single video (at least the playlist ones i'm watching that are only a few minutes long each), the topic is definitely not changing in the middle of the video. for example, if i'm watching a set of lectures on active networks, that is one topic. if it switches to component design, that's a new topic and we've crossed a boundary.
+
+and, about the observation that a topic does not change inside a clip: "this may not be true for longer lectures!"
+
+The definition. A topic boundary is a place where the subject being taught changes to a different topic. The unit is the topic, not the clip. A join between two clips of the same topic is not a boundary. A boundary can be a clip join (when the next clip starts a different topic) or can fall inside a long lecture. In the short playlist clips used so far a topic does not change inside a clip; that is an observation about those clips, not a rule of the lab.
+
+What it changes in Amendment 1 (PROPOSED wording, Derek to confirm when he next reviews this file):
+
+- A clip join is a boundary CANDIDATE only. Derek confirms it only when the topic changes there. Amendment 1 said "so the topic boundaries are the joins between clips"; that is superseded.
+- The product's rule is unchanged: a video ending does not close a chunk, and the next clip's first window decides.
+- Everything else in Amendment 1 (the set as the lecture, the split at the nearest join, matching, the undetectable-label rule) stays as written.
+
+Effect on run 1. The labels signed on 2026-11-05 confirmed all 10 joins of the 11-clip set as boundaries. My reading of the clip titles (clips 1 to 6 are the Active Networks lesson, ending with "ANTS Capsule and API"; clips 7 to 11 start with "Object based vs Procedural Design" and continue with Spring, the component-design lesson) is that only the join from clip 6, "ANTS Capsule and API", to clip 7, "Object based vs Procedural Design", is a topic change. That is my inference from titles and Derek's two example topics, not a label: no labels have been made under this definition, and Derek has not yet said which joins he would confirm. On that reading, run 1 was scored against labels that were wrong by this definition. Its results are kept below as a record and are SUPERSEDED: they are not an experiment 2 result against the bars. In particular, recall 0 of 3 on the held-out half counted joins that, on that reading, are not boundaries, and the held-out half (clips 8 to 11) would then contain no boundary, so recall there would be NOT MEASURED.
+
+The held-out half is spent. This definition was written after it was scored once, so the stored judgments are not re-read against new labels as if that were a clean held-out result. A new set with labels made under this definition, scored once, replaces it.
+
+An observation made after the fact, not a result: in the tuning half, at yes 0.5, Jev's one close was at the start of clip 7, which on the reading above is the one topic change in that half. It is one boundary.
+
+Next, not yet run: capture more topic changes with automated watching (Derek approved driving Chrome through playlists, and may supply links), label them under this definition, then run tuning and a single scoring on a held-out set that has several boundaries. The counts and budget will be written here before any call. `docs/experiments/06-model-optimized-jev.md` names experiment 2's scoring of the 11-clip set as its baseline; that must be updated to the new set before experiment 6 runs.
 
 ## The four bars
 
@@ -282,4 +306,71 @@ Every line starts with `[fixture]` or `[live]`, like the probe report. A run is 
 
 ## Results
 
-No run yet. Derek's label sign-off and a run with a key are still needed.
+### Run 1 (2026-11-05), the 11-clip set, SUPERSEDED by Amendment 2
+
+Scored against labels that counted all 10 clip joins as boundaries. Kept for the record; not an experiment 2 result. The labels file was signed by Derek on 2026-11-05 after he verified model proposals on the sheet; the signed file differs from his download by the cleanup recorded in its description.
+
+Tuning rounds on the first halves (clips 1 to 7), 195 live Jev calls in round 1 and none in rounds 2 and 3 (stored judgments reused):
+
+| Round | Settings changed | Recall | Jev closes | False closes | Steps lost | Duplicates dropped |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | none (yes at 0.7, no at 0.3) | 0 of 6 | 0 | 0 | 1 of 8 | 38 of 40 |
+| 2 | yes at 0.5 | 1 of 6 | 1 | 0 | 1 of 8 | 38 of 40 |
+| 3 | yes at 0.5, `reviseOnNextNoNo` on | 1 of 6 | 1 | 0 | 1 of 8 | 38 of 40 |
+
+The scored run on the held-out half (clips 8 to 11), once, 256 live calls, with round 3's settings. The report below is pasted unedited from `score-1.report.txt`; `rescore` reproduces it byte for byte.
+
+```text
+[live] Jev lab report score-1
+[live] Data origin: live
+[live] Scope: held-out second halves (scored once)
+[live] Model: jev-1.13.0
+[live] Config: windowNewS=30, contextS=120, timeCapS=480, maxFramesPerWindow=2, reviseOnNextNoNo=true
+[live] Thresholds: yes at or above 0.5, no at or below 0.3
+[live] Budget: "~800 Jev calls, max 3 tuning rounds, tune on first halves, score once on held-out second halves"
+[live] Lecture cap_z2fpbreijoryj4as3xvxp3ic7l/set:-nY-8shbqOo+10: 11 clips in watch order, split at the join before clip 8 (watched 1038.049 s before it and 1165.268 s after; the midpoint of 2203.317 s is 1101.659 s), tune clips 1-7, held-out clips 8-11, scored second half; labels labels-set-signed.json sha256 5138e96ca3ea
+[live]   clip 1: -nY-8shbqOo, span [3.3, 134.081), watched 130.781 s
+[live]   clip 2: 6E0bLlZhq68, span [0, 216.741), watched 216.741 s
+[live]   clip 3: pV3YVncEwp0, span [0.013, 137.121), watched 137.108 s
+[live]   clip 4: 8TKdsjd_HAo, span [0.019, 167.181), watched 167.162 s
+[live]   clip 5: ZKgQChNiwzY, span [0, 185.021), watched 185.021 s
+[live]   clip 6: 9PvZIjEs2uE, span [0, 16.9), watched 16.9 s
+[live]   clip 7: Uks_t77_nyk, span [0.005, 184.341), watched 184.336 s
+[live]   clip 8: DS_idEsax-s, span [0, 229.421), watched 229.421 s
+[live]   clip 9: nxkoYy7FOp8, span [0, 403.361), watched 403.361 s
+[live]   clip 10: blYTia8r3s8, span [0.005, 338.841), watched 338.836 s
+[live]   clip 11: fcaUwpeKAoY, span [0.009, 193.66), watched 193.65 s
+
+[live] Boundary recall: FAIL
+[live] Bar: "≥70% of labeled boundaries detected within ±60s"
+[live] Measured: 0/3 labeled boundaries detected within ±60s = 0%.
+[live]   cap_z2fpbreijoryj4as3xvxp3ic7l/set:-nY-8shbqOo+10: 0/3 detected; missed at clip 9 0s, clip 10 0.005s, clip 11 0.009s
+[live]   cap_z2fpbreijoryj4as3xvxp3ic7l/set:-nY-8shbqOo+10: 1 label(s) at clip 8 0s lie in the first window of the second half, so no model could detect them (PROPOSED rule, Amendment 1); excluded from the denominator
+
+[live] False closes: PASS
+[live] Bar: "≤1 false close per 15 min"
+[live] Measured: 0 false close(s) in 1165.268 s watched = 0 per 15 min.
+[live]   cap_z2fpbreijoryj4as3xvxp3ic7l/set:-nY-8shbqOo+10: 0 Jev close(s), 0 false at none in 1165.268 s watched
+
+[live] Visual steps: PASS
+[live] Bar: "≤1 important visual step lost per lecture"
+[live] Measured: most lost in one lecture 1 (limit 1); this is the scored half only, not a whole lecture.
+[live]   cap_z2fpbreijoryj4as3xvxp3ic7l/set:-nY-8shbqOo+10: 1/6 lost (clip 9 219.92s every candidate frame dropped)
+
+[live] Duplicates: PASS
+[live] Bar: "≥50% duplicates dropped"
+[live] Measured: 202/213 labeled duplicates dropped = 94.836%.
+[live]   cap_z2fpbreijoryj4as3xvxp3ic7l/set:-nY-8shbqOo+10: 202/213 dropped
+
+[live] Usage (this run, measured; Jev reports tokens only, so cost is unknown):
+[live]   calls 256 (boundary 37, frame change 219, failed 0); judgments reused from earlier calls 0
+[live]   input tokens 1414658 (0 call(s) without a count), output tokens 6554 (0 call(s) without a count)
+[live]   cost unknown
+[live] Latency (report only, no target): all calls p50 436 ms, p95 1003 ms (n=256)
+[live]   boundary p50 536 ms, p95 812 ms (n=37)
+[live]   frame change p50 430 ms, p95 1072 ms (n=219)
+
+[live] OVERALL: FAIL (failed: recall)
+[live] Not shown by this lab: model accuracy beyond this label set, other lectures, other machines, learning effectiveness. Labels are Derek's judgment.
+```
+
