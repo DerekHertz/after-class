@@ -5,6 +5,7 @@ import type { EvidenceId, ReviewId } from "../shared/ids";
 import type { AppApi } from "./api";
 import { useAppearance, useSceneActivity } from "./appearance";
 import { RoomTools } from "./room-tools";
+import { reactToCompanion } from "./companion-reaction";
 import { createReviewController } from "./controller";
 import type { SessionState } from "./controller";
 import {
@@ -70,6 +71,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   function openSource(ids: readonly EvidenceId[], label: string, origin: HTMLButtonElement) {
     sourceOrigin.current = origin;
     setSelection({ kind: "pinned", ids, label });
+    if (!sourceOpen) reactToCompanion("draw");
     setSourceOpen(true);
     requestAnimationFrame(() => sourceHeading.current?.focus());
   }
@@ -127,7 +129,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             }}>Latest exchange</button>
             <button ref={sourceToggle} type="button" aria-expanded={sourceOpen} aria-controls="review-source" onClick={(e) => {
               if (sourceOpen) closeSource();
-              else { sourceOrigin.current = e.currentTarget; setSourceOpen(true); }
+              else { sourceOrigin.current = e.currentTarget; reactToCompanion("draw"); setSourceOpen(true); }
             }}>{sourceOpen ? "Close source" : "Open source"}</button>
           </div>
           <div ref={history} onScroll={() => {

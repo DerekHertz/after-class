@@ -13,6 +13,10 @@ function AppearancePicker() {
     <summary>Room &amp; companion</summary>
     <div className="appearance-options">
       <p className="appearance-intro">Make yourself at home.</p>
+      <fieldset><legend>Room artwork</legend><div className="detail-choices">
+        <button type="button" aria-pressed={appearance.detail === "hd-pixel"} onClick={() => update({ detail: "hd-pixel" })}>HD pixel art</button>
+        <button type="button" aria-pressed={appearance.detail === "painted"} onClick={() => update({ detail: "painted" })}>Painted</button>
+      </div></fieldset>
       <fieldset><legend>Your room</legend><div className="room-choices">
         {(Object.entries(SCENES) as [SceneId, typeof SCENES[SceneId]][]).map(([id, scene]) => <button key={id} type="button" className="room-choice" aria-pressed={appearance.scene === id} onClick={() => update({ scene: id })}>
           <RoomDrawing id={id} /><span>{scene.name}</span><small>{scene.detail}</small>
@@ -34,7 +38,7 @@ function AppearancePicker() {
 }
 export function SceneShell({ children }: { readonly children: ReactNode }) {
   const { appearance, activity } = useAppearance();
-  return <div className="scene-shell" data-scene={appearance.scene} data-motion={appearance.motion}>
+  return <div className="scene-shell" data-scene={appearance.scene} data-motion={appearance.motion} data-detail={appearance.detail}>
     <header className="scene-masthead">
       <Link to={{ page: "home" }}><span className="bell-mark" aria-hidden="true" /><span>After Class</span></Link>
       <span className="room-name">{SCENES[appearance.scene].name}</span><AppearancePicker />

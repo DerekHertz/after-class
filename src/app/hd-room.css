@@ -1,0 +1,45 @@
+.detail-choices { display: flex; gap: 8px; margin-bottom: 8px; }
+.detail-choices button[aria-pressed="true"] { background: #e5ead6; outline: 2px solid #51644d; }
+.hd-room { position: relative; width: 100%; aspect-ratio: 1672 / 941; overflow: hidden; background: #594533; isolation: isolate; }
+.hd-room-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.hd-room-art { position: absolute; inset: 0; pointer-events: none; z-index: -1; }
+.hd-room-base { position: absolute; inset: 0; background: url('./assets/hd-pixel/last-desk.webp') center / 100% 100% no-repeat; }
+.hd-room-exterior {
+  position: absolute; left: 0; top: 0; width: 426px; height: 360px; pointer-events: none;
+  background: url('./assets/hd-pixel/exterior-breeze.webp') 0 0 / 400% 100% no-repeat;
+  clip-path: path('M 113 0 L 119 0 L 119 64 L 94 55 Z M 137 0 L 200 0 L 200 86 L 137 66 Z M 219 0 L 259 18 L 259 103 L 219 89 Z M 281 29 L 314 46 L 314 124 L 281 112 Z M 333 58 L 352 69 L 352 142 L 333 132 Z M 370 82 L 388 93 L 388 160 L 370 151 Z M 403 107 L 415 115 L 415 182 L 403 175 Z M 86 76 L 119 88 L 119 210 L 64 192 Z M 137 96 L 200 117 L 200 231 L 137 213 Z M 219 124 L 259 140 L 259 246 L 219 235 Z M 282 153 L 314 164 L 314 238 L 282 264 Z M 333 173 L 352 181 L 352 226 L 333 231 Z M 371 191 L 388 198 L 388 221 L 371 222 Z M 60 215 L 119 233 L 119 326 L 61 324 Z M 137 239 L 200 258 L 200 338 L 137 330 Z M 219 264 L 259 276 L 259 347 L 219 342 Z');
+  animation: hd-exterior-breeze 12s steps(1, end) infinite;
+}
+@keyframes hd-exterior-breeze { 0%, 16%, 60%, 100% { background-position-x: 0%; } 23%, 51% { background-position-x: 33.333333%; } 31%, 43% { background-position-x: 66.666667%; } 36% { background-position-x: 100%; } }
+.hd-room-board-shade { position: absolute; left: 752px; top: 275px; width: 210px; height: 174px; pointer-events: none; background: repeating-linear-gradient(117deg, transparent 0 17px, #344a36 24px 29px, transparent 35px 49px); mask-image: radial-gradient(ellipse closest-side, #000 40%, transparent); mix-blend-mode: multiply; animation: hd-passing-shade 12s steps(6, end) infinite; }
+@keyframes hd-passing-shade { 0%, 22%, 73%, 100% { opacity: 0; transform: translateX(-5px); } 35% { opacity: .32; transform: translateX(2px); } 46% { opacity: .18; transform: translateX(8px); } 58% { opacity: .25; transform: translateX(4px); } }
+.hd-room[data-paused="true"] *, .scene-shell[data-motion="reduced"] .hd-room * { animation-play-state: paused !important; }
+.scene-shell[data-motion="reduced"] .hd-room-board-shade { opacity: 0; animation: none; }
+.scene-shell[data-motion="reduced"] .hd-room-exterior { animation: none; background-position-x: 0%; }
+@media (prefers-reduced-motion: reduce) { .hd-room * { animation: none !important; } .hd-room-board-shade { opacity: 0; } }
+/* Give the registered landscape room its own space above the readable source. */
+.scene-shell[data-detail="hd-pixel"] .review-source-column { aspect-ratio: auto; margin-top: 95px; }
+.scene-shell[data-detail="hd-pixel"] .review .room-tools { position: relative; inset: auto; perspective: none; }
+.scene-shell[data-detail="hd-pixel"] .review .source-stand { position: relative; left: auto; top: auto; width: calc(100% - 32px); height: auto; max-height: 340px; margin: 18px 16px; padding: 18px; color: #30271f; --fg: #30271f; --muted: #706352; --accent: #244c9c; --border: #cbb99b; background: #f9edda; border: 1px solid #cbb99b; border-radius: 6px; }
+@media (max-width: 800px) { .scene-shell[data-detail="hd-pixel"] .review-source-column { margin: 0; width: 100%; } }
+
+.hd-room[data-scene="study-bench"] .hd-room-base { background-image: url('./assets/hd-pixel/study-bench.webp'); }
+.hd-room[data-scene="projection-booth"] .hd-room-base { background-image: url('./assets/hd-pixel/projection-booth.webp'); }
+.hd-room[data-scene="study-bench"] .hd-room-exterior {
+  width: 337px; height: 509px;
+  clip-path: path('M 0 0 L 27 0 L 27 44 L 0 36 Z M 95 0 L 207 0 L 207 102 L 95 67 Z M 231 13 L 316 48 L 316 145 L 231 116 Z M 0 80 L 28 89 L 28 278 L 0 275 Z M 96 112 L 206 146 L 206 296 L 96 281 Z M 231 156 L 316 182 L 316 306 L 231 299 Z M 0 310 L 29 311 L 29 504 L 0 506 Z M 99 328 L 207 337 L 207 480 L 99 497 Z M 232 341 L 316 350 L 316 468 L 232 480 Z');
+}
+.hd-room[data-scene="study-bench"] .hd-room-board-shade { left: 69px; top: 621px; width: 260px; height: 91px; transform-origin: center; rotate: 14deg; opacity: 0; }
+.hd-room-projection-glow { position: absolute; inset: 0; background: url('./assets/hd-pixel/projection-booth.webp') center / 100% 100% no-repeat; filter: brightness(1.17) saturate(1.05); mask-image: radial-gradient(ellipse 170px 130px at 1011px 300px, #000, transparent), radial-gradient(ellipse 110px 80px at 215px 445px, #000, transparent); animation: hd-projector-light 14s ease-in-out infinite; }
+@keyframes hd-projector-light { 0%, 100% { opacity: .16; } 38% { opacity: .44; } 63% { opacity: .27; } 79% { opacity: .36; } }
+.hd-room-projection-dust { position: absolute; left: 820px; top: 220px; width: 320px; height: 230px; }
+.hd-room-projection-dust i { position: absolute; left: 21%; top: 36%; width: 2px; height: 2px; background: #f5deb3; opacity: 0; animation: hd-dust-drift 11s ease-in-out infinite; }
+.hd-room-projection-dust i:nth-child(2) { left: 61%; top: 59%; animation-delay: -5s; }
+.hd-room-projection-dust i:nth-child(3) { left: 83%; top: 21%; animation-delay: -8s; }
+@keyframes hd-dust-drift { 0% { opacity: 0; translate: 0 0; } 38%, 65% { opacity: .4; } 100% { opacity: 0; translate: 13px -19px; } }
+.scene-shell[data-motion="reduced"] :is(.hd-room-projection-glow, .hd-room-projection-dust) { animation: none; display: none; }
+@media (prefers-reduced-motion: reduce) { .hd-room-projection-glow, .hd-room-projection-dust { display: none; } }
+.scene-shell[data-detail="hd-pixel"] .room-raster[data-room="last-desk"] { background-image: url('./assets/hd-pixel/last-desk.webp'); }
+.scene-shell[data-detail="hd-pixel"] .room-raster[data-room="study-bench"] { background-image: url('./assets/hd-pixel/study-bench.webp'); }
+.scene-shell[data-detail="hd-pixel"] .room-raster[data-room="projection-booth"] { background-image: url('./assets/hd-pixel/projection-booth.webp'); }
+.scene-shell[data-detail="hd-pixel"] .room-raster { aspect-ratio: 1672 / 941; background-size: cover; background-position: center; }
