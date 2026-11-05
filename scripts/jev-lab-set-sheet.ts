@@ -80,7 +80,7 @@ export function loadProposals(files: readonly string[]): readonly { readonly fil
   });
 }
 
-type SetOptions = { readonly dataDir: string; readonly outDir: string; readonly info: LabelInfo; readonly proposalFiles: readonly string[] };
+type SetOptions = { readonly dataDir: string; readonly outDir: string; readonly info: LabelInfo; readonly proposalFiles: readonly string[]; readonly allowFixtureProposals?: boolean };
 
 export async function generateSetSheet(opts: SetOptions): Promise<SheetResult> {
   const dataDir = canonical(opts.dataDir);
@@ -95,6 +95,11 @@ export async function generateSetSheet(opts: SetOptions): Promise<SheetResult> {
 
   const proposalFiles = loadProposals(opts.proposalFiles);
   if (proposalFiles.length > 2) refuse(`${proposalFiles.length} proposal files given; the sheet compares at most two models`);
+  for (const p of proposalFiles) {
+    if (p.proposals.origin === "fixture" && opts.allowFixtureProposals !== true) {
+      refuse(`${p.file} has origin "fixture": it was produced by a scripted test client, not a model. Pass --allow-fixture-proposals to show it anyway, labelled FIXTURE, not a model.`);
+    }
+  }
   const seen = new Set<string>();
   for (const p of proposalFiles) {
     const who = `${p.proposals.proposedBy.model} (${p.proposals.proposedBy.effort})`;

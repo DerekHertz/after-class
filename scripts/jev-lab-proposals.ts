@@ -25,6 +25,8 @@ export type Proposals = {
   readonly captureId: string;
   readonly provenance: string | null;
   readonly createdAt: string;
+  /** "fixture" = produced by a scripted test client, not a model. Absent or "live" = a real model. */
+  readonly origin?: "fixture" | "live";
   readonly items: {
     readonly boundaries: readonly ProposedBoundary[];
     readonly visualSteps: readonly ProposedStep[];
@@ -46,7 +48,7 @@ export function validateProposals(input: unknown): ProposalsResult {
     for (const k of Object.keys(o)) if (!allowed.includes(k)) err(`${path}.${k}`, `unknown field (allowed: ${allowed.join(", ")})`);
   };
   if (!isObj(input)) return { ok: false, errors: ["proposals: expected a JSON object"] };
-  unknownKeys("proposals", input, ["schemaVersion", "kind", "proposedBy", "captureId", "provenance", "createdAt", "items"]);
+  unknownKeys("proposals", input, ["schemaVersion", "kind", "proposedBy", "captureId", "provenance", "createdAt", "origin", "items"]);
   if (input.schemaVersion !== 1) err("schemaVersion", `expected 1, got ${JSON.stringify(input.schemaVersion)}`);
   if (input.kind !== "label-proposals") err("kind", `expected "label-proposals", got ${JSON.stringify(input.kind)}`);
   const by = input.proposedBy;
@@ -59,6 +61,8 @@ export function validateProposals(input: unknown): ProposalsResult {
   if (!isText(input.captureId)) err("captureId", "expected a non-empty string");
   if (input.provenance !== null && typeof input.provenance !== "string") err("provenance", "expected a string or null");
   if (!isText(input.createdAt) || Number.isNaN(Date.parse(input.createdAt))) err("createdAt", "expected an ISO date-time string");
+
+  if (input.origin !== undefined && input.origin !== "fixture" && input.origin !== "live") err("origin", `expected "fixture" or "live" when present, got ${JSON.stringify(input.origin)}`);
 
   const items = input.items;
   const reason = (path: string, o: Record<string, unknown>) => {

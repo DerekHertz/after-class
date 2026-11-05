@@ -27,7 +27,7 @@ export type ItemKey = MarkKey | "groups";
 export type Origin = "draft" | "proposal" | "user";
 
 /** A proposing model, as the sheet names it. `key` is `proposedBy.model` verbatim; `label` is what the page shows. */
-export type Proposer = { readonly key: string; readonly label: string; readonly effort: string; readonly reason: string; readonly source?: "model" | "join" };
+export type Proposer = { readonly key: string; readonly label: string; readonly effort: string; readonly reason: string; readonly source?: "model" | "join"; readonly fixture?: true };
 export type Member = DuplicateMember & { readonly videoId: string };
 
 type Item = { readonly id: string; readonly note: string; readonly status: Status; readonly cue?: string; readonly origin: Origin; readonly proposers: readonly Proposer[] };
@@ -84,7 +84,12 @@ export function modelLabel(model: string): string {
   return model;
 }
 
-const proposerOf = (p: Proposals, reason: string, source?: "model" | "join"): Proposer => ({ key: p.proposedBy.model, label: modelLabel(p.proposedBy.model), effort: p.proposedBy.effort, reason, ...(source === undefined ? {} : { source }) });
+/** What the page calls a proposals file. A fixture file came from a scripted test client, so it is never called Opus or Fable. */
+export const proposalsLabel = (p: Proposals): string => (p.origin === "fixture" ? `FIXTURE, not a model: ${p.proposedBy.model}` : modelLabel(p.proposedBy.model));
+
+const proposerOf = (p: Proposals, reason: string, source?: "model" | "join"): Proposer => ({
+  key: p.proposedBy.model, label: proposalsLabel(p), effort: p.proposedBy.effort, reason, ...(source === undefined ? {} : { source }), ...(p.origin === "fixture" ? { fixture: true as const } : {}),
+});
 
 // ───────────────────────────── merging two models' proposals ─────────────────────────────
 
@@ -318,7 +323,7 @@ export function placeOf(item: Mark | Group, order: readonly string[]): { readonl
 /** Provenance kept in the file: the draft's own cue, then one "proposed by <model>: <reason>" per model. The labeler's own items carry none. */
 export function cueOf(item: Mark | Group): string | undefined {
   if (item.origin === "user") return undefined;
-  const parts = [...(item.cue === undefined ? [] : [item.cue]), ...item.proposers.map((p) => `proposed by ${p.key}: ${p.reason}`)];
+  const parts = [...(item.cue === undefined ? [] : [item.cue]), ...item.proposers.map((p) => `proposed by ${p.key}${p.fixture === true ? " (FIXTURE, not a model)" : ""}: ${p.reason}`)];
   return parts.length === 0 ? undefined : parts.join("; ");
 }
 
@@ -425,7 +430,8 @@ const isTime = (x: unknown): x is number => typeof x === "number" && Number.isFi
 function readProposer(x: unknown): Proposer | null {
   if (!isObj(x) || typeof x.key !== "string" || typeof x.label !== "string" || typeof x.effort !== "string" || typeof x.reason !== "string") return null;
   if (x.source !== undefined && x.source !== "model" && x.source !== "join") return null;
-  return { key: x.key, label: x.label, effort: x.effort, reason: x.reason, ...(x.source === undefined ? {} : { source: x.source }) };
+  if (x.fixture !== undefined && x.fixture !== true) return null;
+  return { key: x.key, label: x.label, effort: x.effort, reason: x.reason, ...(x.source === undefined ? {} : { source: x.source }), ...(x.fixture === true ? { fixture: true as const } : {}) };
 }
 
 function readItem(x: unknown): Item | null {

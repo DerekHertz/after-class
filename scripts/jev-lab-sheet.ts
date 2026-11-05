@@ -128,7 +128,7 @@ type Summary = { readonly videoId: string; readonly title: string; readonly dura
 
 export type SheetResult = { readonly files: readonly { readonly path: string; readonly bytes: number }[]; readonly notes: readonly string[] };
 
-export async function generateSheet(opts: { readonly dataDir: string; readonly labelFiles: readonly string[]; readonly outDir: string; readonly proposalFiles?: readonly string[] }): Promise<SheetResult> {
+export async function generateSheet(opts: { readonly dataDir: string; readonly labelFiles: readonly string[]; readonly outDir: string; readonly proposalFiles?: readonly string[]; readonly allowFixtureProposals?: boolean }): Promise<SheetResult> {
   const dataDir = canonical(opts.dataDir);
   const outDir = canonical(opts.outDir);
   if (outDir === dataDir || outDir.startsWith(dataDir + sep)) refuse(`--out ${opts.outDir} is inside the data dir ${opts.dataDir}; the data dir is never written, so choose another place`);
@@ -137,7 +137,7 @@ export async function generateSheet(opts: { readonly dataDir: string; readonly l
   if (loaded.some((i) => i.labels.schemaVersion === 2)) {
     // A schema 2 file is a set of clips: one page for the whole set (jev-lab-set-sheet.ts). Loaded on demand, because it imports this module.
     if (loaded.length !== 1) refuse("a set of clips (schema 2) has one label file and one sheet; pass exactly one --labels file, and no schema 1 file beside it");
-    return (await import("./jev-lab-set-sheet")).generateSetSheet({ dataDir: opts.dataDir, outDir: opts.outDir, info: loaded[0]!, proposalFiles: opts.proposalFiles ?? [] });
+    return (await import("./jev-lab-set-sheet")).generateSetSheet({ dataDir: opts.dataDir, outDir: opts.outDir, info: loaded[0]!, proposalFiles: opts.proposalFiles ?? [], allowFixtureProposals: opts.allowFixtureProposals === true });
   }
   if ((opts.proposalFiles ?? []).length > 0) refuse("--proposals belongs to a set of clips (schema 2); the per-clip sheet of a schema 1 file takes none");
   const infos = loaded.map((i) => {
@@ -219,13 +219,13 @@ function indexPage(lectures: readonly Summary[]): string {
 }
 
 if (import.meta.main) {
-  const { values } = parseArgs({ options: { data: { type: "string" }, labels: { type: "string", multiple: true }, proposals: { type: "string", multiple: true }, out: { type: "string" } } });
+  const { values } = parseArgs({ options: { data: { type: "string" }, labels: { type: "string", multiple: true }, proposals: { type: "string", multiple: true }, "allow-fixture-proposals": { type: "boolean" }, out: { type: "string" } } });
   if (!values.data || !values.out || (values.labels ?? []).length === 0) {
-    console.error("usage: bun run scripts/jev-lab-sheet.ts --data <dir> --labels <file> [--labels <file> ...] --out <dir>\n       bun run scripts/jev-lab-sheet.ts --data <dir> --labels <set draft> [--proposals <file> [--proposals <file>]] --out <dir>   (a set of clips, schema 2)");
+    console.error("usage: bun run scripts/jev-lab-sheet.ts --data <dir> --labels <file> [--labels <file> ...] --out <dir>\n       bun run scripts/jev-lab-sheet.ts --data <dir> --labels <set draft> [--proposals <file> [--proposals <file>]] [--allow-fixture-proposals] --out <dir>   (a set of clips, schema 2)");
     process.exit(2);
   }
   try {
-    const done = await generateSheet({ dataDir: resolve(values.data), labelFiles: values.labels!.map((f) => resolve(f)), outDir: resolve(values.out), proposalFiles: (values.proposals ?? []).map((f) => resolve(f)) });
+    const done = await generateSheet({ dataDir: resolve(values.data), labelFiles: values.labels!.map((f) => resolve(f)), outDir: resolve(values.out), proposalFiles: (values.proposals ?? []).map((f) => resolve(f)), allowFixtureProposals: values["allow-fixture-proposals"] === true });
     for (const f of done.files) console.log(`${f.path}  ${(f.bytes / 1e6).toFixed(2)} MB (${f.bytes} bytes)`);
     for (const n of done.notes) console.log(`note: ${n}`);
   } catch (e) {

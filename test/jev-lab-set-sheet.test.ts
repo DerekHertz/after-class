@@ -19,6 +19,7 @@ import type { LabelFileV2 } from "../scripts/jev-lab-score";
 import { proposalsAgainstLabels, validateProposals } from "../scripts/jev-lab-proposals";
 import type { Proposals } from "../scripts/jev-lab-proposals";
 import { generateSheet } from "../scripts/jev-lab-sheet";
+import { proposalsLabel } from "../scripts/jev-lab-set-client";
 import {
   BOUNDARY_TOLERANCE_S, FRAME_FILE, STEP_TOLERANCE_S, disagreements, evaluate, initialState, labelJson, makeGroup, mergeProposals, modelLabel, removeItem, removeMember, restoreState, setSignature,
   setStatus, toggleMark,
@@ -718,5 +719,58 @@ describe("the set sheet generator", () => {
     expect(html).toContain("img-src data:;");
     expect(html).toContain("data:image/jpeg;base64,");
     await expect(generateSheet({ dataDir: dir, labelFiles: [file], outDir: out, proposalFiles: ["x.json"] })).rejects.toThrow("--proposals belongs to a set");
+  });
+});
+
+describe("proposals origin: a fixture file is not a model", () => {
+  const withOrigin = (origin: unknown, model = OPUS, captureId = "cap_x") => ({ ...proposals(model, { visualSteps: [step(B, 20, "r")] }, captureId), origin });
+
+  test("origin is optional and accepts only fixture or live, with the path of a bad one", () => {
+    expect(validateProposals(proposals(OPUS, {})).ok).toBe(true);
+    expect(validateProposals(withOrigin("fixture")).ok).toBe(true);
+    expect(validateProposals(withOrigin("live")).ok).toBe(true);
+    for (const bad of ["model", "", 1, null]) {
+      const r = validateProposals(withOrigin(bad));
+      expect(r.ok).toBe(false);
+      expect(r.ok ? "" : r.errors.join("\n")).toContain('origin: expected "fixture" or "live"');
+    }
+  });
+
+  test("a fixture file is refused by default, with an error that says it came from a test client", async () => {
+    const { dir, captureId, labelsFile, out } = setFixture();
+    const file = writeProposals(withOrigin("fixture", OPUS, captureId) as unknown as Proposals, "fx.json");
+    await expect(generateSheet({ dataDir: dir, labelFiles: [labelsFile], outDir: out, proposalFiles: [file] })).rejects.toThrow(
+      "fx.json has origin \"fixture\": it was produced by a scripted test client, not a model. Pass --allow-fixture-proposals to show it anyway, labelled FIXTURE, not a model.",
+    );
+    expect(existsSync(out)).toBe(false);
+  });
+
+  test("with the flag a fixture file is shown labelled FIXTURE, not a model, and never as Opus or Fable", async () => {
+    const { dir, captureId, labelsFile, out } = setFixture();
+    const file = writeProposals(withOrigin("fixture", OPUS, captureId) as unknown as Proposals, "fx.json");
+    await generateSheet({ dataDir: dir, labelFiles: [labelsFile], outDir: out, proposalFiles: [file], allowFixtureProposals: true });
+    const { parsed } = dataOf(readFileSync(join(out, "index.html"), "utf8"));
+    expect(parsed.proposals[0]!.origin).toBe("fixture");
+    const label = proposalsLabel(parsed.proposals[0]!);
+    expect(label).toContain("FIXTURE, not a model");
+    expect(label).not.toMatch(/^(Opus|Fable)$/);
+    const s = initialState(parsed.draft, parsed.proposals);
+    const item = s.visualSteps.find((x) => x.proposers.length > 0)!;
+    expect(item.proposers[0]!.label).toContain("FIXTURE, not a model");
+    expect(item.status).toBe("unconfirmed");
+    const confirmed = evaluate(setSignature(setStatus(s, "visualSteps", item.id, "confirmed"), "Derek", "2026-11-05"), parsed.draft).labels;
+    expect(confirmed.visualSteps.find((x) => x.mediaS === 20)!.cue).toContain("FIXTURE, not a model");
+  });
+
+  test("a live file, and a file with no origin, are unaffected by the flag", async () => {
+    const { dir, captureId, labelsFile } = setFixture();
+    const live = writeProposals(withOrigin("live", OPUS, captureId) as unknown as Proposals, "live.json");
+    const none = writeProposals(proposals(FABLE, {}, captureId), "none.json");
+    for (const allow of [false, true]) {
+      const out = join(tmp("out"), "sheet");
+      await generateSheet({ dataDir: dir, labelFiles: [labelsFile], outDir: out, proposalFiles: [live, none], allowFixtureProposals: allow });
+      const { parsed } = dataOf(readFileSync(join(out, "index.html"), "utf8"));
+      expect(parsed.proposals.map(proposalsLabel)).toEqual(["Opus", "Fable"]);
+    }
   });
 });

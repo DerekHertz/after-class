@@ -8,7 +8,7 @@
  */
 import { fmtTime, watchUrl } from "./jev-lab-sheet-client";
 import {
-  BOUNDARY_TOLERANCE_S, FRAME_FILE, STEP_TOLERANCE_S, agreementOf, disagreements, evaluate, initialState, isMarked, labelJson, makeGroup, modelLabel, placeOf, removeItem, removeMember, restoreState,
+  BOUNDARY_TOLERANCE_S, FRAME_FILE, STEP_TOLERANCE_S, agreementOf, disagreements, evaluate, initialState, isMarked, labelJson, makeGroup, placeOf, proposalsLabel, removeItem, removeMember, restoreState,
   setNote, setSignature, setStatus, storageKey, toggleMark,
 } from "./jev-lab-set-client";
 import type { Group, ItemKey, Mark, Member, SetClip, SetData, SetState, Status } from "./jev-lab-set-client";
@@ -110,7 +110,7 @@ if (split.kind === "join") {
 }
 
 const proposalMeta = proposals.map((p) =>
-  h("li", {}, `${p.proposedBy.model} (effort ${p.proposedBy.effort}), made ${p.createdAt}. ${p.provenance === null ? "No provenance recorded." : `Provenance: ${p.provenance}${/[.!?]$/.test(p.provenance) ? "" : "."}`} It proposed ${p.items.boundaries.length} boundaries, ${p.items.visualSteps.length} visual steps and ${p.items.duplicateGroups.length} duplicate groups.`),
+  h("li", {}, `${p.origin === "fixture" ? "FIXTURE, not a model: " : ""}${p.proposedBy.model} (effort ${p.proposedBy.effort}), made ${p.createdAt}. ${p.provenance === null ? "No provenance recorded." : `Provenance: ${p.provenance}${/[.!?]$/.test(p.provenance) ? "" : "."}`} It proposed ${p.items.boundaries.length} boundaries, ${p.items.visualSteps.length} visual steps and ${p.items.duplicateGroups.length} duplicate groups.`),
 );
 
 app.append(
@@ -293,12 +293,12 @@ function renderDisagreements(): void {
   if (!comparable) parts.push(h("p", { class: "note" }, `Only one proposals file was given (${names[0] ?? ""}), so there is nothing to compare. Its items are listed below as "only" that model.`));
   parts.push(h("p", {}, "Use \"Show only disagreements\" in the toolbar to see only the places where just one model proposed something."));
   for (const p of proposals) {
-    const mine = entries.filter((d) => d.by.includes(modelLabel(p.proposedBy.model)));
-    parts.push(h("p", { class: "meta" }, `${modelLabel(p.proposedBy.model)} proposed ${mine.length} item(s) in all.`));
+    const mine = entries.filter((d) => d.by.includes(proposalsLabel(p)));
+    parts.push(h("p", { class: "meta" }, `${proposalsLabel(p)} proposed ${mine.length} item(s) in all.`));
   }
   if (comparable) {
     for (const p of proposals) {
-      const label = modelLabel(p.proposedBy.model);
+      const label = proposalsLabel(p);
       parts.push(...section(`Only ${label} proposed`, only.filter((d) => d.by.length === 1 && d.by[0] === label)));
     }
     parts.push(...section("Both models proposed", both));
