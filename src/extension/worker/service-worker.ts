@@ -279,7 +279,8 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
  * experiment (a driven playlist) needs no click on the popup, which no automation tool can reach.
  */
 declare const __AFTERCLASS_TEST_AUTOSTART__: boolean;
-if (__AFTERCLASS_TEST_AUTOSTART__) {
+// typeof: the unbundled source (tests, tsc) has no such global, and that means off.
+if (typeof __AFTERCLASS_TEST_AUTOSTART__ !== "undefined" && __AFTERCLASS_TEST_AUTOSTART__) {
   chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
     if (change.status !== "complete" || !isWatchUrl(tab.url) || new URL(tab.url!).searchParams.get("ac_autostart") !== "1") return;
     void readState(tabId).then(async (state) => {
