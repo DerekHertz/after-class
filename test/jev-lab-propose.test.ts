@@ -174,7 +174,7 @@ const rejects = async (p: Promise<unknown>): Promise<Error> => p.then(() => { th
 describe("chunking and the plan", () => {
   test("the limits are the ones in the brief", () => {
     expect(MAX_FRAMES_PER_CALL).toBe(24);
-    expect(BUDGET_CLAUDE_CALLS).toBe(150);
+    expect(BUDGET_CLAUDE_CALLS).toBe(250);
     expect(PILOT_CALLS).toBe(3);
     expect(CHUNK_OVERLAP_FRAMES).toBeGreaterThan(0);
     expect(CHUNK_OVERLAP_FRAMES).toBeLessThan(MAX_FRAMES_PER_CALL);
@@ -611,11 +611,11 @@ describe("no call without both flags, a persisted counter and a ceiling", () => 
 
   test("a run whose plan would cross the ceiling refuses up front (the ceiling counts all of the experiment's runs)", async () => {
     const f = fixture();
-    writeFileSync(join(f.labDir, "claude-state.fixture.json"), JSON.stringify({ version: 1, callsUsed: 147 }));
+    writeFileSync(join(f.labDir, "claude-state.fixture.json"), JSON.stringify({ version: 1, callsUsed: 247 }));
     const { options, requests } = f.base();
     const err = await rejects(proposeLecture(options));
     expect(err).toBeInstanceOf(ProposeRefusal);
-    expect(err.message).toMatch(/150/);
+    expect(err.message).toMatch(/250/);
     expect(requests.length).toBe(0);
   });
 
