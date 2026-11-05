@@ -6,7 +6,8 @@
  *
  * Each draft label file (from `jev-lab draft-labels`) names the capture and the video. The capture is read through a
  * scratch copy of the database, as probe-export does, so <dir> is never written; --out may not lie inside it. No
- * model is called and no key is read. A page is self-contained: frames are embedded as data: URIs, the logic is
+ * model is called and no key is read. A set of clips (a schema 2 file) gets ONE page for the whole set instead, with
+ * its frames as files next to it: see jev-lab-set-sheet.ts. A per-clip page is self-contained: frames are embedded as data: URIs, the logic is
  * bundled from jev-lab-sheet-page.ts, and a Content-Security-Policy that allows only that one script and style
  * forbids every network request. The only links are YouTube watch links, built from a validated video id.
  */
@@ -19,7 +20,7 @@ import { LabRefusal, loadLabels, openCapture } from "./jev-lab";
 import { fmtTime, isVideoId, midpointOf } from "./jev-lab-sheet-client";
 import type { SheetData } from "./jev-lab-sheet-client";
 
-function refuse(message: string): never {
+export function refuse(message: string): never {
   throw new LabRefusal(message);
 }
 
@@ -28,11 +29,11 @@ export function jsonForScript(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c").replace(new RegExp("\\u2028", "g"), "\\u2028").replace(new RegExp("\\u2029", "g"), "\\u2029");
 }
 
-const escapeHtml = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-const sha256Base64 = (s: string): string => createHash("sha256").update(s).digest("base64");
+export const escapeHtml = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+export const sha256Base64 = (s: string): string => createHash("sha256").update(s).digest("base64");
 
 /** The path with symlinks resolved as far as it exists, so an alias of the data dir is not mistaken for another place. */
-function canonical(path: string): string {
+export function canonical(path: string): string {
   const abs = resolve(path);
   const rest: string[] = [];
   let at = abs;
@@ -43,7 +44,7 @@ function canonical(path: string): string {
   return join(realpathSync(at), ...rest);
 }
 
-const CSS = `
+export const CSS = `
 :root { color-scheme: light dark; --bg: #fbfaf7; --fg: #1d1c1a; --muted: #5d5a54; --line: #d6d2c9; --card: #ffffff; --accent: #1f5fbf; --ok: #1d6b3a; --warn: #9a5a00; --bad: #a3261f; --watched: #bfe3c8; }
 @media (prefers-color-scheme: dark) { :root { --bg: #17171a; --fg: #ece9e2; --muted: #a9a59c; --line: #3a3a3f; --card: #212125; --accent: #7aa7ff; --ok: #6fcf8e; --warn: #e0a54a; --bad: #ff8b82; --watched: #2f5a3d; } }
 * { box-sizing: border-box; }
@@ -100,22 +101,26 @@ input[type="text"], input[type="search"], textarea { background: var(--card); bo
 .lectures { list-style: none; padding: 0; } .lectures li { border: 1px solid var(--line); border-radius: 6px; background: var(--card); padding: 0.5rem 0.9rem; margin: 0.6rem 0; }
 `;
 
-const csp = (scriptHash: string | null, styleHash: string): string =>
-  `default-src 'none'; img-src data:; style-src 'sha256-${styleHash}'; ${scriptHash === null ? "" : `script-src 'sha256-${scriptHash}'; `}base-uri 'none'; form-action 'none'`;
+export const csp = (scriptHash: string | null, styleHash: string, img = "data:"): string =>
+  `default-src 'none'; img-src ${img}; style-src 'sha256-${styleHash}'; ${scriptHash === null ? "" : `script-src 'sha256-${scriptHash}'; `}base-uri 'none'; form-action 'none'`;
 
-const shell = (title: string, policy: string, css: string, body: string): string =>
+export const shell = (title: string, policy: string, css: string, body: string): string =>
   `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<meta http-equiv="Content-Security-Policy" content="${policy}">\n<title>${escapeHtml(title)}</title>\n<style>${css}</style>\n</head>\n<body>\n${body}\n</body>\n</html>\n`;
 
-let bundle: Promise<string> | undefined;
-/** The page script, bundled once per process. It must hold no "</script" or "<!--", which would end or confuse the script element. */
-function pageScript(): Promise<string> {
-  bundle ??= (async () => {
-    const result = await Bun.build({ entrypoints: [join(import.meta.dir, "jev-lab-sheet-page.ts")], target: "browser", format: "iife", minify: false, throw: false });
-    if (!result.success || result.outputs.length !== 1) throw new Error(`building the sheet script failed:\n${result.logs.map(String).join("\n")}`);
-    const text = await result.outputs[0]!.text();
-    if (/<\/script|<!--/i.test(text)) throw new Error("the bundled sheet script contains </script or <!--; it cannot be inlined safely");
-    return text;
-  })();
+const bundles = new Map<string, Promise<string>>();
+/** A page script, bundled once per process. It must hold no "</script" or "<!--", which would end or confuse the script element. */
+export function pageScript(entry = "jev-lab-sheet-page.ts"): Promise<string> {
+  let bundle = bundles.get(entry);
+  if (bundle === undefined) {
+    bundle = (async () => {
+      const result = await Bun.build({ entrypoints: [join(import.meta.dir, entry)], target: "browser", format: "iife", minify: false, throw: false });
+      if (!result.success || result.outputs.length !== 1) throw new Error(`building the sheet script failed:\n${result.logs.map(String).join("\n")}`);
+      const text = await result.outputs[0]!.text();
+      if (/<\/script|<!--/i.test(text)) throw new Error("the bundled sheet script contains </script or <!--; it cannot be inlined safely");
+      return text;
+    })();
+    bundles.set(entry, bundle);
+  }
   return bundle;
 }
 
@@ -123,13 +128,20 @@ type Summary = { readonly videoId: string; readonly title: string; readonly dura
 
 export type SheetResult = { readonly files: readonly { readonly path: string; readonly bytes: number }[]; readonly notes: readonly string[] };
 
-export async function generateSheet(opts: { readonly dataDir: string; readonly labelFiles: readonly string[]; readonly outDir: string }): Promise<SheetResult> {
+export async function generateSheet(opts: { readonly dataDir: string; readonly labelFiles: readonly string[]; readonly outDir: string; readonly proposalFiles?: readonly string[]; readonly allowFixtureProposals?: boolean }): Promise<SheetResult> {
   const dataDir = canonical(opts.dataDir);
   const outDir = canonical(opts.outDir);
   if (outDir === dataDir || outDir.startsWith(dataDir + sep)) refuse(`--out ${opts.outDir} is inside the data dir ${opts.dataDir}; the data dir is never written, so choose another place`);
 
-  const infos = loadLabels(opts.labelFiles).map((i) => {
-    if (i.labels.schemaVersion !== 1) return refuse(`${i.file} is a schema 2 set of clips; the sheet makes one page per video and reads schema 1 files only (a set has no sheet yet)`);
+  const loaded = loadLabels(opts.labelFiles);
+  if (loaded.some((i) => i.labels.schemaVersion === 2)) {
+    // A schema 2 file is a set of clips: one page for the whole set (jev-lab-set-sheet.ts). Loaded on demand, because it imports this module.
+    if (loaded.length !== 1) refuse("a set of clips (schema 2) has one label file and one sheet; pass exactly one --labels file, and no schema 1 file beside it");
+    return (await import("./jev-lab-set-sheet")).generateSetSheet({ dataDir: opts.dataDir, outDir: opts.outDir, info: loaded[0]!, proposalFiles: opts.proposalFiles ?? [], allowFixtureProposals: opts.allowFixtureProposals === true });
+  }
+  if ((opts.proposalFiles ?? []).length > 0) refuse("--proposals belongs to a set of clips (schema 2); the per-clip sheet of a schema 1 file takes none");
+  const infos = loaded.map((i) => {
+    if (i.labels.schemaVersion !== 1) return refuse(`${i.file} is not a schema 1 file`);
     return { ...i, labels: i.labels };
   });
   const ids = infos.map((i) => i.labels.lecture.videoId);
@@ -207,13 +219,13 @@ function indexPage(lectures: readonly Summary[]): string {
 }
 
 if (import.meta.main) {
-  const { values } = parseArgs({ options: { data: { type: "string" }, labels: { type: "string", multiple: true }, out: { type: "string" } } });
+  const { values } = parseArgs({ options: { data: { type: "string" }, labels: { type: "string", multiple: true }, proposals: { type: "string", multiple: true }, "allow-fixture-proposals": { type: "boolean" }, out: { type: "string" } } });
   if (!values.data || !values.out || (values.labels ?? []).length === 0) {
-    console.error("usage: bun run scripts/jev-lab-sheet.ts --data <dir> --labels <file> [--labels <file> ...] --out <dir>");
+    console.error("usage: bun run scripts/jev-lab-sheet.ts --data <dir> --labels <file> [--labels <file> ...] --out <dir>\n       bun run scripts/jev-lab-sheet.ts --data <dir> --labels <set draft> [--proposals <file> [--proposals <file>]] [--allow-fixture-proposals] --out <dir>   (a set of clips, schema 2)");
     process.exit(2);
   }
   try {
-    const done = await generateSheet({ dataDir: resolve(values.data), labelFiles: values.labels!.map((f) => resolve(f)), outDir: resolve(values.out) });
+    const done = await generateSheet({ dataDir: resolve(values.data), labelFiles: values.labels!.map((f) => resolve(f)), outDir: resolve(values.out), proposalFiles: (values.proposals ?? []).map((f) => resolve(f)), allowFixtureProposals: values["allow-fixture-proposals"] === true });
     for (const f of done.files) console.log(`${f.path}  ${(f.bytes / 1e6).toFixed(2)} MB (${f.bytes} bytes)`);
     for (const n of done.notes) console.log(`note: ${n}`);
   } catch (e) {
