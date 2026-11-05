@@ -276,6 +276,26 @@ describe("assembleCaptures", () => {
     expect(() => assembleCaptures({ inputs: [{ dataDir: a.dir, captureId: a.captureId }, { dataDir: a.dir, captureId: a.captureId }], outDir: join(tmp(), "out") })).toThrow("twice");
   });
 
+  test("a capture that ended because its tab left the watch page (final pause, left_watch_page) assembles; the pause is dropped and listed", () => {
+    const a = record([{ videoId: V1, watched: [0, 100], text: "x", frameTags: [1] }], { extra: [{ kind: "control", action: "pause", reason: "left_watch_page" }] });
+    const b = record([{ videoId: V2, watched: [0, 80], text: "y", frameTags: [2] }], { wall0: 2_000_000, extra: [{ kind: "control", action: "pause", reason: "left_watch_page" }] });
+    const out = join(tmp(), "out");
+    const done = assembleCaptures({ inputs: [{ dataDir: a.dir, captureId: a.captureId }, { dataDir: b.dir, captureId: b.captureId }], outDir: out });
+    expect(done.provenance.inputs[0]!.droppedControls.join(" ")).toContain("left the watch page");
+    expect(done.provenance.inputs[1]!.droppedControls.join(" ")).toContain("left the watch page");
+    expect(done.provenance.inputs.map((i) => i.watchedSeconds)).toEqual([100, 80]);
+  });
+
+  test("a failure episode still open when a capture ends by leaving the watch page is closed at the join, and the next input keeps its own gaps", () => {
+    const failed: CaptureFactBody = { kind: "channel", channel: "playback", health: "failed", videoId: null, atMediaS: null, detail: "the last seconds before the pause or stop were lost" };
+    const a = record([{ videoId: V1, watched: [0, 100], text: "x", frameTags: [1] }], { extra: [failed, { kind: "control", action: "pause", reason: "left_watch_page" }] });
+    const b = record([{ videoId: V2, watched: [0, 80], text: "y", frameTags: [2] }], { wall0: 2_000_000 });
+    const out = join(tmp(), "out");
+    const done = assembleCaptures({ inputs: [{ dataDir: a.dir, captureId: a.captureId }, { dataDir: b.dir, captureId: b.captureId }], outDir: out });
+    expect(done.provenance.inputs[0]!.addedFacts.join(" ")).toContain("channel playback ok");
+    expect(done.provenance.inputs[1]!.addedFacts).toEqual([]);
+  });
+
   test("a capture left paused is caught by the comparison, not silently assembled", () => {
     // Input A ends paused (no resume): B's spans would fall outside capture in the assembled stream.
     const a = record([{ videoId: V1, watched: [0, 100], text: "x", frameTags: [] }], { extra: [{ kind: "control", action: "pause", reason: "user" }] });
