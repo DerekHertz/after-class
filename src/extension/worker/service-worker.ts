@@ -271,6 +271,24 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
   if (change.url === undefined || isWatchUrl(change.url)) return;
   void applyEvent(tabId, { kind: "left_watch_page" });
 });
+
+/**
+ * TEST BUILD ONLY. `AFTERCLASS_TEST_AUTOSTART=1 bun run build:ext` replaces this constant with true; the normal build
+ * replaces it with false and the bundler drops this block. Capture starts on its own only for a watch page opened with
+ * `ac_autostart=1` in its URL, so a tab the person opens normally is never captured. It exists so an unattended
+ * experiment (a driven playlist) needs no click on the popup, which no automation tool can reach.
+ */
+declare const __AFTERCLASS_TEST_AUTOSTART__: boolean;
+if (__AFTERCLASS_TEST_AUTOSTART__) {
+  chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
+    if (change.status !== "complete" || !isWatchUrl(tab.url) || new URL(tab.url!).searchParams.get("ac_autostart") !== "1") return;
+    void readState(tabId).then(async (state) => {
+      if (state?.state === "capturing" || state?.state === "paused") return;
+      await handlePopup({ type: "start", tabId });
+    }).catch((e: unknown) => console.error("After Class test autostart failed", e));
+  });
+}
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   void applyEvent(tabId, { kind: "tab_closed" });
   ports.delete(tabId);

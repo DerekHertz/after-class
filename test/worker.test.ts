@@ -567,6 +567,20 @@ describe("extension build", () => {
     expect(manifest.host_permissions).not.toContain("http://localhost:4317/*");
   });
 
+  test("the product build has no autostart code and keeps its name; only the test build has it, under a name that says so", async () => {
+    const product = scratchDir("afterclass-build-product-");
+    const test = scratchDir("afterclass-build-autostart-");
+    await buildExtension(product);
+    await buildExtension(test, { testAutostart: true });
+    const productWorker = readFileSync(join(product, "worker.js"), "utf8");
+    const testWorker = readFileSync(join(test, "worker.js"), "utf8");
+    expect(productWorker).not.toContain("ac_autostart");
+    expect(productWorker).not.toContain("__AFTERCLASS_TEST_AUTOSTART__");
+    expect(testWorker).toContain("ac_autostart");
+    expect(JSON.parse(readFileSync(join(product, "manifest.json"), "utf8")).name).toBe("After Class");
+    expect(JSON.parse(readFileSync(join(test, "manifest.json"), "utf8")).name).toBe("After Class (TEST autostart)");
+  });
+
   test("copying to a Windows path replaces a previous build but refuses an unrelated non-empty folder", () => {
     const from = scratchDir("afterclass-from-");
     writeFileSync(join(from, "manifest.json"), "{}");

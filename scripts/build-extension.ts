@@ -53,7 +53,11 @@ export function manifestFiles(manifest: unknown): string[] {
   return [m.background?.service_worker, m.action?.default_popup, m.options_page, ...(m.content_scripts ?? []).flatMap((c) => c.js ?? [])].filter((f): f is string => typeof f === "string");
 }
 
-export async function buildExtension(outDir: string): Promise<void> {
+/** The test-only autostart variant: its own name and folder, so it is never mistaken for the product build. */
+export type BuildOptions = { readonly testAutostart?: boolean };
+
+export async function buildExtension(outDir: string, options: BuildOptions = {}): Promise<void> {
+  const testAutostart = options.testAutostart === true;
   const out = resolve(ROOT, outDir);
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
@@ -68,12 +72,18 @@ export async function buildExtension(outDir: string): Promise<void> {
       minify: false,
       sourcemap: "linked",
       plugins: [keepExtensionOnly],
+      define: { __AFTERCLASS_TEST_AUTOSTART__: String(testAutostart) },
       throw: false,
     });
     if (!result.success) throw new Error(`build of ${entry} failed:\n${result.logs.map(String).join("\n")}`);
   }
 
   for (const { from, to } of STATIC_FILES) cpSync(join(SRC, from), join(out, to));
+  if (testAutostart) {
+    const manifest = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8")) as { name: string };
+    manifest.name = "After Class (TEST autostart)";
+    writeFileSync(join(out, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+  }
 
   const missing = manifestFiles(JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"))).filter((f) => !existsSync(join(out, f)));
   if (missing.length > 0) throw new Error(`manifest references files that were not built: ${missing.join(", ")}`);
@@ -96,4 +106,7 @@ export function copyBuild(from: string, dest: string): void {
   console.log(`copied the build to ${dest}`);
 }
 
-if (import.meta.main) await buildExtension("dist/extension");
+if (import.meta.main) {
+  const testAutostart = process.env.AFTERCLASS_TEST_AUTOSTART === "1";
+  await buildExtension(testAutostart ? "dist/extension-test-autostart" : "dist/extension", { testAutostart });
+}
