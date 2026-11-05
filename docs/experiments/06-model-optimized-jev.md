@@ -6,7 +6,7 @@ This experiment is outside the five approved in `docs/flows/after-class.md`. Der
 
 ## Decisions for Derek
 
-1. **Models and arms. ADOPTED 2026-11-04.** Opus 5.5 and Fable 5.1 both label (independently) and both optimize (two arms), next to an unmodified Jev baseline.
+1. **Models and arms. ADOPTED 2026-11-04.** Opus 5.5 and Fable 5.1 both label (independently) and both optimize (two arms), next to a baseline (Jev as experiment 2 leaves it, question wording unchanged).
 2. **The data.** The assembled set of 11 clips (the two real captures replayed into one capture, see `assembled-captures.md`), as one lecture under Amendment 1 of `02-jev-lab.md`. PROPOSED. The Georgia Tech Lamport clip is available as a twelfth. Only Derek's verified labels count, never a model's.
 3. **Rounds.** At most 3 optimizer rounds per arm. PROPOSED.
 4. **What an optimizer may change.** The wording of the three bool questions (`newConcept`, `stoppingPoint`, `teachingChange`), the Jev verdict thresholds, and `SEGMENTATION_DEFAULTS`. Question types stay bool. Not the model, the routing table, the labels, the split, the scoring, or the frame sampler. PROPOSED.
@@ -16,7 +16,7 @@ This experiment is outside the five approved in `docs/flows/after-class.md`. Der
 
 ## What it does and does not show
 
-It shows whether a model-rewritten Jev agrees better with Derek's verified labels on held-out clips than the unmodified Jev does, for this one set of clips. It does not show that Jev or the pairing improves learning, that the labels are objectively right (they are Derek's judgment after checking model proposals), or anything about other courses, other lecturers or other machines. A model that fits the tuning-half labels and fails the held-out half is a possible and reportable outcome.
+It shows whether a model-rewritten Jev agrees better with Derek's verified labels on held-out clips than Jev as experiment 2 leaves it does, for this one set of clips. It does not show that Jev or the pairing improves learning, that the labels are objectively right (they are Derek's judgment after checking model proposals), or anything about other courses, other lecturers or other machines. A model that fits the tuning-half labels and fails the held-out half is a possible and reportable outcome.
 
 ## Stages
 
