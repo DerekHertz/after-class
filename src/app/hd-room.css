@@ -43,3 +43,23 @@
 .scene-shell[data-detail="hd-pixel"] .room-raster[data-room="study-bench"] { background-image: url('./assets/hd-pixel/study-bench.webp'); }
 .scene-shell[data-detail="hd-pixel"] .room-raster[data-room="projection-booth"] { background-image: url('./assets/hd-pixel/projection-booth.webp'); }
 .scene-shell[data-detail="hd-pixel"] .room-raster { aspect-ratio: 1672 / 941; background-size: cover; background-position: center; }
+
+.scene-shell[data-detail="hd-pixel"] .review[data-view="room"] { padding: 0; position: relative; }
+.scene-shell[data-detail="hd-pixel"] .review[data-view="room"] .review-workspace { display: block; padding: 0; }
+.scene-shell[data-detail="hd-pixel"] .review[data-view="room"] .review-source-column { margin: 0; width: 100%; }
+.scene-shell[data-detail="hd-pixel"] .review[data-view="room"] .review-header { position: absolute; top: 8px; left: 22px; right: 22px; z-index: 2; margin: 0; padding: 8px 12px; color: #fff7e1; background: #29231dba; border-radius: 4px; }
+.scene-shell[data-detail="hd-pixel"] .review[data-view="room"] .review-header h1 { font-size: 22px; color: inherit; }
+.scene-shell[data-detail="hd-pixel"] .review[data-view="room"] .review-scope-line { color: #f2e5c9; margin-bottom: 0; }
+.scene-shell[data-detail="hd-pixel"] .review[data-view="room"] .review-navigation { position: static; color: inherit; }
+.scene-shell[data-detail="hd-pixel"] .review[data-view="room"] .review-navigation :is(a,button) { color: inherit; }
+@media (max-width:800px) {
+  .scene-shell[data-detail="hd-pixel"] .review[data-view="room"] .review-header { position: static; margin: 0; border-radius: 0; }
+}
+.review .conversation-notebook[hidden] { display: none !important; }
+.scene-shell[data-detail="hd-pixel"] .review[data-view="room"] .review-header { width: auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.scene-shell[data-detail="hd-pixel"] .review[data-view="room"] .review-navigation { width: auto; flex-wrap: wrap; gap: 16px; }
+@media (max-width:800px) {
+  .scene-shell[data-detail="hd-pixel"] .review[data-view="room"] .review-header { flex-wrap: wrap; }
+}
+.scene-shell[data-detail="hd-pixel"] .review .notebook-heading { flex-wrap: wrap; }
+.scene-shell[data-detail="hd-pixel"] .review[data-view="room"] .review-phase { color: #f2e5c9; }

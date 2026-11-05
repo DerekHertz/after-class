@@ -48,7 +48,7 @@ Use the new HD companion poses in all three rooms. The earlier standalone protot
 
 ## Implemented frontend pass, 2026-11-04
 
-The React frontend now offers a persisted HD pixel detail setting, defaulting to HD Last Desk for newly parsed or older preferences. Last Desk uses the registered plate, a four-pose exterior canopy sheet clipped to traced pane openings, and a delayed chalkboard shadow. Desktop tool buttons share the artwork coordinates. On mobile, a separate row provides 44-pixel controls. Source text and the learner’s response remain in readable HTML alongside the scene.
+The React frontend now offers a persisted HD pixel detail setting, defaulting to HD Last Desk for newly parsed or older preferences. Last Desk uses the registered plate, a four-pose exterior canopy sheet clipped to traced pane openings, and a delayed chalkboard shadow. Opening an HD review lands in the full room scene. Clicking the source card box or lecture stand opens the study workspace. Back to room restores the scene with the same draft and review state. Desktop tool buttons share the artwork coordinates. On mobile, a separate row provides 44-pixel controls. Source text and the learner’s response remain in readable HTML alongside the scene.
 
 All six companions have new lossless idle, draw and read images, each exported on a 255 × 228 canvas with a shared ground anchor. Opening a source card, source stand or source control triggers the draw pose. Opening the desk notebook shows the read pose and navigates to the existing notebook after a short pause. These interactions use the real source and notebook routes. The card currently opens lecture evidence. Companion and room choices remain independent, and the app’s current activity continues alongside the gesture.
 

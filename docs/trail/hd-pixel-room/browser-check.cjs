@@ -31,6 +31,16 @@ const companions = ['Pip', 'Mote', 'Lumi', 'Inkcloud Yun', 'Moonlit Library Mote
       await page.getByRole('button', { name: new RegExp('^' + name) }).click();
       await picker(false);
     }
+    async function enterStudy(useStand = false) {
+      assert.equal(await page.locator('main.review').getAttribute('data-view'), 'room');
+      assert(await page.locator('.conversation-notebook').isHidden());
+      const mobile = page.viewportSize().width <= 800;
+      const control = mobile ? page.locator('.hd-mobile-tools button').first() : page.locator(useStand ? '.hd-stand' : '.hd-card');
+      await control.focus(); await page.keyboard.press('Enter');
+      await page.locator('main.review[data-view="study"]').waitFor();
+      assert(await page.locator('.conversation-notebook').isVisible());
+      await page.locator('#review-source').waitFor({ state: 'visible' });
+    }
     async function verifySourceToggle(mobile) {
       const control = mobile ? page.locator('.hd-mobile-tools button').first() : page.locator('.hd-card');
       if (await page.locator('#review-source').isVisible()) {
@@ -69,7 +79,19 @@ const companions = ['Pip', 'Mote', 'Lumi', 'Inkcloud Yun', 'Moonlit Library Mote
       await page.setViewportSize({ width: 1440, height: 1000 });
       await chooseScene(name);
       assert.equal(await page.locator('.hd-room').getAttribute('data-scene'), id);
+      assert.equal(await page.locator('main.review').getAttribute('data-view'), 'room');
+      assert((await page.locator('.hd-room').boundingBox()).width > 1400);
+      await page.mouse.move(1430, 10);
+      await page.screenshot({ path: join(__dirname, id === 'last-desk' ? 'desktop.png' : id + '.png'), fullPage: true });
+      await page.locator('.hd-journal').focus(); await page.keyboard.press('Enter');
+      await page.waitForURL('**/record');
+      await page.goto(base); await page.waitForLoadState('networkidle');
+      await enterStudy();
       await page.locator('textarea').fill('Draft survives ' + id);
+      await page.getByRole('button', { name: 'Back to room', exact: true }).click();
+      assert(await page.locator('.conversation-notebook').isHidden());
+      await enterStudy(true);
+      assert.equal(await page.locator('textarea').inputValue(), 'Draft survives ' + id);
       const stageBefore = await page.locator('.hd-room-stage').boundingBox();
       await page.mouse.move(1400, 950);
       assert.deepEqual(await page.locator('.hd-room-stage').boundingBox(), stageBefore);
@@ -109,7 +131,7 @@ const companions = ['Pip', 'Mote', 'Lumi', 'Inkcloud Yun', 'Moonlit Library Mote
       }
       await page.mouse.move(1430, 10);
       await page.locator('textarea').focus();
-      await page.screenshot({ path: join(__dirname, id === 'last-desk' ? 'desktop.png' : id + '.png'), fullPage: true });
+      await page.screenshot({ path: join(__dirname, id + '-study.png'), fullPage: true });
       await page.locator('.hd-journal').focus(); await page.keyboard.press('Enter');
       assert.equal(await page.locator('.hd-room-friend .study-companion').getAttribute('data-reaction'), 'read');
       await page.waitForURL('**/record'); assert(await page.locator('.record-page').isVisible());
@@ -124,13 +146,21 @@ const companions = ['Pip', 'Mote', 'Lumi', 'Inkcloud Yun', 'Moonlit Library Mote
       await page.setViewportSize({ width: 390, height: 844 });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
       assert((await page.locator('.hd-mobile-tools button').first().boundingBox()).height >= 44);
+      assert.equal(await page.locator('main.review').getAttribute('data-view'), 'room');
+      await page.mouse.move(389, 1);
+      await page.screenshot({ path: join(__dirname, id === 'last-desk' ? 'mobile.png' : id + '-mobile.png'), fullPage: true });
+      await enterStudy();
+      await page.locator('textarea').fill('Mobile room draft');
+      await page.getByRole('button', { name: 'Back to room', exact: true }).click();
+      await enterStudy(); assert.equal(await page.locator('textarea').inputValue(), 'Mobile room draft');
       await verifySourceToggle(true);
       await page.locator('textarea').focus();
       await page.mouse.move(389, 1);
-      await page.screenshot({ path: join(__dirname, id === 'last-desk' ? 'mobile.png' : id + '-mobile.png'), fullPage: true });
+      await page.screenshot({ path: join(__dirname, id + '-study-mobile.png'), fullPage: true });
       await page.locator('.hd-mobile-tools').getByRole('button', { name: 'My notebook', exact: true }).click();
       await page.waitForURL('**/record');
       await page.goto(base); await page.waitForLoadState('networkidle');
+      await enterStudy();
       // CSS embeds images as data URLs. Exercise functional fallback by removing all HD artwork.
       await page.addStyleTag({ content: '.hd-room-art *, .hd-companion-pose { background-image:none !important; }' });
       await page.locator('textarea').fill('Works with artwork unavailable');
@@ -138,8 +168,9 @@ const companions = ['Pip', 'Mote', 'Lumi', 'Inkcloud Yun', 'Moonlit Library Mote
       assert.equal(await page.locator('textarea').inputValue(), 'Works with artwork unavailable');
       await page.locator('.hd-mobile-tools').getByRole('button', { name: 'My notebook', exact: true }).click();
       await page.waitForURL('**/record'); await page.goto(base); await page.waitForLoadState('networkidle');
-      results.push({ scene: id, status: 'PASS', checks: ['Fixed camera', 'Detail change preserves draft', 'Six HD idle/draw/read frame sets decode at matching dimensions', 'Keyboard source reaction and settle', 'Desktop and mobile notebook navigation', 'System/app reduced motion including all visible animated descendants', 'Synthetic visibility pauses/resumes all animation', 'Hidden companion', '390px no horizontal overflow and 44px mobile controls', 'Source, draft and notebook usable with HD artwork removed'] });
+      results.push({ scene: id, status: 'PASS', checks: ['Full room landing with direct notebook route', 'Card and stand open workspace', 'Back to room and reentry preserve draft on desktop and mobile', 'Fixed camera', 'Detail change preserves draft', 'Six HD idle/draw/read frame sets decode at matching dimensions', 'Keyboard source reaction and settle', 'Desktop and mobile notebook navigation', 'System/app reduced motion including all visible animated descendants', 'Synthetic visibility pauses/resumes all animation', 'Hidden companion', '390px no horizontal overflow and 44px mobile controls', 'Source, draft and notebook usable with HD artwork removed'] });
     }
+    await enterStudy();
     await page.locator('textarea').fill('Cross-room draft');
     for (const [, name] of scenes) {
       await chooseScene(name); assert.equal(await page.locator('textarea').inputValue(), 'Cross-room draft');

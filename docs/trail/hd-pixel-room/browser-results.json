@@ -11,6 +11,9 @@
       "scene": "last-desk",
       "status": "PASS",
       "checks": [
+        "Full room landing with direct notebook route",
+        "Card and stand open workspace",
+        "Back to room and reentry preserve draft on desktop and mobile",
         "Fixed camera",
         "Detail change preserves draft",
         "Six HD idle/draw/read frame sets decode at matching dimensions",
@@ -27,6 +30,9 @@
       "scene": "study-bench",
       "status": "PASS",
       "checks": [
+        "Full room landing with direct notebook route",
+        "Card and stand open workspace",
+        "Back to room and reentry preserve draft on desktop and mobile",
         "Fixed camera",
         "Detail change preserves draft",
         "Six HD idle/draw/read frame sets decode at matching dimensions",
@@ -43,6 +49,9 @@
       "scene": "projection-booth",
       "status": "PASS",
       "checks": [
+        "Full room landing with direct notebook route",
+        "Card and stand open workspace",
+        "Back to room and reentry preserve draft on desktop and mobile",
         "Fixed camera",
         "Detail change preserves draft",
         "Six HD idle/draw/read frame sets decode at matching dimensions",
