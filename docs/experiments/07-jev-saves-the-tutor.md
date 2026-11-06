@@ -48,9 +48,18 @@ Frame dedupe and the claim check stay as they are.
 - Claude: Fable refining wording, 3 rounds, about 6 calls; tutor interpretation, about 30 calls per arm, ceiling 80 in all, counted in experiment 7's own ledger (experiment 6's ledger, capped at 250, has 67 left and is not used).
 - Jev: tasks 1 and 2 at about one call per kept frame and per earlier claim per chunk, boundary questions per window, tuning rounds included; ceiling 4,000.
 
-## Build prerequisites (none built yet)
+## Build prerequisites (item 1 built)
 
-- Jev tasks 1 and 2 and the intro/conclusion question as product-style tasks with versioned wording, and the task-3 routing as an experiment-only option.
+- BUILT (item 1): Jev tasks 1 and 2 and the intro/conclusion question as versioned tasks, and the task-3 routing as an experiment-only option. What exists, none of it wired into the product (`main.ts` is unchanged; the product's `QUESTIONS`, tasks, memo keys and routing table behave as before):
+  - `frameRelevanceTask` (task 1): one kept frame image plus the captions within 15 s of it (`passagesNear`); yes or uncertain or failed keeps the frame, only a no drops it (`framesKept`).
+  - `claimRelevanceTask` (task 2): one existing claim's text plus the new material's passages, no images; only a no drops the claim (`claimsKept`).
+  - `lessonFramingTask` (task 3): `boundaryTask` with the intro/conclusion question as a third question in the same request, so it costs no extra round trip and the window's frames are sent once. The verdict is `lessonFraming` on the judgment.
+  - Each takes an optional wording override; the default wording is version "1", any other wording is `arm-<hash>`, and the version is in the memo key.
+  - Routing: `planChunks(..., routing)` with `{ lessonFramingCloses: true }` closes on new concept yes and stopping point yes, or new concept yes and lesson framing yes. Off by default; clip joins add nothing by themselves.
+  - Draft default wordings (neutral first drafts by the builder; Fable refines them on clips 1 to 22; Derek has not approved them as product wording):
+    - Frame relevance: "Do the captions in state.captions refer to what state.frame shows, so that someone reading only the captions would need to see the frame? Answer no if the captions never mention or point to anything visible in the frame, or if the frame only repeats what the captions already say in full."
+    - Claim relevance: "Does state.claim relate to the material in state.passages, so that a tutor preparing that material would need the claim to avoid restating it or to supersede it? Answer no if the claim is about a different topic than state.passages."
+    - Lesson framing: "Is state.passage the introduction of a lesson (for example a greeting, an announcement of what the lesson covers, or a statement of its goals), or does state.context end with the conclusion or summary of a lesson (for example a recap, a closing remark, or a statement that the lesson is over)? Answer no if both are ordinary lesson content."
 - Fable wording refinement for these questions on clips 1 to 22 (extending the experiment 6 optimizer and its held-out guard).
 - An interpretation runner that prepares the same chunks in both arms with the product's `interpretTask`, records tokens (images and text separately), frames and claims sent, calls and time, with Claude-call rails (ceiling 80) and Jev rails (ceiling 4,000).
 - A blind side-by-side rating sheet for Derek, topic by topic, listing every claim whose frame task 1 removed.
