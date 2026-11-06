@@ -16,7 +16,7 @@ export function route(newConcept: Verdict, stoppingPoint: Verdict): Route {
   return "continue"; // no/no, and every uncertain combination (flow B: "Jev error/uncertain → treat as \"continue\"")
 }
 
-/** Experiment 7 routing options, off unless a caller passes them (the product never does). */
+/** Experiment 7 routing options, off unless a caller passes them (the product passes PRODUCT_JEV_SETUP.routing, from 2026-11-06). */
 export type RoutingOptions = {
   /**
    * Design item 6 of docs/experiments/07-jev-saves-the-tutor.md: a window also closes when new concept is yes and the

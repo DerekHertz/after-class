@@ -19,14 +19,15 @@ import type { WatchOrder } from "../evidence";
 import type { BoundaryInput } from "../providers/jev-tasks";
 import { appliesBefore } from "../providers/memo";
 import type { Lookup } from "../providers/memo";
-import { buildWindows, planChunks, reconcile, route } from "./core";
+import { buildWindows, planChunks, reconcile, route, routeWithFraming } from "./core";
+import type { RoutingOptions } from "./core";
 export { routeWithFraming } from "./core";
 export type { RoutingOptions } from "./core";
 
 /** Re-exported so the experiment 2 lab measures the windowing and chunk planning the product runs, without importing core.ts. */
 export { buildWindows, planChunks } from "./core";
 
-/** Starting values (flow B: tune on held-out clips). */
+/** Starting values (flow B: tune on held-out clips). The product runs PRODUCT_JEV_SETUP.segmentation (../jev-setup.ts); these defaults are the lab baseline. */
 export type SegmentationConfig = {
   readonly windowNewS: number; // 30
   readonly contextS: number; // 120
@@ -91,7 +92,7 @@ export function createSegmentation(db: Db, deps: {
   lookupBoundary(input: BoundaryInput): Lookup<BoundaryJudgment>;
   boundaryInput(w: BoundaryWindow): BoundaryInput;
   nextSeq(): Seq;
-}, cfg: SegmentationConfig): Segmentation {
+}, cfg: SegmentationConfig, routing?: RoutingOptions): Segmentation {
   const insert = db.sql.query(
     `INSERT INTO chunk_revisions (id, chunk_id, capture_id, ordinal, revision_no, material_json, windows_json, provenance, closed_at_seq, supersedes)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -116,7 +117,7 @@ export function createSegmentation(db: Db, deps: {
     const judged = new Map<WindowId, BoundaryJudgment | "pending" | "failed">(
       looked.map(({ window, lookup }) => [window.id, !appliesBefore(lookup, null) ? "pending" : lookup.kind === "hit" ? lookup.value : "failed"]),
     );
-    const plan = planChunks(windows, (w) => judged.get(w.id)!, order.status.state === "stopped", cfg);
+    const plan = planChunks(windows, (w) => judged.get(w.id)!, order.status.state === "stopped", cfg, routing);
     return { looked, judged, plan };
   }
 
@@ -147,7 +148,7 @@ export function createSegmentation(db: Db, deps: {
       const { looked, judged, plan } = derive(captureId);
       return looked.map(({ window }): WindowTrace => {
         const judgment = judged.get(window.id)!;
-        const decided = judgment === "pending" ? null : judgment === "failed" ? route("uncertain", "uncertain") : route(judgment.newConcept, judgment.stoppingPoint);
+        const decided = judgment === "pending" ? null : judgment === "failed" ? route("uncertain", "uncertain") : routeWithFraming(judgment.newConcept, judgment.stoppingPoint, judgment.lessonFraming, routing);
         const why =
           plan.notes.get(window.id) ??
           (judgment === "pending" ? "awaiting Jev judgment" : `judged, not folded yet: waiting on window ${plan.blockedOn}`);

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "kind": "jev-arm-config-exp7",
+  "questions": {
+    "newConcept": "Does state.passage itself switch to a different main subject from the one state.context was teaching: a different system, paper, module or theme, usually opened after state.context wrapped up the previous subject with a conclusion, or announced as what this lesson or module will cover? Answer no if the passage is the next section, mechanism, layer, component, implementation detail, example, history, quiz or recap of the subject in state.context, or if state.context already began or announced this subject (such as 'now let's look at X' or 'as I mentioned'): then any switch happened earlier.",
+    "stoppingPoint": "Could a review chunk end at the end of state.context without cutting a thought in half? Answer yes if state.context finished its point (a conclusion, summary, recap, transition, preview of what comes next, or a completed explanation), or if state.passage starts something new rather than completing what state.context left open. A final caption that is cut off or truncated does not count as unfinished. Answer no only if state.passage directly continues a step, derivation, list, example or argument that state.context was still in the middle of.",
+    "teachingChange": "Does state.after show teaching content that state.before did not: a new slide, newly written or revealed text, a new equation, figure, diagram element, annotation or code edit (use state.captions as a hint)? Answer no if the slide content is the same and only the cursor, pointer, highlight, camera, presenter or video controls changed, or if the content merely repeats what was already shown.",
+    "frameRelevance": "Do the captions in state.captions refer to specific content visible in state.frame (they name, read, point at or explain a term, figure, equation, code or diagram shown there), so that a tutor reading only the captions would miss something without the frame? Answer no if the captions are general talk that does not mention anything shown, if the frame is only a title, heading, presenter or blank slide, or if the frame adds nothing the captions do not already state in full.",
+    "claimRelevance": "Does state.claim concern the same subject as the material in state.passages, so that a tutor preparing that material would need the claim to build on it, avoid restating it, or correct or supersede it? Answer yes if the passages mention, extend, contrast with or depend on what the claim says. Answer no only if the claim is about a different topic that the passages do not touch.",
+    "lessonFraming": "Is state.passage the opening of a lesson or module (a greeting, an announcement of what this lesson or module will cover, or a statement of its goals), or does state.context end with the closing of a lesson (a conclusion, a summary of what was learned, a closing remark, or a pointer to what the next lesson will study)? Answer no if both are ordinary content, including a transition to the next section, step or mechanism inside the same lesson."
+  },
+  "thresholds": {
+    "yesAtOrAbove": 0.5,
+    "noAtOrBelow": 0.3
+  },
+  "segmentation": {
+    "windowNewS": 45,
+    "contextS": 120,
+    "timeCapS": 480,
+    "maxFramesPerWindow": 2,
+    "reviseOnNextNoNo": false
+  }
+}
