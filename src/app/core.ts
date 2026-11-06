@@ -75,6 +75,56 @@ export function partialText(reason: PartialReason, titles: SourceTitles = new Ma
   }
 }
 
+/**
+ * Capture gaps grouped per video and reason, so a long capture shows one line per
+ * kind of gap instead of one per stretch. A group of one keeps its exact interval.
+ */
+export function groupGaps(gaps: readonly Gap[], titles: SourceTitles = new Map()): readonly { readonly where: string; readonly reason: string; readonly count: number }[] {
+  const groups = new Map<string, Gap[]>();
+  for (const g of gaps) {
+    const key = `${g.reason}\u0000${g.sourceId}`;
+    groups.set(key, [...(groups.get(key) ?? []), g]);
+  }
+  return [...groups.values()].map((group) => {
+    const first = group[0]!;
+    const title = titleOf(titles, first.sourceId);
+    const total = group.reduce((sum, g) => sum + (g.interval.end - g.interval.start), 0);
+    return {
+      where: group.length === 1 ? `${title}, ${formatInterval(first.interval)}` : `${title}, ${group.length} places, ${formatClock(total)} in all`,
+      reason: GAP_LABEL[first.reason],
+      count: group.length,
+    };
+  });
+}
+
+/** Why a review is partial, one line per reason; capture gaps are grouped as in groupGaps, in the place their first gap held. */
+export function partialLines(reasons: readonly PartialReason[], titles: SourceTitles = new Map()): readonly string[] {
+  const gaps = reasons.flatMap((r) => (r.kind === "capture_gap" ? [r.gap] : []));
+  const grouped = groupGaps(gaps, titles);
+  const firstGap = reasons.findIndex((r) => r.kind === "capture_gap");
+  const lines = reasons.filter((r) => r.kind !== "capture_gap").map((r) => partialText(r, titles));
+  const gapLines = grouped.map((g) => `${g.reason} in ${g.where}.`);
+  if (firstGap < 0) return lines;
+  const before = reasons.slice(0, firstGap).filter((r) => r.kind !== "capture_gap").length;
+  return [...lines.slice(0, before), ...gapLines, ...lines.slice(before)];
+}
+
+/**
+ * A short heading for one or more lecture videos. Playlist titles usually share a
+ * course suffix ("Intro - Georgia Tech - Advanced Operating Systems"); when they all
+ * do, the heading is that shared part and the detail counts the videos. Otherwise the
+ * first title and how many more.
+ */
+export function lectureHeading(titles: readonly string[]): { readonly title: string; readonly detail: string | null } {
+  if (titles.length === 0) return { title: "Review", detail: null };
+  if (titles.length === 1) return { title: titles[0]!, detail: null };
+  const parts = titles.map((t) => t.split(" - "));
+  let shared = 0;
+  while (parts.every((p) => p.length > shared + 1 && p[p.length - 1 - shared] === parts[0]![parts[0]!.length - 1 - shared])) shared++;
+  const count = `${titles.length} videos`;
+  return shared > 0 ? { title: parts[0]!.slice(-shared).join(" - "), detail: count } : { title: `${titles[0]} and ${titles.length - 1} more`, detail: count };
+}
+
 export type StartOffer = { readonly choice: StartChoice; readonly label: string; readonly note: string };
 
 export type OptionsScreen =
@@ -124,7 +174,7 @@ export function optionsScreen(options: ReviewOptions, titles: SourceTitles = new
       return {
         kind: "ready",
         supportedClaims: options.scope.supportedClaims,
-        partial: options.scope.partial.map((p) => partialText(p, titles)),
+        partial: partialLines(options.scope.partial, titles),
         offers: [{ choice: "prepared_only", label: "Review now", note: "Anything still preparing keeps preparing for later." }],
       };
     case "processing": {
@@ -133,7 +183,7 @@ export function optionsScreen(options: ReviewOptions, titles: SourceTitles = new
         kind: "processing",
         estimate: estimateText(options.estimateS),
         pendingChunks: options.pendingChunks,
-        ready: ready && { supportedClaims: ready.supportedClaims, partial: ready.partial.map((p) => partialText(p, titles)) },
+        ready: ready && { supportedClaims: ready.supportedClaims, partial: partialLines(ready.partial, titles) },
         offers: ready
           ? [
               { choice: "prepared_only", label: "Review what is ready", note: "The rest keeps preparing for a later review." },
@@ -145,7 +195,7 @@ export function optionsScreen(options: ReviewOptions, titles: SourceTitles = new
     case "nothing_to_review":
       return {
         kind: "nothing",
-        gaps: options.gaps.map((g) => ({ where: `${titleOf(titles, g.sourceId)}, ${formatInterval(g.interval)}`, reason: GAP_LABEL[g.reason] })),
+        gaps: groupGaps(options.gaps, titles).map(({ where, reason }) => ({ where, reason })),
         unverified: options.unverified.map((c) => ({ text: claimText(c), status: CLAIM_STATUS_LABEL[c.status], evidence: claimEvidence(c) })),
         rewatch: options.rewatch.map((r) => {
           const videoId = videos.get(r.sourceId);

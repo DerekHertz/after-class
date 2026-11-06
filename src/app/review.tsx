@@ -11,7 +11,7 @@ import { createReviewController } from "./controller";
 import type { SessionState } from "./controller";
 import {
   ACTION_LABEL, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
-  softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, toAct, unansweredLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer,
+  softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer,
 } from "./core";
 import type { ActionId, Line, SourceSelection } from "./core";
 import type { Speaker, SpeechInput } from "./speech";
@@ -107,6 +107,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const evidenceIds = selectedEvidenceIds(selection, automaticIds);
   const videos = sourceVideos(capture.data?.capture ?? null);
   const unanswered = unansweredLearnerTurn(view.turns);
+  const heading = lectureHeading([...titles.values()]);
+  const scopeSeconds = Material.sources(view.scope.material).reduce((sum, id) => sum + Material.get(view.scope.material, id).intervals().reduce((s, i) => s + (i.end - i.start), 0), 0);
   const canRetry = !streaming && (state.unsent.length > 0 || unanswered !== null || state.live?.status === "failed");
 
   return (
@@ -114,8 +116,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
       {notebookOpen && <dialog className="room-notebook-dialog" ref={node => { if (node && !node.open) node.showModal(); }} onClose={() => setNotebookOpen(false)}><button onClick={() => setNotebookOpen(false)}>Back to room</button><RecordScreen indexed api={api} reviewId={null} /></dialog>}
       <header className="review-header">
         <div>
-          <h1>{[...titles.values()].join("; ") || "Review"}</h1>
-          <p className="review-scope-line">Reviewing {Material.sources(view.scope.material).flatMap(id => Material.get(view.scope.material, id).intervals().map(formatInterval)).join(" · ")}</p>
+          <h1>{heading.title}</h1>
+          <p className="review-scope-line">Reviewing {heading.detail ?? "this lecture"} · {formatClock(scopeSeconds)} of lecture</p>
         </div>
         <div className="review-navigation">
           <span className="review-phase">{view.state.phase}</span>
@@ -301,7 +303,6 @@ function ScopeBundle({ api, view, titles, onSource }: { readonly api: AppApi; re
     <p>Browse captured material in the frozen scope. These items are not citations supporting the current question.</p>
     <div className="scope-source-list">
       {bundle.data.passages.map((p) => <button key={p.id} type="button" onClick={(e) => onSource([p.id], "Selected from this review’s scope", e.currentTarget)}>{titles.get(p.sourceId) ?? "Lecture"} · captions · {formatInterval(p.interval)}</button>)}
-      {bundle.data.frames.map((f) => <button key={f.id} type="button" onClick={(e) => onSource([f.id], "Selected captured frame from this review’s scope", e.currentTarget)}>{titles.get(f.sourceId) ?? "Lecture"} · frame · {formatClock(f.mediaS)}</button>)}
     </div>
     <BundleInspector report={inspectBundle(bundle.data, titles)} />
   </>;
