@@ -12,7 +12,8 @@ import type { CaptureFact, CaptureFactBody, Evidence, Verdict } from "../src/sha
 import { Material, interval, media } from "../src/shared/time";
 import type { Lookup } from "../src/backend/providers/memo";
 import type { FrameChangeInput } from "../src/backend/providers/jev-tasks";
-import { clipToWatched, sourceIdOf, spanPlausible } from "../src/backend/evidence/core";
+import { FRAME_STALL_S, clipToWatched, sourceIdOf, spanPlausible } from "../src/backend/evidence/core";
+import { FRAME_DEFAULTS } from "../src/extension/content/frames";
 import { createEvidence } from "../src/backend/evidence";
 import { asSeq } from "../src/backend/db";
 import { testDb } from "./fakes";
@@ -269,23 +270,51 @@ describe("gaps", () => {
     s.control("start");
     s.source();
     s.push({ kind: "transcript_unavailable", videoId: VIDEO, reason: "no_captions" });
-    s.span(0, 20);
+    s.span(0, 100);
     s.frame("f1", 1);
-    s.frame("f2", 10); // 9 s since f1 ⇒ stall; 10 s to the span end ⇒ stall
-    s.span(20, 30, { visible: false });
-    s.push({ kind: "channel", channel: "frames", health: "failed", videoId: VIDEO, atMediaS: media(35), detail: "capture threw" });
-    s.span(35, 45);
+    s.frame("f2", 50); // 49 s since f1 ⇒ stall; 50 s to the span end ⇒ stall
+    s.span(100, 110, { visible: false });
+    s.push({ kind: "channel", channel: "frames", health: "failed", videoId: VIDEO, atMediaS: media(115), detail: "capture threw" });
+    s.span(115, 125);
     h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
 
     const gaps = h.evidence.captureBundle(s.captureId).gaps;
     const has = (reason: string, start: number, end: number, channel?: string) =>
       gaps.some((g) => g.reason === reason && g.start === start && g.end === end && (channel === undefined || g.channel === channel));
-    expect(has("no_transcript", 0, 30, "transcript")).toBe(true);
-    expect(has("no_transcript", 35, 45)).toBe(true);
-    expect(has("hidden_tab", 20, 30, "frames")).toBe(true);
-    expect(has("frame_stall", 1, 10, "frames")).toBe(true);
-    expect(has("frame_stall", 10, 20, "frames")).toBe(true);
-    expect(has("channel_failed", 35, 45, "frames")).toBe(true);
+    expect(has("no_transcript", 0, 110, "transcript")).toBe(true);
+    expect(has("no_transcript", 115, 125)).toBe(true);
+    expect(has("hidden_tab", 100, 110, "frames")).toBe(true);
+    expect(has("frame_stall", 1, 50, "frames")).toBe(true);
+    expect(has("frame_stall", 50, 100, "frames")).toBe(true);
+    expect(has("channel_failed", 115, 125, "frames")).toBe(true);
+  });
+
+  test("a slide held between saved frames is quiet, not a frame stall", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.span(0, 130);
+    // The extension's cadence for an unchanging slide: a keyframe every ~31 s, then one change that took the full settle wait.
+    for (const [id, t] of [["k0", 0], ["k1", 31], ["k2", 62], ["k3", 93], ["c1", 129]] as const) s.frame(id, t);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(h.evidence.captureBundle(s.captureId).gaps.filter((g) => g.reason === "frame_stall")).toEqual([]);
+  });
+
+  test("the stall bar is a keyframe period plus the settle wait and two samples, and a longer silence is a stall", () => {
+    const f = FRAME_DEFAULTS;
+    expect(FRAME_STALL_S).toBe(f.keyframeEveryMediaS + f.maxSettleWaitMediaS + 2 * f.sampleEveryMediaS);
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.span(0, 100);
+    s.frame("a", 0);
+    s.frame("b", 36); // exactly the bar: not a stall
+    s.frame("c", 73); // 37 s: a stall
+    s.frame("d", 100);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(h.evidence.captureBundle(s.captureId).gaps.filter((g) => g.reason === "frame_stall").map((g) => [g.start, g.end])).toEqual([[36, 73]]);
   });
 
   test("declining transcription is a transcript_declined gap; accepting ASR is not a gap while it runs", () => {
@@ -944,10 +973,10 @@ describe("a frame fact whose bytes were not a JPEG", () => {
     const s = stream();
     s.control("start");
     s.source();
-    s.span(0, 20);
-    s.frame("bad", 10, { jpeg: Buffer.from("zzzzzzzzzzzz").toString("base64") });
+    s.span(0, 80);
+    s.frame("bad", 40, { jpeg: Buffer.from("zzzzzzzzzzzz").toString("base64") });
     h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
-    expect(stalls(h, s)).toEqual([[0, 20]]);
+    expect(stalls(h, s)).toEqual([[0, 80]]);
   });
 
   test("a real frame the user later deleted still counts as a sample", () => {
@@ -955,11 +984,11 @@ describe("a frame fact whose bytes were not a JPEG", () => {
     const s = stream();
     s.control("start");
     s.source();
-    s.span(0, 20);
-    s.frame("good", 10);
+    s.span(0, 80);
+    s.frame("good", 40);
     h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
     const before = stalls(h, s);
-    expect(before).toEqual([[0, 10], [10, 20]]);
+    expect(before).toEqual([[0, 40], [40, 80]]);
     h.evidence.deleteByUser([stableId("ev", s.captureId, "good")], "r1");
     expect(stalls(h, s)).toEqual(before);
   });

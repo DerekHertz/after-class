@@ -19,7 +19,7 @@ import { createReviewController } from "../src/app/controller";
 import type { SessionState } from "../src/app/controller";
 import {
   availableActions, conversationLines, currentEvidenceIds, estimateText, formatClock, inspectBundle, liveText, noteView, observationRow,
-  optionsScreen, parseRoute, reduceLive, routePath, softTargetPrompt, startLive, toAct, unansweredLearnerTurn, usageRows,
+  groupGaps, lectureHeading, optionsScreen, parseRoute, reduceLive, routePath, softTargetPrompt, startLive, toAct, unansweredLearnerTurn, usageRows,
 } from "../src/app/core";
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { StreamError, ndjson, tutorEvents } from "../src/app/ndjson";
@@ -281,6 +281,29 @@ describe("review options screens", () => {
     if (screen.kind !== "ready") throw new Error("unreachable");
     expect(screen.partial[0]).toBe("2 claims were not confirmed by the source and will not be used to assess you.");
     expect(screen.partial[1]).toBe("Tab was hidden, so frames stalled in Lamport clocks, 2:00 to 3:00.");
+  });
+
+  test("many capture gaps of one kind in one video become one line, in the place the first held", () => {
+    const gap = (start: number, end: number, reason: "partially_watched_segment" | "hidden_tab" = "partially_watched_segment") =>
+      ({ kind: "capture_gap", gap: { sourceId: src, interval: interval(start, end), channel: "transcript", reason } }) as const;
+    const screen = optionsScreen(
+      { kind: "ready", scope: { chunkRevisions: [crv], supportedClaims: 1, partial: [gap(0, 2), { kind: "unverified_claims", count: 1 }, gap(10, 13), gap(20, 25), gap(30, 90, "hidden_tab")] } },
+      titles,
+    );
+    if (screen.kind !== "ready") throw new Error("unreachable");
+    expect(screen.partial).toEqual([
+      "Caption line only partly watched, so not used in Lamport clocks, 3 places, 0:10 in all.",
+      "Tab was hidden, so frames stalled in Lamport clocks, 0:30 to 1:30.",
+      "1 claim was not confirmed by the source and will not be used to assess you.",
+    ]);
+    expect(groupGaps([gap(0, 2).gap, gap(5, 6).gap], titles)).toEqual([{ where: "Lamport clocks, 2 places, 0:03 in all", reason: "Caption line only partly watched, so not used", count: 2 }]);
+  });
+
+  test("a lecture heading names the shared course instead of every video title", () => {
+    expect(lectureHeading([])).toEqual({ title: "Review", detail: null });
+    expect(lectureHeading(["Intro - Georgia Tech - AOS"])).toEqual({ title: "Intro - Georgia Tech - AOS", detail: null });
+    expect(lectureHeading(["Intro - Georgia Tech - AOS", "GSM Basics - Georgia Tech - AOS", "Conclusion - Georgia Tech - AOS"])).toEqual({ title: "Georgia Tech - AOS", detail: "3 videos" });
+    expect(lectureHeading(["Lamport clocks", "Vector clocks"])).toEqual({ title: "Lamport clocks and 1 more", detail: "2 videos" });
   });
 
   test("processing shows an estimate only when the backend gave a usable one", () => {

@@ -182,12 +182,20 @@ function failureEpisodes(sorted: readonly CaptureFact[]): FailureEpisode[] {
   return out;
 }
 
-const FRAME_STALL_S = 3;
+/**
+ * Watched seconds with no saved frame before we call frames stalled. The extension
+ * samples every second but saves a frame only when the picture changes, or as a
+ * keyframe after 30 s without one (FRAME_DEFAULTS in src/extension/content/frames.ts).
+ * So a slide left up for a while is quiet, not stalled: the bar is the keyframe
+ * period plus the longest settle wait (4 s) and two samples of slack. A decode
+ * stall the extension sees itself arrives as a channel fact instead.
+ */
+export const FRAME_STALL_S = 36;
 
 /**
  * Gaps for a source: watched intervals with no transcript (no_transcript /
  * transcript_declined), with tabVisible=false (hidden_tab, frames channel),
- * with no frame sample for > 3 s while visible (frame_stall; a frame fact
+ * with no saved frame for > FRAME_STALL_S while visible (frame_stall; a frame fact
  * whose bytes were not a JPEG is no sample), channel failures, implausible spans, and spans emitted while capture was off
  * (capture_paused). Ad time is deliberately not a gap (flow A).
  */

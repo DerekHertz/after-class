@@ -3,7 +3,7 @@ import { randomId } from "../shared/ids";
 import type { CaptureId, ReviewId } from "../shared/ids";
 import type { ReviewOptions, StartChoice } from "../shared/domain";
 import type { AppApi } from "./api";
-import { formatClock, inspectBundle, optionsScreen, sourceTitles, sourceVideos } from "./core";
+import { formatClock, inspectBundle, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
 import type { OptionsScreen, SourceTitles, StartOffer } from "./core";
 import { BundleInspector, ErrorNote, EvidencePane, Link, navigate, useAsync } from "./ui";
 
@@ -205,7 +205,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
       <ErrorNote error={capture.error} retry={capture.reload} />
       {capture.data && (
         <p className="capture-summary">
-          {capture.data.capture.sources.map((s) => s.title).join("; ") || "No source yet"} · capture {capture.data.capture.status.state} ·{" "}
+          {summaryTitle(capture.data.capture.sources.map((s) => s.title))} · capture {capture.data.capture.status.state} ·{" "}
           {formatClock(capture.data.capture.watchedSeconds)} watched · captions {capture.data.capture.transcript.replaceAll("_", " ")}
         </p>
       )}
@@ -247,6 +247,12 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
       </section>
     </main>
   );
+}
+
+function summaryTitle(titles: readonly string[]): string {
+  if (titles.length === 0) return "No source yet";
+  const h = lectureHeading(titles);
+  return h.detail === null ? h.title : `${h.title} (${h.detail})`;
 }
 
 function CaptureEvidence({ api, captureId, titles }: { readonly api: AppApi; readonly captureId: CaptureId; readonly titles: SourceTitles }) {
