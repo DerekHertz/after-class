@@ -486,7 +486,8 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     }
     const turns = loadTurns(reviewId);
     const { claims, evidence } = grounding(review, state, turns);
-    const allowed = [...kit.allowedMoves(state, { turns, claims })];
+    const pendingClaims = deps.claimsIn(review.captureId, review.scope.material).filter((c) => NON_TERMINAL.has(c.status)).length;
+    const allowed = [...kit.allowedMoves(state, { turns, claims, pendingClaims })];
     if (allowed.length === 0) return null;
     return { state, allowed, scope: review.scope, claims, evidence, turns, priorObservations: [], repairNote };
   }
@@ -560,9 +561,19 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     }
 
     let replayed = n === 0;
-    while (n < MAX_MOVES_PER_TURN) {
+    // The cap counts the moves this attempt makes, not the ones it replayed, so a resend after the cap still goes on.
+    let made = 0;
+    while (made < MAX_MOVES_PER_TURN) {
+      made++;
       let input = tutorInput(reviewId, review, null);
-      if (!input) break;
+      if (!input) {
+        // No move is allowed while the review is active: every claim in scope is out for a check (R3), so nothing can be asked yet.
+        if (stateOf(reviewId, review, loadTurns(reviewId)).state.phase === "active") {
+          yield { type: "turn_failed", error: "Some statements are being rechecked against the lecture. Try again in a moment.", retryable: true };
+          return;
+        }
+        break;
+      }
       const outId = moveTurnId(reviewId, turnId, n);
       const asOf = deps.nextSeq();
       let stored: { readonly move: TutorMove; readonly say: string } | null = null;

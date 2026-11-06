@@ -1341,3 +1341,73 @@ describe("an interrupted chain is resumable, and a review with no usable claim e
     expect(r.reviews.view(r.reviewId).owesMove).toBe(false);
   });
 });
+
+describe("claims only out for a recheck do not end the review; the move cap does not strand a chain", () => {
+  const moveKinds = (events: readonly TurnEvent[]) => events.flatMap((e) => (e.type === "move" ? [e.move.kind] : []));
+
+  /** The real rules (allowedMoves, validateMove); a valid question whenever one is allowed. */
+  function realRig() {
+    const base = startedRig();
+    const t = tutorHarness(base.db, (input) => {
+      const pending = input.state.corrections.find((c) => !c.disclosed);
+      if (pending) return reply({ kind: "disclose_correction", correctionId: pending.id, threadIds: [], evidence: [] }, "A correction.");
+      return input.allowed.includes("ask_main")
+        ? reply({ kind: "ask_main", threadId: nextThreadId(input.state), claimIds: [input.claims[0]!.id] }, "A question.")
+        : reply({ kind: "wrap_up" }, "Bye.");
+    });
+    const reviews = createReviews(base.db, { ...base.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { now: () => 1_000_000 });
+    return { ...base, tutor: t, reviews };
+  }
+
+  for (const status of ["awaiting_check", "awaiting_revision", "awaiting_recheck"] as const) {
+    test(`every claim ${status}: the review stays open, the turn fails retryably, and a resend after the check continues`, async () => {
+      const x = realRig();
+      x.world.check(x.claim, status);
+      const turnId = randomId("turn");
+      const first = await collect(x.reviews.turn(x.reviewId, turnId, { kind: "begin" }));
+      expect(moveKinds(first)).not.toContain("wrap_up");
+      expect(first.at(-1)).toMatchObject({ type: "turn_failed", retryable: true, error: expect.stringContaining("rechecked") });
+      expect(x.reviews.view(x.reviewId).state.phase).toBe("active");
+
+      x.world.check(x.claim, "supported_by_check");
+      const again = await collect(x.reviews.turn(x.reviewId, turnId, { kind: "begin" }));
+      expect(again.find((e) => e.type === "turn_failed")).toBeUndefined();
+      expect(moveKinds(again).at(-1)).toBe("ask_main");
+      expect(types(again).at(-1)).toBe("turn_complete");
+      expect(x.reviews.view(x.reviewId).state.phase).toBe("active");
+      expect(x.reviews.view(x.reviewId).turns.filter((t) => t.actor === "learner")).toHaveLength(1);
+    });
+  }
+
+  test("a withdrawn claim is final: the review wraps up with the honest line", async () => {
+    const x = realRig();
+    x.world.check(x.claim, "unverified");
+    const events = await collect(x.reviews.turn(x.reviewId, randomId("turn"), { kind: "begin" }));
+    expect(moveKinds(events).at(-1)).toBe("wrap_up");
+    expect(events.find((e) => e.type === "turn_failed")).toBeUndefined();
+  });
+
+  test("a chain cut off by the move cap on a disclosure still owes a move, and a resend carries on", async () => {
+    const r = startedRig();
+    const t = tutorHarness(r.db, (input) =>
+      input.allowed.includes("disclose_correction")
+        ? reply({ kind: "disclose_correction", correctionId: "c", threadIds: [], evidence: [] }, "Again.")
+        : reply({ kind: "ask_main", threadId: nextThreadId(input.state), claimIds: [r.claim] }, "A question."),
+    );
+    const tutorTurns = (turns: readonly Turn[]) => turns.filter((x) => x.actor === "tutor").length;
+    const capped: TutorKit = {
+      ...kit,
+      allowedMoves: (_state, ctx) => new Set<TutorMoveKind>(tutorTurns(ctx.turns) < MAX_MOVES_PER_TURN ? ["disclose_correction"] : ["ask_main"]),
+    };
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: capped });
+    const turnId = randomId("turn");
+    const first = await collect(reviews.turn(r.reviewId, turnId, { kind: "begin" }));
+    expect(moveKinds(first)).toHaveLength(MAX_MOVES_PER_TURN);
+    expect(reviews.view(r.reviewId).owesMove).toBe(true);
+
+    const again = await collect(reviews.turn(r.reviewId, turnId, { kind: "begin" }));
+    expect(moveKinds(again)).toEqual([...moveKinds(first), "ask_main"]);
+    expect(reviews.view(r.reviewId).turns.filter((x) => x.actor === "tutor")).toHaveLength(MAX_MOVES_PER_TURN + 1);
+    expect(reviews.view(r.reviewId).owesMove).toBe(false);
+  });
+});

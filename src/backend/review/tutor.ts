@@ -205,7 +205,7 @@ function recheckedClaims(openThread: ThreadId | null, ctx: Pick<TutorInput, "tur
  * Code (not the tutor) appends a soft_target_reached notice when the last tutor
  * move was close_thread and activeSeconds ≥ softTargetS ∧ !softTargetOffered.
  */
-export function allowedMoves(state: ReviewState, ctx: Pick<TutorInput, "turns" | "claims">): ReadonlySet<TutorMoveKind> {
+export function allowedMoves(state: ReviewState, ctx: Pick<TutorInput, "turns" | "claims"> & { readonly pendingClaims?: number }): ReadonlySet<TutorMoveKind> {
   if (state.phase !== "active") return new Set();
   if (state.corrections.some((c) => !c.disclosed)) return new Set(["disclose_correction"]);
   if (recheckedClaims(state.openThread, ctx).length > 0) return new Set([state.wrapUpRequested ? "wrap_up" : "close_thread"]);
@@ -218,8 +218,11 @@ export function allowedMoves(state: ReviewState, ctx: Pick<TutorInput, "turns" |
   if (state.openThread !== null) {
     s.add("ask_followup").add("diagnose").add("close_thread");
     if (state.detour.kind === "none") s.add("propose_detour");
-  } else if (state.mainQuestions < MAX_MAIN_QUESTIONS && ctx.claims.length > 0) s.add("ask_main");
-  else s.add("wrap_up"); // also when no claim is usable: R3 forbids asking on one, so the review ends honestly
+  } else if (state.mainQuestions < MAX_MAIN_QUESTIONS) {
+    // R3: nothing is asked on an unusable claim. If every one is only out for a check the tutor waits (no move); if they are gone for good the review ends.
+    if (ctx.claims.length > 0) s.add("ask_main");
+    else if ((ctx.pendingClaims ?? 0) === 0) s.add("wrap_up");
+  } else s.add("wrap_up");
   if (state.detour.kind === "active") s.add("detour_step");
   return s;
 }
