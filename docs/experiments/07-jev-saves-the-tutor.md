@@ -83,7 +83,7 @@ Not run, so not measured: the interpretation runner and the blind rating sheet w
 
 What did run (live Jev, `data/lab/lab-run-2/exp7`; 2,053 of the 4,000 Jev calls and 3 of the 80 Claude calls):
 
-- Measurement round (arm `measure-0`, Derek: "Yes, measure first"), clips 1 to 22, experiment 6's selected Fable configuration with the draft wordings: 544 calls. The draft frame-relevance question answered yes on all 37 kept frames; the intro/conclusion question answered yes on 10 of 20 clip-start windows, and its routing added one close, a false one.
+- Measurement round (arm `measure-0`, Derek: "Yes, measure first"), clips 1 to 22, experiment 6's selected Fable configuration with the draft wordings: 544 calls. Its first-half report: recall 3/4, 13 false closes (3.299 per 15 min), 1 of 25 visual steps lost (clip 22 at 194.227 s, every candidate frame dropped by the duplicate check, not by frame relevance), 96.684% of duplicates dropped. The draft frame-relevance question answered yes on all 37 kept frames (p 0.50 to 0.84), so it dropped none. The intro/conclusion question answered yes (p at or above 0.42) on 23 of 73 boundary windows, including 10 of the 20 windows whose new passage starts within 10 s of a clip start. One window had new concept yes and stopping point not yes but intro/conclusion yes, so only the intro/conclusion route closed it: clip 4 at 92 s (p 0.53, 0.40, 0.78), a false close.
 - Fable wording arm (`fable-1`), three rounds on clips 1 to 22 (first-half tuning reports, not results):
 
 | Round | Recall | False closes | Visual steps lost | Duplicates dropped | Frames asked frame relevance | Dropped by it |
@@ -101,6 +101,7 @@ What did run (live Jev, `data/lab/lab-run-2/exp7`; 2,053 of the 4,000 Jev calls 
 | "≤1 important visual step lost per lecture" | PASS, 0 lost |
 | "≥50% duplicates dropped" | PASS, 277/424 = 65.33% |
 
+- Offline rescore of the same stored answers with the intro/conclusion route turned off (no call; a check made after seeing the result, not a pre-registered result): clips 23 to 43 give recall 2/5 and 2 false closes (0.559 per 15 min); clips 1 to 22 are unchanged (3/4, 10). On the held-out clips the route accounts for two of the four detected boundaries and two of the four false closes.
 - Frame relevance on clips 23 to 43: 161 kept frames asked, 1 dropped (a labeled duplicate), 7 uncertain and kept. Across all runs it never dropped a labeled visual step, and it removed under 10% of the frames it was asked about, far below the roughly 40% the token bar needed.
 - For comparison on the same clips: experiment 2's baseline 2/5 and 0.559 per 15 min; experiment 6 Opus round 3 2/5 and 1.118; experiment 6 Fable round 3 5/5 and 3.073.
 
