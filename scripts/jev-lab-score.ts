@@ -6,7 +6,7 @@
  * The four clauses are fixed (docs/flows/after-class.md, "Experiments and pass bars"):
  *   "≥70% of labeled boundaries detected within ±60s; ≤1 false close per 15 min; ≤1 important visual step lost per
  *   lecture; ≥50% duplicates dropped."
- * Budget: "~800 Jev calls, max 3 tuning rounds, tune on first halves, score once on held-out second halves".
+ * Budget: "~2400 Jev calls (Amendment 3; ~800 until then), max 3 tuning rounds, tune on first halves, score once on held-out second halves".
  */
 import type { BoundaryWindow, ChunkProvenance, Verdict } from "../src/shared/domain";
 import type { CaptureId, EvidenceId, WindowId } from "../src/shared/ids";
@@ -26,7 +26,7 @@ export const BAR_RECALL = "≥70% of labeled boundaries detected within ±60s";
 export const BAR_FALSE_CLOSES = "≤1 false close per 15 min";
 export const BAR_VISUAL_STEPS = "≤1 important visual step lost per lecture";
 export const BAR_DUPLICATES = "≥50% duplicates dropped";
-export const BUDGET_TEXT = "~800 Jev calls, max 3 tuning rounds, tune on first halves, score once on held-out second halves";
+export const BUDGET_TEXT = "~2400 Jev calls (Amendment 3; ~800 until then), max 3 tuning rounds, tune on first halves, score once on held-out second halves";
 
 export const TOLERANCE_S = 60;
 export const RECALL_MIN = 0.7;
@@ -35,8 +35,8 @@ export const FALSE_CLOSES_MAX_PER_WINDOW = 1;
 export const STEPS_LOST_MAX_PER_LECTURE = 1;
 export const DUPLICATES_DROPPED_MIN = 0.5;
 export const MAX_TUNE_ROUNDS = 3;
-/** "~800": read as a hard ceiling that includes retries. PROPOSED, needs Derek's OK before any paid call. */
-export const BUDGET_CALLS = 800;
+/** A hard ceiling that includes retries. 800 until experiment 2 Amendment 3 (Derek, 2026-11-05), which sets 2400 for the 43-clip set. */
+export const BUDGET_CALLS = 2400;
 
 // ───────────────────────────── PROPOSED definitions (docs/experiments/02-jev-lab.md, "Decisions for Derek") ─────────────────────────────
 // Each is a one-line edit after Derek's OK. None is tuned afterwards.

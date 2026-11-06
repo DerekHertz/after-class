@@ -141,7 +141,7 @@ const V1_TUNE_REPORT = [
   "[fixture] Model: jev-1.13.0",
   "[fixture] Config: windowNewS=30, contextS=120, timeCapS=480, maxFramesPerWindow=2, reviseOnNextNoNo=false",
   "[fixture] Thresholds: yes at or above 0.7, no at or below 0.3",
-  "[fixture] Budget: \"~800 Jev calls, max 3 tuning rounds, tune on first halves, score once on held-out second halves\"",
+  "[fixture] Budget: \"~2400 Jev calls (Amendment 3; ~800 until then), max 3 tuning rounds, tune on first halves, score once on held-out second halves\"",
   "[fixture] Lecture CAP/aaaaaaaaaaa: span [0, 355), split at 177.5, scored first half; labels a.json sha256 X",
   "[fixture] Lecture CAP/bbbbbbbbbbb: span [0, 200), split at 100, scored first half; labels b.json sha256 X",
   "",
@@ -186,7 +186,7 @@ const V1_SCORE_REPORT = [
   "[fixture] Model: jev-1.13.0",
   "[fixture] Config: windowNewS=30, contextS=120, timeCapS=480, maxFramesPerWindow=2, reviseOnNextNoNo=false",
   "[fixture] Thresholds: yes at or above 0.7, no at or below 0.3",
-  "[fixture] Budget: \"~800 Jev calls, max 3 tuning rounds, tune on first halves, score once on held-out second halves\"",
+  "[fixture] Budget: \"~2400 Jev calls (Amendment 3; ~800 until then), max 3 tuning rounds, tune on first halves, score once on held-out second halves\"",
   "[fixture] Lecture CAP/aaaaaaaaaaa: span [0, 355), split at 177.5, scored second half; labels a.json sha256 X",
   "[fixture] Lecture CAP/bbbbbbbbbbb: span [0, 200), split at 100, scored second half; labels b.json sha256 X",
   "",
@@ -452,7 +452,7 @@ describe("a run over the five clips", () => {
     expect(text).toContain("split at the join before clip 4 (watched 816 s before, 533 s after, midpoint of 1349 s is 674.5 s)");
     expect(text).toContain("first half: 2 boundary labels (2 at a clip start), 0 in the half's first window");
     expect(text).toContain("second half: 2 boundary labels (2 at a clip start), 1 in the half's first window and excluded from recall");
-    expect(text).toContain("49 of 800 budgeted: within budget");
+    expect(text).toContain("49 of 2400 budgeted: within budget");
   });
 
   test("tune: judges the clips before the split only; each join is detected where the next clip starts", async () => {
