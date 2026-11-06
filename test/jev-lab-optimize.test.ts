@@ -20,7 +20,7 @@ import type { RunOptions } from "../scripts/jev-lab";
 import { armConfigFromBaseline, validateArmConfig } from "../scripts/jev-lab-arm";
 import type { ArmConfig } from "../scripts/jev-lab-arm";
 import {
-  APPROVED_TEMPLATE_SHA256, ProposeRefusal, barsOf, buildOptimizerPrompt, loadFlowB, loadTemplate, parseProposal, proposeRound, resolveRound, scanForHeldOut,
+  APPROVED_TEMPLATE_SHA256, ProposeRefusal, barsOf, buildOptimizerPrompt, dryRunRound, loadFlowB, loadTemplate, parseProposal, proposeRound, resolveRound, scanForHeldOut,
 } from "../scripts/jev-lab-optimize";
 import type { GuardAllow, HeldOut, OptimizeInputs, OptimizeOptions } from "../scripts/jev-lab-optimize";
 
@@ -278,8 +278,8 @@ describe("the prompt: round 1", () => {
 // ───────────────────────────── the held-out guard, one trigger at a time ─────────────────────────────
 
 describe("the held-out guard", () => {
-  const empty: HeldOut = { clipNumbers: [], videoIds: [], sourceIds: [], titles: [], windowIds: [], evidenceIds: [], passages: [], labels: [], reportLines: [] };
-  const noAllow: GuardAllow = { firstHalfPassages: [], allowedLines: new Set() };
+  const empty: HeldOut = { clipNumbers: [], videoIds: [], sourceIds: [], titles: [], windowIds: [], evidenceIds: [], passages: [], labels: [], reportLines: [], reportNumbers: [] };
+  const noAllow: GuardAllow = { firstHalfPassages: [], allowedLines: new Set(), allowedNumbers: new Set() };
   const kinds = (prompt: string, h: Partial<HeldOut>, allow: GuardAllow = noAllow) => scanForHeldOut(prompt, { ...empty, ...h }, allow).map((x) => x.kind);
 
   test("each trigger, on the prompt the runner really builds", async () => {
@@ -312,14 +312,34 @@ describe("the held-out guard", () => {
     expect(kinds(`quoted: ${passage.slice(5, 45)}`, { passages: [passage] })).toEqual(["passage"]);
     expect(kinds(`quoted:   the pivot is chosen as  the median\nof three samples taken`, { passages: [passage] })).toEqual(["passage"]);
     // a phrase the first half repeats says nothing about the held-out half
-    expect(kinds(`quoted: ${passage}`, { passages: [passage] }, { firstHalfPassages: [`and then ${passage} again`], allowedLines: new Set() })).toEqual([]);
+    expect(kinds(`quoted: ${passage}`, { passages: [passage] }, { firstHalfPassages: [`and then ${passage} again`], allowedLines: new Set(), allowedNumbers: new Set() })).toEqual([]);
   });
 
   test("a held-out report line is a hit unless it is also a line of the first-half report or the template", () => {
     const line = "clip 31: 0/3 detected; missed at clip 31 30s";
     expect(kinds(`x ${line} y`, { reportLines: [line] })).toEqual(["heldOutReport"]);
-    expect(kinds(`x ${line} y`, { reportLines: [line] }, { firstHalfPassages: [], allowedLines: new Set([line]) })).toEqual([]);
+    expect(kinds(`x ${line} y`, { reportLines: [line] }, { firstHalfPassages: [], allowedLines: new Set([line]), allowedNumbers: new Set() })).toEqual([]);
     expect(kinds("no such line here", { reportLines: [line] })).toEqual([]);
+  });
+
+  test("a number from the held-out report (fraction or decimal) is a hit unless the first-half bars, template, flow B or config carry it", () => {
+    const reportNumbers = ["2/5", "0.559", "387/424"];
+    expect(kinds("recall was 2/5 there", { reportNumbers })).toEqual(["heldOutNumber"]);
+    expect(kinds("a rate of 0.559 per window", { reportNumbers })).toEqual(["heldOutNumber"]);
+    expect(kinds("387/424 frames", { reportNumbers })).toEqual(["heldOutNumber"]);
+    expect(kinds("a rate of 0.5591", { reportNumbers })).toEqual([]);
+    expect(kinds("12/25 and 0.5", { reportNumbers })).toEqual([]);
+    expect(kinds("recall was 2/5", { reportNumbers }, { ...noAllow, allowedNumbers: new Set(["2/5"]) })).toEqual([]);
+  });
+
+  test("on the real fixture prompt, a held-out report number placed in the prompt is caught and the clean prompt passes", async () => {
+    const h = await sharedHarness();
+    const { built } = prepared(h);
+    expect(built.heldOut.reportNumbers.length).toBeGreaterThan(0);
+    const num = built.heldOut.reportNumbers.find((n) => !built.allow.allowedNumbers.has(n))!;
+    expect(num).toBeDefined();
+    expect(scanForHeldOut(`${built.prompt}\nsee ${num}`, built.heldOut, built.allow).map((x) => x.kind)).toContain("heldOutNumber");
+    expect(scanForHeldOut(built.prompt, built.heldOut, built.allow)).toEqual([]);
   });
 
   test("a label time next to a held-out clip, not merely a number, is the trigger", () => {
@@ -479,8 +499,11 @@ describe("propose", () => {
     expect(e1.message).toMatch(/--live-claude/);
     const e2 = await rejects(proposeRound({ ...noClient.opts, live: true, spawn }));
     expect(e2.message).toMatch(/--max-claude-calls/);
+    // live without --claude-ledger can never start a fresh ledger outside the shared cap
+    const e2b = await rejects(proposeRound({ ...noClient.opts, client: undefined as never, live: true, maxClaudeCalls: 5, spawn }));
+    expect(e2b.message).toMatch(/needs --claude-ledger/);
     const { heldOutReportPath: _drop, ...noReport } = options(h).opts;
-    const e3 = await rejects(proposeRound({ ...noReport, live: true, maxClaudeCalls: 5, spawn }));
+    const e3 = await rejects(proposeRound({ ...noReport, live: true, maxClaudeCalls: 5, claudeLedger: h.propDir, spawn }));
     expect(e3.message).toMatch(/--heldout-report/);
     expect(spawned).toEqual([]);
   });
@@ -533,6 +556,35 @@ describe("propose", () => {
     const e = await rejects(proposeRound({ ...base, client: undefined as never, live: true, maxClaudeCalls: 3, claudeLedger: join(h.labDir, "elsewhere"), outDir: join(h.propDir, `live-${++counter}`), spawn, env }));
     expect(e.message).toMatch(/parent of --out/);
     expect(spawned.length).toBe(1);
+  });
+});
+
+describe("--dry-run", () => {
+  test("builds the real prompt, runs the guard, writes prompt.txt, guard.json and README, and touches no ledger and no client", async () => {
+    const h = await sharedHarness();
+    const { opts, outDir } = options(h);
+    const { client: _c, live: _l, ...rest } = opts;
+    const stateOf = (o: string) => (existsSync(join(h.propDir, `claude-state.${o}.json`)) ? readFileSync(join(h.propDir, `claude-state.${o}.json`), "utf8") : null);
+    const before = [stateOf("fixture"), stateOf("live")];
+    const r = dryRunRound(rest);
+    expect(r.hits).toEqual([]);
+    expect(readFileSync(join(outDir, "prompt.txt"), "utf8")).toBe(prepared(h).built.prompt);
+    expect(JSON.parse(readFileSync(join(outDir, "guard.json"), "utf8"))).toMatchObject({ dryRun: true, passed: true, heldOutReportScanned: true });
+    expect(readFileSync(join(outDir, "README.md"), "utf8")).toContain("No Claude call was made");
+    expect(existsSync(join(outDir, "calls"))).toBe(false);
+    expect([stateOf("fixture"), stateOf("live")]).toEqual(before);
+  });
+
+  test("a guard hit writes the files for inspection and refuses; a bad model or a non-empty out dir is refused", async () => {
+    const h = await harness();
+    const report = join(tmp("report"), "score-1.report.txt");
+    writeFileSync(report, "[fixture] the lecturer discusses scheduling quanta and run queues in detail at second 10 of this part\n");
+    const { opts, outDir } = options(h, { heldOutReportPath: report });
+    const { client: _c, live: _l, ...rest } = opts;
+    expect(() => dryRunRound(rest)).toThrow(/held-out guard/);
+    expect(JSON.parse(readFileSync(join(outDir, "guard.json"), "utf8")).passed).toBe(false);
+    expect(() => dryRunRound(rest)).toThrow(/not empty/);
+    expect(() => dryRunRound({ ...rest, model: "gpt", outDir: join(h.propDir, "x") })).toThrow(/--model must be one of/);
   });
 });
 

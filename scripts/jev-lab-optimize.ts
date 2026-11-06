@@ -10,15 +10,16 @@
  *       [--baseline-state <state.json>]      (round 1: experiment 2's final state)
  *       [--previous <proposal dir> ...]      (rounds 2 and 3: the earlier rounds' output dirs, in round order)
  *       [--heldout-report <score-1.report.txt>]   (required with --live-claude: its lines are scanned for in every prompt)
- *       [--live-claude --max-claude-calls N --claude-ledger <dir>]
+ *       [--dry-run]                          (build the real prompt, run the guard, write prompt.txt; no call, no ledger)
+ *       [--live-claude --max-claude-calls N --claude-ledger <dir>]   (--claude-ledger is required live and must be the parent of --out)
  *
  * Claude is reached only through `jev-lab-propose`'s rails (the product's createClaudeCli, the same flags and env
  * stripping, the same persisted ledger and call floor, BUDGET_CLAUDE_CALLS). Nothing here makes a Jev call or reads a key
  * file. Before ANY call the whole prompt is scanned for held-out material; a hit stops the run with nothing sent.
  */
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import type { ClaudeCli, SpawnFn } from "../src/backend/providers/claude";
 import type { Passage } from "../src/shared/domain";
@@ -26,7 +27,7 @@ import type { EvidenceId } from "../src/shared/ids";
 import { lectureWork, loadLabels, openCapture, readState, reportFromFile } from "./jev-lab";
 import { ARM_KIND, ARM_NAME, PRODUCT_QUESTIONS, armConfigFromBaseline, validateArmConfig } from "./jev-lab-arm";
 import type { ArmConfig } from "./jev-lab-arm";
-import { ProposeRefusal, attemptCall, checkCommon, openSession, parseMaxClaudeCalls, readClips, refuse, writeMeta } from "./jev-lab-propose";
+import { PROPOSED_MODELS, ProposeRefusal, attemptCall, checkCommon, openSession, parseMaxClaudeCalls, readClips, refuse, writeMeta } from "./jev-lab-propose";
 import type { ClipEvidence } from "./jev-lab-propose";
 import {
   MAX_TUNE_ROUNDS, PROPOSED_DUPLICATE_MATCH_S, PROPOSED_STEP_CATCH_S, TOLERANCE_S, clipsOf, detectBoundaries, lectureIdOfLabels, parseResults, splitterOf, verdictAt, viewOf,
@@ -89,9 +90,11 @@ export type HeldOut = {
   readonly labels: readonly { readonly videoId: string; readonly clipNumber: number; readonly mediaS: number }[];
   /** Lines of experiment 2's held-out report. */
   readonly reportLines: readonly string[];
+  /** Fractions (2/5, 387/424) and decimals (0.559) written in experiment 2's held-out report. */
+  readonly reportNumbers: readonly string[];
 };
 /** What the prompt may legitimately repeat from the held-out side, because the first half has it too. */
-export type GuardAllow = { readonly firstHalfPassages: readonly string[]; readonly allowedLines: ReadonlySet<string> };
+export type GuardAllow = { readonly firstHalfPassages: readonly string[]; readonly allowedLines: ReadonlySet<string>; readonly allowedNumbers: ReadonlySet<string> };
 export type GuardHit = { readonly kind: string; readonly detail: string };
 
 export const SHINGLE = 40;
@@ -99,6 +102,8 @@ export const MIN_REPORT_LINE = 12;
 const squash = (s: string) => s.replace(/\s+/g, " ").trim();
 const untag = (line: string) => squash(line.replace(/^\[(?:fixture|live)\]\s*/, ""));
 export const reportLinesOf = (text: string): readonly string[] => text.split("\n").map(untag).filter((l) => l.length >= MIN_REPORT_LINE);
+/** Number tokens the guard compares: fractions and decimals (plain integers are everywhere: seconds, clip numbers). */
+export const numberTokens = (text: string): readonly string[] => [...new Set(text.match(/(?<![\d.\/])(?:\d+\/\d+|\d+\.\d+)(?![\d])/g) ?? [])];
 const timeForms = (t: number) => [...new Set([String(t), t.toFixed(1), t.toFixed(0), String(Number(t.toFixed(2)))])];
 const hasToken = (line: string, tok: string) => new RegExp(`(^|[^0-9.])${tok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![0-9]|\\.[0-9])`).test(line);
 
@@ -145,6 +150,8 @@ export function scanForHeldOut(prompt: string, h: HeldOut, allow: GuardAllow): r
     }
   }
   for (const line of h.reportLines) if (!allow.allowedLines.has(line) && flat.includes(line)) hits.push({ kind: "heldOutReport", detail: `a line of experiment 2's held-out report: ${JSON.stringify(line.slice(0, 80))}` });
+  const inPrompt = new Set(numberTokens(prompt));
+  for (const n of h.reportNumbers) if (inPrompt.has(n) && !allow.allowedNumbers.has(n)) hits.push({ kind: "heldOutNumber", detail: `the number ${n}, which experiment 2's held-out report has and the first-half bars, template and flow B do not` });
   return hits;
 }
 
@@ -261,11 +268,16 @@ const p2 = (p: number | null | undefined) => (p === null || p === undefined ? "n
 
 /** The four bars and their numbers, from a tune report: no lecture header (it names every clip), no usage block. */
 export function barsOf(report: Report): string {
-  const lines = report.text.split("\n");
+  return barsOfText(report.text) ?? refuse("a tune report has no bars block to quote");
+}
+
+/** The bars block of any report text (recall to OVERALL, no lecture header, no usage), or null when the text has none. */
+export function barsOfText(text: string): string | null {
+  const lines = text.split("\n");
   const from = lines.findIndex((l) => /\] Boundary recall: /.test(l));
   const to = lines.findIndex((l, i) => i > from && /\] Usage \(/.test(l));
   const overall = lines.find((l) => /\] OVERALL/.test(l));
-  if (from < 0 || to < 0 || overall === undefined) return refuse("a tune report has no bars block to quote");
+  if (from < 0 || to < 0 || overall === undefined) return null;
   return [...lines.slice(from, to), overall].filter((l) => l.trim() !== "").map((l) => l.replace(/^\[(?:fixture|live)\] /, "")).join("\n");
 }
 
@@ -406,11 +418,15 @@ export function buildOptimizerPrompt(inp: OptimizeInputs, ctx: RoundContext, roo
 
   const heldOut = heldOutOf(ctx, clips, lecture, heldWindows, inp);
   const allowedLines = new Set([...reportLinesOf(template), ...reportLinesOf(bars), ...reportLinesOf(loadFlowB(root))]);
+  // numbers the prompt may carry because they come from the first half or the config, not from the held-out report
+  const configText = [ctx.config, ...ctx.previous.map((p) => p.config)].map((c) => JSON.stringify(c)).join("\n");
+  const priorText = ctx.previous.map((p) => `${p.report.metrics.recallMatched}/${p.report.metrics.recallLabeled} ${barsOf(p.report)}`).join("\n");
+  const allowedNumbers = new Set(numberTokens([template, bars, loadFlowB(root), configText, priorText].join("\n")));
   const allTitles = [...new Set([...clips.map((c) => c.title), ...viewOf(ctx.info.labels).clips.map((c) => c.title ?? null)].filter((t): t is string => t !== null && t.trim() !== ""))];
   return {
     prompt: text,
     heldOut,
-    allow: { firstHalfPassages: pieces.firstPassages, allowedLines },
+    allow: { firstHalfPassages: pieces.firstPassages, allowedLines, allowedNumbers },
     forbiddenInWording: { titles: allTitles, videoIds: clips.map((c) => c.videoId) },
     nClips: pieces.nClips,
     mClips: pieces.mClips,
@@ -465,6 +481,8 @@ function heldOutOf(ctx: RoundContext, clips: readonly ClipEvidence[], lecture: L
       ...view.boundaries, ...view.visualSteps, ...view.duplicateGroups.flatMap((g) => g.frames),
     ].filter((l) => secondOnly.some((s) => s.videoId === l.videoId)).map((l) => ({ videoId: l.videoId, clipNumber: heldNumber(l.videoId), mediaS: l.mediaS })),
     reportLines: reportLinesOf(reportText),
+    // the report's results (its bars and OVERALL): its header and usage lines carry clip spans, latencies and token counts that merely coincide with first-half times
+    reportNumbers: numberTokens(barsOfText(reportText) ?? ""),
   };
 }
 
@@ -538,12 +556,51 @@ function readme(info: { model: string; effort: string; origin: Origin; arm: stri
   ].join("\n");
 }
 
+export type DryRunOptions = OptimizeInputs & { readonly model: string; readonly outDir: string };
+export type DryRunOutcome = { readonly promptPath: string; readonly guardPath: string; readonly readmePath: string; readonly round: number; readonly hits: readonly GuardHit[]; readonly promptChars: number };
+
+/**
+ * `--dry-run`: builds the real prompt and runs the guard; writes prompt.txt, guard.json and README.md. Makes no call, needs
+ * no --live-claude or --max-claude-calls, builds no client and never touches the Claude ledger. A guard hit still writes
+ * the files (for inspection; prompt.txt then holds the held-out material that was found) and then refuses.
+ */
+export function dryRunRound(opts: DryRunOptions): DryRunOutcome {
+  if (!(PROPOSED_MODELS as readonly string[]).includes(opts.model)) refuse(`--model must be one of ${PROPOSED_MODELS.join(", ")}, got "${opts.model}"`);
+  const outDir = resolve(opts.outDir);
+  if (existsSync(outDir) && readdirSync(outDir).length > 0) refuse(`--out ${outDir} is not empty`);
+  const data = resolve(opts.dataDir);
+  if (outDir === data || outDir.startsWith(data + sep)) refuse(`--out ${outDir} is inside the data dir; the data dir is never written`);
+  const info = loadLabels([resolve(opts.labelFile)])[0]!;
+  const ctx = resolveRound(opts, info);
+  const built = buildOptimizerPrompt(opts, ctx);
+  const hits = scanForHeldOut(built.prompt, built.heldOut, built.allow);
+  mkdirSync(outDir, { recursive: true });
+  const promptPath = join(outDir, "prompt.txt");
+  const guardPath = join(outDir, "guard.json");
+  const readmePath = join(outDir, "README.md");
+  writeFileSync(promptPath, built.prompt);
+  writeFileSync(guardPath, JSON.stringify({ dryRun: true, passed: hits.length === 0, hits, heldOutReportScanned: opts.heldOutReportPath !== undefined }, null, 2) + "\n");
+  writeFileSync(readmePath, [
+    `# Optimizer dry run: arm ${opts.arm}, round ${ctx.round}, for ${opts.model}`, "",
+    "No Claude call was made and the Claude ledger was not touched. This is the prompt the live run would send, and the held-out guard's verdict on it.", "",
+    `- Guard: ${hits.length === 0 ? "passed" : `REFUSED: ${hits.map((h) => h.detail).join("; ")}`}`,
+    `- Held-out report scanned: ${opts.heldOutReportPath === undefined ? "NO (no --heldout-report given; a live run requires it)" : "yes"}`,
+    `- Prompt: ${built.prompt.length} characters, ${built.nClips} of ${built.mClips} clips`, "",
+    "Files:", "- prompt.txt", "- guard.json", "",
+  ].join("\n"));
+  if (hits.length > 0) refuse(`held-out guard: the prompt contains held-out material: ${hits.map((h) => h.detail).join("; ")} (nothing was sent; see ${guardPath})`);
+  return { promptPath, guardPath, readmePath, round: ctx.round, hits, promptChars: built.prompt.length };
+}
+
 export async function proposeRound(opts: OptimizeOptions): Promise<OptimizeOutcome> {
   const { effort, origin } = checkCommon({ model: opts.model, outDir: opts.outDir, live: opts.live, ...(opts.maxClaudeCalls === undefined ? {} : { maxClaudeCalls: opts.maxClaudeCalls }), ...(opts.client === undefined ? {} : { client: opts.client }) });
   if (opts.live && opts.heldOutReportPath === undefined) refuse("a live run needs --heldout-report <experiment 2's score-1.report.txt>: its lines are scanned for in every prompt");
   const outDir = resolve(opts.outDir);
-  if (opts.live && opts.claudeLedger !== undefined && resolve(opts.claudeLedger) !== dirname(outDir)) {
-    refuse(`--claude-ledger ${opts.claudeLedger} must be the parent of --out (${dirname(outDir)}), so that this run's calls count in the same ledger and call floor as the labelers'`);
+  if (opts.live) {
+    if (opts.claudeLedger === undefined) refuse("a live run needs --claude-ledger <dir>, the parent of --out that holds claude-state.live.json, so these calls count against the shared 250-call cap");
+    if (resolve(opts.claudeLedger) !== dirname(outDir)) {
+      refuse(`--claude-ledger ${opts.claudeLedger} must be the parent of --out (${dirname(outDir)}), so that this run's calls count in the same ledger and call floor as the labelers'`);
+    }
   }
   const labels = loadLabels([resolve(opts.labelFile)]);
   const info = labels[0]!;
@@ -612,11 +669,22 @@ async function cli(argv: readonly string[]): Promise<number> {
     options: {
       data: { type: "string" }, labels: { type: "string" }, lab: { type: "string" }, arm: { type: "string" }, model: { type: "string" }, out: { type: "string" },
       "from-results": { type: "string", multiple: true }, "baseline-state": { type: "string" }, previous: { type: "string", multiple: true }, "heldout-report": { type: "string" },
-      "live-claude": { type: "boolean" }, "max-claude-calls": { type: "string" }, "claude-ledger": { type: "string" },
+      "dry-run": { type: "boolean" }, "live-claude": { type: "boolean" }, "max-claude-calls": { type: "string" }, "claude-ledger": { type: "string" },
     },
   });
   if (command !== "propose") return usage("the only command is propose");
   if (!values.data || !values.labels || !values.lab || !values.arm || !values.model || !values.out) return usage("propose needs --data, --labels, --lab, --arm, --model and --out");
+  if (values["dry-run"] === true) {
+    if (values["live-claude"] || values["max-claude-calls"] !== undefined || values["claude-ledger"]) return usage("--dry-run makes no call and never touches the ledger; do not combine it with --live-claude, --max-claude-calls or --claude-ledger");
+    const r = dryRunRound({
+      dataDir: resolve(values.data), labelFile: resolve(values.labels), labDir: resolve(values.lab), arm: values.arm, model: values.model, outDir: resolve(values.out),
+      fromResults: values["from-results"] ?? [], previousDirs: values.previous ?? [],
+      ...(values["baseline-state"] ? { baselineStatePath: values["baseline-state"] } : {}),
+      ...(values["heldout-report"] ? { heldOutReportPath: values["heldout-report"] } : {}),
+    });
+    console.log(`[dry-run] round ${r.round}: guard passed, prompt ${r.promptChars} characters, wrote ${r.promptPath}; no Claude call was made`);
+    return 0;
+  }
   const max = values["max-claude-calls"] === undefined ? undefined : parseMaxClaudeCalls(values["max-claude-calls"]);
   await proposeRound({
     dataDir: resolve(values.data), labelFile: resolve(values.labels), labDir: resolve(values.lab), arm: values.arm, model: values.model, outDir: resolve(values.out),

@@ -74,11 +74,13 @@ The results header records the arm, the question wording when it differs from th
 `scripts/jev-lab-optimize.ts propose` makes ONE optimizer round's proposal for ONE arm. Nothing here makes a Claude call without `--live-claude` and `--max-claude-calls`, and nothing makes a Jev call. The per-round loop, per arm (`opus-1`, `fable-1`), up to 3 rounds:
 
 ```
+# 0. FIRST STEP, before any live call: add --dry-run (and drop the live flags) to build the real prompt and run the guard.
+#    It writes <out>/prompt.txt, guard.json and README.md for inspection, makes no call and never touches the ledger.
 # 1. propose (round 1: the baseline's tune results and experiment 2's state.json; the held-out report is only scanned for)
 bun run scripts/jev-lab-optimize.ts propose --data <assembledDir> --labels <signed.json> --lab <lab> --arm opus-1 \
   --model claude-opus-5-5 --out <ledger>/opt-opus-1-r1 --from-results <lab>/live/runs/tune-N.jsonl \
   --baseline-state <lab>/live/state.json --heldout-report <lab>/live/runs/score-1.report.txt \
-  [--live-claude --max-claude-calls 4 --claude-ledger <ledger>]
+  [--live-claude --max-claude-calls 2 --claude-ledger <ledger>]
 
 # 2. run it on the first halves (Jev; its own flags and ceilings)
 bun run scripts/jev-lab.ts run --data <dir> --lab <lab> --labels <signed.json> --phase tune --arm opus-1 \
@@ -89,17 +91,17 @@ bun run scripts/jev-lab-optimize.ts propose ... --out <ledger>/opt-opus-1-r2 \
   --from-results <lab>/exp6/opus-1/live/runs/tune-1.jsonl --previous <ledger>/opt-opus-1-r1
 ```
 
-`--claude-ledger` is the parent directory that holds `claude-state.live.json` (`data/lab/propose`, the labelers' ledger); with `--live-claude` it must be the parent of `--out`, so the same persisted counter and call floor, and `BUDGET_CLAUDE_CALLS` (250), count the optimizers' calls with the labelers'. Models are `claude-opus-5-5` and `claude-fable-5-1` only, effort high.
+`--claude-ledger` is the parent directory that holds `claude-state.live.json` (`data/lab/propose`, the labelers' ledger); `--claude-ledger` is REQUIRED with `--live-claude` and must equal the parent of `--out` (anything else is refused), so a live run can never start a fresh ledger outside the shared cap: the same persisted counter and call floor, and `BUDGET_CLAUDE_CALLS` (250), count the optimizers' calls with the labelers'. Models are `claude-opus-5-5` and `claude-fable-5-1` only, effort high.
 
 Output: `arm-config.json` (the config, exactly what `jev-lab run --arm-config` takes), `rationale.txt`, `guard.json`, `README.md`, and `calls/<n>.prompt.txt|.response.txt|.meta.json` for every attempt, the prompt stored before the call. A reply is refused unless it is one JSON object with a non-empty `rationale` and a body that `validateArmConfig` accepts, and its question wordings name no clip title, videoId or mm:ss time; a refusal is stored with its reason and retried once with the reason appended, and a second refusal stops (no `arm-config.json`, the README says INCOMPLETE).
 
-Held-out guard, before every call: the prompt is built only from first-half inputs, and the full text is scanned for held-out clip videoIds and sourceIds, titles that only held-out clips have, window and frame or passage ids, any 40-character run of a held-out passage that the first half does not also contain, a reference to a held-out clip number, a held-out label time next to a held-out clip, and every non-trivial line of experiment 2's held-out report (`--heldout-report`, required with `--live-claude`) that the first-half report and the template do not also carry. A `--from-results` file of a score run is refused. A hit stops the run with no call and the reason stored in `guard.json` and the README.
+Held-out guard, before every call: the prompt is built only from first-half inputs, and the full text is scanned for held-out clip videoIds and sourceIds, titles that only held-out clips have, window and frame or passage ids, any 40-character run of a held-out passage that the first half does not also contain, a reference to a held-out clip number, a held-out label time next to a held-out clip, and every non-trivial line of experiment 2's held-out report (`--heldout-report`, required with `--live-claude`) that the first-half report and the template do not also carry, and every fraction or decimal (2/5, 0.559, 387/424) in that report's results block that the first-half bars, the template, flow B and the configs do not also carry. A `--from-results` file of a score run is refused. A hit stops the run with no call and the reason stored in `guard.json` and the README.
 
 **Claude calls for a full experiment 6 optimizer stage:** 2 arms x 3 rounds = 6 calls at the minimum, 12 if every round needs its one retry. With 177 already used by the pilot and the two labelers (52 + 62 + 63), that leaves 73 of the 250, so 12 fits. `--max-claude-calls 2` per proposal covers one retry.
 
 ## Fixed, to be enforced in code
 
-The rules below are decided now and are enforced and tested by the prerequisites above before stage 3. The three exceptions to experiment 2's adopted definitions (decision 5, the selected round; decision 6, the Jev ceiling; decision 7, score once per arm) apply to experiment 6 only and are enforced by the same prerequisites. They are not yet implemented, and until they are, no call is made.
+The rules below are decided now and are enforced and tested by the prerequisites above before stage 3. The three exceptions to experiment 2's adopted definitions (decision 5, the selected round; decision 6, the Jev ceiling; decision 7, score once per arm) apply to experiment 6 only and are enforced by the same prerequisites. Implemented and tested so far: the Claude rails (`jev-lab-propose`), the Jev rails, arm configs, per-arm directories, the cross-arm Jev counter and selected-round scoring (PR #75), and the optimizer runner with its held-out prompt guard (`jev-lab-optimize`, with `--dry-run`). The optimizer prompt guard is the only held-out check; labeler prompts precede signing and the split. Nothing in this list has been run live for experiment 6's optimizer stage, and no optimizer call has been made.
 
 - Claude calls go only through the product's Claude client: `claude -p` with `--restricted --tools Read --strict-mcp-config --disable-slash-commands --no-session-persistence`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` stripped from the child environment, `--add-dir` only for the copied frame files. Subscription calls, cost recorded as notional.
 - Jev calls reuse experiment 2's rails: a 0600 key file, `--live`, a hard call cap, signed-off labels, persisted counters that a deleted `state.json` cannot reset, redaction of the key, stored judgments so any report can be rescored with no call.
