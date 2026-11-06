@@ -23,7 +23,7 @@ import type { Exp7ArmConfig } from "../scripts/jev-lab-arm";
 import { detectBoundaries, parseResults } from "../scripts/jev-lab-score";
 import type { WindowRecord } from "../scripts/jev-lab-score";
 import {
-  APPROVED_EXP7_TEMPLATE_SHA256, DRAFT_BANNER, EXP7_BUDGET_CLAUDE_CALLS, TEMPLATE7_DOC, buildOptimizerPrompt, dryRunRound, loadTemplate7, parseProposal, proposeRound, resolveRound, scanForHeldOut,
+  APPROVED_EXP7_TEMPLATE_SHA256, DRAFT_BANNER, EXP7_BUDGET_CLAUDE_CALLS, TEMPLATE7_DOC, buildOptimizerPrompt, dryRunRound, loadTemplate7, parseProposal, proposeRound, resolveRound, scanForHeldOut, MEASUREMENT_ARM7,
 } from "../scripts/jev-lab-optimize";
 import type { OptimizeInputs, OptimizeOptions } from "../scripts/jev-lab-optimize";
 
@@ -493,5 +493,94 @@ describe("parseProposal in exp7 mode", () => {
     if (!named.ok) expect(named.error).toMatch(/questions\.lessonFraming names a clip title/);
     const time = parseProposal(proposal7({ questions: { ...config7().questions, claimRelevance: "Does it relate to 12:30?" } }), forbidden, true);
     expect(time.ok).toBe(false);
+  });
+});
+
+// ───────────────────────────── round 1 from the measurement arm ─────────────────────────────
+
+describe("experiment 7 round 1 from the measurement run", () => {
+  const measured = async () => {
+    const h = await harness();
+    const m = await h.run({ phase: "tune", exp7: true, arm: MEASUREMENT_ARM7, exp7Config: config7() });
+    return { h, m };
+  };
+  const inputs = (h: Harness, fromResults: string[], over: Partial<OptimizeInputs> = {}): OptimizeInputs => ({
+    ...inputsOf(options(h, { arm: "xm" }).opts), arm: "xm", fromResults, exp7Measurement: true, ...over,
+  });
+  const resolveWith = (inp: OptimizeInputs) => resolveRound(inp, loadLabels([inp.labelFile])[0]!);
+  const refusal = (inp: OptimizeInputs): string => {
+    try { resolveWith(inp); } catch (e) { return (e as Error).message; }
+    throw new Error("expected a refusal");
+  };
+
+  test("the prompt shows Jev's real p values, names the measurement run, uses its own config and passes the guard", async () => {
+    const { h, m } = await measured();
+    const inp = inputs(h, [m.resultsPath]);
+    const ctx = resolveWith(inp);
+    expect(ctx.round).toBe(1);
+    expect(ctx.measurement).toBe(true);
+    expect(ctx.config).toEqual(config7());
+    const built = buildOptimizerPrompt(inp, ctx);
+    const p = built.prompt;
+    expect(p).not.toMatch(/<<[^>]*>>/);
+    expect(p).not.toContain("p(lesson framing) not measured yet");
+    expect(p).not.toContain("p(frame relevance) not measured yet");
+    expect(p).toMatch(/p\(lesson framing\) 0\.9 = yes; routed: close the chunk at the boundary/);
+    expect(p).toMatch(/p\(frame relevance\) 0\.1 = no \(frame dropped\)/);
+    expect(p).toContain("the measurement round: experiment 6's selected configuration with the draft wordings of the new questions");
+    expect(p).not.toContain("run before any lesson-framing or frame-relevance question was asked of Jev");
+    expect(scanForHeldOut(p, built.heldOut, built.allow)).toEqual([]);
+  });
+
+  test("a held-out leak through the measurement prompt is refused", async () => {
+    const { h, m } = await measured();
+    const inp = inputs(h, [m.resultsPath]);
+    const built = buildOptimizerPrompt(inp, resolveWith(inp));
+    const kinds = (t: string) => scanForHeldOut(t, built.heldOut, built.allow).map((x) => x.kind);
+    expect(kinds(built.prompt)).toEqual([]);
+    expect(kinds(`${built.prompt}\nsee ${IDS[4]}`)).toContain("videoId");
+    expect(kinds(`${built.prompt}\nQuicksort Deep Dive`)).toContain("title");
+    expect(kinds(`${built.prompt}\n- clip 5; p(lesson framing) 0.9 = yes`)).toContain("clipNumber");
+    expect(kinds(`${built.prompt}\n${built.heldOut.passages[0]!}`)).toContain("passage");
+  });
+
+  test("refused: the run is from arm X itself, another arm, another origin, round 2, a score run or not experiment 7", async () => {
+    const { h, m } = await measured();
+    expect(refusal(inputs(h, [m.resultsPath], { arm: MEASUREMENT_ARM7 }))).toMatch(/measurement arm itself/);
+    const other = await h.run({ phase: "tune", exp7: true, arm: "other7", exp7Config: config7() });
+    expect(refusal(inputs(h, [other.resultsPath]))).toMatch(/takes a run of arm "measure-0", not of arm "other7"/);
+    // a copy filed under another origin directory is not the measurement run of this lab and origin
+    const moved = join(h.labDir, "exp7", MEASUREMENT_ARM7, "live", "runs", "tune-1.jsonl");
+    mkdirSync(join(moved, ".."), { recursive: true });
+    writeFileSync(moved, readFileSync(m.resultsPath));
+    expect(refusal(inputs(h, [moved]))).toMatch(/must be .*fixture/);
+    const second = await h.run({ phase: "tune", exp7: true, arm: MEASUREMENT_ARM7, exp7Config: config7() });
+    expect(parseResults(readFileSync(second.resultsPath, "utf8")).header.round).toBe(2);
+    expect(refusal(inputs(h, [second.resultsPath]))).toMatch(/round 1 of arm measure-0, got round 2/);
+    expect(refusal(inputs(h, [h.baseTune]))).toMatch(/not one/);
+    expect(refusal(inputs(h, [m.resultsPath, h.baseTune]))).toMatch(/exactly one/);
+    // without the flag, the old rule stands
+    expect(refusal(inputs(h, [m.resultsPath], { exp7Measurement: false }))).toMatch(/experiment 7 run of arm "measure-0", not of --arm xm/);
+  });
+
+  test("refused when arm X already has tune rounds; rounds 2 and 3 never take the measurement run", async () => {
+    const { h, m } = await measured();
+    const first = options(h, { arm: "xm" });
+    const prop = await proposeRound(first.opts);
+    const own = await h.run({ phase: "tune", exp7: true, arm: "xm", exp7Config: prop.proposal.config as Exp7ArmConfig });
+    expect(refusal(inputs(h, [m.resultsPath]))).toMatch(/already has 1 tune round/);
+    // round 2 of xm: its own run plus the earlier proposal dir; adding the measurement run is refused either way
+    expect(refusal(inputs(h, [own.resultsPath, m.resultsPath], { exp7Measurement: false, previousDirs: [first.outDir] }))).toMatch(/experiment 7 run of arm "measure-0"/);
+    expect(refusal(inputs(h, [m.resultsPath], { exp7Measurement: false, previousDirs: [first.outDir] }))).toMatch(/experiment 7 run of arm "measure-0"/);
+    expect(refusal(inputs(h, [m.resultsPath], { previousDirs: [first.outDir] }))).toMatch(/no earlier proposals/);
+  });
+
+  test("the experiment 2/6 round 1 path is unchanged", async () => {
+    const h = await sharedHarness();
+    const { ctx, built } = prepared(h);
+    expect(ctx.round).toBe(1);
+    expect(ctx.measurement).toBeUndefined();
+    expect(built.prompt).toContain("round 0: experiment 6's selected configuration, run before any lesson-framing or frame-relevance question was asked of Jev");
+    expect(built.prompt).toContain("p(lesson framing) not measured yet");
   });
 });

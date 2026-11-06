@@ -11,7 +11,7 @@
  *       [--previous <proposal dir> ...]      (rounds 2 and 3: the earlier rounds' output dirs, in round order)
  *       [--heldout-report <score-1.report.txt>]   (required with --live-claude: its lines are scanned for in every prompt)
  *       [--dry-run]                          (build the real prompt, run the guard, write prompt.txt; no call, no ledger)
- *       [--exp7 [--approved-template <file>]]  (experiment 7: the six wordings; the draft template is dry-run only, a live run needs an
+ *       [--exp7 [--exp7-measurement] [--approved-template <file>]]  (experiment 7: the six wordings; the draft template is dry-run only, a live run needs an
  *                                              approved copy with the matching SHA, --out under <lab>/exp7, Claude ceiling 80 in <lab>/exp7)
  *       [--live-claude --max-claude-calls N --claude-ledger <dir>]   (--claude-ledger is required live and must be the parent of --out)
  *
@@ -214,6 +214,8 @@ export type OptimizeInputs = {
   readonly heldOutReportPath?: string;
   /** Experiment 7 mode: the six wordings, the exp7 template and ledger. Off (default): experiment 6, unchanged. */
   readonly exp7?: boolean;
+  /** Experiment 7 round 1 only: --from-results is the tune run of the measurement arm (MEASUREMENT_ARM7) instead of an experiment 2 or 6 run. */
+  readonly exp7Measurement?: boolean;
   /** Experiment 7: a copy of the approved template (see loadTemplate7). Needed for a live run. */
   readonly approvedTemplatePath?: string;
 };
@@ -223,6 +225,8 @@ export type RoundContext = {
   readonly origin: Origin;
   readonly config: ArmConfig | Exp7ArmConfig;
   readonly exp7?: true;
+  /** Experiment 7 round 1 built from the measurement arm's run (see MEASUREMENT_ARM7). */
+  readonly measurement?: true;
   readonly current: Loaded;
   readonly previous: readonly PreviousRound[];
   readonly info: LabelInfo;
@@ -312,7 +316,32 @@ export function resolveRound(inp: OptimizeInputs, info: LabelInfo): RoundContext
   return { round, origin, config: last.config, current: armRuns[armRuns.length - 1]!, previous, info };
 }
 
+/** The one arm name that may serve as an experiment 7 round 1 measurement (Derek, 2026-11-05: "Yes, measure first"). */
+export const MEASUREMENT_ARM7 = "measure-0";
+
 const headerConfig7 = (r: ParsedResults): Exp7ArmConfig => ({ schemaVersion: 1, kind: ARM7_KIND, questions: r.header.exp7!.questions, thresholds: r.header.thresholds, segmentation: r.header.config });
+
+/**
+ * Experiment 7 round 1 with --exp7-measurement: the single --from-results is round 1 of the measurement arm's experiment 7 tune
+ * run (one real Jev round with the starting configuration), so round 1 sees Jev's answers to the new questions. It does not count
+ * as one of the optimized arm's tune rounds: that arm must have none yet.
+ */
+function resolveMeasurementRound1(inp: OptimizeInputs, loaded: readonly Loaded[], origin: Origin, info: LabelInfo): RoundContext {
+  if (inp.arm === MEASUREMENT_ARM7) refuse(`--arm ${inp.arm} is the measurement arm itself; the measurement feeds round 1 of another arm`);
+  if (loaded.length !== 1) refuse("--exp7-measurement takes exactly one --from-results: the measurement arm's round 1 tune run");
+  if (inp.previousDirs.length > 0) refuse("round 1 has no earlier proposals; --previous is for rounds 2 and 3");
+  const run = loaded[0]!;
+  const h = run.results.header;
+  if (h.exp7 === undefined) refuse("--exp7-measurement needs an experiment 7 tune run (with the six wordings); this run is not one");
+  if (h.arm !== MEASUREMENT_ARM7) refuse(`--exp7-measurement takes a run of arm "${MEASUREMENT_ARM7}", not of arm "${String(h.arm)}"`);
+  if (h.round !== 1) refuse(`--exp7-measurement takes round 1 of arm ${MEASUREMENT_ARM7}, got round ${h.round}`);
+  const expected = join(resolve(inp.labDir), "exp7", MEASUREMENT_ARM7, origin, "runs", "tune-1.jsonl");
+  if (resolve(run.path) !== expected) refuse(`the measurement run must be ${expected} (arm ${MEASUREMENT_ARM7}, origin ${origin}, in --lab); got ${run.path}`);
+  const runsDir = join(resolve(inp.labDir), "exp7", inp.arm, origin);
+  const onDisk = existsSync(join(runsDir, "runs")) ? readdirSync(join(runsDir, "runs")).filter((f) => /^tune-\d+\.jsonl$/.test(f)).length : 0;
+  if (onDisk > 0) refuse(`experiment 7 arm ${inp.arm} already has ${onDisk} tune round(s) in ${runsDir}; the measurement only starts round 1`);
+  return { round: 1, origin, config: headerConfig7(run.results), exp7: true, measurement: true, current: run, previous: [], info };
+}
 
 /**
  * Experiment 7 rounds. Round 1 takes exactly one --from-results: an experiment 2 or 6 tune run (no experiment 7 wordings);
@@ -321,6 +350,7 @@ const headerConfig7 = (r: ParsedResults): Exp7ArmConfig => ({ schemaVersion: 1, 
  */
 function resolveRound7(inp: OptimizeInputs, info: LabelInfo): RoundContext {
   const { loaded, origin } = loadTuneRuns(inp, info);
+  if (inp.exp7Measurement === true) return resolveMeasurementRound1(inp, loaded, origin, info);
   const armRuns = loaded.filter((l) => l.results.header.exp7 !== undefined).sort((a, b) => a.results.header.round - b.results.header.round);
   const baseline = loaded.filter((l) => l.results.header.exp7 === undefined);
   const wrongArm = armRuns.find((l) => l.results.header.arm !== inp.arm);
@@ -505,6 +535,7 @@ function fillLine(text: string, startsWith: string, fill: string): string {
 }
 
 /** Round-1 text for experiment 7, where the current report is an experiment 2 or 6 run that never saw the new questions. */
+const EXP7_MEASUREMENT_NOTE = "round 0, the measurement round: experiment 6's selected configuration with the draft wordings of the new questions, run by Jev on these clips before any proposal; the p values below are Jev's real answers";
 const EXP7_ROUND1_NOTE = "round 0: experiment 6's selected configuration, run before any lesson-framing or frame-relevance question was asked of Jev";
 
 export function buildOptimizerPrompt(inp: OptimizeInputs, ctx: RoundContext, root = repoRoot, live = false): BuiltPrompt {
@@ -536,7 +567,7 @@ export function buildOptimizerPrompt(inp: OptimizeInputs, ctx: RoundContext, roo
   text = fillLine(text, "<<flow B,", loadFlowB(root));
   text = fillLine(text, "<<the arm's current config", "```json\n" + JSON.stringify({ questions: ctx.config.questions, thresholds: ctx.config.thresholds, segmentation: ctx.config.segmentation }, null, 2) + "\n```");
   text = text.replace("<<N>>", String(pieces.nClips)).replace("<<M>>", String(pieces.mClips));
-  text = fillLine(text, "<<the first-half report", `Report of the current configuration on the tuning clips (${exp7 && ctx.round === 1 ? EXP7_ROUND1_NOTE : `round ${ctx.round - 1 === 0 ? "0, the baseline" : String(ctx.round - 1)}`}):\n${bars}`);
+  text = fillLine(text, "<<the first-half report", `Report of the current configuration on the tuning clips (${exp7 && ctx.round === 1 ? (ctx.measurement === true ? EXP7_MEASUREMENT_NOTE : EXP7_ROUND1_NOTE) : `round ${ctx.round - 1 === 0 ? "0, the baseline" : String(ctx.round - 1)}`}):\n${bars}`);
   text = fillLine(text, "<<per clip, in watch order", pieces.sections.transcript);
   text = fillLine(text, "<<per boundary window", pieces.sections.windows);
   text = fillLine(text, exp7 ? "<<per kept frame" : "<<per judged frame", pieces.sections.frames);
@@ -820,10 +851,11 @@ async function cli(argv: readonly string[]): Promise<number> {
     options: {
       data: { type: "string" }, labels: { type: "string" }, lab: { type: "string" }, arm: { type: "string" }, model: { type: "string" }, out: { type: "string" },
       "from-results": { type: "string", multiple: true }, "baseline-state": { type: "string" }, previous: { type: "string", multiple: true }, "heldout-report": { type: "string" },
-      "dry-run": { type: "boolean" }, "live-claude": { type: "boolean" }, "max-claude-calls": { type: "string" }, "claude-ledger": { type: "string" }, exp7: { type: "boolean" }, "approved-template": { type: "string" },
+      "dry-run": { type: "boolean" }, "live-claude": { type: "boolean" }, "max-claude-calls": { type: "string" }, "claude-ledger": { type: "string" }, exp7: { type: "boolean" }, "exp7-measurement": { type: "boolean" }, "approved-template": { type: "string" },
     },
   });
   if (command !== "propose") return usage("the only command is propose");
+  if (values["exp7-measurement"] === true && values.exp7 !== true) return usage("--exp7-measurement needs --exp7");
   if (!values.data || !values.labels || !values.lab || !values.arm || !values.model || !values.out) return usage("propose needs --data, --labels, --lab, --arm, --model and --out");
   if (values["dry-run"] === true) {
     if (values["live-claude"] || values["max-claude-calls"] !== undefined || values["claude-ledger"]) return usage("--dry-run makes no call and never touches the ledger; do not combine it with --live-claude, --max-claude-calls or --claude-ledger");
@@ -832,7 +864,7 @@ async function cli(argv: readonly string[]): Promise<number> {
       fromResults: values["from-results"] ?? [], previousDirs: values.previous ?? [],
       ...(values["baseline-state"] ? { baselineStatePath: values["baseline-state"] } : {}),
       ...(values["heldout-report"] ? { heldOutReportPath: values["heldout-report"] } : {}),
-      ...(values.exp7 === true ? { exp7: true } : {}), ...(values["approved-template"] ? { approvedTemplatePath: values["approved-template"] } : {}),
+      ...(values.exp7 === true ? { exp7: true } : {}), ...(values["exp7-measurement"] === true ? { exp7Measurement: true } : {}), ...(values["approved-template"] ? { approvedTemplatePath: values["approved-template"] } : {}),
     });
     console.log(`[dry-run] round ${r.round}: guard passed, prompt ${r.promptChars} characters, wrote ${r.promptPath}; no Claude call was made`);
     return 0;
@@ -843,7 +875,7 @@ async function cli(argv: readonly string[]): Promise<number> {
     fromResults: values["from-results"] ?? [], previousDirs: values.previous ?? [], live: values["live-claude"] === true,
     ...(values["baseline-state"] ? { baselineStatePath: values["baseline-state"] } : {}),
     ...(values["heldout-report"] ? { heldOutReportPath: values["heldout-report"] } : {}),
-    ...(values.exp7 === true ? { exp7: true } : {}), ...(values["approved-template"] ? { approvedTemplatePath: values["approved-template"] } : {}),
+    ...(values.exp7 === true ? { exp7: true } : {}), ...(values["exp7-measurement"] === true ? { exp7Measurement: true } : {}), ...(values["approved-template"] ? { approvedTemplatePath: values["approved-template"] } : {}),
     ...(max === undefined ? {} : { maxClaudeCalls: max }),
     ...(values["claude-ledger"] ? { claudeLedger: resolve(values["claude-ledger"]) } : {}),
   });
