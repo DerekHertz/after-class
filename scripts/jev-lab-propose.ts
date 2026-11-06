@@ -59,7 +59,7 @@ export class ProposeRefusal extends Error {
   override readonly name = "ProposeRefusal";
 }
 
-function refuse(message: string): never {
+export function refuse(message: string): never {
   throw new ProposeRefusal(message);
 }
 
@@ -507,6 +507,8 @@ export type CallOptions = {
   readonly now?: () => number;
   /** For tests only: a lower ceiling. The command line has no such flag. */
   readonly ceiling?: number;
+  /** The directory that holds `claude-state.<origin>.json` and the sibling output dirs the call floor reads. Default: the parent of `outDir`. */
+  readonly ledgerDir?: string;
   readonly out?: (line: string) => void;
 };
 
@@ -516,7 +518,7 @@ export function parseMaxClaudeCalls(s: string): number {
   return n;
 }
 
-function checkCommon(opts: CallOptions): { effort: Effort; origin: Origin } {
+export function checkCommon(opts: CallOptions): { effort: Effort; origin: Origin } {
   if (!(PROPOSED_MODELS as readonly string[]).includes(opts.model)) refuse(`--model must be one of ${PROPOSED_MODELS.join(", ")}, got "${opts.model}"`);
   const effort = opts.effort ?? PROPOSE_EFFORT;
   if (!EFFORTS.includes(effort)) refuse(`--effort must be one of ${EFFORTS.join(", ")}, got "${String(effort)}"`);
@@ -624,10 +626,10 @@ function makeRedactor(env: Readonly<Record<string, string | undefined>>): (s: st
 
 // ───────────────────────────── one stored Claude call ─────────────────────────────
 
-type CallKind = "propose" | "pilot-text" | "pilot-image" | "pilot-json";
-type Attempt = { readonly n: number; readonly ok: true; readonly text: string } | { readonly n: number; readonly ok: false; readonly error: string };
+export type CallKind = "propose" | "pilot-text" | "pilot-image" | "pilot-json" | "optimize";
+export type Attempt = { readonly n: number; readonly ok: true; readonly text: string } | { readonly n: number; readonly ok: false; readonly error: string };
 
-type Session = {
+export type Session = {
   readonly client: ClaudeCli;
   readonly ledger: Ledger;
   readonly outDir: string;
@@ -640,7 +642,7 @@ type Session = {
   n: number;
 };
 
-type CallSpec = {
+export type CallSpec = {
   readonly kind: CallKind;
   readonly system: string;
   readonly prompt: string;
@@ -652,12 +654,12 @@ type CallSpec = {
 
 const callPath = (s: Session, n: number, ext: string) => join(s.outDir, "calls", `${n}.${ext}`);
 
-function writeMeta(s: Session, n: number, meta: Rec): void {
+export function writeMeta(s: Session, n: number, meta: Rec): void {
   writeFileSync(callPath(s, n, "meta.json"), s.redact(JSON.stringify(meta, null, 2)) + "\n");
 }
 
 /** One attempt: charge the ledger, store the prompt and a "started" meta BEFORE the call, then the response and the outcome. */
-async function attemptCall(s: Session, spec: CallSpec): Promise<Attempt & { readonly meta: Rec }> {
+export async function attemptCall(s: Session, spec: CallSpec): Promise<Attempt & { readonly meta: Rec }> {
   s.ledger.charge();
   const n = ++s.n;
   const meta: Rec = {
@@ -707,10 +709,10 @@ async function askValidated<T>(s: Session, spec: Omit<CallSpec, "attempt">, vali
   return refuse(`${spec.videoId === undefined ? "a call" : `clip ${spec.videoId}${spec.chunk ? ` call ${spec.chunk.index + 1} of ${spec.chunk.of}` : ""}`} failed twice and is not retried again; last reason: ${s.redact(reason).slice(0, 400)}`);
 }
 
-function openSession(opts: CallOptions, effort: Effort, origin: Origin, planned: number, dataDir: string | undefined): { session: Session; cleanup: () => void } {
+export function openSession(opts: CallOptions, effort: Effort, origin: Origin, planned: number, dataDir: string | undefined): { session: Session; cleanup: () => void } {
   const outDir = resolve(opts.outDir);
   checkOutDir(outDir, dataDir);
-  const labDir = dirname(outDir);
+  const labDir = opts.ledgerDir === undefined ? dirname(outDir) : resolve(opts.ledgerDir);
   const ledger = openLedger(labDir, origin, { ...(opts.maxClaudeCalls === undefined ? {} : { maxClaudeCalls: opts.maxClaudeCalls }), ...(opts.ceiling === undefined ? {} : { ceiling: opts.ceiling }) });
   ledger.assertPlan(planned);
   const env = opts.env ?? process.env;
