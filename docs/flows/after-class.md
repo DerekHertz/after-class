@@ -65,7 +65,7 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 - Window: about 45 s of new material (was about 30 s); context 120 s, time cap 8 min, at most 2 frames per window, no boundary revision on a next no/no, as before.
 - One added routing rule: new concept yes AND the intro/conclusion (lesson framing) question yes closes the chunk, regardless of the stopping point. Every other row of the table is unchanged.
 - Frame relevance and claim relevance are not in the product (lab only).
-- Evidence: held-out recall 4/5 at 1.118 false closes per 15 min; the false-close bar fails (see the experiment doc). Derek chose it so he can use the app and collect data.
+- Evidence: held-out recall 4/5 at 1.118 false closes per 15 min; the false-close bar fails (see the experiment doc). Derek, 2026-11-06: "it is way better for me to test as the user and collect data rather than sit in these experiments for days on end".
 
 ## C. Preparation and review invites (approved 2026-11-03)
 
