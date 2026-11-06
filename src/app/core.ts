@@ -380,6 +380,21 @@ export const ACTION_LABEL: Readonly<Record<ActionId, string>> = {
   end: "End review",
 };
 
+/**
+ * Ending a review cannot be undone, so the End button only asks; the act is sent by the confirm step alone.
+ * Pause and every other action stay one click.
+ */
+export type EndStep = "idle" | "confirming";
+export type EndEvent = "press_end" | "confirm" | "cancel";
+
+export function endFlow(step: EndStep, event: EndEvent): { readonly step: EndStep; readonly send: boolean } {
+  if (event === "press_end") return { step: "confirming", send: false };
+  if (event === "confirm") return { step, send: step === "confirming" };
+  return { step: "idle", send: false };
+}
+
+export const END_CONFIRM_TEXT = "End this review? You can't reopen it.";
+
 /** Acts that carry text. */
 export const NEEDS_TEXT: ReadonlySet<ActionId> = new Set(["answer", "dispute"]);
 

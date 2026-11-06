@@ -1113,3 +1113,53 @@ describe("begin (flow D: the tutor opens with a recall question)", () => {
     expect(x.reviews.view(x.reviewId).turns).toHaveLength(before);
   });
 });
+
+// ───────────────────────────── material used up by earlier reviews ─────────────────────────────
+
+describe("which earlier reviews use up material", () => {
+  const endingScript: Script = () => reply({ kind: "wrap_up" }, "Done.");
+  const end = (r: ReturnType<typeof startedRig>) => collect(r.reviews.turn(r.reviewId, randomId("turn"), { kind: "end" }));
+
+  test("an ended review with no answer, skip or don't-know frees its material for a new review", async () => {
+    const r = startedRig(endingScript);
+    expect(r.reviews.options(r.capture).kind).toBe("nothing_to_review");
+    await end(r);
+    expect(r.reviews.view(r.reviewId).state.phase).toBe("ended");
+    expect(r.reviews.view(r.reviewId).turns.some((t) => t.actor === "learner" && ["answer", "skip", "dont_know"].includes(t.act.kind))).toBe(false);
+
+    expect(r.reviews.options(r.capture)).toMatchObject({ kind: "ready", scope: { chunkRevisions: r.scope.chunkRevisions } });
+    const again = started(r.reviews.start(r.capture, "prepared_only", randomId("rvw")));
+    expect(again.scope.chunkRevisions).toEqual(r.scope.chunkRevisions);
+    // R7: the ended review's own frozen scope is unchanged.
+    expect(Material.canonical(r.reviews.view(r.reviewId).scope.material)).toEqual(Material.canonical(r.scope.material));
+  });
+
+  for (const act of [answer(), { kind: "skip" }, { kind: "dont_know" }] as LearnerAct[]) {
+    test(`an ended review where the learner gave a ${act.kind} still uses its material up`, async () => {
+      const r = startedRig(endingScript);
+      await collect(r.reviews.turn(r.reviewId, randomId("turn"), act));
+      expect(r.reviews.view(r.reviewId).state.phase).toBe("ended");
+      expect(r.reviews.options(r.capture).kind).toBe("nothing_to_review");
+    });
+  }
+
+  test("a review that is active or paused with no response still holds its material, so two cannot run at once", async () => {
+    const r = startedRig(endingScript);
+    expect(r.reviews.options(r.capture).kind).toBe("nothing_to_review");
+    await collect(r.reviews.turn(r.reviewId, randomId("turn"), { kind: "pause" }));
+    expect(r.reviews.view(r.reviewId).state.phase).toBe("paused");
+    expect(r.reviews.options(r.capture).kind).toBe("nothing_to_review");
+  });
+
+  test("freed material is offered together with new material, and list() names the reviews newest first", async () => {
+    const r = startedRig(endingScript);
+    await end(r);
+    r.world.close(1, 300, 600);
+    r.world.claim(2, 310, 320);
+    const opts = r.reviews.options(r.capture);
+    expect(opts.kind === "ready" && opts.scope.chunkRevisions.length).toBe(2);
+    r.clock.advance(1000);
+    const second = started(r.reviews.start(r.capture, "prepared_only", randomId("rvw")));
+    expect(r.reviews.list(r.capture).map((x) => x.reviewId)).toEqual([second.reviewId, r.reviewId]);
+  });
+});

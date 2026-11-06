@@ -173,6 +173,7 @@ const fixtures: Record<RouteName, Fixture> = {
     request: { captureId: cap, facts: [{ ...base(0), kind: "control", action: "start", reason: "user" }, { ...base(1), ...span }] },
     response: { ackedThroughSeq: 1, invite: { state: "none" }, capture: captureView, reviewAppUrl: "http://127.0.0.1:4317/app/" },
   },
+  lectures: { response: { lectures: [{ captureId: cap, sourceTitles: ["Locks"], videos: 1, watchedSeconds: 30, status: { state: "stopped" }, reviews: [{ reviewId: rvw, startedMs: 5, phase: "ended", saved: "unsaved", mainQuestions: 0 }] }] } },
   captureView: { params: { captureId: cap }, response: { capture: captureView, invite: { state: "invited", atChunk: crv } }, app: captureResponsez },
   answerInvite: { params: { captureId: cap }, request: { answer: "later" }, response: { state: "later" } },
   reviewOptions: { params: { captureId: cap }, response: { kind: "ready", scope: readyScope }, app: reviewOptionsz },
@@ -271,6 +272,7 @@ describe("both clients stay inside ROUTES", () => {
   const appCalls: Record<RouteName, ((api: AppApi) => Promise<unknown>) | null> = {
     ingest: null,
     retryPreparation: (a) => a.retryPreparation(cap),
+    lectures: (a) => a.lectures(),
     captureView: (a) => a.captureView(cap),
     answerInvite: (a) => a.answerInvite(cap, "later"),
     reviewOptions: (a) => a.reviewOptions(cap),

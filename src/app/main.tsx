@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AppearanceProvider } from "./appearance";
 import { SceneShell } from "./scene";
@@ -12,7 +11,8 @@ import { ReviewScreen } from "./review";
 import { browserSpeaker, browserSpeechInput } from "./speech";
 import { audioElementPlayer, chooseSpeaker, createElevenLabsSpeaker, synthPlayback } from "./voice";
 import { createIndexedDbUnsent } from "./unsent";
-import { Link, navigate, usePathname } from "./ui";
+import { Link, usePathname } from "./ui";
+import { HomeScreen } from "./home";
 
 /** The backend writes the pairing token into the served HTML; it is never in the URL or in storage. */
 function readToken(): string {
@@ -34,26 +34,7 @@ const speaker = chooseSpeaker(
 const speech = browserSpeechInput();
 const unsent = createIndexedDbUnsent();
 
-function Home() {
-  const [id, setId] = useState("");
-  const valid = parseId("cap", id.trim()) !== null;
-  return (
-    <main>
-      <h1>After Class</h1>
-      <p>Open a capture from the extension popup, or paste a capture id.</p>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (valid) navigate({ page: "capture", id: id.trim() });
-        }}
-      >
-        <input value={id} onChange={(e) => setId(e.target.value)} placeholder="cap_..." aria-label="Capture id" />{" "}
-        <button type="submit" disabled={!valid}>Open</button>
-      </form>
-      <p><Link to={{ page: "record", reviewId: null }}>Saved record</Link> · <Link to={{ page: "usage" }}>Usage</Link></p>
-    </main>
-  );
-}
+const Home = () => <HomeScreen api={api} />;
 
 function NotFound() {
   return (
