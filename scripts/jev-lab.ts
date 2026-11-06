@@ -9,6 +9,8 @@
  *                                      [--live --max-calls <n> [--keys <path>]]
  *   experiment 6 arm run: run ... --arm <name> --phase tune --arm-config <file>   (directory <lab>/exp6/<arm>/<origin>)
  *                         run ... --arm <name> --phase score                      (scores the arm's selected round)
+ *   experiment 7 arm run (opt-in, directory <lab>/exp7/<arm>/<origin>): run ... --exp7 --arm <name> --phase tune --exp7-config <file>
+ *                         the six wordings, lesson-framing routing and frame relevance over kept frames; run ... --exp7 --arm <name> --phase score
  *   bun run scripts/jev-lab.ts report  --results <file> --labels <file>...
  *   bun run scripts/jev-lab.ts rescore --results <file> --labels <file>... [--expect <report.txt>]
  *
@@ -26,8 +28,10 @@ import type { EvidenceStoreWithProbe } from "../src/backend/evidence";
 import { readKeys } from "../src/backend/main";
 import { createJevClient } from "../src/backend/providers/jev";
 import type { JevAnswer, JevClient, JevRequest } from "../src/backend/providers/jev";
-import { JEV_MODEL, boundaryTask, boundaryWordingVersion, frameChangeTask, frameChangeWordingVersion } from "../src/backend/providers/jev-tasks";
-import type { BoundaryInput, FrameChangeInput } from "../src/backend/providers/jev-tasks";
+import {
+  JEV_MODEL, boundaryTask, boundaryWordingVersion, frameChangeTask, frameChangeWordingVersion, frameRelevanceTask, frameRelevanceWordingVersion, lessonFramingTask, lessonFramingWordingVersion,
+} from "../src/backend/providers/jev-tasks";
+import type { BoundaryInput, FrameChangeInput, FrameRelevanceInput } from "../src/backend/providers/jev-tasks";
 import { ProviderError } from "../src/backend/providers/memo";
 import type { Task } from "../src/backend/providers/memo";
 import { SEGMENTATION_DEFAULTS } from "../src/backend/segmentation";
@@ -37,11 +41,13 @@ import type { BoundaryWindow, Evidence, Frame, Passage } from "../src/shared/dom
 import { canonicalJson, stableId } from "../src/shared/ids";
 import type { CaptureId, EvidenceId, MemoKey, SourceId } from "../src/shared/ids";
 import { Material } from "../src/shared/time";
-import { ARM_NAME, PRODUCT_QUESTIONS, boundaryQuestionsOf, frameQuestionsOf, isProductWording, segmentationInRange, selectRound, thresholdsInRange, validateArmConfig } from "./jev-lab-arm";
-import type { ArmConfig, ArmQuestions } from "./jev-lab-arm";
+import {
+  ARM_NAME, PRODUCT_QUESTIONS, boundaryQuestionsOf, exp7FrameRelevanceOf, exp7LessonFramingOf, frameQuestionsOf, isProductWording, segmentationInRange, selectRound, thresholdsInRange, validateArmConfig, validateExp7ArmConfig,
+} from "./jev-lab-arm";
+import type { ArmConfig, ArmQuestions, Exp7ArmConfig, Exp7Questions } from "./jev-lab-arm";
 import { scratchCopy } from "./probe-export";
 import {
-  BUDGET_CALLS, BUDGET_TEXT, DEFAULT_THRESHOLDS, MAX_TUNE_ROUNDS, buildReport, isInFirstWindow, lectureIdOfLabels, makeSplitter, parseResults, serializeResults, validateLabels, viewOf, watchedIn,
+  BUDGET_CALLS, BUDGET_TEXT, DEFAULT_THRESHOLDS, MAX_TUNE_ROUNDS, buildReport, isInFirstWindow, lectureIdOfLabels, makeSplitter, parseResults, serializeResults, validateLabels, verdictAt, viewOf, watchedIn,
 } from "./jev-lab-score";
 import type {
   CallRecord, ClipRecord, FrameRecord, Half, JudgmentRecord, LabelFile, LabelFileV2, LabelInfo, LectureRecord, Origin, ParsedResults, Phase, Place, Report, RunHeader, Splitter, Thresholds, WindowRecord,
@@ -315,14 +321,26 @@ const refusingJev: JevClient = {
 type Tasks = {
   readonly boundary: Task<BoundaryInput, unknown>;
   readonly frame: Task<FrameChangeInput, unknown>;
+  /** Experiment 7 only (opt-in): task 1 over the kept frames. */
+  readonly relevance: Task<FrameRelevanceInput, unknown> | null;
+  readonly relevanceVersion: string;
   /** The wording versions: "1" for the product's wording, `arm-<hash>` for any other, and part of every key. */
   readonly boundaryVersion: string;
   readonly frameVersion: string;
 };
-const tasksOver = (jev: JevClient, questions?: ArmQuestions): Tasks => {
+const tasksOver = (jev: JevClient, questions?: ArmQuestions, exp7?: Exp7Questions): Tasks => {
   const b = questions === undefined ? undefined : boundaryQuestionsOf(questions);
   const f = questions === undefined ? undefined : frameQuestionsOf(questions);
-  return { boundary: boundaryTask(jev, b), frame: frameChangeTask(jev, f), boundaryVersion: boundaryWordingVersion(b), frameVersion: frameChangeWordingVersion(f) };
+  if (exp7 !== undefined) {
+    // Experiment 7 (opt-in): the boundary request carries the lesson-framing question; its wording version is part of every key.
+    const lf = exp7LessonFramingOf(exp7);
+    const fr = exp7FrameRelevanceOf(exp7);
+    return {
+      boundary: lessonFramingTask(jev, lf, b), frame: frameChangeTask(jev, f), relevance: frameRelevanceTask(jev, fr),
+      boundaryVersion: `${boundaryWordingVersion(b)}+lf.${lessonFramingWordingVersion(lf)}`, frameVersion: frameChangeWordingVersion(f), relevanceVersion: frameRelevanceWordingVersion(fr),
+    };
+  }
+  return { boundary: boundaryTask(jev, b), frame: frameChangeTask(jev, f), relevance: null, relevanceVersion: "", boundaryVersion: boundaryWordingVersion(b), frameVersion: frameChangeWordingVersion(f) };
 };
 
 /**
@@ -331,6 +349,8 @@ const tasksOver = (jev: JevClient, questions?: ArmQuestions): Tasks => {
  */
 export const boundaryKey = (t: Tasks, i: BoundaryInput) => stableId("key", "jev-lab", "boundary", t.boundaryVersion, JEV_MODEL, t.boundary.canonicalInput(i));
 export const frameKey = (t: Tasks, i: FrameChangeInput) => stableId("key", "jev-lab", "frame_change", t.frameVersion, JEV_MODEL, t.frame.canonicalInput(i));
+
+export const relevanceKey = (t: Tasks, i: FrameRelevanceInput) => stableId("key", "jev-lab", "frame_relevance", t.relevanceVersion, JEV_MODEL, t.relevance!.canonicalInput(i));
 
 /** Deterministic stand-in used without --live: the answer is a hash of the request, so it is repeatable and means nothing. */
 export function deterministicFakeJev(): JevClient {
@@ -410,13 +430,15 @@ function writeState(dir: string, state: LabState): void {
  * calls across every arm directory under <lab>/exp6/, retries included, on top of the per-directory BUDGET_CALLS.
  */
 export const EXP6_BUDGET_CALLS = 5000;
+/** Experiment 7 (docs/experiments/07-jev-saves-the-tutor.md, Budget): a hard 4,000 Jev calls across every arm directory under <lab>/exp7/, tuning rounds included. */
+export const EXP7_BUDGET_CALLS = 4000;
 
 /**
  * Calls already used by the OTHER arm directories of this origin: each one's state.json counter under the same floors
  * `withFloors` applies, so deleting an arm's state.json cannot lower the total.
  */
-function exp6UsedByOthers(labDir: string, arm: string, origin: Origin): number {
-  const root = join(labDir, "exp6");
+function exp6UsedByOthers(labDir: string, arm: string, origin: Origin, family: "exp6" | "exp7" = "exp6"): number {
+  const root = join(labDir, family);
   if (!existsSync(root)) return 0;
   let used = 0;
   for (const name of readdirSync(root)) {
@@ -558,6 +580,12 @@ export type RunOptions = {
   /** Experiment 6: the arm's name (directory <lab>/exp6/<arm>/<origin>) and, for a tune round, its config file's content. */
   readonly arm?: string;
   readonly armConfig?: ArmConfig;
+  /**
+   * Experiment 7, opt-in (directory <lab>/exp7/<arm>/<origin>): the six wordings (a tune round's config) and the
+   * lessonFramingCloses routing. Without `exp7`, nothing about a run changes.
+   */
+  readonly exp7?: boolean;
+  readonly exp7Config?: Exp7ArmConfig;
   /** Offline seams. `client` is used only without --live; `fetch` reaches the real adapter only with --live. */
   readonly client?: JevClient;
   readonly fetch?: typeof fetch;
@@ -589,13 +617,19 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
   const arm = opts.arm;
   if (arm !== undefined && !ARM_NAME.test(arm)) refuse(`--arm must be letters, digits and dashes, got "${arm}"`);
   if (arm === undefined && opts.armConfig !== undefined) refuse("--arm-config needs --arm <name>");
-  const dir = arm === undefined ? join(opts.labDir, origin) : join(opts.labDir, "exp6", arm, origin);
+  const exp7 = opts.exp7 === true;
+  if (exp7 && arm === undefined) refuse("--exp7 needs --arm <name>");
+  if (!exp7 && opts.exp7Config !== undefined) refuse("an experiment 7 config needs --exp7");
+  if (exp7 && opts.armConfig !== undefined) refuse("an experiment 7 run takes --exp7-config, not an experiment 6 --arm-config");
+  const family = exp7 ? "exp7" : "exp6";
+  const budgetCalls = exp7 ? EXP7_BUDGET_CALLS : EXP6_BUDGET_CALLS;
+  const dir = arm === undefined ? join(opts.labDir, origin) : join(opts.labDir, family, arm, origin);
   let state = withFloors(dir, readState(dir), readCache(dir).size);
   const hasKnobs = opts.overrides !== undefined && Object.keys(opts.overrides).length > 0;
 
   if (opts.phase === "score") {
     if (hasKnobs) refuse(arm === undefined ? "a scored run takes no tuning flags: it uses the config of the last tune round" : "a scored run takes no tuning flags: it uses the arm's selected tune round");
-    if (opts.armConfig !== undefined) refuse("a scored run takes no --arm-config: it uses the arm's selected tune round");
+    if (opts.armConfig !== undefined || opts.exp7Config !== undefined) refuse("a scored run takes no --arm-config: it uses the arm's selected tune round");
     if (state.scoreStatus === "complete") refuse("the held-out half was already scored once; it is never scored again. Read it back with: rescore --results <file> --labels <files>");
     if (state.lastTune === null) refuse("no tune round has run yet; run a tune round first (a tune round with the defaults counts as one)");
     const unsigned = infos.filter((i) => i.labels.status !== "signed_off");
@@ -603,7 +637,7 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
   } else {
     if (arm !== undefined) {
       if (hasKnobs) refuse("an arm run takes its tuning from --arm-config, not from the per-knob tuning flags; nothing was sent");
-      if (opts.armConfig === undefined) refuse("an arm tune round needs --arm-config <file>; nothing was sent");
+      if (exp7 ? opts.exp7Config === undefined : opts.armConfig === undefined) refuse(`an arm tune round needs ${exp7 ? "--exp7-config" : "--arm-config"} <file>; nothing was sent`);
     }
     if (state.scoreStatus === "complete") refuse("the held-out half was already scored; tuning after seeing it would tune on the held-out data. Read it back with: rescore --results <file> --labels <files>");
     if (state.tuneRounds >= MAX_TUNE_ROUNDS) refuse(`${MAX_TUNE_ROUNDS} tuning rounds are already used; there is no fourth`);
@@ -627,11 +661,18 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
   }
 
   let questions: ArmQuestions = PRODUCT_QUESTIONS;
+  let exp7Questions: Exp7Questions | undefined;
   let selected: { readonly round: number; readonly reason: string } | null = null;
   let tuning: { readonly config: SegmentationConfig; readonly thresholds: Thresholds };
   if (opts.phase === "tune") {
     if (arm === undefined) tuning = resolveTuning(opts.overrides ?? {});
-    else {
+    else if (exp7) {
+      const checked = validateExp7ArmConfig(opts.exp7Config);
+      if (!checked.ok) return refuse(`the experiment 7 config is refused:\n${checked.errors.map((e) => `  ${e}`).join("\n")}`);
+      questions = checked.config.questions;
+      exp7Questions = checked.config.questions;
+      tuning = { config: checked.config.segmentation, thresholds: checked.config.thresholds };
+    } else {
       const checked = validateArmConfig(opts.armConfig);
       if (!checked.ok) return refuse(`the arm config is refused:\n${checked.errors.map((e) => `  ${e}`).join("\n")}`);
       questions = checked.config.questions;
@@ -647,7 +688,11 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
     selected = selectRound(stored.map((r) => ({ round: r.round, report: r.report })));
     const header = stored.find((r) => r.round === selected!.round)!.results.header;
     tuning = { config: header.config, thresholds: header.thresholds };
-    questions = header.questions ?? PRODUCT_QUESTIONS;
+    if (exp7) {
+      if (header.exp7 === undefined) refuse("the arm's selected tune round has no experiment 7 wordings; it is not an experiment 7 run");
+      exp7Questions = header.exp7.questions;
+      questions = header.exp7.questions;
+    } else questions = header.questions ?? PRODUCT_QUESTIONS;
   }
   const { config, thresholds } = tuning;
   const round = opts.phase === "tune" ? state.tuneRounds + 1 : 1;
@@ -661,8 +706,8 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
     async ask<Q extends string>(req: JevRequest<Q>, signal: AbortSignal) {
       if (state.callsUsed >= BUDGET_CALLS) refuse(`the lab's ${BUDGET_CALLS}-call budget is spent (${state.callsUsed} used); no further call is made`);
       if (arm !== undefined) {
-        const total = exp6UsedByOthers(opts.labDir, arm, origin) + state.callsUsed;
-        if (total >= EXP6_BUDGET_CALLS) refuse(`the experiment 6 budget of ${EXP6_BUDGET_CALLS} Jev calls across the arm directories is spent (${total} used); no further call is made`);
+        const total = exp6UsedByOthers(opts.labDir, arm, origin, family) + state.callsUsed;
+        if (total >= budgetCalls) refuse(`the experiment ${exp7 ? 7 : 6} budget of ${budgetCalls} Jev calls across the arm directories is spent (${total} used); no further call is made`);
       }
       if (opts.maxCalls !== undefined && runCalls >= opts.maxCalls) refuse(`--max-calls ${opts.maxCalls} reached; aborting before the next call`);
       state = { ...state, callsUsed: state.callsUsed + 1 };
@@ -684,7 +729,7 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
       }
     },
   };
-  const tasks = tasksOver(jev, arm === undefined ? undefined : questions);
+  const tasks = tasksOver(jev, arm === undefined ? undefined : questions, exp7Questions);
 
   const cap = openCapture(opts.dataDir);
   try {
@@ -694,19 +739,31 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
     assertPhaseHalf(opts.phase, work.flatMap((l) => [...l.windows, ...l.frames]));
 
     const cache = readCache(dir);
-    const subjects = work.flatMap((l) => [
-      ...l.windows.map((w) => ({ lecture: l, videoId: w.record.videoId!, purpose: "boundary" as const, subject: w.record.id, key: boundaryKey(tasks, w.input), run: () => judgeBoundary(w.input) })),
-      ...l.frames.flatMap((f) => (f.input === null ? [] : [{ lecture: l, videoId: f.record.videoId!, purpose: "frame_change" as const, subject: f.record.id, key: frameKey(tasks, f.input), run: () => judgeFrame(f.input!) }])),
+    type Attempted = Awaited<ReturnType<typeof attempt>>;
+    type Subject = {
+      readonly lecture: (typeof work)[number];
+      readonly videoId: string;
+      readonly purpose: JudgmentRecord["purpose"];
+      readonly subject: string;
+      readonly key: string;
+      readonly version: string;
+      readonly run: () => Promise<Attempted>;
+    };
+    const subjects: Subject[] = work.flatMap((l) => [
+      ...l.windows.map((w): Subject => ({ lecture: l, videoId: w.record.videoId!, purpose: "boundary", subject: w.record.id, key: boundaryKey(tasks, w.input), version: tasks.boundaryVersion, run: () => judgeBoundary(w.input) })),
+      ...l.frames.flatMap((f): Subject[] => (f.input === null ? [] : [{ lecture: l, videoId: f.record.videoId!, purpose: "frame_change", subject: f.record.id, key: frameKey(tasks, f.input), version: tasks.frameVersion, run: () => judgeFrame(f.input!) }])),
     ]);
-    const needed = new Set(subjects.filter((s) => !cache.has(s.key)).map((s) => s.key)).size;
-    if (opts.live) {
+    // Refuses before any call when a live run's new calls would pass a cap (the same checks for every stage).
+    const preflight = (needed: number) => {
+      if (!opts.live) return;
       if (needed > opts.maxCalls!) refuse(`this run needs ${needed} new calls and --max-calls is ${opts.maxCalls}; no call was made`);
       if (state.callsUsed + needed > BUDGET_CALLS) refuse(`this run needs ${needed} new calls and ${state.callsUsed} of ${BUDGET_CALLS} are used; no call was made`);
       if (arm !== undefined) {
-        const used = exp6UsedByOthers(opts.labDir, arm, origin) + state.callsUsed;
-        if (used + needed > EXP6_BUDGET_CALLS) refuse(`this run needs ${needed} new calls and ${used} of ${EXP6_BUDGET_CALLS} are used across the experiment 6 arm directories; no call was made`);
+        const used = exp6UsedByOthers(opts.labDir, arm, origin, family) + state.callsUsed;
+        if (used + needed > budgetCalls) refuse(`this run needs ${needed} new calls and ${used} of ${budgetCalls} are used across the experiment ${exp7 ? 7 : 6} arm directories; no call was made`);
       }
-    }
+    };
+    preflight(new Set(subjects.filter((s) => !cache.has(s.key)).map((s) => s.key)).size);
 
     if (opts.phase === "score") {
       state = { ...state, scoreStatus: "in_progress" };
@@ -736,23 +793,41 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
 
     const judgments: JudgmentRecord[] = [];
     let newCalls = 0;
-    for (const s of subjects) {
-      const hit = cache.get(s.key);
-      if (hit) {
-        judgments.push({ ...hit, lectureId: s.lecture.record.lectureId, videoId: s.videoId, reused: true });
-        continue;
+    const judgeAll = async (list: readonly Subject[]) => {
+      for (const s of list) {
+        const hit = cache.get(s.key);
+        if (hit) {
+          judgments.push({ ...hit, lectureId: s.lecture.record.lectureId, videoId: s.videoId, reused: true });
+          continue;
+        }
+        const done = await s.run();
+        const record: JudgmentRecord = {
+          t: "judgment", lectureId: s.lecture.record.lectureId, videoId: s.videoId, purpose: s.purpose, subject: s.subject, key: s.key, model: JEV_MODEL,
+          questionVersion: s.version, reused: false, calls: done.calls, p: done.p, error: done.error,
+        };
+        newCalls += done.calls.length;
+        if (record.error === null) {
+          appendCache(dir, record);
+          cache.set(s.key, record);
+        }
+        judgments.push(record);
       }
-      const done = await s.run();
-      const record: JudgmentRecord = {
-        t: "judgment", lectureId: s.lecture.record.lectureId, videoId: s.videoId, purpose: s.purpose, subject: s.subject, key: s.key, model: JEV_MODEL,
-        questionVersion: s.purpose === "boundary" ? tasks.boundaryVersion : tasks.frameVersion, reused: false, calls: done.calls, p: done.p, error: done.error,
-      };
-      newCalls += done.calls.length;
-      if (record.error === null) {
-        appendCache(dir, record);
-        cache.set(s.key, record);
-      }
-      judgments.push(record);
+    };
+    await judgeAll(subjects);
+
+    if (exp7 && tasks.relevance !== null) {
+      // Task 1 over the frames dedupe kept: a frame_change verdict of "no" drops a frame (framesKept); the first frame of a
+      // clip has no before-frame input in the lab, is not asked, and counts as kept (uncertain keeps).
+      const droppedBy = new Map(judgments.filter((j) => j.purpose === "frame_change" && j.error === null).map((j) => [j.subject, verdictAt(j.p.teaching_change ?? null, thresholds)] as const));
+      const second: Subject[] = work.flatMap((l) =>
+        l.frames.flatMap((f): Subject[] => {
+          if (f.input === null || droppedBy.get(f.record.id) === "no") return [];
+          const input: FrameRelevanceInput = { frame: f.input.after, nearbyPassages: f.input.nearbyPassages };
+          return [{ lecture: l, videoId: f.record.videoId!, purpose: "frame_relevance", subject: f.record.id, key: relevanceKey(tasks, input), version: tasks.relevanceVersion, run: () => attempt(tasks.relevance!, input) }];
+        }),
+      );
+      preflight(new Set(second.filter((s) => !cache.has(s.key)).map((s) => s.key)).size);
+      await judgeAll(second);
     }
 
     const failed = judgments.filter((j) => j.error !== null);
@@ -766,7 +841,8 @@ async function runGuarded(opts: RunOptions, hold: (key: string) => void, redact:
     const header: RunHeader = {
       t: "header", version: 1, runId, phase: opts.phase, round, origin, model: JEV_MODEL, config, thresholds,
       ...(arm === undefined ? {} : { arm }),
-      ...(arm !== undefined && !isProductWording(questions) ? { questions } : {}),
+      ...(arm !== undefined && !exp7 && !isProductWording(questions) ? { questions } : {}),
+      ...(exp7Questions === undefined ? {} : { exp7: { questions: exp7Questions, lessonFramingCloses: true as const } }),
       ...(selected === null ? {} : { selectedRound: selected.round, selectionReason: selected.reason }),
     };
     const results: ParsedResults = {
@@ -944,7 +1020,7 @@ async function cli(argv: readonly string[]): Promise<number> {
       keys: { type: "string" }, origin: { type: "string", default: "fixture" }, results: { type: "string" }, expect: { type: "string" },
       "window-new-s": { type: "string" }, "context-s": { type: "string" }, "time-cap-s": { type: "string" }, "max-frames-per-window": { type: "string" },
       "revise-on-next-no-no": { type: "string" }, "yes-at": { type: "string" }, "no-at": { type: "string" },
-      arm: { type: "string" }, "arm-config": { type: "string" },
+      arm: { type: "string" }, "arm-config": { type: "string" }, exp7: { type: "boolean" }, "exp7-config": { type: "string" },
     },
   });
   if (values.origin !== "fixture" && values.origin !== "live") return usage("--origin must be fixture or live");
@@ -962,6 +1038,19 @@ async function cli(argv: readonly string[]): Promise<number> {
     }
     const checked = validateArmConfig(json);
     if (!checked.ok) return refuse(`${values["arm-config"]} is not a valid arm config:\n${checked.errors.map((e) => `  ${e}`).join("\n")}`);
+    return checked.config;
+  };
+
+  const readExp7Config = (): Exp7ArmConfig | undefined => {
+    if (values["exp7-config"] === undefined) return undefined;
+    let json: unknown;
+    try {
+      json = JSON.parse(readFileSync(resolve(values["exp7-config"]), "utf8"));
+    } catch {
+      return refuse(`cannot read ${values["exp7-config"]} as JSON`);
+    }
+    const checked = validateExp7ArmConfig(json);
+    if (!checked.ok) return refuse(`${values["exp7-config"]} is not a valid experiment 7 config:\n${checked.errors.map((e) => `  ${e}`).join("\n")}`);
     return checked.config;
   };
 
@@ -1004,9 +1093,11 @@ async function cli(argv: readonly string[]): Promise<number> {
       };
       const maxCalls = num("max-calls", values["max-calls"]);
       const armConfig = readArmConfig();
+      const exp7Config = readExp7Config();
       const done = await runLab({
         dataDir: resolve(values.data), labDir: resolve(values.lab), labelFiles: labels, phase: values.phase, live: values.live === true, overrides,
         ...(values.arm !== undefined ? { arm: values.arm } : {}), ...(armConfig ? { armConfig } : {}),
+        ...(values.exp7 === true ? { exp7: true } : {}), ...(exp7Config ? { exp7Config } : {}),
         ...(maxCalls !== undefined ? { maxCalls } : {}), ...(values.keys ? { keysPath: resolve(values.keys) } : {}), out: (l) => console.log(l),
       });
       console.log(`results ${done.resultsPath}\nreport ${done.reportPath}`);
