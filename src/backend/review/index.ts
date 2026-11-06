@@ -21,7 +21,7 @@ import { Material } from "../../shared/time";
 import { asSeq } from "../db";
 import type { Db } from "../db";
 import type { Lookup, Memo } from "../providers/memo";
-import { allowedMoves, parseMoveHeader, reviewState, validateMove, waitsForLearner } from "./tutor";
+import { MAX_MAIN_QUESTIONS, allowedMoves, parseMoveHeader, reviewState, validateMove, tutorOwesMove, waitsForLearner } from "./tutor";
 import type { TutorInput, TutorOutput, WrapUpInput, WrapUpOutput } from "./tutor";
 import {
   corrections as deriveCorrections, decodeScope, encodeScope, foldInvites, freezeScope, takeSentences, unreviewed, usableInScope,
@@ -111,6 +111,7 @@ type Settled = { readonly ok: true; readonly lookup: Lookup<TutorOutput> } | { r
 
 const CLOSE_THREAD_LINE = "Let's leave that question there and move on.";
 const WRAP_UP_LINE = "Let's wrap up here.";
+const NOTHING_TO_ASK_LINE = "Every statement I prepared for this part was withdrawn after checking against the lecture, so there's nothing left I can fairly ask you about. Let's wrap up here.";
 /** One request may hold several tutor moves (a correction, then the next question); never more than this, so it cannot loop. */
 export const MAX_MOVES_PER_TURN = 4;
 const NON_TERMINAL = new Set(["awaiting_check", "awaiting_revision", "awaiting_recheck"]);
@@ -313,7 +314,8 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     const review = stored(reviewId);
     if (!review) throw new Error(`unknown review ${reviewId}`);
     const turns = loadTurns(reviewId);
-    return { reviewId, captureId: review.captureId, scope: review.scope, state: stateOf(reviewId, review, turns).state, turns, observations: [], saved: "unsaved" };
+    const { state } = stateOf(reviewId, review, turns);
+    return { reviewId, captureId: review.captureId, scope: review.scope, state, turns, owesMove: tutorOwesMove(turns, state.phase), observations: [], saved: "unsaved" };
   }
 
   function list(captureId: CaptureId) {
@@ -362,7 +364,10 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     }
     const thread = input.state.openThread;
     if (input.allowed.includes("close_thread") && thread) return { move: { kind: "close_thread", threadId: thread }, say: CLOSE_THREAD_LINE };
-    if (input.allowed.includes("wrap_up")) return { move: { kind: "wrap_up" }, say: WRAP_UP_LINE };
+    if (input.allowed.includes("wrap_up")) {
+      const noneLeft = input.claims.length === 0 && input.state.openThread === null && input.state.mainQuestions < MAX_MAIN_QUESTIONS && !input.state.wrapUpRequested;
+      return { move: { kind: "wrap_up" }, say: noneLeft ? NOTHING_TO_ASK_LINE : WRAP_UP_LINE };
+    }
     return null;
   }
 

@@ -157,6 +157,24 @@ export function waitsForLearner(move: TutorMove): boolean {
 }
 
 /**
+ * Whether the tutor still owes a move: the review is active and the last tutor move asked nothing
+ * (a disclosure or a closed thread) with no learner turn since, so a request stopped part-way.
+ * The soft-target prompt counts as the tutor's wait for the learner.
+ */
+export function tutorOwesMove(turns: readonly Turn[], phase: ReviewState["phase"]): boolean {
+  if (phase !== "active") return false;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const t = turns[i]!;
+    if (t.actor === "code") {
+      if (t.notice.kind === "soft_target_reached") return false;
+      continue;
+    }
+    return t.actor === "tutor" && !waitsForLearner(t.move);
+  }
+  return false;
+}
+
+/**
  * Flow D's TLC fix for R3, "A claim being rechecked is out of assessment until
  * it passes again; an open question on it pauses and the tutor says why."
  * The open thread's claims that are not usable now; any means the thread is paused.
@@ -200,8 +218,8 @@ export function allowedMoves(state: ReviewState, ctx: Pick<TutorInput, "turns" |
   if (state.openThread !== null) {
     s.add("ask_followup").add("diagnose").add("close_thread");
     if (state.detour.kind === "none") s.add("propose_detour");
-  } else if (state.mainQuestions < MAX_MAIN_QUESTIONS) s.add("ask_main");
-  else s.add("wrap_up");
+  } else if (state.mainQuestions < MAX_MAIN_QUESTIONS && ctx.claims.length > 0) s.add("ask_main");
+  else s.add("wrap_up"); // also when no claim is usable: R3 forbids asking on one, so the review ends honestly
   if (state.detour.kind === "active") s.add("detour_step");
   return s;
 }

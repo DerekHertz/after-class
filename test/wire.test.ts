@@ -139,6 +139,7 @@ const reviewJson = {
     { id: stableId("turn", "tutor1"), reviewId: rvw, seq: 1, atMs: 1000, threadId: thr, actor: "tutor", move: { kind: "ask_main", threadId: thr, claimIds: [clm] }, say: "What does a clock give you?" },
     { id: trn, reviewId: rvw, seq: 2, atMs: 2000, threadId: thr, actor: "learner", act: { kind: "answer", text: "An ordering.", modality: "speech" } },
   ],
+  owesMove: false,
   observations: [observationJson],
   saved: "unsaved",
 };

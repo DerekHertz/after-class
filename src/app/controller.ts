@@ -21,7 +21,7 @@ import { randomId } from "../shared/ids";
 import { learnerAct } from "../shared/wire";
 import { ApiError } from "./api";
 import type { Api } from "./api";
-import { reduceLive, startLive, unansweredLearnerTurn } from "./core";
+import { owedLearnerTurn, reduceLive, startLive, unansweredLearnerTurn } from "./core";
 import type { Live } from "./core";
 import type { Speaker } from "./speech";
 import type { UnsentStore, UnsentTurn } from "./unsent";
@@ -47,7 +47,7 @@ export type ReviewController = {
   load(): Promise<void>;
   /** True when the act was accepted and sent; false when it was refused (invalid, or an earlier turn is unsent) or ignored. */
   send(act: LearnerAct): Promise<boolean>;
-  /** Resend the oldest unsent turn, or the stored turn the tutor never answered. Same id as before. */
+  /** Resend the oldest unsent turn, the stored turn the tutor never answered, or the one whose chain stopped part-way. Same id as before. */
   retryTurn(): Promise<void>;
   /**
    * Drop every unsent turn and the failure it left. The backend never stored them, so nothing is counted for them
@@ -85,6 +85,24 @@ export function beginOnce(controller: Pick<ReviewController, "send">): (state: S
     if (sent || !needsBegin(state)) return;
     sent = true;
     void controller.send({ kind: "begin" });
+  };
+}
+
+/**
+ * True for a loaded, active review whose tutor owes a move (a request stopped after a disclosure or a closed thread),
+ * with nothing unsent and nothing streaming.
+ */
+export function needsResume(state: SessionState): boolean {
+  return state.view !== null && owedLearnerTurn(state.view) !== null && state.unsent.length === 0 && state.live === null;
+}
+
+/** Resends the learner turn the tutor still owes a move for, at most once per call of this factory. A second failure leaves the Retry button. */
+export function resumeOnce(controller: Pick<ReviewController, "retryTurn">): (state: SessionState) => void {
+  let sent = false;
+  return (state) => {
+    if (sent || !needsResume(state)) return;
+    sent = true;
+    void controller.retryTurn();
   };
 }
 
@@ -207,6 +225,8 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
         if (oldest) return runTurn(oldest.turnId, oldest.act);
         const waiting = state.view ? unansweredLearnerTurn(state.view.turns) : null;
         if (waiting) return runTurn(waiting.id, waiting.act);
+        const owed = state.view ? owedLearnerTurn(state.view) : null;
+        if (owed) return runTurn(owed.id, owed.act);
       }),
     discardUnsent: async () => {
       await exclusive(async () => {
