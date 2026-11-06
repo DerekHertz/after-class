@@ -215,11 +215,16 @@ export type Line = {
   readonly evidenceIds: readonly EvidenceId[];
 };
 
-/** A review opens on the conversation, for every appearance. The room view stays one click away ("Back to room"). */
-export const INITIAL_STUDY_OPEN = true;
+/**
+ * The conversation is always on the page, under the scene, for every appearance; nothing hides it.
+ * The source panel is a side panel that starts closed, opens when the learner asks or a reply cites evidence,
+ * and closing it changes nothing else.
+ */
+export const INITIAL_SOURCE_OPEN = false;
 
-export function isRoomLanding(studyOpen: boolean, detail: string): boolean {
-  return !studyOpen && detail === "hd-pixel";
+/** What the page shows after the source panel is toggled. The conversation is never part of the choice. */
+export function reviewLayout(sourceOpen: boolean): { readonly conversationVisible: true; readonly sourceVisible: boolean } {
+  return { conversationVisible: true, sourceVisible: sourceOpen };
 }
 
 export function learnerActText(act: LearnerAct): string {
@@ -332,8 +337,9 @@ export function reduceLive(live: Live, event: TurnEvent): Live {
   switch (event.type) {
     case "learner_turn_stored": return { ...live, stored: true };
     case "move": return { ...live, move: event.move };
-    case "say_delta": return { ...live, deltaText: live.deltaText + event.text };
-    case "sentence": return { ...live, sentences: [...live.sentences, event.text] };
+    // A request can hold several tutor moves; a move event closes one, so words after it belong to the next.
+    case "say_delta": return live.move !== null ? { ...live, move: null, deltaText: event.text, sentences: [] } : { ...live, deltaText: live.deltaText + event.text };
+    case "sentence": return live.move !== null ? { ...live, move: null, deltaText: "", sentences: [event.text] } : { ...live, sentences: [...live.sentences, event.text] };
     case "turn_complete": return { ...live, status: "complete" };
     case "turn_failed": return { ...live, status: "failed", error: event.error, retryable: event.retryable };
   }
@@ -341,6 +347,40 @@ export function reduceLive(live: Live, event: TurnEvent): Live {
 
 /** Deltas show the text as it arrives; a replayed turn may carry sentences only. */
 export const liveText = (live: Live): string => (live.deltaText !== "" ? live.deltaText : live.sentences.join(" "));
+
+// ───────────────────────────── Voice answers ────────────────────────────────
+
+/** The last thing speech recognition heard, and whether the recogniser called it final. */
+export type Heard = { readonly text: string; readonly final: boolean };
+
+/**
+ * A spoken answer sends itself when recognition ends with a final, non-empty transcript and an answer is allowed.
+ * An interim-only or empty transcript is never sent: it stays in the box to edit.
+ */
+export function shouldAutoSendSpeech(heard: Heard | null, answerAllowed: boolean): boolean {
+  return heard !== null && heard.final && heard.text.trim() !== "" && answerAllowed;
+}
+
+export type TurnStatus =
+  | { readonly kind: "idle"; readonly text: null }
+  | { readonly kind: "listening"; readonly text: string; readonly transcript: string }
+  | { readonly kind: "sending"; readonly text: string }
+  | { readonly kind: "thinking"; readonly text: string }
+  | { readonly kind: "replying"; readonly text: string };
+
+/**
+ * What the composer area says while a turn is under way: listening (with what was heard so far), sending the
+ * learner's turn, the tutor thinking until its first words, then the tutor replying (its words show in the conversation).
+ */
+export function turnStatus(input: { readonly listening: boolean; readonly transcript: string; readonly submitting: boolean; readonly live: Live | null }): TurnStatus {
+  const { live } = input;
+  if (input.listening) return { kind: "listening", text: "Listening… speak your answer", transcript: input.transcript };
+  if (input.submitting || (live !== null && live.status === "streaming" && !live.stored)) return { kind: "sending", text: "Sending…" };
+  if (live !== null && live.status === "streaming") {
+    return liveText(live) === "" ? { kind: "thinking", text: "Tutor is thinking…" } : { kind: "replying", text: "Tutor is replying…" };
+  }
+  return { kind: "idle", text: null };
+}
 
 // ───────────────────────────── Actions ──────────────────────────────────────
 

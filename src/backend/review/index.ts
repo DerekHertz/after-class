@@ -21,7 +21,7 @@ import { Material } from "../../shared/time";
 import { asSeq } from "../db";
 import type { Db } from "../db";
 import type { Lookup, Memo } from "../providers/memo";
-import { allowedMoves, parseMoveHeader, reviewState, validateMove } from "./tutor";
+import { allowedMoves, parseMoveHeader, reviewState, validateMove, waitsForLearner } from "./tutor";
 import type { TutorInput, TutorOutput, WrapUpInput, WrapUpOutput } from "./tutor";
 import {
   corrections as deriveCorrections, decodeScope, encodeScope, foldInvites, freezeScope, takeSentences, unreviewed, usableInScope,
@@ -111,6 +111,8 @@ type Settled = { readonly ok: true; readonly lookup: Lookup<TutorOutput> } | { r
 
 const CLOSE_THREAD_LINE = "Let's leave that question there and move on.";
 const WRAP_UP_LINE = "Let's wrap up here.";
+/** One request may hold several tutor moves (a correction, then the next question); never more than this, so it cannot loop. */
+export const MAX_MOVES_PER_TURN = 4;
 const NON_TERMINAL = new Set(["awaiting_check", "awaiting_revision", "awaiting_recheck"]);
 
 export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions = {}): Reviews {
@@ -321,6 +323,8 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
   // ───────────────────────────── turns ─────────────────────────────
 
   const tutorTurnId = (reviewId: ReviewId, turnId: TurnId) => stableId("turn", reviewId, turnId, "tutor");
+  /** The nth tutor move of one request; the first keeps the id a single-move turn always had. */
+  const moveTurnId = (reviewId: ReviewId, turnId: TurnId, n: number) => (n === 0 ? tutorTurnId(reviewId, turnId) : stableId("turn", reviewId, turnId, "tutor", n));
   const codeTurnId = (reviewId: ReviewId, cause: string) => stableId("turn", reviewId, cause, "code");
   const threadOf = (move: TutorMove): ThreadId | null => ("threadId" in move ? move.threadId : null);
 
@@ -488,8 +492,7 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
    * R3: "A claim can be used to judge my answers only if it passed the evidence check."
    * Returns the stored turn, or why the move went stale.
    */
-  function commit(reviewId: ReviewId, turnId: TurnId, review: Stored, input: TutorInput, move: TutorMove, say: string) {
-    const outId = tutorTurnId(reviewId, turnId);
+  function commit(reviewId: ReviewId, turnId: TurnId, outId: TurnId, review: Stored, input: TutorInput, move: TutorMove, say: string) {
     return db.tx((): { readonly ok: true; readonly move: TutorMove; readonly say: string } | { readonly ok: false; readonly why: string } => {
       const already = loadTurns(reviewId).find((t) => t.id === outId);
       if (already?.actor === "tutor") return { ok: true, move: already.move, say: already.say };
@@ -529,59 +532,78 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     }
     yield { type: "learner_turn_stored", turnId };
 
-    const outId = tutorTurnId(reviewId, turnId);
-    const reply = loadTurns(reviewId).find((t) => t.id === outId);
-    if (reply?.actor === "tutor") {
+    // Replay what an earlier attempt of this request already stored, in order.
+    let n = 0;
+    let last: TutorMove | null = null;
+    for (;; n++) {
+      const reply = loadTurns(reviewId).find((t) => t.id === moveTurnId(reviewId, turnId, n));
+      if (reply?.actor !== "tutor") break;
       yield* spoken(reply.say);
-      yield { type: "move", turnId: outId, move: reply.move };
-      yield { type: "turn_complete", turnId: outId };
+      yield { type: "move", turnId: reply.id, move: reply.move };
+      last = reply.move;
+    }
+    const completeId = () => (n === 0 ? turnId : moveTurnId(reviewId, turnId, n - 1));
+    const softTargetUp = () => {
+      const lastTurn = loadTurns(reviewId).at(-1);
+      return lastTurn?.actor === "code" && lastTurn.notice.kind === "soft_target_reached";
+    };
+    /** The request stops once a move waits for the learner (or the soft-target prompt is up). */
+    const stops = (move: TutorMove) => waitsForLearner(move) || softTargetUp();
+    if (last && stops(last)) {
+      yield { type: "turn_complete", turnId: completeId() };
       return;
     }
 
-    // Two model attempts (the second carries the repair note), then code's own move.
-    let input = tutorInput(reviewId, review, null);
-    const asOf = deps.nextSeq();
-    let replayed = true;
-    for (let n = 0; input && n < 2; n++) {
-      const outcome = yield* attempt(input, asOf);
-      if (outcome.kind === "failed") {
-        yield { type: "turn_failed", error: outcome.error, retryable: true };
-        return;
-      }
-      let why: string;
-      if (outcome.kind === "spoken") {
-        const done = commit(reviewId, turnId, review, input, outcome.move, outcome.say);
-        if (done.ok) {
-          yield { type: "move", turnId: outId, move: done.move };
-          yield { type: "turn_complete", turnId: outId };
+    let replayed = n === 0;
+    while (n < MAX_MOVES_PER_TURN) {
+      let input = tutorInput(reviewId, review, null);
+      if (!input) break;
+      const outId = moveTurnId(reviewId, turnId, n);
+      const asOf = deps.nextSeq();
+      let stored: { readonly move: TutorMove; readonly say: string } | null = null;
+      // Two model attempts (the second carries the repair note), then code's own move.
+      for (let k = 0; input && k < 2; k++) {
+        const outcome = yield* attempt(input, asOf);
+        if (outcome.kind === "failed") {
+          yield { type: "turn_failed", error: outcome.error, retryable: true };
           return;
         }
-        why = done.why;
-        replayed = false;
-      } else {
-        why = outcome.why;
-        replayed &&= outcome.stored;
+        let why: string;
+        if (outcome.kind === "spoken") {
+          const done = commit(reviewId, turnId, outId, review, input, outcome.move, outcome.say);
+          if (done.ok) {
+            yield { type: "move", turnId: outId, move: done.move };
+            stored = done;
+            break;
+          }
+          why = done.why;
+          replayed = false;
+        } else {
+          why = outcome.why;
+          replayed &&= outcome.stored;
+        }
+        input = tutorInput(reviewId, review, why);
       }
-      input = tutorInput(reviewId, review, why);
+      if (!stored) {
+        if (!input) break;
+        const fallback = codeMove(input, review);
+        if (!fallback) {
+          yield { type: "turn_failed", error: `no valid move: ${input.repairNote}`, retryable: !replayed };
+          return;
+        }
+        const done = commit(reviewId, turnId, outId, review, input, fallback.move, fallback.say);
+        if (!done.ok) {
+          yield { type: "turn_failed", error: `no valid move: ${done.why}`, retryable: true };
+          return;
+        }
+        yield* spoken(done.say);
+        yield { type: "move", turnId: outId, move: done.move };
+        stored = done;
+      }
+      n++;
+      if (stops(stored.move)) break;
     }
-    if (!input) {
-      yield { type: "turn_complete", turnId };
-      return;
-    }
-
-    const fallback = codeMove(input, review);
-    if (!fallback) {
-      yield { type: "turn_failed", error: `no valid move: ${input.repairNote}`, retryable: !replayed };
-      return;
-    }
-    const done = commit(reviewId, turnId, review, input, fallback.move, fallback.say);
-    if (!done.ok) {
-      yield { type: "turn_failed", error: `no valid move: ${done.why}`, retryable: true };
-      return;
-    }
-    yield* spoken(done.say);
-    yield { type: "move", turnId: outId, move: done.move };
-    yield { type: "turn_complete", turnId: outId };
+    yield { type: "turn_complete", turnId: completeId() };
   }
 
   return { invite, answerInvite, options, start, turn, view, list };

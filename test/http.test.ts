@@ -985,12 +985,12 @@ describe("POST /reviews/:id/turns", () => {
     );
     expect(first.events.at(-1)?.type).toBe("turn_complete");
     expect(moveOf(first.events)).toBe("disclose_correction");
-    expect(rig.model.calls).toHaveLength(2);
+    expect(rig.model.calls).toHaveLength(3);
 
     const { body } = await rig.view(started.reviewId);
     const turns = body.turns as { actor: string; move?: { kind: string; claimIds?: string[] }; notice?: { kind: string } }[];
     const tutors = turns.filter((t) => t.actor === "tutor");
-    expect(tutors.map((t) => t.move?.kind)).toEqual(["disclose_correction"]);
+    expect(tutors.map((t) => t.move?.kind)).toEqual(["disclose_correction", "ask_main"]);
     expect(tutors.some((t) => t.move?.claimIds?.includes(a))).toBe(false);
     expect(turns.some((t) => t.actor === "code" && t.notice?.kind === "correction_pending")).toBe(true);
   });
@@ -1130,8 +1130,8 @@ describe("GET /reviews/:id, POST /reviews/:id/save and the replay review", () =>
       expect(t.events.at(-1)?.type).toBe("turn_complete");
       moves.push(moveOf(t.events));
     }
-    expect(moves).toEqual(["ask_main", "ask_followup", "close_thread", "ask_main", "wrap_up"]);
-    expect(rig.model.calls).toHaveLength(5);
+    expect(moves).toEqual(["ask_main", "ask_followup", "close_thread", "ask_followup", "wrap_up"]);
+    expect(rig.model.calls).toHaveLength(6);
 
     const before = await rig.view(reviewId);
     expect(before.status).toBe(200);
@@ -1139,7 +1139,7 @@ describe("GET /reviews/:id, POST /reviews/:id/save and the replay review", () =>
     expect(before.body).toMatchObject({ reviewId, captureId: rig.capture, saved: "unsaved", observations: [], state: { phase: "ended", mainQuestions: 2 } });
     expect(before.body.scope.material).toEqual([[SRC, [[0, 300]]]]);
     expect(before.body.turns.filter((t: { actor: string }) => t.actor === "learner")).toHaveLength(5);
-    expect(before.body.turns.filter((t: { actor: string }) => t.actor === "tutor")).toHaveLength(5);
+    expect(before.body.turns.filter((t: { actor: string }) => t.actor === "tutor")).toHaveLength(6);
 
     const save = await post(rig.base, `/reviews/${reviewId}/save`, {});
     expect(save.status).toBe(200);

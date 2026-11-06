@@ -10,10 +10,10 @@ import { reactToCompanion } from "./companion-reaction";
 import { beginOnce, createReviewController } from "./controller";
 import type { SessionState } from "./controller";
 import {
-  ACTION_LABEL, END_CONFIRM_TEXT, INITIAL_STUDY_OPEN, endFlow, isRoomLanding, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
+  ACTION_LABEL, END_CONFIRM_TEXT, INITIAL_SOURCE_OPEN, endFlow, shouldAutoSendSpeech, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
   softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer,
 } from "./core";
-import type { ActionId, EndEvent, EndStep, Line, SourceSelection } from "./core";
+import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, TurnStatus } from "./core";
 import type { Speaker, SpeechInput } from "./speech";
 import type { UnsentStore } from "./unsent";
 import { BundleInspector, ErrorNote, EvidencePane, Link, useAsync } from "./ui";
@@ -31,10 +31,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const sourceOrigin = useRef<HTMLButtonElement | null>(null);
   const followHistory = useRef(true);
   const [selection, setSelection] = useState<SourceSelection>({ kind: "automatic" });
-  const [sourceOpen, setSourceOpen] = useState(true);
+  const [sourceOpen, setSourceOpen] = useState(INITIAL_SOURCE_OPEN);
   const [notebookOpen, setNotebookOpen] = useState(false);
-  const [studyOpen, setStudyOpen] = useState(INITIAL_STUDY_OPEN);
-  const roomLanding = isRoomLanding(studyOpen, appearance.detail);
   const [listening, setListening] = useState(false);
   const controller = useMemo(() => createReviewController({ api, reviewId, speaker, unsent }), [api, reviewId, speaker, unsent]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
@@ -72,7 +70,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   }, [automaticKey]);
   useEffect(() => {
     if (followHistory.current && history.current) history.current.scrollTop = history.current.scrollHeight;
-  }, [state.view?.turns.length, state.live?.deltaText, state.live?.sentences.length, studyOpen]);
+  }, [state.view?.turns.length, state.live?.deltaText, state.live?.sentences.length]);
   useSceneActivity(state.saving ? "saving" : listening ? "listening" : state.view?.state.phase === "paused" ? "paused" : state.live?.status === "streaming" ? "waiting" : "idle");
 
   function openSource(ids: readonly EvidenceId[], label: string, origin: HTMLButtonElement) {
@@ -84,7 +82,6 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   }
 
   function closeSource() {
-    setStudyOpen(false);
     setSelection({ kind: "automatic" });
     setSourceOpen(false);
     const origin = sourceOrigin.current;
@@ -115,8 +112,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const canRetry = !streaming && (state.unsent.length > 0 || unanswered !== null || state.live?.status === "failed");
 
   return (
-    <main className="review" data-view={roomLanding ? "room" : "study"}>
-      {notebookOpen && <dialog className="room-notebook-dialog" ref={node => { if (node && !node.open) node.showModal(); }} onClose={() => setNotebookOpen(false)}><button onClick={() => setNotebookOpen(false)}>Back to room</button><RecordScreen indexed api={api} reviewId={null} /></dialog>}
+    <main className="review">
+      {notebookOpen && <dialog className="room-notebook-dialog" ref={node => { if (node && !node.open) node.showModal(); }} onClose={() => setNotebookOpen(false)}><button onClick={() => setNotebookOpen(false)}>Close notebook</button><RecordScreen indexed api={api} reviewId={null} /></dialog>}
       <header className="review-header">
         <div>
           <h1>{heading.title}</h1>
@@ -131,19 +128,9 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
       <SaveBanner state={state} onRetry={() => void controller.save()} reviewId={reviewId} />
       <ErrorNote error={state.loadError} retry={() => void controller.load()} />
       <div className={`review-workspace${sourceOpen ? "" : " source-closed"}`}>
-        <section className="conversation-notebook" aria-labelledby="conversation-heading" hidden={roomLanding}>
+        <section className="conversation-notebook" aria-labelledby="conversation-heading">
           <div className="notebook-heading">
             <h2 id="conversation-heading">Conversation</h2>
-            {studyOpen && appearance.detail === "hd-pixel" && (
-              <button type="button" onClick={() => {
-                setStudyOpen(false);
-                requestAnimationFrame(() => {
-                  const target = window.matchMedia("(max-width: 800px)").matches
-                    ? ".hd-mobile-tools button" : ".hd-card, .source-handle";
-                  sourceColumn.current?.querySelector<HTMLButtonElement>(target)?.focus();
-                });
-              }}>Back to room</button>
-            )}
             <span className="question-marker">Question {view.state.mainQuestions}</span>
             <button type="button" onClick={() => {
               followHistory.current = true;
@@ -191,6 +178,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             onSpeaking={controller.learnerSpeaking}
             onListeningChange={setListening}
             speechToggle={speechToggle}
+            live={state.live}
             send={(id, text, modality) => controller.send(toAct(id, text, modality))}
           />
           {view.observations.length > 0 && (
@@ -211,16 +199,12 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           )}
         </section>
         <div ref={sourceColumn} className="review-source-column" data-source-open={sourceOpen}>
-        <RoomTools onNotebook={() => setNotebookOpen(true)} scene={appearance.scene} sourceOpen={!roomLanding && sourceOpen} listening={listening} speechAvailable={speech.supported && actions.includes("answer")} onSpeak={() => { speechToggle.current?.(); }} onSource={(origin) => {
+        <RoomTools onNotebook={() => setNotebookOpen(true)} scene={appearance.scene} sourceOpen={sourceOpen} listening={listening} speechAvailable={speech.supported && actions.includes("answer")} onSpeak={() => { speechToggle.current?.(); }} onSource={(origin) => {
           sourceOrigin.current = origin ?? sourceToggle.current;
-          if (roomLanding) {
-            setStudyOpen(true);
-            setSourceOpen(true);
-            requestAnimationFrame(() => sourceHeading.current?.focus());
-          } else if (sourceOpen) closeSource();
+          if (sourceOpen) closeSource();
           else setSourceOpen(true);
         }} />
-        <aside ref={sourceSurface} id="review-source" className="source-stand" aria-labelledby="source-heading" hidden={roomLanding || !sourceOpen}>
+        <aside ref={sourceSurface} id="review-source" className="source-stand" aria-labelledby="source-heading" hidden={!sourceOpen}>
           <div className="source-heading">
             <p className="eyebrow">From the lecture</p>
             <h2 ref={sourceHeading} tabIndex={-1} id="source-heading">Lecture evidence</h2>
@@ -337,8 +321,19 @@ function Actions({ ids, disabled, send }: { readonly ids: readonly ActionId[]; r
   );
 }
 
+/** Shows what is happening to the learner's turn; nothing when idle. */
+export function TurnStatusNote({ status }: { readonly status: TurnStatus }) {
+  if (status.kind === "idle") return null;
+  return (
+    <p className="turn-status" role="status" data-status={status.kind}>
+      {status.text}
+      {status.kind === "listening" && status.transcript !== "" && <q className="turn-status-heard"> {status.transcript}</q>}
+    </p>
+  );
+}
+
 export function Composer({
-  actions, disabled, sendError, speech, onSpeaking, onListeningChange, speechToggle, send,
+  actions, disabled, sendError, speech, onSpeaking, onListeningChange, speechToggle, live, send,
 }: {
   readonly actions: readonly ActionId[];
   readonly disabled: boolean;
@@ -347,6 +342,8 @@ export function Composer({
   readonly onSpeaking: () => void;
   readonly onListeningChange?: (listening: boolean) => void;
   readonly speechToggle?: MutableRefObject<(() => void) | null>;
+  /** The tutor turn in flight, for the status line. */
+  readonly live?: Live | null;
   readonly send: (id: ActionId, text: string, modality: "speech" | "text") => Promise<boolean>;
 }) {
   const responseId = useId();
@@ -356,6 +353,12 @@ export function Composer({
   const modality = useRef<"speech" | "text">("text");
   const hasText = actions.includes("answer");
   const submitting = useRef(false);
+  const [sending, setSending] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const heard = useRef<Heard | null>(null);
+  /** The latest props, for speech callbacks that outlive the render that started them. */
+  const latest = useRef({ allowed: false, send });
+  latest.current = { allowed: hasText && !disabled, send };
   useEffect(() => { onListeningChange?.(listening); }, [listening, onListeningChange]);
   useEffect(() => () => { speech.stop(); }, [speech]);
   useEffect(() => {
@@ -368,15 +371,26 @@ export function Composer({
       return;
     }
     setSpeechError(null);
+    setTranscript("");
+    heard.current = null;
     setListening(true);
     speech.start({
       onSpeechStart: onSpeaking,
-      onTranscript: (text) => {
+      onTranscript: (text, final) => {
         modality.current = "speech";
+        heard.current = { text, final };
+        setTranscript(text);
         setDraft(text);
       },
-      onEnd: () => setListening(false),
+      onEnd: () => {
+        setListening(false);
+        const spoken = heard.current;
+        heard.current = null;
+        // A voice answer sends itself, through the same path as Send answer.
+        if (spoken !== null && shouldAutoSendSpeech(spoken, latest.current.allowed)) void submit("answer", spoken.text, "speech");
+      },
       onError: (m) => {
+        heard.current = null;
         setSpeechError(m);
         setListening(false);
       },
@@ -388,22 +402,36 @@ export function Composer({
     return () => { if (speechToggle) speechToggle.current = null; };
   }, [speechToggle, listening, speech, onSpeaking]);
 
-  async function fire(id: ActionId) {
-    if (disabled || submitting.current || !actions.includes(id) || (NEEDS_TEXT.has(id) && draft.trim() === "")) return;
+  async function submit(id: ActionId, text: string, how: "speech" | "text") {
+    if (submitting.current) return;
     submitting.current = true;
+    setSending(true);
     try {
-      const accepted = await send(id, draft.trim(), modality.current);
+      const accepted = await latest.current.send(id, text.trim(), how);
       if (accepted && NEEDS_TEXT.has(id)) {
         setDraft("");
+        setTranscript("");
         modality.current = "text";
       }
-    } finally { submitting.current = false; }
+    } finally {
+      submitting.current = false;
+      setSending(false);
+    }
   }
+
+  async function fire(id: ActionId) {
+    if (disabled || submitting.current || !actions.includes(id) || (NEEDS_TEXT.has(id) && draft.trim() === "")) return;
+    await submit(id, draft, modality.current);
+  }
+
+  const status = turnStatus({ listening, transcript, submitting: sending, live: live ?? null });
 
   const empty = draft.trim() === "";
   return (
     <div className="composer">
       {sendError !== null && <p className="note note-error" role="alert">{sendError}</p>}
+      {speechError && <p className="note note-error" role="alert">Speech input: {speechError}</p>}
+      <TurnStatusNote status={status} />
       {hasText && (
         <>
           <label htmlFor={responseId}>Your response</label>
@@ -429,7 +457,6 @@ export function Composer({
             ) : (
               <span className="muted">Speech input is not available in this browser.</span>
             )}
-            {speechError && <span className="note-error">Speech input: {speechError}</span>}
           </div>
         </>
       )}

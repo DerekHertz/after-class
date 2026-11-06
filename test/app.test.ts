@@ -16,7 +16,6 @@ import type { Api } from "../src/app/api";
 import { OptionsView, checkAgain } from "../src/app/capture";
 import type { AppApi } from "../src/app/api";
 import { beginOnce, createReviewController, needsBegin } from "../src/app/controller";
-import { INITIAL_STUDY_OPEN, isRoomLanding } from "../src/app/core";
 import { learnerAct } from "../src/shared/wire";
 import type { SessionState } from "../src/app/controller";
 import {
@@ -430,7 +429,7 @@ describe("conversation", () => {
 
   test("live text follows deltas, falls back to sentences for a replayed turn, and records failure", () => {
     let live = startLive("t");
-    for (const e of [stored("t"), { type: "move", turnId: tid("t"), move: { kind: "wrap_up" } } as TurnEvent, { type: "say_delta", text: "Hel" } as TurnEvent, { type: "say_delta", text: "lo." } as TurnEvent, sentence("Hello.")]) live = reduceLive(live, e);
+    for (const e of [stored("t"), { type: "say_delta", text: "Hel" } as TurnEvent, { type: "say_delta", text: "lo." } as TurnEvent, sentence("Hello."), { type: "move", turnId: tid("t"), move: { kind: "wrap_up" } } as TurnEvent]) live = reduceLive(live, e);
     expect(live).toMatchObject({ stored: true, move: { kind: "wrap_up" }, status: "streaming" });
     expect(liveText(live)).toBe("Hello.");
     const replay = reduceLive(reduceLive(startLive("t"), sentence("One.")), sentence("Two."));
@@ -1179,11 +1178,5 @@ describe("opening the review (flow D: tutor opens with a recall question)", () =
     const lines = conversationLines(parsedReview({ turns: [turnJson(1, "learner", { act: { kind: "begin" } }), tutorAsk] }).turns);
     expect(lines.map((l) => l.speaker)).toEqual(["system", "tutor"]);
     expect(lines[0]!.text).toBe("Review started");
-  });
-
-  test("the review opens on the conversation for every appearance, with the room one click away", () => {
-    expect(INITIAL_STUDY_OPEN).toBe(true);
-    expect(isRoomLanding(INITIAL_STUDY_OPEN, "hd-pixel")).toBe(false);
-    expect(isRoomLanding(false, "hd-pixel")).toBe(true);
   });
 });
