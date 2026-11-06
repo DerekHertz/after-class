@@ -15,7 +15,12 @@
 .diagram-frame .frame { max-width: 100%; height: auto; }
 .diagram-lines { padding-left: 20px; }
 .diagram-lines li { margin: 6px 0; }
-.diagram-lines .citation { font-size: .8rem; margin-left: 4px; }
+.diagram-lines .citation { font-size: .8rem; margin-left: 8px; }
+.diagram-sources-toggle { font-size: .85rem; margin: 4px 0; }
+/* The diagram takes its natural height in the source column (the page scrolls); the frame is never cropped or height-capped. */
+.scene-shell .review .review-workspace .source-stand:has(.diagram-panel) { position: relative; left: auto; top: auto; width: auto; height: auto; max-height: none; overflow: visible; }
+.review-source-column:has(.diagram-panel) { aspect-ratio: auto; }
+.review .source-stand .diagram-panel .frame, .review .illustrated-page .frame { display: block; width: 100%; height: auto; max-height: none !important; object-fit: contain; }
 .review .review-topics { flex: 0 0 auto; font-size: .85rem; margin-top: 8px; }
 .review .review-topics ul { list-style: none; padding-left: 0; }
 .review .current-topic { flex: 0 0 auto; font-size: .9rem; margin: 8px 0 0; }

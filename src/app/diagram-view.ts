@@ -30,7 +30,7 @@ export const shouldPollDiagrams = (topics: readonly TopicDiagram[] | null): bool
 export const SUMMARY_NOTE = {
   no_claims: "No claim about this topic is usable right now, so there is nothing cited to summarize.",
   not_requested: "The state-change summary has not been written yet.",
-  preparing: "Writing the state-change summary from the cited evidence...",
+  preparing: "Writing the summary… this usually takes 20–30 seconds.",
 } as const;
 
 export const NO_FRAME_NOTE = "No frame was captured for this topic, so only the summary is shown.";
@@ -76,10 +76,10 @@ export function illustratedPages(view: Pick<ReviewView, "turns" | "observations"
 /** Topics a page needs a summary for and does not have yet. */
 export const needsSummary = (topic: TopicDiagram): boolean => topic.summary.state === "not_requested";
 
-export type CitationLabel = { readonly ids: readonly EvidenceId[]; readonly label: string; readonly aria: string };
+export type LineSources = { readonly ids: readonly EvidenceId[]; readonly label: string; readonly aria: string };
 
-/** The citation buttons of one summary line; each opens the cited evidence in the evidence pane. */
-export function citationLabels(line: { readonly evidence: readonly EvidenceId[] }, lineNo: number): CitationLabel[] {
-  return line.evidence.map((id, i) => ({ ids: [id], label: `Evidence ${i + 1}`, aria: `Open evidence ${i + 1} cited by line ${lineNo}` }));
+/** The one compact "Sources (n)" button of a summary line; it opens all of that line's evidence in the evidence pane. */
+export function lineSources(line: { readonly evidence: readonly EvidenceId[] }, lineNo: number): LineSources {
+  const n = line.evidence.length;
+  return { ids: line.evidence, label: `Sources (${n})`, aria: `Open the ${n} ${n === 1 ? "source" : "sources"} cited by line ${lineNo}` };
 }
-
