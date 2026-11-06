@@ -49,7 +49,7 @@ Frame dedupe and the claim check stay as they are.
 - Jev: tasks 1 and 2 at about one call per kept frame and per earlier claim per chunk, boundary questions per window, tuning rounds included; ceiling 4,000.
 - Experiment 7 calls are separated from product calls by memo version, not by purpose (the database only allows the existing purposes); count them by version or use a separate database.
 
-## Build prerequisites (item 1 built)
+## Build prerequisites (items 1 and 2 built; 3 and 4 not built, experiment stopped 2026-11-06)
 
 - BUILT (item 1): Jev tasks 1 and 2 and the intro/conclusion question as versioned tasks, and the task-3 routing as an experiment-only option. What exists, none of it wired into the product (`main.ts` is unchanged; the product's `QUESTIONS`, tasks, memo keys and routing table behave as before):
   - `frameRelevanceTask` (task 1): one kept frame image plus the captions within 15 s of it (`passagesNear`); yes or uncertain or failed keeps the frame, only a no drops it (`framesKept`).
@@ -70,6 +70,41 @@ Frame dedupe and the claim check stay as they are.
 
 - The false-close tolerance as a product rule, in Derek's words (his note, 2026-11-05: "honestly probably fine. the user may choose to review on a topic change anyways"). Not written as a rule until he states it.
 - Whether the tutor should be Sonnet 5.5 in a later run (experiment 4 compares Sonnet and Opus).
+
+## Results and stop (2026-11-06)
+
+Experiment 7 stopped after the Fable wording arm was scored once on clips 23 to 43. Derek decided to stop here and use the app instead (chat, 2026-11-06, verbatim):
+
+> "Oh, I was saying recall, like, as remember, not commenting on the benchmark that we are doing. So I was just saying, like, oh, like, remember I mentioned this. anyways, I think we should just try it in the current state. And as I'm using it, some of that information or data that we collect can be used to retune or kind of sharpen the classification that's passed to Jev. So yeah, I think we should amend it and just get into actually finishing the application so that I can use it."
+
+> "it is way better for me to test as the user and collect data rather than sit in these experiments for days on end"
+
+Not run, so not measured: the interpretation runner and the blind rating sheet were not built, so the first two bars (tutor input tokens, Derek's rating) and the third (no claim loses a needed frame) have no result. Task 2 (claim relevance) was never asked of Jev: the lab holds no claims. Nothing below is a claim about the tutor's tokens or quality.
+
+What did run (live Jev, `data/lab/lab-run-2/exp7`; 2,053 of the 4,000 Jev calls and 3 of the 80 Claude calls):
+
+- Measurement round (arm `measure-0`, Derek: "Yes, measure first"), clips 1 to 22, experiment 6's selected Fable configuration with the draft wordings: 544 calls. The draft frame-relevance question answered yes on all 37 kept frames; the intro/conclusion question answered yes on 10 of 20 clip-start windows, and its routing added one close, a false one.
+- Fable wording arm (`fable-1`), three rounds on clips 1 to 22 (first-half tuning reports, not results):
+
+| Round | Recall | False closes | Visual steps lost | Duplicates dropped | Frames asked frame relevance | Dropped by it |
+|---|---|---|---|---|---|---|
+| 1 | 3/4 | 10 | 0 | 79.8% | 105 | 3 |
+| 2 | 1/4 | 0 | 0 | 84.9% | 84 | 5 |
+| 3 | 2/4 | 0 | 0 | 89.3% | 66 | 6 |
+
+- Decision 5's rule (most bars passed, then recall) selected round 1. Scored once on clips 23 to 43 (667 calls). These clips were already scored in experiments 2 and 6, so this is a reuse, not a fresh held-out test:
+
+| Bar | Result |
+|---|---|
+| "≥70% of labeled boundaries detected within ±60s" | PASS, 4/5 (missed clip 34) |
+| "≤1 false close per 15 min" | FAIL, 4 in 3221.466 s = 1.118 per 15 min (clips 25 at 3 s, 29 at 39 s, 35 at 2 s, 41 at 5 s) |
+| "≤1 important visual step lost per lecture" | PASS, 0 lost |
+| "≥50% duplicates dropped" | PASS, 277/424 = 65.33% |
+
+- Frame relevance on clips 23 to 43: 161 kept frames asked, 1 dropped (a labeled duplicate), 7 uncertain and kept. Across all runs it never dropped a labeled visual step, and it removed under 10% of the frames it was asked about, far below the roughly 40% the token bar needed.
+- For comparison on the same clips: experiment 2's baseline 2/5 and 0.559 per 15 min; experiment 6 Opus round 3 2/5 and 1.118; experiment 6 Fable round 3 5/5 and 3.073.
+
+None of the experiment 7 wordings or the intro/conclusion routing is in the product; `main.ts` is unchanged. Moving any of them into the product needs Derek's approval (the routing change needs it in the flow doc).
 
 ## What it does not show
 
