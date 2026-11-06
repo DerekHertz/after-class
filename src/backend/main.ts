@@ -3,6 +3,9 @@
  *
  *   keys     ~/.config/afterclass/keys.env, mode 0600 or the backend refuses to start. Only this file reads it; the
  *            value of TYPESAFE_API_KEY goes to the Jev client and nowhere else (not a log line, not a response, not a child env).
+ *            ELEVENLABS_API_KEY (optional) goes to the ElevenLabs voice and nowhere else, the same way.
+ *   voice    Tutor speech from ElevenLabs through POST /voice/speech, live mode with a key only; otherwise GET /voice says
+ *            unavailable and the app speaks with Chrome's voice. AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL.
  *   token    ~/.config/afterclass/pairing-token (0600), created on first boot, printed with "listening on 127.0.0.1:<port>".
  *   data     $AFTERCLASS_DATA (default ./data): afterclass.sqlite, frames/
  *   mode     AFTERCLASS_MODE=live | replay. Unset: live when a keys file exists, replay otherwise.
@@ -52,6 +55,8 @@ import type { LearningRecord } from "./record";
 import { DEFAULT_LIMITS, createScheduler } from "./scheduler";
 import type { Scheduler, WorkItem } from "./scheduler";
 import { DEFAULT_PORT, serve } from "./http";
+import { DEFAULT_VOICE_ID, DEFAULT_VOICE_MODEL, checkVoiceSettings, createVoice, unavailableVoice } from "./providers/elevenlabs";
+import type { Voice } from "./providers/elevenlabs";
 
 const ROOT = resolve(import.meta.dir, "../..");
 const RETENTION_DAYS = 30;
@@ -70,7 +75,7 @@ export type TaskSet = {
 export type Env = Readonly<Record<string, string | undefined>>;
 
 export type MainOptions = {
-  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_EXTENSION_ID. */
+  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_EXTENSION_ID, AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL. */
   readonly env?: Env;
   /** Holds keys.env and pairing-token. Defaults to ~/.config/afterclass. */
   readonly configDir?: string;
@@ -121,21 +126,24 @@ function assertPrivateFile(path: string, what: string): void {
   if (typeof process.getuid === "function" && st.uid !== process.getuid()) throw new Error(`${what} ${path} is owned by another user; refusing to start`);
 }
 
-/** The one secret the backend reads from keys.env. Anything else in the file is ignored, never forwarded. */
-export type Keys = { readonly TYPESAFE_API_KEY?: string };
+/** The secrets the backend reads from keys.env. Anything else in the file is ignored, never forwarded. */
+export type Keys = { readonly TYPESAFE_API_KEY?: string; readonly ELEVENLABS_API_KEY?: string };
+
+const KEY_NAMES = ["TYPESAFE_API_KEY", "ELEVENLABS_API_KEY"] as const;
 
 export function readKeys(path: string): Keys {
   assertPrivateFile(path, "keys file");
-  const out: { TYPESAFE_API_KEY?: string } = {};
+  const out: { -readonly [K in keyof Keys]?: string } = {};
   for (const raw of readFileSync(path, "utf8").split(/\r?\n/)) {
     const line = raw.trim();
     if (line === "" || line.startsWith("#")) continue;
     const eq = line.indexOf("=");
     if (eq < 0) continue;
     const name = line.slice(0, eq).replace(/^export\s+/, "").trim();
-    if (name !== "TYPESAFE_API_KEY") continue;
+    const known = KEY_NAMES.find((k) => k === name);
+    if (known === undefined) continue;
     const value = line.slice(eq + 1).trim().replace(/^(["'])(.*)\1$/, "$2");
-    if (value !== "") out.TYPESAFE_API_KEY = value;
+    if (value !== "") out[known] = value;
   }
   return out;
 }
@@ -209,7 +217,11 @@ export async function main(options: MainOptions = {}): Promise<Running> {
   if (mode === "live" && !keysFile) throw new Error(`AFTERCLASS_MODE=live needs ${keysPath}`);
 
   // Everything that can refuse to start runs before a file is created or a port is bound.
-  const apiKey = mode === "live" ? readKeys(keysPath).TYPESAFE_API_KEY : undefined;
+  const keys = mode === "live" ? readKeys(keysPath) : {};
+  const apiKey = keys.TYPESAFE_API_KEY;
+  const voiceId = env.AFTERCLASS_ELEVENLABS_VOICE_ID || DEFAULT_VOICE_ID;
+  const voiceModel = env.AFTERCLASS_ELEVENLABS_MODEL || DEFAULT_VOICE_MODEL;
+  if (keys.ELEVENLABS_API_KEY !== undefined) checkVoiceSettings(voiceId, voiceModel);
   if (mode === "live" && apiKey === undefined) throw new Error(`${keysPath} has no TYPESAFE_API_KEY; refusing to start`);
   const token = loadPairingToken(join(configDir, "pairing-token"));
   const port = options.port ?? parsePort(env.AFTERCLASS_PORT) ?? DEFAULT_PORT;
@@ -225,7 +237,7 @@ export async function main(options: MainOptions = {}): Promise<Running> {
     const claudeCwd = join(dataDir, "claude-cwd");
     mkdirSync(claudeCwd, { recursive: true });
     // Neither provider key may reach the child: claude -p bills the subscription login, and the Jev key is not its business.
-    const { TYPESAFE_API_KEY: _jevKey, ...childEnv } = env;
+    const { TYPESAFE_API_KEY: _jevKey, ELEVENLABS_API_KEY: _voiceKey, ...childEnv } = env;
     return buildTasks(
       createJevClient({ apiKey: apiKey!, ...(options.fetch ? { fetch: options.fetch } : {}) }),
       createClaudeCli({ bin: options.claudeBin ?? "claude", cwd: claudeCwd, maxConcurrent: DEFAULT_LIMITS.claude, env: childEnv, ...(options.spawn ? { spawn: options.spawn } : {}) }),
@@ -410,7 +422,12 @@ export async function main(options: MainOptions = {}): Promise<Running> {
     }
   }
 
-  const server = serve({ modules: { ledger, evidence: served, reviews, record, preparation, segmentation }, auth: { port, extensionId, token }, appDir });
+  const voice: Voice =
+    keys.ELEVENLABS_API_KEY === undefined
+      ? unavailableVoice
+      : createVoice({ apiKey: keys.ELEVENLABS_API_KEY, voiceId, model: voiceModel, db, ...(options.fetch ? { fetch: options.fetch } : {}) });
+
+  const server = serve({ modules: { ledger, evidence: served, reviews, record, preparation, segmentation, voice }, auth: { port, extensionId, token }, appDir });
   const boundPort = server.port as number;
 
   if (extensionId === "") logError("backend: AFTERCLASS_EXTENSION_ID is not set, so the extension's requests are refused (403) until it is");
@@ -419,6 +436,7 @@ export async function main(options: MainOptions = {}): Promise<Running> {
       ? "mode: live (Jev with the key from keys.env; Claude through claude -p on your login)"
       : `mode: replay (${keysFile ? "AFTERCLASS_MODE=replay" : "no keys file"}: Jev unavailable, Claude unavailable, every live call is refused)`,
   );
+  log(voice.available ? `voice: ElevenLabs (model ${voice.model}, voice ${voice.voiceId})` : "voice: unavailable (no ELEVENLABS_API_KEY in keys.env, or replay mode); the app speaks with Chrome's voice");
   log(`listening on 127.0.0.1:${boundPort}\npairing token: ${token}`);
 
   pump();

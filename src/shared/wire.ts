@@ -179,6 +179,17 @@ export function parseEvidenceDeleteRequest(raw: unknown): { readonly evidenceIds
   return parseWith(evidenceDeleteRequest, raw);
 }
 
+/** POST /voice/speech: one tutor sentence. The bound keeps a stray request from spending a plan's characters. */
+export const VOICE_TEXT_MAX = 1000;
+export const speakRequest = z.object({ text: z.string().trim().min(1).max(VOICE_TEXT_MAX) });
+
+export function parseSpeakRequest(raw: unknown): { readonly text: string } {
+  return parseWith(speakRequest, raw);
+}
+
+/** GET /voice. `available` is false in replay mode and without an ElevenLabs key; the app then speaks with Chrome's voice. */
+export const voiceStatusResponse = z.object({ available: z.boolean() });
+
 /** NDJSON lines of POST /reviews/:id/turns. Same shape as the domain TurnEvent. */
 export type TutorStreamEvent = TurnEvent;
 
@@ -528,6 +539,7 @@ export type Reply =
   | { readonly kind: "json"; readonly schema: z.ZodType }
   | { readonly kind: "ndjson"; readonly event: z.ZodType<TutorStreamEvent> }
   | { readonly kind: "jpeg" }
+  | { readonly kind: "audio" }
   | { readonly kind: "empty" };
 
 export type Method = "GET" | "POST" | "PATCH" | "DELETE";
@@ -584,6 +596,10 @@ export const ROUTES = {
   deleteEvidence: route("POST", "/record/evidence/delete", { request: evidenceDeleteRequest, reply: EMPTY }),
   /** Re-queues the capture's chunks that are unfinished or have no supported claim. No body; the app's "Check again". */
   retryPreparation: route("POST", "/captures/:captureId/retry-preparation", { reply: EMPTY }),
+  /** Whether tutor speech can come from ElevenLabs through the backend. */
+  voiceStatus: route("GET", "/voice", { reply: json(voiceStatusResponse) }),
+  /** The tutor's sentence as audio/mpeg, streamed from ElevenLabs. 503 when voice is unavailable, 502 or 504 when the upstream failed. */
+  speak: route("POST", "/voice/speech", { request: speakRequest, reply: { kind: "audio" } }),
 } as const;
 
 export type RouteName = keyof typeof ROUTES;

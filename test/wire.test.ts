@@ -191,6 +191,8 @@ const fixtures: Record<RouteName, Fixture> = {
   overrideObservation: { params: { observationId: obs }, request: { status: "after_help" } },
   deleteEvidence: { request: { evidenceIds: [ev1, ev2] } },
   retryPreparation: { params: { captureId: cap } },
+  voiceStatus: { response: { available: true } },
+  speak: { request: { text: "What did the lecturer say about ordering?" } },
 };
 
 const names = Object.keys(ROUTES) as RouteName[];
@@ -288,6 +290,8 @@ describe("both clients stay inside ROUTES", () => {
     resolveDispute: (a) => a.resolveDispute(obs, "learner_was_right"),
     overrideObservation: (a) => a.overrideObservation(obs, "partial"),
     deleteEvidence: (a) => a.deleteEvidence([ev1]),
+    voiceStatus: (a) => a.voiceAvailable(),
+    speak: (a) => a.speech("What did the lecturer say about ordering?"),
   };
 
   test("every createApi method calls a ROUTES route with a body its request schema accepts, and reads the fixture response", async () => {
@@ -303,7 +307,7 @@ describe("both clients stay inside ROUTES", () => {
         const reply = hit === null ? undefined : ROUTES[hit.name].reply;
         const response = hit === null ? undefined : fixtures[hit.name].response;
         if (reply?.kind === "ndjson") return new Response(`${JSON.stringify(response)}\n${JSON.stringify({ type: "turn_complete", turnId: trn })}\n`);
-        if (reply?.kind === "jpeg") return new Response(new Blob(["x"]));
+        if (reply?.kind === "jpeg" || reply?.kind === "audio") return new Response(new Blob(["x"]));
         if (reply?.kind === "json") return new Response(JSON.stringify(response));
         return new Response(null, { status: 204 });
       }) as typeof fetch;

@@ -75,6 +75,8 @@ export const api: AppApi = {
   async startReview(_capture, _choice, reviewId) { log("review.start"); return { kind: "started", reviewId, scope: view.scope }; },
   async answerInvite(_id, answer) { log(`invite.${answer}`); },
   async retryPreparation() { log("preparation.retry"); },
+  async voiceAvailable() { return false; },
+  async speech() { throw new Error("the preview has no voice"); },
   async evidence(query) {
     log("evidence.read");
     if (scenario === "evidence-error" && evidenceAttempts++ === 0) throw new ApiError("Fixture evidence request failed. Retry is available.", 503);
