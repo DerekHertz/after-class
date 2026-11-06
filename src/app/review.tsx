@@ -21,7 +21,7 @@ import { BundleInspector, ErrorNote, EvidencePane, Link, useAsync } from "./ui";
 export type ReviewDeps = { readonly api: AppApi; readonly speaker: Speaker; readonly speech: SpeechInput; readonly unsent: UnsentStore };
 
 export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewDeps & { readonly reviewId: ReviewId }) {
-  const { appearance } = useAppearance();
+  const { appearance, voice } = useAppearance();
   const speechToggle = useRef<(() => void) | null>(null);
   const history = useRef<HTMLDivElement>(null);
   const sourceHeading = useRef<HTMLHeadingElement>(null);
@@ -176,6 +176,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             disabled={streaming || state.unsent.length > 0}
             sendError={state.sendError}
             speech={speech}
+            showSpeak={voice}
             onSpeaking={controller.learnerSpeaking}
             onListeningChange={setListening}
             speechToggle={speechToggle}
@@ -200,7 +201,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           )}
         </section>
         <div ref={sourceColumn} className="review-source-column" data-source-open={sourceOpen}>
-        <RoomTools onNotebook={() => setNotebookOpen(true)} scene={appearance.scene} sourceOpen={sourceOpen} listening={listening} speechAvailable={speech.supported && actions.includes("answer")} onSpeak={() => { speechToggle.current?.(); }} onSource={(origin) => {
+        <RoomTools onNotebook={() => setNotebookOpen(true)} scene={appearance.scene} sourceOpen={sourceOpen} listening={listening} showSpeak={voice} speechAvailable={speech.supported && actions.includes("answer")} onSpeak={() => { speechToggle.current?.(); }} onSource={(origin) => {
           sourceOrigin.current = origin ?? sourceToggle.current;
           if (sourceOpen) closeSource();
           else setSourceOpen(true);
@@ -334,12 +335,14 @@ export function TurnStatusNote({ status }: { readonly status: TurnStatus }) {
 }
 
 export function Composer({
-  actions, disabled, sendError, speech, onSpeaking, onListeningChange, speechToggle, live, send,
+  actions, disabled, sendError, speech, showSpeak = true, onSpeaking, onListeningChange, speechToggle, live, send,
 }: {
   readonly actions: readonly ActionId[];
   readonly disabled: boolean;
   readonly sendError: string | null;
   readonly speech: SpeechInput;
+  /** Whether to offer the Speak button. The review turns it off unless the voice setting is on. */
+  readonly showSpeak?: boolean;
   readonly onSpeaking: () => void;
   readonly onListeningChange?: (listening: boolean) => void;
   readonly speechToggle?: MutableRefObject<(() => void) | null>;
@@ -453,7 +456,7 @@ export function Composer({
             }}
           />
           <div className="actions">
-            {speech.supported ? (
+            {!showSpeak ? null : speech.supported ? (
               <button type="button" aria-pressed={listening} onKeyDown={event => { if (event.repeat) event.preventDefault(); }} onClick={toggleListening}>{listening ? "Stop listening" : "Speak"}</button>
             ) : (
               <span className="muted">Speech input is not available in this browser.</span>

@@ -12,12 +12,14 @@ const TOOLS = {
   "study-bench": { name: "Lecture paper feed", action: "Unroll lecture source" },
 } as const;
 
-export function RoomTools({ scene, onNotebook, onSource, sourceOpen, onSpeak, speechAvailable = false, listening = false }: {
+export function RoomTools({ scene, onNotebook, onSource, sourceOpen, onSpeak, showSpeak = true, speechAvailable = false, listening = false }: {
   readonly scene: SceneId;
   readonly onNotebook?: () => void;
   readonly onSource: (origin?: HTMLButtonElement) => void;
   readonly sourceOpen: boolean;
   readonly onSpeak?: () => void;
+  /** Whether the Speak controls exist at all; the review shows them only when the voice setting is on. */
+  readonly showSpeak?: boolean;
   readonly speechAvailable?: boolean;
   readonly listening?: boolean;
 }) {
@@ -46,14 +48,14 @@ export function RoomTools({ scene, onNotebook, onSource, sourceOpen, onSpeak, sp
       }}><span>{sourceOpen ? "Close source" : "Draw source card"}</span></button>
       <button className="hd-room-hotspot hd-stand" type="button" aria-label={sourceOpen ? "Close lecture source on stand" : "Open lecture source on stand"} aria-expanded={sourceOpen} aria-controls="review-source" onClick={event => { if (!sourceOpen) reactToCompanion("draw"); onSource(event.currentTarget); }}><span>Lecture source</span></button>
       <button className="hd-room-hotspot hd-journal" type="button" onClick={openNotebook}><span>My notebook</span></button>
-      <button className="hd-room-hotspot hd-recorder" type="button" aria-label={listening ? "Stop listening with recorder" : "Speak with recorder"} disabled={!speechAvailable} aria-pressed={listening} onClick={onSpeak}><span>{listening ? "Stop listening" : "Speak"}</span></button>
+      {showSpeak && <button className="hd-room-hotspot hd-recorder" type="button" aria-label={listening ? "Stop listening with recorder" : "Speak with recorder"} disabled={!speechAvailable} aria-pressed={listening} onClick={onSpeak}><span>{listening ? "Stop listening" : "Speak"}</span></button>}
       {appearance.visible && <div className="hd-room-friend"><Companion id={appearance.companion} activity={activity} /></div>}
       {!appearance.visible && <span className="hd-quiet-status" role="status">{activity === "idle" ? "Ready when you are" : activity === "waiting" ? "Waiting for a response" : activity === "listening" ? "Listening" : activity === "saving" ? "Saving your record" : "Review paused"}</span>}
     </HDRoomStage>
       <div className="hd-mobile-tools" aria-label="Study desk tools">
         <button type="button" aria-expanded={sourceOpen} aria-controls="review-source" onClick={event => { if (!sourceOpen) reactToCompanion("draw"); onSource(event.currentTarget); }}>{sourceOpen ? "Close source" : "Draw source card"}</button>
         <button type="button" onClick={openNotebook}>My notebook</button>
-        <button type="button" disabled={!speechAvailable} aria-pressed={listening} onClick={onSpeak}>{listening ? "Stop listening" : "Speak"}</button>
+        {showSpeak && <button type="button" disabled={!speechAvailable} aria-pressed={listening} onClick={onSpeak}>{listening ? "Stop listening" : "Speak"}</button>}
       </div>
     </div>;
   }
@@ -68,7 +70,7 @@ export function RoomTools({ scene, onNotebook, onSource, sourceOpen, onSpeak, sp
     </button>
     <div className="scene-foreground">
       {appearance.visible && <Companion id={appearance.companion} activity={activity} />}
-      <div className="recorder-tool" data-depressed={speechAvailable && (held || listening)}><span className="recorder-art" aria-hidden="true" />
+      {showSpeak && <div className="recorder-tool" data-depressed={speechAvailable && (held || listening)}><span className="recorder-art" aria-hidden="true" />
       {scene === "projection-booth" && <span className="recorder-legend" aria-hidden="true">Voice</span>}
       <button type="button" className="recorder-key" aria-label={listening ? "Stop listening with recorder" : "Speak with recorder"} disabled={!speechAvailable} aria-pressed={listening}
         onPointerDown={event => { if (speechAvailable && event.button === 0) setHeld(true); }}
@@ -80,7 +82,7 @@ export function RoomTools({ scene, onNotebook, onSource, sourceOpen, onSpeak, sp
         onKeyUp={() => setHeld(false)} onBlur={() => setHeld(false)} onClick={onSpeak}>
         <span className="recorder-key-art" aria-hidden="true" />
         <span className="physical-tool-label">{listening ? "Stop" : "Speak"}</span>
-      </button></div>
+      </button></div>}
       <div className="journal-tool" onClickCapture={() => reactToCompanion("read")}><Link to={{ page: "record", reviewId: null }}>
         <span className="journal-art" aria-hidden="true" /><span className="physical-tool-label">My notebook</span>
       </Link></div>

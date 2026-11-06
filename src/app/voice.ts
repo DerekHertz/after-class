@@ -195,3 +195,23 @@ export function chooseSpeaker(available: Promise<boolean>, voice: Speaker, fallb
     },
   };
 }
+
+/**
+ * Voice is off unless the learner turned it on. While off, the tutor is never spoken: `beginTurn` and `speak` do
+ * nothing (no ElevenLabs request, no speechSynthesis call, nothing to wait for), and `make` is not even called, so the
+ * availability check never goes out. `stop` still reaches a speaker that was made, so turning voice off mid-sentence
+ * silences it.
+ */
+export function gateSpeaker(enabled: () => boolean, make: () => Speaker): Speaker {
+  let inner: Speaker | null = null;
+  const live = (): Speaker | null => {
+    if (!enabled()) return null;
+    inner ??= make();
+    return inner;
+  };
+  return {
+    beginTurn: () => live()?.beginTurn(),
+    speak: (sentence) => live()?.speak(sentence),
+    stop: () => inner?.stop(),
+  };
+}

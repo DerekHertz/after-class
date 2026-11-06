@@ -45,18 +45,38 @@ export function persistAppearance(storage: Pick<Storage, "setItem"> | null, valu
     return true;
   } catch { return false; }
 }
+/** Tutor speech and the Speak controls. Off unless the learner turns it on; stored per browser, apart from the look of the room. */
+export const VOICE_KEY = "afterclass.voice.v1";
+export function readVoice(storage: Pick<Storage, "getItem"> | null): boolean {
+  try { return storage?.getItem(VOICE_KEY) === "on"; } catch { return false; }
+}
+export function persistVoice(storage: Pick<Storage, "setItem"> | null, on: boolean): boolean {
+  try {
+    if (storage === null) return false;
+    storage.setItem(VOICE_KEY, on ? "on" : "off");
+    return true;
+  } catch { return false; }
+}
+let voiceOn: boolean | null = null;
+/** The current voice setting, readable outside React (the speaker asks it at the start of each turn). */
+export function voiceEnabled(): boolean {
+  voiceOn ??= readVoice(browserStorage());
+  return voiceOn;
+}
 function browserStorage(): Storage | null {
   try { return typeof window === "undefined" ? null : window.localStorage; } catch { return null; }
 }
 const ignoreActivity: Dispatch<SetStateAction<CompanionActivity>> = () => {};
-const AppearanceContext = createContext({ appearance: DEFAULT_APPEARANCE, update: (_patch: Partial<Appearance>) => {}, activity: "idle" as CompanionActivity, setActivity: ignoreActivity, persistent: true });
+const AppearanceContext = createContext({ appearance: DEFAULT_APPEARANCE, update: (_patch: Partial<Appearance>) => {}, activity: "idle" as CompanionActivity, setActivity: ignoreActivity, persistent: true, voice: false, setVoice: (_on: boolean) => {} });
 export function AppearanceProvider({ children }: { readonly children: ReactNode }) {
   const [appearance, setAppearance] = useState(() => readAppearance(browserStorage()));
   const [activity, setActivity] = useState<CompanionActivity>("idle");
   const [persistent, setPersistent] = useState(true);
+  const [voice, setVoiceState] = useState(voiceEnabled);
+  const setVoice = useCallback((on: boolean) => { voiceOn = on; persistVoice(browserStorage(), on); setVoiceState(on); }, []);
   const update = useCallback((patch: Partial<Appearance>) => setAppearance(p => ({ ...p, ...patch })), []);
   useEffect(() => { setPersistent(persistAppearance(browserStorage(), appearance)); }, [appearance]);
-  const value = useMemo(() => ({ appearance, update, activity, setActivity, persistent }), [appearance, update, activity, persistent]);
+  const value = useMemo(() => ({ appearance, update, activity, setActivity, persistent, voice, setVoice }), [appearance, update, activity, persistent, voice, setVoice]);
   return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
 }
 export function useAppearance() { return useContext(AppearanceContext); }
