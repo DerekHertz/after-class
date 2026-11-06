@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { AppearanceProvider } from "./appearance";
+import { AppearanceProvider, voiceEnabled } from "./appearance";
 import { SceneShell } from "./scene";
 import { parseId } from "../shared/ids";
 import { createApi } from "./api";
@@ -9,7 +9,7 @@ import { parseRoute } from "./core";
 import { RecordScreen, UsageScreen } from "./record";
 import { ReviewScreen } from "./review";
 import { browserSpeaker, browserSpeechInput } from "./speech";
-import { audioElementPlayer, chooseSpeaker, createElevenLabsSpeaker, synthPlayback } from "./voice";
+import { audioElementPlayer, chooseSpeaker, createElevenLabsSpeaker, gateSpeaker, synthPlayback } from "./voice";
 import { createIndexedDbUnsent } from "./unsent";
 import { Link, usePathname } from "./ui";
 import { HomeScreen } from "./home";
@@ -21,16 +21,16 @@ function readToken(): string {
 }
 
 const api: AppApi = createApi(readToken());
-const chromeVoice = browserSpeaker();
-const speaker = chooseSpeaker(
+/** Chat-first: nothing is spoken (and no voice request is made) unless the voice setting is on. */
+const speaker = gateSpeaker(voiceEnabled, () => chooseSpeaker(
   api.voiceAvailable().catch(() => false),
   createElevenLabsSpeaker({
     fetchAudio: (text, signal) => api.speech(text, signal),
     play: audioElementPlayer(),
     fallback: typeof speechSynthesis === "undefined" ? () => ({ done: Promise.resolve(), stop() {} }) : synthPlayback(speechSynthesis),
   }),
-  chromeVoice,
-);
+  browserSpeaker(),
+));
 const speech = browserSpeechInput();
 const unsent = createIndexedDbUnsent();
 

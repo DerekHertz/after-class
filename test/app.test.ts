@@ -26,6 +26,7 @@ import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode"
 import { StreamError, ndjson, tutorEvents } from "../src/app/ndjson";
 import { UsageTable } from "../src/app/record";
 import { Composer, SaveBanner, UndeliveredNote } from "../src/app/review";
+import { gateSpeaker } from "../src/app/voice";
 import { createSpeechInput, createSynthSpeaker } from "../src/app/speech";
 import type { RecognitionLike, Speaker } from "../src/app/speech";
 import { BundleInspector, EvidencePane } from "../src/app/ui";
@@ -911,6 +912,30 @@ describe("review session controller", () => {
     await h.controller.send(answer);
     expect(h.controller.getState().live).toMatchObject({ status: "failed", error: "backend restarting", retryable: true });
     expect(h.controller.getState().unsent).toHaveLength(1);
+  });
+
+  test("chat-first: a gated-off speaker never delays a send, and the sentences still stream to the screen", async () => {
+    const calls: string[] = [];
+    const speaker = gateSpeaker(() => false, () => (calls.push("made"), { beginTurn: () => void calls.push("begin"), speak: () => void calls.push("speak"), stop: () => void calls.push("stop") }));
+    const api: Api = {
+      reviewOptions: async () => { throw new Error("unused"); },
+      startReview: async () => { throw new Error("unused"); },
+      sendTurn: async function* (_r, turnId) {
+        yield { type: "learner_turn_stored", turnId };
+        yield sentence("One.");
+        yield sentence("Two.");
+        yield { type: "turn_complete", turnId };
+      },
+      review: async () => parsedReview(),
+      save: async () => ({ kind: "saved", notes: 0, observations: 0, links: 0 }),
+      record: async () => { throw new Error("unused"); },
+      usage: async () => { throw new Error("unused"); },
+    };
+    const controller = createReviewController({ api, reviewId, speaker, unsent: createMemoryUnsent() });
+    await controller.send(answer);
+    expect(controller.getState().unsent).toHaveLength(0);
+    expect(controller.getState().sendError).toBeNull();
+    expect(calls).toEqual([]);
   });
 
   test("the tutor stops mid-turn when the learner starts speaking, and speaks again on the next turn", async () => {

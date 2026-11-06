@@ -10,7 +10,7 @@ import { reactToCompanion } from "./companion-reaction";
 import { beginOnce, createReviewController, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
 import {
-  ACTION_LABEL, END_CONFIRM_TEXT, INITIAL_SOURCE_OPEN, endFlow, shouldAutoSendSpeech, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
+  ACTION_LABEL, END_CONFIRM_TEXT, INITIAL_SOURCE_OPEN, endFlow, shouldAutoSendSpeech, shouldStopListening, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
   softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer,
 } from "./core";
 import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, TurnStatus } from "./core";
@@ -21,7 +21,7 @@ import { BundleInspector, ErrorNote, EvidencePane, Link, useAsync } from "./ui";
 export type ReviewDeps = { readonly api: AppApi; readonly speaker: Speaker; readonly speech: SpeechInput; readonly unsent: UnsentStore };
 
 export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewDeps & { readonly reviewId: ReviewId }) {
-  const { appearance } = useAppearance();
+  const { appearance, voice } = useAppearance();
   const speechToggle = useRef<(() => void) | null>(null);
   const history = useRef<HTMLDivElement>(null);
   const sourceHeading = useRef<HTMLHeadingElement>(null);
@@ -176,6 +176,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             disabled={streaming || state.unsent.length > 0}
             sendError={state.sendError}
             speech={speech}
+            showSpeak={voice}
             onSpeaking={controller.learnerSpeaking}
             onListeningChange={setListening}
             speechToggle={speechToggle}
@@ -200,7 +201,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           )}
         </section>
         <div ref={sourceColumn} className="review-source-column" data-source-open={sourceOpen}>
-        <RoomTools onNotebook={() => setNotebookOpen(true)} scene={appearance.scene} sourceOpen={sourceOpen} listening={listening} speechAvailable={speech.supported && actions.includes("answer")} onSpeak={() => { speechToggle.current?.(); }} onSource={(origin) => {
+        <RoomTools onNotebook={() => setNotebookOpen(true)} scene={appearance.scene} sourceOpen={sourceOpen} listening={listening} showSpeak={voice} speechAvailable={speech.supported && actions.includes("answer")} onSpeak={() => { speechToggle.current?.(); }} onSource={(origin) => {
           sourceOrigin.current = origin ?? sourceToggle.current;
           if (sourceOpen) closeSource();
           else setSourceOpen(true);
@@ -334,12 +335,14 @@ export function TurnStatusNote({ status }: { readonly status: TurnStatus }) {
 }
 
 export function Composer({
-  actions, disabled, sendError, speech, onSpeaking, onListeningChange, speechToggle, live, send,
+  actions, disabled, sendError, speech, showSpeak = true, onSpeaking, onListeningChange, speechToggle, live, send,
 }: {
   readonly actions: readonly ActionId[];
   readonly disabled: boolean;
   readonly sendError: string | null;
   readonly speech: SpeechInput;
+  /** Whether to offer the Speak button. The review turns it off unless the voice setting is on. */
+  readonly showSpeak?: boolean;
   readonly onSpeaking: () => void;
   readonly onListeningChange?: (listening: boolean) => void;
   readonly speechToggle?: MutableRefObject<(() => void) | null>;
@@ -359,12 +362,12 @@ export function Composer({
   const heard = useRef<Heard | null>(null);
   /** The latest props, for speech callbacks that outlive the render that started them. */
   const latest = useRef({ allowed: false, send });
-  latest.current = { allowed: hasText && !disabled, send };
+  latest.current = { allowed: hasText && !disabled && showSpeak, send };
   useEffect(() => { onListeningChange?.(listening); }, [listening, onListeningChange]);
   useEffect(() => () => { speech.stop(); }, [speech]);
   useEffect(() => {
-    if (!hasText && listening) { speech.stop(); setListening(false); }
-  }, [hasText, listening, speech]);
+    if (shouldStopListening(listening, hasText, showSpeak)) { speech.stop(); heard.current = null; setListening(false); }
+  }, [hasText, showSpeak, listening, speech]);
 
   function toggleListening() {
     if (listening) {
@@ -453,7 +456,7 @@ export function Composer({
             }}
           />
           <div className="actions">
-            {speech.supported ? (
+            {!showSpeak ? null : speech.supported ? (
               <button type="button" aria-pressed={listening} onKeyDown={event => { if (event.repeat) event.preventDefault(); }} onClick={toggleListening}>{listening ? "Stop listening" : "Speak"}</button>
             ) : (
               <span className="muted">Speech input is not available in this browser.</span>

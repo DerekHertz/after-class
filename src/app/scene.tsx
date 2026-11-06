@@ -8,7 +8,7 @@ export function RoomDrawing({ id }: { readonly id: SceneId }) {
   return <span className="room-drawing room-raster" data-room={id} aria-hidden="true" />;
 }
 function AppearancePicker() {
-  const { appearance, update, persistent } = useAppearance();
+  const { appearance, update, persistent, voice, setVoice } = useAppearance();
   return <details className="appearance-picker">
     <summary>Room &amp; companion</summary>
     <div className="appearance-options">
@@ -26,6 +26,7 @@ function AppearancePicker() {
       <div className="appearance-preferences">
         <label><input type="checkbox" checked={appearance.visible} onChange={e => update({ visible: e.target.checked })} /> Show companion</label>
         <label><input type="checkbox" checked={appearance.motion === "reduced"} onChange={e => update({ motion: e.target.checked ? "reduced" : "system" })} /> Reduce motion</label>
+        <label><input type="checkbox" checked={voice} onChange={e => setVoice(e.target.checked)} /> Voice (the tutor speaks, and you can speak back)</label>
       </div>
       <p className="appearance-footnote">Room and companion choices are independent. Your system's reduced-motion setting is always respected. Preferences stay in this browser.</p>
       {!persistent && <p className="appearance-storage-note" role="status">Appearance works for this visit. This browser could not save your preferences.</p>}
