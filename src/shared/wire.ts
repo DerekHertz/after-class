@@ -111,7 +111,7 @@ export function parseIngestBatch(raw: unknown): { readonly captureId: CaptureId;
 const answerText = z.string().trim().min(1).max(8000);
 
 export const learnerAct = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("begin") }),
+  z.object({ kind: z.literal("begin"), fuzzy: z.array(idOf("cpt")).max(200).optional(), note: z.string().trim().min(1).max(2000).optional() }),
   z.object({ kind: z.literal("answer"), text: answerText, modality: z.enum(["speech", "text"]) }),
   z.object({ kind: z.literal("skip") }),
   z.object({ kind: z.literal("dont_know") }),
@@ -373,6 +373,7 @@ const evidenceIds = z.array(idOf("ev"));
 
 const tutorMovez: z.ZodType<TutorMove> = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("ask_main"), threadId: idOf("thr"), claimIds: nonEmpty(idOf("clm")) }),
+  z.object({ kind: z.literal("quick_check"), threadId: idOf("thr"), claimIds: nonEmpty(idOf("clm")) }),
   z.object({ kind: z.literal("ask_followup"), threadId: idOf("thr") }),
   z.object({ kind: z.literal("diagnose"), threadId: idOf("thr"), hypothesis: z.string(), evidence: evidenceIds }),
   z.object({ kind: z.literal("hint"), threadId: idOf("thr") }),
@@ -412,6 +413,8 @@ const reviewStatez = z.object({
   reviewId: idOf("rvw"),
   phase: z.enum(["active", "paused", "ended"]),
   mainQuestions: z.number(),
+  quickChecks: z.number(),
+  fuzzy: z.array(idOf("cpt")),
   openThread: idOf("thr").nullable(),
   lastLearnerAct: learnerTurnz.nullable(),
   detour: detourz,
@@ -432,7 +435,7 @@ const observationz = z.object({
   claimIds: nonEmpty(idOf("clm")),
   conceptIds: z.array(idOf("cpt")),
   proposed: observationStatus,
-  status: z.union([observationStatus, z.literal("disputed")]),
+  status: z.union([observationStatus, z.literal("disputed"), z.literal("looks_fine")]),
   clampedFrom: observationStatus.nullable(),
   dispute: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("none") }),
@@ -454,6 +457,7 @@ const observationz = z.object({
 
 export const reviewViewResponse = z.object({
   reviewId: idOf("rvw"),
+  topics: z.array(z.object({ id: idOf("cpt"), label: z.string(), summary: z.string() })),
   captureId: idOf("cap"),
   scope: frozenScopez,
   state: reviewStatez,

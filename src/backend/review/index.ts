@@ -12,9 +12,9 @@
  *   for await (const ev of reviews.turn(reviewId, turnId, act)) send(ev);
  */
 import { stableId } from "../../shared/ids";
-import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, EvidenceId, ReviewId, ThreadId, TurnId } from "../../shared/ids";
+import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, ConceptId, EvidenceId, ReviewId, ThreadId, TurnId } from "../../shared/ids";
 import type {
-  AssessableClaim, ChunkPrep, ChunkRevision, Claim, CodeNotice, Correction, EvidenceBundle, FrozenScope, InviteAnswer, InviteState,
+  AssessableClaim, ChunkPrep, ChunkRevision, Claim, CodeNotice, Concept, Correction, EvidenceBundle, FrozenScope, InviteAnswer, InviteState,
   LearnerAct, ReviewOptions, ReviewState, ReviewView, Seq, StartChoice, StartResult, Turn, TurnEvent, TutorMove,
 } from "../../shared/domain";
 import { Material } from "../../shared/time";
@@ -88,6 +88,8 @@ export type ReviewsDeps = {
   stopEarly(captureId: CaptureId, ids: readonly ChunkRevisionId[]): Seq;
   assessableIn(captureId: CaptureId, material: Material): readonly AssessableClaim[];
   claimsIn(captureId: CaptureId, material: Material): readonly Claim[];
+  /** Preparation's `concepts`: label and summary for each known concept ID, in the order asked. */
+  concepts?(ids: readonly ConceptId[]): readonly Concept[];
   bundle(material: Material): EvidenceBundle;
   watchedSeconds(captureId: CaptureId): number;
   runTutor(input: TutorInput, streamTo: (delta: string) => void, signal: AbortSignal): Promise<Lookup<TutorOutput>>;
@@ -310,12 +312,22 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     return { corrs, state: kit.reviewState(reviewId, turns, corrs, softTargetS, now()) };
   }
 
+  /**
+   * The topics of the frozen scope: the concepts of its claims, in scope order, each once.
+   * Claims that have since lost their check still name the topic they were frozen with, so the list never changes under the learner.
+   */
+  function topicsOf(review: Stored): readonly Concept[] {
+    const byClaim = new Map(deps.assessableIn(review.captureId, review.scope.material).map((c) => [c.id, c.conceptId] as const));
+    const ids = [...new Set(review.scope.claimsAtStart.flatMap((id) => byClaim.get(id) ?? []))];
+    return deps.concepts?.(ids) ?? [];
+  }
+
   function view(reviewId: ReviewId): ReviewView {
     const review = stored(reviewId);
     if (!review) throw new Error(`unknown review ${reviewId}`);
     const turns = loadTurns(reviewId);
     const { state } = stateOf(reviewId, review, turns);
-    return { reviewId, captureId: review.captureId, scope: review.scope, state, turns, owesMove: tutorOwesMove(turns, state.phase), observations: [], saved: "unsaved" };
+    return { reviewId, captureId: review.captureId, topics: topicsOf(review), scope: review.scope, state, turns, owesMove: tutorOwesMove(turns, state.phase), observations: [], saved: "unsaved" };
   }
 
   function list(captureId: CaptureId) {
@@ -468,8 +480,8 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
   /** The claims and evidence the tutor may use now (R3, R7): re-read on every call, so a claim that lost its check drops out. */
   function grounding(review: Stored, state: ReviewState, turns: readonly Turn[]): Pick<TutorInput, "claims" | "evidence"> {
     const usable = usableNow(review);
-    const asked = turns.find((t) => t.actor === "tutor" && t.move.kind === "ask_main" && t.move.threadId === state.openThread);
-    const threadClaims = new Set<ClaimId>(asked?.actor === "tutor" && asked.move.kind === "ask_main" ? asked.move.claimIds : []);
+    const asked = turns.find((t) => t.actor === "tutor" && (t.move.kind === "ask_main" || t.move.kind === "quick_check") && t.move.threadId === state.openThread);
+    const threadClaims = new Set<ClaimId>(asked?.actor === "tutor" && (asked.move.kind === "ask_main" || asked.move.kind === "quick_check") ? asked.move.claimIds : []);
     const cited = new Set(usable.filter((c) => threadClaims.size === 0 || threadClaims.has(c.id)).flatMap((c) => c.evidence));
     const full = deps.bundle(review.scope.material);
     return { claims: usable, evidence: { ...full, passages: full.passages.filter((p) => cited.has(p.id)), frames: full.frames.filter((f) => cited.has(f.id)) } };
@@ -489,7 +501,7 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     const pendingClaims = deps.claimsIn(review.captureId, review.scope.material).filter((c) => NON_TERMINAL.has(c.status)).length;
     const allowed = [...kit.allowedMoves(state, { turns, claims, pendingClaims })];
     if (allowed.length === 0) return null;
-    return { state, allowed, scope: review.scope, claims, evidence, turns, priorObservations: [], repairNote };
+    return { state, allowed, topics: topicsOf(review), scope: review.scope, claims, evidence, turns, priorObservations: [], repairNote };
   }
 
   /**

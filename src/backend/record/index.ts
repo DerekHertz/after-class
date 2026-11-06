@@ -34,7 +34,7 @@ import type {
   SubjectLinkSuggestion, ThreadFacts, Turn,
 } from "../../shared/domain";
 import type { WrapUpOutput } from "../review/tutor";
-import { clampStatus, threadDispute } from "../review/clamp";
+import { clampStatus, quickCheckThreads, threadDispute } from "../review/clamp";
 import type { Db } from "../db";
 import { buildBundle, correctionsByThread } from "./core";
 import type { RecordBundle } from "./core";
@@ -258,7 +258,7 @@ export function createRecord(db: Db, deps: {
       const fromTurns = threadDispute(threadId, turns);
       const dispute: DisputeState = fromTurns.kind !== "none" && r.resolution !== null ? { kind: "resolved_by_learner", outcome: r.resolution } : fromTurns;
       const facts = JSON.parse(r.facts_json) as ThreadFacts;
-      const { status, clampedFrom } = clampStatus(r.override ?? r.proposed, facts, dispute, r.assessable === 1);
+      const { status, clampedFrom } = clampStatus(r.override ?? r.proposed, facts, dispute, r.assessable === 1, quickCheckThreads(turns).has(threadId));
       return {
         id: r.id as ObservationId,
         reviewId: rid,

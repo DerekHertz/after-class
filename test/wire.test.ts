@@ -130,9 +130,9 @@ const captureView = {
   currentSourceId: src, transcript: "available", health: [{ channel: "frames", health: "ok", detail: "" }], watchedSeconds: 120,
 };
 const reviewJson = {
-  reviewId: rvw, captureId: cap, scope: frozenScope,
+  reviewId: rvw, captureId: cap, topics: [{ id: cpt, label: "Clocks", summary: "Ordering events." }], scope: frozenScope,
   state: {
-    reviewId: rvw, phase: "active", mainQuestions: 1, openThread: thr, lastLearnerAct: null, detour: { kind: "none" }, openDispute: null,
+    reviewId: rvw, phase: "active", mainQuestions: 1, quickChecks: 0, fuzzy: [], openThread: thr, lastLearnerAct: null, detour: { kind: "none" }, openDispute: null,
     corrections: [], activeSeconds: 30, softTargetS: 600, softTargetOffered: false, wrapUpRequested: false,
   },
   turns: [

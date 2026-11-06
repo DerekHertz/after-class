@@ -16,8 +16,8 @@ const RULES = new Map(
 );
 
 describe("Derek's rules are quoted verbatim", () => {
-  test("the flow doc lists R1 to R17", () => {
-    expect([...RULES.keys()]).toEqual(Array.from({ length: 17 }, (_, k) => `R${k + 1}`));
+  test("the flow doc lists R1 to R18", () => {
+    expect([...RULES.keys()]).toEqual(Array.from({ length: 18 }, (_, k) => `R${k + 1}`));
   });
 
   test("every `Rn: \"…\"` quote in src/ matches the flow doc exactly, and every rule is quoted", () => {

@@ -28,7 +28,7 @@ function sortedUnique<T extends string>(xs: Iterable<T>): T[] {
  * source passages are author "source". Attribution is structural, not something
  * the model labels.
  *
- * Per concept discussed (a concept of a claim some ask_main named), in order:
+ * Per concept discussed (a concept of a claim some ask_main or quick_check named), in order:
  *   source   each discussed claim's evidence-checked text and its evidence IDs
  *   learner  answers and disputes in threads about that concept, verbatim, in turn order
  *   tutor    the wrap-up summary, citing only evidence the claims or tutor turns cited
@@ -40,7 +40,7 @@ export function buildBundle(reviewId: ReviewId, turns: readonly Turn[], claims: 
 
   const threads: { readonly id: ThreadId; readonly claims: NonEmpty<AssessableClaim["id"]> }[] = [];
   for (const t of ordered) {
-    if (t.actor !== "tutor" || t.move.kind !== "ask_main") continue;
+    if (t.actor !== "tutor" || (t.move.kind !== "ask_main" && t.move.kind !== "quick_check")) continue;
     const { threadId, claimIds } = t.move;
     if (!threads.some((x) => x.id === threadId)) threads.push({ id: threadId, claims: claimIds });
   }

@@ -98,7 +98,13 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 ## D. Review and learning record (approved 2026-11-03)
 
 ```text
-[agent] Open recall question on the frozen scope (no recap first).
+[code]  Show the topics in the frozen scope as a checklist.
+[user]  Mark the topics I'm fuzzy on (or none), optionally add a note on what feels fuzzy.
+[agent] Main questions go to the fuzzy topics first; follow-ups as needed.
+[agent] Then quick checks on the rest: one short recall question each, on a sample
+        of at most 3 unmarked topics. A clear answer moves on; a shaky one becomes
+        a main question if any are left.
+[agent] No topics marked → today's behavior (open recall question, no recap first).
 [user] Speak/type an answer, skip, "I don't know", hint, explain-it, pause, end.
 [agent] Up to 3 main questions; follow-ups as needed. Evidence shown beside.
 [agent] Mismatch → one tentative, source-grounded diagnostic question.
@@ -129,11 +135,13 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 [user] Inspect, edit, accept/correct links, revisit, delete.
 ```
 
+Amendment (2026-11-06), Derek: "I was also thinking it's probably easier if I also state like, here are the areas that like I'm a little bit fuzzy on, and those are the areas that we focus, but then the tutor kind of just checks very quickly that the other areas are good as well." The agent drafted the checklist, fuzzy-first and quick-check lines above (replacing the single "Open recall question" line) and rule R18; Derek replied "Approve as written".
+
 Flow sections A–D approved as a whole on 2026-11-03. The first TLC run broke R3, R4, R7, R8, R14 and R16; Derek approved the six flow fixes marked "TLC fix" above on 2026-11-03 (rules unchanged). The re-check held 10 of 11 rules; R14 broke on a second path (a dispute Derek settles), and Derek approved the "second path" line the same day. The final re-check (2026-11-03) holds all 11 [TLC] rules, and each of the 16 mutants breaks its rule.
 
 ## Rules (approved by Derek, 2026-11-03)
 
-Drafted as candidates by the agent from the PRD and approved flow; Derek approved all seventeen as written. Quote verbatim. `[TLC]` rules become model invariants; `[test]` rules are enforced by tests.
+Drafted as candidates by the agent from the PRD and approved flow; Derek approved all seventeen as written. R18 was drafted by the agent and approved by Derek as written on 2026-11-06. Quote verbatim. `[TLC]` rules become model invariants; `[test]` rules are enforced by tests.
 
 - R1 `[test]` Evidence only comes from intervals I actually watched while capture was on.
 - R2 `[test]` Ad time never becomes evidence.
@@ -152,6 +160,7 @@ Drafted as candidates by the agent from the PRD and approved flow; Derek approve
 - R15 `[test]` Retrying a save never creates a duplicate record.
 - R16 `[TLC]` Evidence cited by a saved note is only deleted when I delete it, never by expiry.
 - R17 `[test]` Every paid call records a usage event; unknown cost is stored as unknown, not zero.
+- R18 `[test]` A quick check I pass only shows the topic looks fine; it's never recorded as understood the way a main question is.
 
 ## Stack (approved 2026-11-03)
 

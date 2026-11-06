@@ -370,7 +370,11 @@ export type DetourState =
 
 /** What the learner can do. Each is one turn fact (owner: user). */
 export type LearnerAct =
-  | { readonly kind: "begin" }
+  /**
+   * Opens the review (first turn only). `fuzzy` are the concepts the learner marked as fuzzy (may be empty or absent);
+   * `note` is what feels fuzzy, in their words.
+   */
+  | { readonly kind: "begin"; readonly fuzzy?: readonly ConceptId[] | undefined; readonly note?: string | undefined }
   | { readonly kind: "answer"; readonly text: string; readonly modality: "speech" | "text" }
   | { readonly kind: "skip" }
   | { readonly kind: "dont_know" }
@@ -394,6 +398,8 @@ export type LearnerActKind = LearnerAct["kind"];
  */
 export type TutorMove =
   | { readonly kind: "ask_main"; readonly threadId: ThreadId; readonly claimIds: NonEmpty<ClaimId> }
+  /** R18: one short recall question on one topic the learner did not mark. Not a main question; never counts toward the 3. */
+  | { readonly kind: "quick_check"; readonly threadId: ThreadId; readonly claimIds: NonEmpty<ClaimId> }
   | { readonly kind: "ask_followup"; readonly threadId: ThreadId }
   | { readonly kind: "diagnose"; readonly threadId: ThreadId; readonly hypothesis: string; readonly evidence: readonly EvidenceId[] }
   | { readonly kind: "hint"; readonly threadId: ThreadId }
@@ -443,6 +449,9 @@ export type ReviewState = {
   readonly reviewId: ReviewId;
   readonly phase: ReviewPhase;
   readonly mainQuestions: number;
+  readonly quickChecks: number;
+  /** Concepts the learner marked as fuzzy at `begin`. */
+  readonly fuzzy: readonly ConceptId[];
   readonly openThread: ThreadId | null;
   readonly lastLearnerAct: Extract<Turn, { actor: "learner" }> | null;
   readonly detour: DetourState;
@@ -474,8 +483,10 @@ export type ObservationStatus = "independent" | "partial" | "after_help" | "unre
  * What the record stores. `disputed` is code's clamp, never a proposal:
  * R14: "A disputed assessment is never counted as a learning gap unless I resolve it that way."
  * An observation with an open or unsettled dispute is saved as `disputed`.
+ * R18: "A quick check I pass only shows the topic looks fine; it's never recorded as understood the way a main question is."
+ * `looks_fine` is code's clamp for a quick-check thread that would otherwise be `independent`; it is not understood and not a gap.
  */
-export type RecordedStatus = ObservationStatus | "disputed";
+export type RecordedStatus = ObservationStatus | "disputed" | "looks_fine";
 
 export type DisputeState =
   | { readonly kind: "none" }
@@ -513,6 +524,8 @@ export type ReviewSaveState = "unsaved" | "saved" | "save_pending";
 
 export type ReviewView = {
   readonly reviewId: ReviewId;
+  /** Topics (concepts of the claims in the frozen scope), in scope order, each once. */
+  readonly topics: readonly Concept[];
   readonly captureId: CaptureId;
   readonly scope: FrozenScope;
   readonly state: ReviewState;
