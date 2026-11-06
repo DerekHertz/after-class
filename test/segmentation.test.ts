@@ -9,6 +9,8 @@ import { createMemo } from "../src/backend/providers/memo";
 import type { Lookup } from "../src/backend/providers/memo";
 import { buildWindows, planChunks, reconcile, route } from "../src/backend/segmentation/core";
 import { SEGMENTATION_DEFAULTS, createSegmentation } from "../src/backend/segmentation";
+import type { RoutingOptions } from "../src/backend/segmentation/core";
+import { PRODUCT_JEV_SETUP } from "../src/backend/jev-setup";
 import type { SegmentationConfig } from "../src/backend/segmentation";
 import { fakeTask, ok, testDb } from "./fakes";
 
@@ -344,7 +346,7 @@ describe("chunk revisions", () => {
 type Fixture = ReturnType<typeof fixture>;
 
 /** A segmentation over a scripted lecture of `windows` windows. Judgments are set per window ordinal. */
-function fixture(windows: number, opts: { cfg?: SegmentationConfig; captureId?: CaptureId; db?: ReturnType<typeof testDb> } = {}) {
+function fixture(windows: number, opts: { cfg?: SegmentationConfig; captureId?: CaptureId; db?: ReturnType<typeof testDb>; routing?: RoutingOptions | undefined } = {}) {
   const cfg = opts.cfg ?? CFG;
   const captureId = opts.captureId ?? CAP;
   const db = opts.db ?? testDb();
@@ -360,7 +362,7 @@ function fixture(windows: number, opts: { cfg?: SegmentationConfig; captureId?: 
       state.seqCalls++;
       return db.nextSeq();
     },
-  }, cfg);
+  }, cfg, opts.routing);
   return {
     db, seg, ids, state,
     show(n: number) { state.shown = n * 3; },
@@ -372,6 +374,11 @@ function fixture(windows: number, opts: { cfg?: SegmentationConfig; captureId?: 
         : { kind: "hit", key: "key_x" as never, value: j as BoundaryJudgment, atSeq: 1 as Seq });
     },
     inflight(k: number) { lookups.set(ids[k]!, { kind: "inflight", key: "key_x" as never }); },
+    /** Window k answered with an intro/conclusion (lesson framing) verdict as well. */
+    judgeFraming(k: number, newConcept: Verdict, stoppingPoint: Verdict, lessonFraming: Verdict) {
+      const value: BoundaryJudgment = { windowId: ids[k]!, newConcept, stoppingPoint, lessonFraming, pNewConcept: null, pStoppingPoint: null, questionVersion: "v1" };
+      lookups.set(ids[k]!, { kind: "hit", key: "key_x" as never, value, atSeq: 1 as Seq });
+    },
   };
 }
 
@@ -504,7 +511,7 @@ describe("rewatch and a second session reuse cached judgments", () => {
       lookupBoundary: (input) => memo.lookup(task, { w: input.window.id }),
       boundaryInput: (window) => ({ window, newPassages: [], contextPassages: [], frames: [] }),
       nextSeq: () => db.nextSeq(),
-    }, CFG);
+    }, CFG, undefined);
     const windows = buildWindows(CAP, watchOrder(passages), CFG);
     (["no/no", "no/yes", "yes/yes", "no/yes"] as const).forEach((s, k) => scripted.set(windows[k]!.id, s.split("/") as [Verdict, Verdict]));
 
@@ -523,5 +530,29 @@ describe("rewatch and a second session reuse cached judgments", () => {
     expect(again.closed[0]!.captureId).toBe(otherCapture);
     expect(again.closed[0]!.chunkId).not.toBe(first.current(CAP)[0]!.chunkId);
     expect(Material.equals(again.closed[0]!.material, first.current(CAP)[0]!.material)).toBe(true);
+  });
+});
+
+describe("the product's intro/conclusion close through createSegmentation (flow B amendment, 2026-11-06)", () => {
+  const run = (routing: RoutingOptions | undefined, nc: Verdict, sp: Verdict, lf: Verdict) => {
+    const f = fixture(4, { routing });
+    f.show(3);
+    f.judge(0, "no/no");
+    f.judge(1, "no/no");
+    f.judgeFraming(2, nc, sp, lf);
+    return f.seg.sync(CAP).closed.map((r) => r.provenance);
+  };
+
+  test("the product routing closes on new concept yes and intro/conclusion yes even when the stopping point is no", () => {
+    expect(PRODUCT_JEV_SETUP.routing).toEqual({ lessonFramingCloses: true });
+    expect(run(PRODUCT_JEV_SETUP.routing, "yes", "no", "yes")).toEqual(["boundary"]);
+  });
+
+  test("without the routing option the same answers do not close", () => {
+    expect(run(undefined, "yes", "no", "yes")).toEqual([]);
+  });
+
+  test("intro/conclusion yes alone does not close", () => {
+    expect(run(PRODUCT_JEV_SETUP.routing, "no", "no", "yes")).toEqual([]);
   });
 });

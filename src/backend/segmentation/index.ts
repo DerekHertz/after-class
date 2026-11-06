@@ -92,7 +92,7 @@ export function createSegmentation(db: Db, deps: {
   lookupBoundary(input: BoundaryInput): Lookup<BoundaryJudgment>;
   boundaryInput(w: BoundaryWindow): BoundaryInput;
   nextSeq(): Seq;
-}, cfg: SegmentationConfig, routing?: RoutingOptions): Segmentation {
+}, cfg: SegmentationConfig, routing: RoutingOptions | undefined): Segmentation {
   const insert = db.sql.query(
     `INSERT INTO chunk_revisions (id, chunk_id, capture_id, ordinal, revision_no, material_json, windows_json, provenance, closed_at_seq, supersedes)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
