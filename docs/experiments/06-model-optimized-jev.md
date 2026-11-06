@@ -4,7 +4,7 @@ Derek's question, 2026-11-04: the flow depends on Jev making the fast decisions 
 
 This experiment is outside the five approved in `docs/flows/after-class.md`. Derek approved it in chat on 2026-11-04 (cost is not a constraint in development; Opus and Fable both used). Every number below that he has not yet said yes to is marked `PROPOSED, needs Derek's OK before any call`.
 
-**Status, 2026-11-05.** Decisions 2 to 6 are adopted (above). Stages 1 to 5 are done on the 43-clip set: assembled (`assembled-2`), model labels (Opus 62 Claude calls, Fable 63 with one retry), Derek verified and signed `labels-set-2-signed.json`, and the baseline is experiment 2's Run 2 (yes at 0.4, recall 2 of 5 on the held-out half, see `02-jev-lab.md`). Stage 6 (optimizer rounds) and stage 7 are not started; the lab side of the build prerequisites below is built (the items marked BUILT under "Build prerequisites"), the optimizer runner and the held-out prompt guard are built too (`scripts/jev-lab-optimize.ts`, see "Optimizer rounds: commands"). No optimizer call has been made.
+**Status, 2026-11-05.** Decisions 2 to 6 are adopted (above). Stages 1 to 5 are done on the 43-clip set: assembled (`assembled-2`), model labels (Opus 62 Claude calls, Fable 63 with one retry), Derek verified and signed `labels-set-2-signed.json`, and the baseline is experiment 2's Run 2 (yes at 0.4, recall 2 of 5 on the held-out half, see `02-jev-lab.md`). Stages 6 and 7 ran on 2026-11-05 (see Results); the lab side of the build prerequisites below is built (the items marked BUILT under "Build prerequisites"), the optimizer runner and the held-out prompt guard are built too (`scripts/jev-lab-optimize.ts`, see "Optimizer rounds: commands"). 
 
 ## Decisions for Derek
 
@@ -113,4 +113,212 @@ The rules below are decided now and are enforced and tested by the prerequisites
 
 ## Results
 
-None yet. This section is filled only from Derek's runs and pasted unedited.
+### Run 1 (2026-11-05 local evening), the 43-clip set
+
+Derek said "Yes, start" to the run plan. Opus arm (`opus-1`) first, then Fable (`fable-1`), one at a time; 3 optimizer rounds each, every proposal accepted on its first attempt (6 Claude calls, no retry; the shared Claude ledger went from 177 to 183 of 250). Every round-1 prompt passed the held-out guard; the dry-run prompt (166,037 characters, clips 1 to 22 only) is the one both arms received. Jev: 2,889 calls across the two arm directories (opus-1 1,730, fable-1 1,159) of the 5,000 cap, none failed. Proposals, rationales, prompts and responses: `data/lab/propose/opt-<arm>-r<N>/`; runs: `data/lab/lab-run-2/exp6/<arm>/live/runs/`.
+
+Tuning rounds on the first half (clips 1 to 22, 4 labeled boundaries). Bars: recall at least 70%, at most 1 false close per 15 min, at most 1 step lost, at least 50% duplicates dropped.
+
+| Arm, round | What the optimizer changed | Recall | False closes per 15 min | Steps lost | Duplicates dropped | Bars passed |
+| --- | --- | --- | --- | --- | --- | --- |
+| baseline (exp 2 round 2) | product wording, yes at 0.4 | 1 of 4 | 1.52 | 0 of 25 | 96.4% | 2 |
+| opus-1 r1 | lesson-level new-concept and wrapped-up stopping-point wording, context 180 s | 2 of 4 | 0.76 | 1 of 25 | 96.9% | 3 |
+| opus-1 r2 | "clean break" stopping point, new concept narrowed, frame wording widened | 2 of 4 | 2.54 | 0 of 25 | 76.0% | 2 |
+| opus-1 r3 | "whole lesson wrapped up" stopping point, yes at 0.35, no at 0.25 | 2 of 4 | 0.25 | 0 of 25 | 68.6% | 3 |
+| fable-1 r1 | lesson-level new concept, stopping point leaning yes, yes at 0.45, windows 45 s, context 150 s | 2 of 4 | 0.76 | 0 of 25 | 96.2% | 3 |
+| fable-1 r2 | stricter new concept ("unrelated subject"), stopping point says yes on truncated captions, yes at 0.5, context 120 s | 0 of 4 | 0 | 0 of 25 | 96.2% | 3 |
+| fable-1 r3 | round-1 cues plus targeted exclusions, yes at 0.42 | 3 of 4 | 3.30 | 0 of 25 | 96.2% | 3 |
+
+Selected by decision 5 (code, first-half reports only): opus-1 round 3 (tie on bars and recall, fewer false closes); fable-1 round 3 (tie on bars, higher recall).
+
+Held-out half (clips 23 to 43, 5 labeled boundaries), each arm scored once; both reports below are pasted unedited and `rescore` reproduces each byte for byte.
+
+| Arm | Recall | False closes per 15 min | Steps lost | Duplicates dropped | Overall |
+| --- | --- | --- | --- | --- | --- |
+| Baseline (experiment 2 Run 2) | 2 of 5 (40%) FAIL | 0.559 PASS | 0 of 13 PASS | 91.3% PASS | FAIL (recall) |
+| Opus 5.5 (opus-1, round 3) | 2 of 5 (40%) FAIL | 1.118 FAIL | 0 of 13 PASS | 56.4% PASS | FAIL (recall, false closes) |
+| Fable 5.1 (fable-1, round 3) | 5 of 5 (100%) PASS | 3.073 FAIL | 0 of 13 PASS | 91.0% PASS | FAIL (false closes) |
+
+No arm passes all four bars. Nobody picks among the arms; all three are reported side by side (decision 7). An observation, not a result: 8 of Fable's 11 false closes on the held-out half fall within 6 s of a clip start, so its wording closes at many clip joins whose topic does not change. One set, one labeler, one machine; this says nothing about other courses or about learning.
+
+```text
+[live] Jev lab report score-1
+[live] Data origin: live
+[live] Scope: held-out second halves (scored once)
+[live] Model: jev-1.13.0
+[live] Config: windowNewS=30, contextS=180, timeCapS=480, maxFramesPerWindow=2, reviseOnNextNoNo=false
+[live] Thresholds: yes at or above 0.35, no at or below 0.25
+[live] Questions (this arm's wording, which differs from the product's):
+[live]   newConcept: "Does state.passage start a new lesson on a different main subject (a different system, technique or problem) from the lesson state.context was teaching? Typical yes: caption times restart (a new video) and the speaker introduces a lesson whose main subject differs from the one just concluded, even within the same course area and even if the earlier lesson previewed it. Answer no for the next part, mechanism, layer, step, history, quiz, example, recap or conclusion of the same lesson. Mid-video, answer yes only if the speaker explicitly ends one topic and starts another."
+[live]   stoppingPoint: "Does state.context end by wrapping up a whole lesson, for example closing remarks, overall takeaways, a final summary, a reading recommendation or a mention of what the next lesson will cover? Ignore a final caption cut off mid-sentence. Answer no if the end of the context is an introduction, an explanation still in progress, a quiz prompt, or a transition between parts of the same lesson (such as 'having covered X, let's look at Y' or 'now let's dig into the details')."
+[live]   teachingChange: "Does state.after show slide content that state.before does not: new text, a new or extended figure or diagram, a new equation or code, a different slide, or writing added to the existing slide (even a small addition)? Answer no if the slide content is the same and only the cursor, pointer, camera, presenter, lighting or video compression changed."
+[live] Arm: opus-1
+[live] Selected round: 3 of this arm's tune rounds (tie on clauses passed and recall, fewer false closes; compared on first-half reports: round 1: 3 of 4 clauses pass, recall 2/4, false closes 3; round 2: 2 of 4 clauses pass, recall 2/4, false closes 10; round 3: 3 of 4 clauses pass, recall 2/4, false closes 1)
+[live] Budget: "~2400 Jev calls (Amendment 3; ~800 until then), max 3 tuning rounds, tune on first halves, score once on held-out second halves"
+[live] Lecture cap_tgdrnaulw4pau7lyfk2wy2tqlq/set:gj8SEvEc8q8+42: 43 clips in watch order, split at the join before clip 23 (watched 3546.876 s before it and 3221.466 s after; the midpoint of 6768.341 s is 3384.171 s), tune clips 1-22, held-out clips 23-43, scored second half; labels labels-set-2-signed.json sha256 0a4789ccd3d6
+[live]   clip 1: gj8SEvEc8q8, span [0.003, 115.521), watched 115.518 s
+[live]   clip 2: oIwmkFTpo8o, span [0.004, 146.401), watched 146.349 s
+[live]   clip 3: XkOpgZwzF1w, span [0.009, 97.596), watched 97.587 s
+[live]   clip 4: 3pKfZb7cplY, span [0.003, 156.181), watched 156.178 s
+[live]   clip 5: QTpdTk6wMDk, span [0.002, 271.981), watched 271.979 s
+[live]   clip 6: WF9o7pvNvyM, span [0.003, 290.441), watched 290.438 s
+[live]   clip 7: Z0RWTiD_pHM, span [0.003, 202.081), watched 202.078 s
+[live]   clip 8: UtwGUDBZmvo, span [0.003, 309.381), watched 309.378 s
+[live]   clip 9: ORfwa0dxzcE, span [0.006, 57.461), watched 57.455 s
+[live]   clip 10: 61f7BVQO6fY, span [0.018, 167.721), watched 167.703 s
+[live]   clip 11: jxv0AOe4HQo, span [0.007, 180.303), watched 180.296 s
+[live]   clip 12: Uks_t77_nyk, span [0.003, 184.341), watched 184.338 s
+[live]   clip 13: iW9-T8d4nFY, span [0.004, 167.701), watched 167.677 s
+[live]   clip 14: NxsgAAwO0kg, span [0.002, 234.761), watched 234.759 s
+[live]   clip 15: eV86JsLbPt8, span [0.007, 47.181), watched 47.174 s
+[live]   clip 16: 6OiieeFFSCo, span [0.013, 25.761), watched 25.748 s
+[live]   clip 17: rwFYdb1AUxA, span [0.008, 19.001), watched 18.993 s
+[live]   clip 18: eCx87JRJ31s, span [0, 13.621), watched 13.621 s
+[live]   clip 19: i8eTe51yH1s, span [0.003, 58.801), watched 58.798 s
+[live]   clip 20: isg_qmXmcN0, span [0.03, 212.581), watched 212.551 s
+[live]   clip 21: IsJnQgacCmY, span [0.139, 248.041), watched 247.902 s
+[live]   clip 22: ASu4g8Q1dVc, span [0.003, 340.361), watched 340.358 s
+[live]   clip 23: oYA5VHWxA9w, span [0.005, 36.201), watched 36.196 s
+[live]   clip 24: QCL4w7adhTI, span [0.006, 67.761), watched 67.755 s
+[live]   clip 25: IXbsbljB9nQ, span [0.017, 160.981), watched 160.964 s
+[live]   clip 26: mmM7uxkXmRM, span [0.008, 241.221), watched 241.213 s
+[live]   clip 27: -lJxenRuzdc, span [0.087, 401.101), watched 401.014 s
+[live]   clip 28: JcW7DfUP4Lw, span [0, 72.401), watched 72.401 s
+[live]   clip 29: aashdwoAiog, span [0.011, 188.281), watched 188.27 s
+[live]   clip 30: _vr032NsptA, span [0.019, 412.881), watched 412.862 s
+[live]   clip 31: XPDuZ3OpBsI, span [0.104, 244.361), watched 244.257 s
+[live]   clip 32: WumSP2BLj2A, span [0.006, 281.841), watched 281.835 s
+[live]   clip 33: jNjiBT3XRuE, span [0.008, 94.621), watched 94.613 s
+[live]   clip 34: E4TSFpP3cTU, span [0.004, 72.261), watched 72.257 s
+[live]   clip 35: 1JlFKgJ1bUg, span [0.003, 139.141), watched 139.138 s
+[live]   clip 36: 2bY1PxhkBBE, span [0.002, 183.821), watched 183.819 s
+[live]   clip 37: LTVbD9_t4iE, span [0, 86.129), watched 86.129 s
+[live]   clip 38: IffxZvPBAiY, span [0.003, 148.91), watched 148.906 s
+[live]   clip 39: qVEMq_tl5Sk, span [0.015, 32.041), watched 32.026 s
+[live]   clip 40: z_UNXO7yaro, span [0.003, 61.721), watched 61.718 s
+[live]   clip 41: 6ap7_kBQUb4, span [0.011, 29.861), watched 29.85 s
+[live]   clip 42: wOQym_iOULE, span [0.016, 143.761), watched 143.745 s
+[live]   clip 43: 0zRt8G366UU, span [0.002, 122.501), watched 122.499 s
+
+[live] Boundary recall: FAIL
+[live] Bar: "≥70% of labeled boundaries detected within ±60s"
+[live] Measured: 2/5 labeled boundaries detected within ±60s = 40%.
+[live]   cap_tgdrnaulw4pau7lyfk2wy2tqlq/set:gj8SEvEc8q8+42: 2/5 detected; missed at clip 34 0.004s, clip 40 0.003s, clip 43 0.002s
+
+[live] False closes: FAIL
+[live] Bar: "≤1 false close per 15 min"
+[live] Measured: 4 false close(s) in 3221.466 s watched = 1.118 per 15 min.
+[live]   cap_tgdrnaulw4pau7lyfk2wy2tqlq/set:gj8SEvEc8q8+42: 6 Jev close(s), 4 false at clip 24 19s, clip 25 3s, clip 29 50s, clip 39 6s in 3221.466 s watched
+
+[live] Visual steps: PASS
+[live] Bar: "≤1 important visual step lost per lecture"
+[live] Measured: most lost in one lecture 0 (limit 1); this is the scored half only, not a whole lecture.
+[live]   cap_tgdrnaulw4pau7lyfk2wy2tqlq/set:gj8SEvEc8q8+42: 0/13 lost
+
+[live] Duplicates: PASS
+[live] Bar: "≥50% duplicates dropped"
+[live] Measured: 239/424 labeled duplicates dropped = 56.368%.
+[live]   cap_tgdrnaulw4pau7lyfk2wy2tqlq/set:gj8SEvEc8q8+42: 239/424 dropped
+
+[live] Usage (this run, measured; Jev reports tokens only, so cost is unknown):
+[live]   calls 538 (boundary 100, frame change 438, failed 0); judgments reused from earlier calls 0
+[live]   input tokens 3050920 (0 call(s) without a count), output tokens 14174 (0 call(s) without a count)
+[live]   cost unknown
+[live] Latency (report only, no target): all calls p50 399 ms, p95 660 ms (n=538)
+[live]   boundary p50 421 ms, p95 713 ms (n=100)
+[live]   frame change p50 392 ms, p95 623 ms (n=438)
+
+[live] OVERALL: FAIL (failed: recall, false closes)
+[live] Not shown by this lab: model accuracy beyond this label set, other lectures, other machines, learning effectiveness. Labels are Derek's judgment.
+```
+
+```text
+[live] Jev lab report score-1
+[live] Data origin: live
+[live] Scope: held-out second halves (scored once)
+[live] Model: jev-1.13.0
+[live] Config: windowNewS=45, contextS=120, timeCapS=480, maxFramesPerWindow=2, reviseOnNextNoNo=false
+[live] Thresholds: yes at or above 0.42, no at or below 0.3
+[live] Questions (this arm's wording, which differs from the product's):
+[live]   newConcept: "Does state.passage open a new lesson or module, or switch to a different main subject from what state.context was teaching? Answer yes if the passage sets up a different system, technique, paper or theme to study now: it announces what this lesson or module will cover, poses a new problem, or moves on after state.context wrapped up the previous subject with a conclusion. Answer no if the passage keeps working on the same subject: its next mechanism, layer, step, detail, example, history, quiz or solution, recap or summary, or a part the lecturer was already introducing in state.context."
+[live]   stoppingPoint: "Could a review chunk end at the end of state.context without cutting a thought in half? Answer yes if state.context finished its point (a conclusion, summary, recap, transition, preview of what comes next, or a completed explanation), or if state.passage starts something new rather than completing what state.context left open. A final caption that is cut off or truncated does not count as unfinished. Answer no only if state.passage directly continues a step, derivation, list, example or argument that state.context was still in the middle of."
+[live]   teachingChange: "Does the change from state.before to state.after add teaching content (a new written step, equation, diagram element, code edit, or slide)? Answer no for cursor, camera or presenter motion or duplicate content."
+[live] Arm: fable-1
+[live] Selected round: 3 of this arm's tune rounds (tie on clauses passed, higher boundary recall; compared on first-half reports: round 1: 3 of 4 clauses pass, recall 2/4, false closes 3; round 2: 3 of 4 clauses pass, recall 0/4, false closes 0; round 3: 3 of 4 clauses pass, recall 3/4, false closes 13)
+[live] Budget: "~2400 Jev calls (Amendment 3; ~800 until then), max 3 tuning rounds, tune on first halves, score once on held-out second halves"
+[live] Lecture cap_tgdrnaulw4pau7lyfk2wy2tqlq/set:gj8SEvEc8q8+42: 43 clips in watch order, split at the join before clip 23 (watched 3546.876 s before it and 3221.466 s after; the midpoint of 6768.341 s is 3384.171 s), tune clips 1-22, held-out clips 23-43, scored second half; labels labels-set-2-signed.json sha256 0a4789ccd3d6
+[live]   clip 1: gj8SEvEc8q8, span [0.003, 115.521), watched 115.518 s
+[live]   clip 2: oIwmkFTpo8o, span [0.004, 146.401), watched 146.349 s
+[live]   clip 3: XkOpgZwzF1w, span [0.009, 97.596), watched 97.587 s
+[live]   clip 4: 3pKfZb7cplY, span [0.003, 156.181), watched 156.178 s
+[live]   clip 5: QTpdTk6wMDk, span [0.002, 271.981), watched 271.979 s
+[live]   clip 6: WF9o7pvNvyM, span [0.003, 290.441), watched 290.438 s
+[live]   clip 7: Z0RWTiD_pHM, span [0.003, 202.081), watched 202.078 s
+[live]   clip 8: UtwGUDBZmvo, span [0.003, 309.381), watched 309.378 s
+[live]   clip 9: ORfwa0dxzcE, span [0.006, 57.461), watched 57.455 s
+[live]   clip 10: 61f7BVQO6fY, span [0.018, 167.721), watched 167.703 s
+[live]   clip 11: jxv0AOe4HQo, span [0.007, 180.303), watched 180.296 s
+[live]   clip 12: Uks_t77_nyk, span [0.003, 184.341), watched 184.338 s
+[live]   clip 13: iW9-T8d4nFY, span [0.004, 167.701), watched 167.677 s
+[live]   clip 14: NxsgAAwO0kg, span [0.002, 234.761), watched 234.759 s
+[live]   clip 15: eV86JsLbPt8, span [0.007, 47.181), watched 47.174 s
+[live]   clip 16: 6OiieeFFSCo, span [0.013, 25.761), watched 25.748 s
+[live]   clip 17: rwFYdb1AUxA, span [0.008, 19.001), watched 18.993 s
+[live]   clip 18: eCx87JRJ31s, span [0, 13.621), watched 13.621 s
+[live]   clip 19: i8eTe51yH1s, span [0.003, 58.801), watched 58.798 s
+[live]   clip 20: isg_qmXmcN0, span [0.03, 212.581), watched 212.551 s
+[live]   clip 21: IsJnQgacCmY, span [0.139, 248.041), watched 247.902 s
+[live]   clip 22: ASu4g8Q1dVc, span [0.003, 340.361), watched 340.358 s
+[live]   clip 23: oYA5VHWxA9w, span [0.005, 36.201), watched 36.196 s
+[live]   clip 24: QCL4w7adhTI, span [0.006, 67.761), watched 67.755 s
+[live]   clip 25: IXbsbljB9nQ, span [0.017, 160.981), watched 160.964 s
+[live]   clip 26: mmM7uxkXmRM, span [0.008, 241.221), watched 241.213 s
+[live]   clip 27: -lJxenRuzdc, span [0.087, 401.101), watched 401.014 s
+[live]   clip 28: JcW7DfUP4Lw, span [0, 72.401), watched 72.401 s
+[live]   clip 29: aashdwoAiog, span [0.011, 188.281), watched 188.27 s
+[live]   clip 30: _vr032NsptA, span [0.019, 412.881), watched 412.862 s
+[live]   clip 31: XPDuZ3OpBsI, span [0.104, 244.361), watched 244.257 s
+[live]   clip 32: WumSP2BLj2A, span [0.006, 281.841), watched 281.835 s
+[live]   clip 33: jNjiBT3XRuE, span [0.008, 94.621), watched 94.613 s
+[live]   clip 34: E4TSFpP3cTU, span [0.004, 72.261), watched 72.257 s
+[live]   clip 35: 1JlFKgJ1bUg, span [0.003, 139.141), watched 139.138 s
+[live]   clip 36: 2bY1PxhkBBE, span [0.002, 183.821), watched 183.819 s
+[live]   clip 37: LTVbD9_t4iE, span [0, 86.129), watched 86.129 s
+[live]   clip 38: IffxZvPBAiY, span [0.003, 148.91), watched 148.906 s
+[live]   clip 39: qVEMq_tl5Sk, span [0.015, 32.041), watched 32.026 s
+[live]   clip 40: z_UNXO7yaro, span [0.003, 61.721), watched 61.718 s
+[live]   clip 41: 6ap7_kBQUb4, span [0.011, 29.861), watched 29.85 s
+[live]   clip 42: wOQym_iOULE, span [0.016, 143.761), watched 143.745 s
+[live]   clip 43: 0zRt8G366UU, span [0.002, 122.501), watched 122.499 s
+
+[live] Boundary recall: PASS
+[live] Bar: "≥70% of labeled boundaries detected within ±60s"
+[live] Measured: 5/5 labeled boundaries detected within ±60s = 100%.
+[live]   cap_tgdrnaulw4pau7lyfk2wy2tqlq/set:gj8SEvEc8q8+42: 5/5 detected; missed at none
+
+[live] False closes: FAIL
+[live] Bar: "≤1 false close per 15 min"
+[live] Measured: 11 false close(s) in 3221.466 s watched = 3.073 per 15 min.
+[live]   cap_tgdrnaulw4pau7lyfk2wy2tqlq/set:gj8SEvEc8q8+42: 16 Jev close(s), 11 false at clip 25 3s, clip 26 5s, clip 27 3s, clip 28 0s, clip 29 39s, clip 32 4s, clip 33 42s, clip 35 2s, clip 36 28s, clip 37 0s, clip 41 5s in 3221.466 s watched
+
+[live] Visual steps: PASS
+[live] Bar: "≤1 important visual step lost per lecture"
+[live] Measured: most lost in one lecture 0 (limit 1); this is the scored half only, not a whole lecture.
+[live]   cap_tgdrnaulw4pau7lyfk2wy2tqlq/set:gj8SEvEc8q8+42: 0/13 lost
+
+[live] Duplicates: PASS
+[live] Bar: "≥50% duplicates dropped"
+[live] Measured: 386/424 labeled duplicates dropped = 91.038%.
+[live]   cap_tgdrnaulw4pau7lyfk2wy2tqlq/set:gj8SEvEc8q8+42: 386/424 dropped
+
+[live] Usage (this run, measured; Jev reports tokens only, so cost is unknown):
+[live]   calls 506 (boundary 68, frame change 438, failed 0); judgments reused from earlier calls 0
+[live]   input tokens 2797532 (0 call(s) without a count), output tokens 12862 (0 call(s) without a count)
+[live]   cost unknown
+[live] Latency (report only, no target): all calls p50 347 ms, p95 818 ms (n=506)
+[live]   boundary p50 362 ms, p95 599 ms (n=68)
+[live]   frame change p50 342 ms, p95 844 ms (n=438)
+
+[live] OVERALL: FAIL (failed: false closes)
+[live] Not shown by this lab: model accuracy beyond this label set, other lectures, other machines, learning effectiveness. Labels are Derek's judgment.
+```
