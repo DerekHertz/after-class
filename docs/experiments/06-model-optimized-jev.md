@@ -4,7 +4,7 @@ Derek's question, 2026-11-04: the flow depends on Jev making the fast decisions 
 
 This experiment is outside the five approved in `docs/flows/after-class.md`. Derek approved it in chat on 2026-11-04 (cost is not a constraint in development; Opus and Fable both used). Every number below that he has not yet said yes to is marked `PROPOSED, needs Derek's OK before any call`.
 
-**Status, 2026-11-05.** Decisions 2 to 6 are adopted (above). Stages 1 to 5 are done on the 43-clip set: assembled (`assembled-2`), model labels (Opus 62 Claude calls, Fable 63 with one retry), Derek verified and signed `labels-set-2-signed.json`, and the baseline is experiment 2's Run 2 (yes at 0.4, recall 2 of 5 on the held-out half, see `02-jev-lab.md`). Stage 6 (optimizer rounds) and stage 7 are not started; the build prerequisites below that they need are not built. No optimizer call has been made.
+**Status, 2026-11-05.** Decisions 2 to 6 are adopted (above). Stages 1 to 5 are done on the 43-clip set: assembled (`assembled-2`), model labels (Opus 62 Claude calls, Fable 63 with one retry), Derek verified and signed `labels-set-2-signed.json`, and the baseline is experiment 2's Run 2 (yes at 0.4, recall 2 of 5 on the held-out half, see `02-jev-lab.md`). Stage 6 (optimizer rounds) and stage 7 are not started; the lab side of the build prerequisites below is built (the items marked BUILT under "Build prerequisites"), the optimizer runner and the held-out prompt guard are not. No optimizer call has been made.
 
 ## Decisions for Derek
 
@@ -41,9 +41,33 @@ None of the following exists on `master` when this was written. Each is built, t
 - The set-aware labeling sheet with model proposals and a disagreements panel (stage 4). Until it merges, the sheet refuses a set.
 - `jev-lab-propose`: the timing pilot, the labeler, the deterministic comparison of two models' proposals, and the Claude-call rails named below (stages 2 and 3).
 - The optimizer runner: it builds the first-half-only prompt, validates a proposal against decision 4, applies it, and re-runs Jev (stage 6).
-- Scoring an arm's selected round, which is not always the last tune round (decision 5).
-- Separate lab run directories per arm, a per-directory Jev ceiling (decision 6, Amendment 2 to it: now 2,400 for both experiments, so nothing separate to build; this line first said "raise to 1,000 while experiment 2 keeps 800"), and a persisted Jev-call counter across the arms' directories for the 5,000 total (decision 6, Amendment 2; this line first said 3,000) (decisions 6 and 7).
-- A code check that no optimizer or labeler prompt contains held-out material (see "Fixed").
+- Scoring an arm's selected round, which is not always the last tune round (decision 5). **BUILT** (arm-lab PR): `selectRound` in `scripts/jev-lab-arm.ts` and `run --phase score --arm <name>`; the held-out half is never read to pick.
+- Separate lab run directories per arm, a per-directory Jev ceiling (decision 6, Amendment 2 to it: now 2,400 for both experiments, so nothing separate to build; this line first said "raise to 1,000 while experiment 2 keeps 800"), and a persisted Jev-call counter across the arms' directories for the 5,000 total (decision 6, Amendment 2; this line first said 3,000) (decisions 6 and 7). **BUILT** (arm-lab PR): `run --arm <name>` writes `<lab>/exp6/<arm>/<origin>`, and `EXP6_BUDGET_CALLS` (5,000) is checked up front and before every request against the floored counters of all arm directories.
+- Lab-side inputs for the optimizer (decision 4): the arm config file (`jev-arm-config`, validated, exactly the three wordings, the thresholds and the segmentation), question wording as an input to the Jev tasks with the wording version in every cache key, and `plan --arm-config`. **BUILT** (arm-lab PR). The optimizer runner above and the code check below are NOT built.
+- A code check that no optimizer or labeler prompt contains held-out material (see "Fixed"). **NOT BUILT.**
+
+## Arm runs: commands (lab side, built)
+
+All paths are examples; nothing here makes a Jev call without `--live`, a 0600 keys file, `--max-calls` and signed labels, exactly as in experiment 2. An arm name is letters, digits and dashes.
+
+```
+# starting config from experiment 2's final state (product wording, its thresholds and segmentation): write it as JSON
+# with armConfigFromBaseline(lastTune) from scripts/jev-lab-arm.ts, then edit only what decision 4 allows.
+
+# price a round (counts only; with --lab and --arm, the arm's stored judgments are not counted as new)
+bun run scripts/jev-lab.ts plan --data <dir> --labels <signed.json> --arm-config <arm-config.json> --lab <lab> --arm opus-1
+
+# a tune round (first halves only; at most 3 per arm); the per-knob flags are refused with --arm
+bun run scripts/jev-lab.ts run --data <dir> --lab <lab> --labels <signed.json> --phase tune --arm opus-1 --arm-config <arm-config.json> [--live --max-calls <n>]
+
+# the held-out run, once per arm directory: scores the arm's SELECTED round (decision 5), not necessarily the last
+bun run scripts/jev-lab.ts run --data <dir> --lab <lab> --labels <signed.json> --phase score --arm opus-1 [--live --max-calls <n>]
+
+# read any run back with no call
+bun run scripts/jev-lab.ts rescore --results <lab>/exp6/opus-1/live/runs/score-1.jsonl --labels <signed.json>
+```
+
+The results header records the arm, the question wording when it differs from the product's (the report then prints a `Questions` block; experiment 2's reports are unchanged), and for a scored run the selected round and the counts compared. A judgment made with other wording is never reused: the wording version (`arm-<16 hex of sha256 of the wording>`) is part of its cache key, and the product's wording keeps version `1`.
 
 ## Fixed, to be enforced in code
 

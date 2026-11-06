@@ -12,6 +12,7 @@
  */
 import { z } from "zod";
 import type { BoundaryJudgment, BoundaryWindow, ClaimDraft, Frame, Passage, Verdict } from "../../shared/domain";
+import { canonicalJson } from "../../shared/ids";
 import type { IdPart } from "../../shared/ids";
 import { ProviderError } from "./memo";
 import type { Task, UsageReport } from "./memo";
@@ -55,6 +56,25 @@ export const QUESTIONS = {
       "Does state.evidence support state.claim within its stated scope? Treat state.assumptions as labelled assumptions, not as evidence. Answer no if the evidence contradicts the claim, does not address it, or supports only a narrower claim.",
   },
 } as const;
+
+/** Question wording as an input (experiment 6 arms). Omitted everywhere in the product, which uses QUESTIONS as written. */
+export type BoundaryQuestions = { readonly newConcept: string; readonly stoppingPoint: string };
+export type FrameChangeQuestions = { readonly teachingChange: string };
+
+const sha16 = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex").slice(0, 16);
+
+/**
+ * The wording version of a task: the product's own wording keeps its version ("1"); any other wording is
+ * `arm-<first 16 hex of sha256 of the wording text>`, so changed wording can never share a key with other wording.
+ */
+export function boundaryWordingVersion(q?: BoundaryQuestions): string {
+  if (q === undefined || (q.newConcept === QUESTIONS.boundary.newConcept && q.stoppingPoint === QUESTIONS.boundary.stoppingPoint)) return QUESTIONS.boundary.version;
+  return `arm-${sha16(canonicalJson({ newConcept: q.newConcept, stoppingPoint: q.stoppingPoint }))}`;
+}
+export function frameChangeWordingVersion(q?: FrameChangeQuestions): string {
+  if (q === undefined || q.teachingChange === QUESTIONS.frameChange.teachingChange) return QUESTIONS.frameChange.version;
+  return `arm-${sha16(canonicalJson({ teachingChange: q.teachingChange }))}`;
+}
 
 const MAX_ATTEMPTS = 3;
 const thresholdTag = `${THRESHOLDS.yesAtOrAbove}/${THRESHOLDS.noAtOrBelow}`;
@@ -119,8 +139,9 @@ const claimOutputSchema = z.object({ verdict: verdictSchema, p: probabilitySchem
  * state = { context: [{t, text}], passage: [{t, text}], frames: ["frame_0", …] }
  * Both questions share one request, so the pair costs one round trip and one copy of the state.
  */
-export function boundaryTask(jev: JevClient): Task<BoundaryInput, BoundaryJudgment> {
-  const wording = `boundary.${QUESTIONS.boundary.version}`;
+export function boundaryTask(jev: JevClient, questions?: BoundaryQuestions): Task<BoundaryInput, BoundaryJudgment> {
+  const wording = `boundary.${boundaryWordingVersion(questions)}`;
+  const text = questions ?? QUESTIONS.boundary;
   return {
     provider: "jev",
     purpose: "boundary",
@@ -135,8 +156,8 @@ export function boundaryTask(jev: JevClient): Task<BoundaryInput, BoundaryJudgme
           model: JEV_MODEL,
           state: { context: i.contextPassages.map(timed), passage: i.newPassages.map(timed), frames: images.map((m) => m.ref) },
           questions: {
-            new_concept: noul(QUESTIONS.boundary.newConcept),
-            stopping_point: noul(QUESTIONS.boundary.stoppingPoint),
+            new_concept: noul(text.newConcept),
+            stopping_point: noul(text.stoppingPoint),
           },
           images,
         },
@@ -173,12 +194,13 @@ const NO_CALL: UsageReport = {
  * Caller maps yes→kept, no→dropped, uncertain/failed→uncertain (kept): "Uncertain visual → keep the frame."
  * The first frame of a source has nothing to compare with and resolves to uncertain without a call.
  */
-export function frameChangeTask(jev: JevClient): Task<FrameChangeInput, Verdict> {
+export function frameChangeTask(jev: JevClient, questions?: FrameChangeQuestions): Task<FrameChangeInput, Verdict> {
+  const text = questions ?? QUESTIONS.frameChange;
   return {
     provider: "jev",
     purpose: "frame_change",
     model: JEV_MODEL,
-    version: versionOf(`frame_change.${QUESTIONS.frameChange.version}`),
+    version: versionOf(`frame_change.${frameChangeWordingVersion(questions)}`),
     maxAttempts: MAX_ATTEMPTS,
     canonicalInput: (i) => ({ before: i.before?.frame.id ?? null, after: i.after.frame.id, nearby: ids(i.nearbyPassages) }),
     async attempt(i, ctx) {
@@ -188,7 +210,7 @@ export function frameChangeTask(jev: JevClient): Task<FrameChangeInput, Verdict>
         {
           model: JEV_MODEL,
           state: { before: "frame_before", after: "frame_after", captions: i.nearbyPassages.map(timed) },
-          questions: { teaching_change: noul(QUESTIONS.frameChange.teachingChange) },
+          questions: { teaching_change: noul(text.teachingChange) },
           images,
         },
         ctx.signal,

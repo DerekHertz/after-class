@@ -14,6 +14,7 @@ import { Material } from "../src/shared/time";
 import { THRESHOLDS } from "../src/backend/providers/jev-tasks";
 import type { SegmentationConfig } from "../src/backend/segmentation";
 import { planChunks } from "../src/backend/segmentation";
+import type { ArmQuestions } from "./jev-lab-arm";
 
 export type Origin = "fixture" | "live";
 export type Phase = "tune" | "score";
@@ -476,7 +477,17 @@ export type JudgmentRecord = {
   readonly error: string | null;
 };
 
-export type RunHeader = {
+/** Experiment 6 only: present when a run is an optimizer arm's. Experiment 2's header has none of these keys. */
+export type ArmInfo = {
+  readonly arm?: string;
+  /** Present only when the question wording differs from the product's. */
+  readonly questions?: ArmQuestions;
+  /** A scored arm run: which tune round it used and why (decision 5). */
+  readonly selectedRound?: number;
+  readonly selectionReason?: string;
+};
+
+export type RunHeader = ArmInfo & {
   readonly t: "header";
   readonly version: 1;
   readonly runId: string;
@@ -643,7 +654,9 @@ export function duplicateOutcomes(groups: readonly DuplicateGroup[], frames: rea
 // ───────────────────────────── report ─────────────────────────────
 
 export type LabelInfo = { readonly file: string; readonly sha256: string; readonly labels: AnyLabelFile };
-export type Report = { readonly text: string; readonly overall: "PASS" | "FAIL" | "NOT PASSED"; readonly exitCode: 0 | 1; readonly bars: readonly { readonly name: string; readonly verdict: BarVerdict }[] };
+/** What round selection compares (experiment 6, decision 5); null means the clause was not measured. */
+export type ReportMetrics = { readonly recallMatched: number; readonly recallLabeled: number; readonly falseCloses: number | null };
+export type Report = { readonly text: string; readonly overall: "PASS" | "FAIL" | "NOT PASSED"; readonly exitCode: 0 | 1; readonly bars: readonly { readonly name: string; readonly verdict: BarVerdict }[]; readonly metrics: ReportMetrics };
 
 const fmt = (x: number) => String(Number(x.toFixed(3)));
 const pct = (num: number, den: number) => `${fmt((num / den) * 100)}%`;
@@ -835,6 +848,16 @@ export function buildReport({ results, labels }: { readonly results: ParsedResul
     `Model: ${header.model}`,
     `Config: ${Object.entries(header.config).map(([k, v]) => `${k}=${v}`).join(", ")}`,
     `Thresholds: yes at or above ${header.thresholds.yesAtOrAbove}, no at or below ${header.thresholds.noAtOrBelow}`,
+    ...(header.questions === undefined
+      ? []
+      : [
+          "Questions (this arm's wording, which differs from the product's):",
+          `  newConcept: ${JSON.stringify(header.questions.newConcept)}`,
+          `  stoppingPoint: ${JSON.stringify(header.questions.stoppingPoint)}`,
+          `  teachingChange: ${JSON.stringify(header.questions.teachingChange)}`,
+        ]),
+    ...(header.arm === undefined ? [] : [`Arm: ${header.arm}`]),
+    ...(header.selectedRound === undefined ? [] : [`Selected round: ${header.selectedRound} of this arm's tune rounds (${header.selectionReason ?? "no reason recorded"})`]),
     `Budget: "${BUDGET_TEXT}"`,
     ...results.lectures.flatMap(lectureLines),
     "",
@@ -845,7 +868,7 @@ export function buildReport({ results, labels }: { readonly results: ParsedResul
   out.push(`Not shown by this lab: model accuracy beyond this label set, other lectures, other machines, learning effectiveness. Labels are Derek's judgment.`);
 
   const text = out.map((l) => (l === "" ? l : `[${header.origin}] ${l}`)).join("\n") + "\n";
-  return { text, overall, exitCode: overall === "PASS" ? 0 : 1, bars: blocks.map((b) => ({ name: b.name, verdict: b.verdict })) };
+  return { text, overall, exitCode: overall === "PASS" ? 0 : 1, bars: blocks.map((b) => ({ name: b.name, verdict: b.verdict })), metrics: { recallMatched: matched, recallLabeled: labeled, falseCloses: rate.pass === null ? null : closes } };
 }
 
 type Block = { readonly name: string; readonly title: string; readonly bar: string; readonly verdict: BarVerdict; readonly lines: readonly string[] };
