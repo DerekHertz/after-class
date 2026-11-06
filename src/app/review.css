@@ -17,10 +17,10 @@
 .diagram-lines li { margin: 6px 0; }
 .diagram-lines .citation { font-size: .8rem; margin-left: 8px; }
 .diagram-sources-toggle { font-size: .85rem; margin: 4px 0; }
-/* The diagram takes its natural height in the source column (the page scrolls); the frame is never cropped or height-capped. */
-.scene-shell .review .review-workspace .source-stand:has(.diagram-panel) { position: relative; left: auto; top: auto; width: auto; height: auto; max-height: none; overflow: visible; }
-.review-source-column:has(.diagram-panel) { aspect-ratio: auto; }
-.review .source-stand .diagram-panel .frame, .review .illustrated-page .frame { display: block; width: 100%; height: auto; max-height: none !important; object-fit: contain; }
+/* The diagram takes its natural height (the page scrolls); the frame is never cropped or height-capped. The stage column and its art keep their own box. */
+.scene-shell[data-detail="hd-pixel"] .review .review-workspace .source-stand:has(.diagram-panel) { height: auto; max-height: none; overflow: visible; }
+.scene-shell:not([data-detail="hd-pixel"]) .review .review-workspace .source-stand:has(.diagram-panel) { height: auto; max-height: none; overflow: visible; z-index: 4; background: var(--surface); padding-bottom: 12px; }
+.scene-shell .review .source-stand .diagram-panel .diagram-frame .frame { display: block; width: 100%; height: auto; max-height: none; object-fit: contain; }
 .review .review-topics { flex: 0 0 auto; font-size: .85rem; margin-top: 8px; }
 .review .review-topics ul { list-style: none; padding-left: 0; }
 .review .current-topic { flex: 0 0 auto; font-size: .9rem; margin: 8px 0 0; }

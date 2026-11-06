@@ -79,10 +79,16 @@ describe("the diagram panel", () => {
     expect(html).toContain("Captured frame");
   });
 
-  test("the diagram's frame and source column are never cropped by CSS", () => {
+  test("the diagram's frame and source stand are never cropped by CSS, and the stage box is left alone", () => {
     const css = readFileSync(new URL("../src/app/review.css", import.meta.url), "utf8");
     expect(css).toMatch(/\.source-stand:has\(\.diagram-panel\)\s*\{[^}]*max-height:\s*none[^}]*overflow:\s*visible/);
-    expect(css).toMatch(/\.diagram-panel \.frame[^{]*\{[^}]*max-height:\s*none/);
+    expect(css).toMatch(/\.diagram-panel \.diagram-frame \.frame\s*\{[^}]*max-height:\s*none/);
+    expect(css).not.toContain("!important");
+    expect(css).not.toMatch(/review-source-column[^{]*\{[^}]*aspect-ratio/);
+    expect(css).not.toMatch(/source-stage-art|room-tools/);
+    const tools = readFileSync(new URL("../src/app/room-tools.css", import.meta.url), "utf8");
+    expect(tools).toMatch(/\.review-source-column \{[^}]*aspect-ratio: 2 \/ 3/);
+    expect(tools).toMatch(/\.source-stage-art \{[^}]*inset: 0[^}]*background-size: 100% 100%/);
     expect(panel(topic())).not.toMatch(/max-height|overflow/);
   });
 
@@ -129,6 +135,11 @@ describe("the diagram panel", () => {
 
   test("a request error is shown above the frame", () => {
     expect(panel(topic(), { error: "backend down" })).toContain("backend down");
+  });
+
+  test("a line with no evidence gets no Sources button", () => {
+    const t = topic({ summary: { state: "ready", title: "T", lines: [{ text: "No cite.", evidence: [] as never }] } });
+    expect(renderToStaticMarkup(createElement(DiagramSummaryView, { topic: t, onRequest: noop, onCite: noop, initialSources: true }))).not.toContain("Sources (");
   });
 });
 

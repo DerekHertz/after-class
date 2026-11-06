@@ -102,7 +102,7 @@ export function DiagramSummaryView({ topic, onRequest, onCite, initialSources = 
               return (
                 <li key={i}>
                   <span>{line.text}</span>
-                  {showSources && <>{" "}<button type="button" className="citation" aria-label={src.aria} onClick={(e) => onCite(src.ids, "Cited by the diagram summary", e.currentTarget)}>{src.label}</button></>}
+                  {showSources && line.evidence.length > 0 && <>{" "}<button type="button" className="citation" aria-label={src.aria} onClick={(e) => onCite(src.ids, "Cited by the diagram summary", e.currentTarget)}>{src.label}</button></>}
                 </li>
               );
             })}
