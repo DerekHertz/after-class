@@ -370,6 +370,7 @@ export type DetourState =
 
 /** What the learner can do. Each is one turn fact (owner: user). */
 export type LearnerAct =
+  | { readonly kind: "begin" }
   | { readonly kind: "answer"; readonly text: string; readonly modality: "speech" | "text" }
   | { readonly kind: "skip" }
   | { readonly kind: "dont_know" }

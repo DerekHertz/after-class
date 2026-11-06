@@ -70,6 +70,24 @@ export type ControllerDeps = {
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
+/**
+ * Flow D: "[agent] Open recall question on the frozen scope (no recap first)."
+ * True for a loaded, active review with no turns, nothing unsent and nothing streaming: the tutor has not opened yet.
+ */
+export function needsBegin(state: SessionState): boolean {
+  return state.view !== null && state.view.state.phase === "active" && state.view.turns.length === 0 && state.unsent.length === 0 && state.live === null;
+}
+
+/** Sends `begin` at most once per call of this factory, however often the state is offered. A retry goes through the unsent store, with the same turn id. */
+export function beginOnce(controller: Pick<ReviewController, "send">): (state: SessionState) => void {
+  let sent = false;
+  return (state) => {
+    if (sent || !needsBegin(state)) return;
+    sent = true;
+    void controller.send({ kind: "begin" });
+  };
+}
+
 export function createReviewController(deps: ControllerDeps): ReviewController {
   const { api, reviewId, speaker, unsent } = deps;
   const mint = deps.mintTurnId ?? (() => randomId("turn"));
@@ -158,7 +176,9 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
       return () => void listeners.delete(listener);
     },
     async load() {
-      await Promise.all([refreshView(), refreshUnsent()]);
+      // Unsent turns first, so a loaded view never shows before the unsent store is known (the review opens by checking both).
+      await refreshUnsent();
+      await refreshView();
     },
     send: async (act) =>
       (await exclusive(async () => {

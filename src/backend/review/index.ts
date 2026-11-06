@@ -503,6 +503,11 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
         yield { type: "turn_failed", error: "this review has ended", retryable: false };
         return;
       }
+      // `begin` only opens a review: it is the first turn, so any earlier turn makes it invalid.
+      if (act.kind === "begin" && loadTurns(reviewId).length > 0) {
+        yield { type: "turn_failed", error: "this review has already begun", retryable: false };
+        return;
+      }
       appendTurn(reviewId, turnId, "learner", state.openThread, { act });
     }
     yield { type: "learner_turn_stored", turnId };

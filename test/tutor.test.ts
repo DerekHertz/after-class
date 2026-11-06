@@ -6,7 +6,7 @@ import type {
   AssessableClaim, CodeNotice, Correction, EvidenceBundle, Frame, FrozenScope, LearnerAct, Passage, Turn, TutorMove, TutorMoveKind,
 } from "../src/shared/domain";
 import { Material, interval } from "../src/shared/time";
-import { allowedMoves, nextThreadId, parseMoveHeader, reviewState, tutorTask, validateMove, wrapUpTask } from "../src/backend/review/tutor";
+import { allowedMoves, nextThreadId, parseMoveHeader, reviewState, tutorPrompt, tutorTask, validateMove, wrapUpTask } from "../src/backend/review/tutor";
 import type { TutorInput, WrapUpOutput } from "../src/backend/review/tutor";
 import type { ClaudeCli, ClaudeRequest } from "../src/backend/providers/claude";
 import { createMemo } from "../src/backend/providers/memo";
@@ -406,3 +406,16 @@ describe("wrapUpTask", () => {
   });
 });
 
+
+describe("begin", () => {
+  const begin: LearnerAct = { kind: "begin" };
+  test("after the opening begin the allowed moves are those of an empty review", () => {
+    expect(allowed(log().learner(begin).turns)).toEqual(allowed([]));
+    expect(allowed(log().learner(begin).turns)).toEqual(["ask_main"]);
+  });
+  test("the prompt says the learner opened the review, with no empty-log text", () => {
+    const prompt = tutorPrompt(inputFor(log().learner(begin).turns));
+    expect(prompt).toContain("(learner opened the review)");
+    expect(prompt).not.toContain("(no turns yet");
+  });
+});

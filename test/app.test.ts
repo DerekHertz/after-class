@@ -15,7 +15,9 @@ import { ApiError, createApi, evidenceParams } from "../src/app/api";
 import type { Api } from "../src/app/api";
 import { OptionsView, checkAgain } from "../src/app/capture";
 import type { AppApi } from "../src/app/api";
-import { createReviewController } from "../src/app/controller";
+import { beginOnce, createReviewController, needsBegin } from "../src/app/controller";
+import { INITIAL_STUDY_OPEN, isRoomLanding } from "../src/app/core";
+import { learnerAct } from "../src/shared/wire";
 import type { SessionState } from "../src/app/controller";
 import {
   availableActions, conversationLines, currentEvidenceIds, estimateText, formatClock, inspectBundle, liveText, noteView, observationRow,
@@ -1118,5 +1120,70 @@ describe("review composer", () => {
     expect(paused).not.toContain("<textarea");
     expect(paused).toContain(">Resume</button>");
     expect(paused).toContain(">End review</button>");
+  });
+});
+
+describe("opening the review (flow D: tutor opens with a recall question)", () => {
+  const state = (o: Partial<SessionState> = {}): SessionState => ({
+    view: parsedReview(), loadError: null, live: null, unsent: [], sendError: null, saving: false, saveError: null, savedSummary: null, storageDegraded: false, ...o,
+  });
+  const unsentTurn = { turnId: stableId("turn", "u"), reviewId, act: { kind: "begin" } as LearnerAct, createdAtMs: 1 };
+  const run = (states: SessionState[]) => {
+    const sent: LearnerAct[] = [];
+    const offer = beginOnce({ send: async (a) => (sent.push(a), true) });
+    for (const s of states) offer(s);
+    return sent;
+  };
+
+  test("the wire schema round-trips begin and rejects other spellings", () => {
+    expect(learnerAct.parse({ kind: "begin" })).toEqual({ kind: "begin" });
+    expect(learnerAct.safeParse({ kind: "begins" }).success).toBe(false);
+  });
+
+  test("an empty active review sends begin exactly once, however often it re-renders", () => {
+    expect(run([state(), state(), state({ sendError: null })])).toEqual([{ kind: "begin" }]);
+  });
+
+  test("a review with turns, a paused or ended review, unsent turns or a stream in flight sends nothing", () => {
+    expect(run([state({ view: parsedReview({ turns: [tutorAsk] }) })])).toEqual([]);
+    expect(run([state({ view: parsedReview({ phase: "paused" }) })])).toEqual([]);
+    expect(run([state({ view: parsedReview({ phase: "ended" }) })])).toEqual([]);
+    expect(run([state({ unsent: [unsentTurn] })])).toEqual([]);
+    expect(run([state({ live: startLive(stableId("turn", "x")) })])).toEqual([]);
+    expect(run([state({ view: null })])).toEqual([]);
+    expect(needsBegin(state())).toBe(true);
+  });
+
+  test("it waits for the view, then sends once", () => {
+    expect(run([state({ view: null }), state(), state()])).toEqual([{ kind: "begin" }]);
+  });
+
+  test("through the controller: a failed begin is resent with the same turn id", async () => {
+    const h = setup({
+      sendTurn: async function* ({ turnId }, n) {
+        if (n === 0) throw new ApiError("down", 0);
+        yield { type: "learner_turn_stored", turnId };
+        yield { type: "turn_complete", turnId };
+      },
+    });
+    await h.controller.load();
+    beginOnce(h.controller)(h.controller.getState());
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.sends.map((s) => s.act)).toEqual([{ kind: "begin" }]);
+    await h.controller.retryTurn();
+    expect(h.sends).toHaveLength(2);
+    expect(h.sends[1]!.turnId).toBe(h.sends[0]!.turnId);
+  });
+
+  test("the begin act is a system note, never a learner line", () => {
+    const lines = conversationLines(parsedReview({ turns: [turnJson(1, "learner", { act: { kind: "begin" } }), tutorAsk] }).turns);
+    expect(lines.map((l) => l.speaker)).toEqual(["system", "tutor"]);
+    expect(lines[0]!.text).toBe("Review started");
+  });
+
+  test("the review opens on the conversation for every appearance, with the room one click away", () => {
+    expect(INITIAL_STUDY_OPEN).toBe(true);
+    expect(isRoomLanding(INITIAL_STUDY_OPEN, "hd-pixel")).toBe(false);
+    expect(isRoomLanding(false, "hd-pixel")).toBe(true);
   });
 });

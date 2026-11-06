@@ -111,6 +111,7 @@ export function parseIngestBatch(raw: unknown): { readonly captureId: CaptureId;
 const answerText = z.string().trim().min(1).max(8000);
 
 export const learnerAct = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("begin") }),
   z.object({ kind: z.literal("answer"), text: answerText, modality: z.enum(["speech", "text"]) }),
   z.object({ kind: z.literal("skip") }),
   z.object({ kind: z.literal("dont_know") }),
