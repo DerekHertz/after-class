@@ -57,6 +57,8 @@ export type Reviews = {
    */
   turn(reviewId: ReviewId, turnId: TurnId, act: LearnerAct): AsyncIterable<TurnEvent>;
   view(reviewId: ReviewId): ReviewView;
+  /** Read-only: the reviews started on a capture, newest first, for the home page's list. */
+  list(captureId: CaptureId): readonly { readonly reviewId: ReviewId; readonly startedMs: number }[];
 };
 
 /** The W8 functions this module calls. Injectable so tests can run before the tutor lands. */
@@ -197,8 +199,19 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
 
   // ───────────────────────────── options and start ─────────────────────────────
 
+  /**
+   * Material that a new review must not take again: the frozen scope of every review that is still open (active or
+   * paused, so two reviews of the same material cannot run at once) or that the learner responded to (an answer, a
+   * skip or an "I don't know"). An ended review with no response, such as one ended by a mis-click, used up nothing,
+   * so its material is offered again. R7 is about a started review's own frozen scope, which this never touches.
+   */
   function reviewedMaterial(captureId: CaptureId): Material {
-    return q.reviewsOf.all(captureId).reduce((m, r) => Material.union(m, decodeScope(r.scope_json).scope.material), Material.empty);
+    const counts = (r: ReviewRow): boolean => {
+      const turns = loadTurns(r.id as ReviewId);
+      const responded = turns.some((t) => t.actor === "learner" && (t.act.kind === "answer" || t.act.kind === "skip" || t.act.kind === "dont_know"));
+      return responded || kit.reviewState(r.id as ReviewId, turns, [], softTargetS, now()).phase !== "ended";
+    };
+    return q.reviewsOf.all(captureId).filter(counts).reduce((m, r) => Material.union(m, decodeScope(r.scope_json).scope.material), Material.empty);
   }
 
   function candidates(captureId: CaptureId) {
@@ -299,6 +312,10 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     if (!review) throw new Error(`unknown review ${reviewId}`);
     const turns = loadTurns(reviewId);
     return { reviewId, captureId: review.captureId, scope: review.scope, state: stateOf(reviewId, review, turns).state, turns, observations: [], saved: "unsaved" };
+  }
+
+  function list(captureId: CaptureId) {
+    return q.reviewsOf.all(captureId).map((r) => ({ reviewId: r.id as ReviewId, startedMs: r.started_ms })).sort((a, b) => b.startedMs - a.startedMs);
   }
 
   // ───────────────────────────── turns ─────────────────────────────
@@ -567,5 +584,5 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     yield { type: "turn_complete", turnId: outId };
   }
 
-  return { invite, answerInvite, options, start, turn, view };
+  return { invite, answerInvite, options, start, turn, view, list };
 }

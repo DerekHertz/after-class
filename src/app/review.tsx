@@ -10,10 +10,10 @@ import { reactToCompanion } from "./companion-reaction";
 import { beginOnce, createReviewController } from "./controller";
 import type { SessionState } from "./controller";
 import {
-  ACTION_LABEL, INITIAL_STUDY_OPEN, isRoomLanding, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
+  ACTION_LABEL, END_CONFIRM_TEXT, INITIAL_STUDY_OPEN, endFlow, isRoomLanding, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
   softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer,
 } from "./core";
-import type { ActionId, Line, SourceSelection } from "./core";
+import type { ActionId, EndEvent, EndStep, Line, SourceSelection } from "./core";
 import type { Speaker, SpeechInput } from "./speech";
 import type { UnsentStore } from "./unsent";
 import { BundleInspector, ErrorNote, EvidencePane, Link, useAsync } from "./ui";
@@ -311,12 +311,28 @@ function ScopeBundle({ api, view, titles, onSource }: { readonly api: AppApi; re
   </>;
 }
 
+export function EndConfirm({ disabled, onConfirm, onCancel }: { readonly disabled: boolean; readonly onConfirm: () => void; readonly onCancel: () => void }) {
+  return (
+    <span className="actions end-confirm" role="alertdialog" aria-label="End this review?">
+      <span>{END_CONFIRM_TEXT}</span>
+      <button type="button" data-action="end-confirm" disabled={disabled} onClick={onConfirm}>{ACTION_LABEL.end}</button>
+      <button type="button" data-action="end-cancel" onClick={onCancel}>Keep reviewing</button>
+    </span>
+  );
+}
+
 function Actions({ ids, disabled, send }: { readonly ids: readonly ActionId[]; readonly disabled: boolean; readonly send: (id: ActionId) => void }) {
+  const [endStep, setEndStep] = useState<EndStep>("idle");
+  const step = (event: EndEvent) => {
+    const next = endFlow(endStep, event);
+    setEndStep(next.send ? "idle" : next.step);
+    if (next.send) send("end");
+  };
   return (
     <span className="actions">
-      {ids.map((id) => (
-        <button key={id} type="button" data-action={id} disabled={disabled} onClick={() => send(id)}>{ACTION_LABEL[id]}</button>
-      ))}
+      {ids.map((id) => id === "end" && endStep === "confirming"
+        ? <EndConfirm key={id} disabled={disabled} onConfirm={() => step("confirm")} onCancel={() => step("cancel")} />
+        : <button key={id} type="button" data-action={id} disabled={disabled} onClick={() => (id === "end" ? step("press_end") : send(id))}>{ACTION_LABEL[id]}</button>)}
     </span>
   );
 }

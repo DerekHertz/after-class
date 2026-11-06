@@ -20,8 +20,8 @@ import type {
   StartResult, UsageSummary,
 } from "../shared/domain";
 import type { Material } from "../shared/time";
-import type { TutorStreamEvent } from "../shared/wire";
-import { ROUTES, parseStartReviewRequest, parseTurnRequest, routeUrl, voiceStatusResponse } from "../shared/wire";
+import type { LecturesResponse, TutorStreamEvent } from "../shared/wire";
+import { ROUTES, lecturesResponse, parseStartReviewRequest, parseTurnRequest, routeUrl, voiceStatusResponse } from "../shared/wire";
 import {
   captureResponsez, encodeMaterial, evidenceBundlez, recordViewz, reviewOptionsz, reviewViewz, saveResultz, startResultz, usageSummaryz,
 } from "./decode";
@@ -45,6 +45,7 @@ export type EvidenceQuery =
 
 /** The frozen `Api` plus the routes the inspectors and record editing need. */
 export type AppApi = Api & {
+  lectures(): Promise<LecturesResponse>;
   captureView(captureId: CaptureId): Promise<CaptureResponse>;
   answerInvite(captureId: CaptureId, answer: InviteAnswer): Promise<void>;
   evidence(query: EvidenceQuery): Promise<EvidenceBundle>;
@@ -143,6 +144,7 @@ export function createApi(token: string, options: ApiOptions = {}): AppApi {
     save: (reviewId) => call(saveResultz, "POST", `/reviews/${enc(reviewId)}/save`),
     record: (filter) => call(recordViewz, "GET", filter.reviewId === undefined ? "/record" : `/record?reviewId=${enc(filter.reviewId)}`),
     usage: () => call(usageSummaryz, "GET", "/usage"),
+    lectures: () => call(lecturesResponse, ROUTES.lectures.method, ROUTES.lectures.path),
     captureView: (captureId) => call(captureResponsez, "GET", `/captures/${enc(captureId)}`),
     answerInvite: (captureId, answer) => command("POST", `/captures/${enc(captureId)}/invite`, { answer }),
     evidence: (query) => call(evidenceBundlez, "GET", `/evidence?${evidenceParams(query)}`),

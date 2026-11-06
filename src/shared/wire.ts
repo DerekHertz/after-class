@@ -289,6 +289,25 @@ const captureViewz = z.object({
   watchedSeconds: z.number(),
 }) satisfies z.ZodType<CaptureView>;
 
+/** GET /lectures: every capture, newest first, with its reviews. `sourceTitles` are the lecture videos' titles. */
+export const lecturesResponse = z.object({
+  lectures: z.array(z.object({
+    captureId: idOf("cap"),
+    sourceTitles: z.array(z.string()),
+    videos: z.number().int().min(0),
+    watchedSeconds: z.number(),
+    status: captureViewz.shape.status,
+    reviews: z.array(z.object({
+      reviewId: idOf("rvw"),
+      startedMs: z.number(),
+      phase: z.enum(["active", "paused", "ended"]),
+      saved: z.enum(["unsaved", "saved", "save_pending"]),
+      mainQuestions: z.number().int().min(0),
+    })),
+  })),
+});
+export type LecturesResponse = z.output<typeof lecturesResponse>;
+
 export const captureResponse = z.object({ capture: captureViewz, invite: inviteState });
 export type CaptureResponse = z.output<typeof captureResponse>;
 
@@ -578,6 +597,8 @@ const EMPTY: Reply = { kind: "empty" };
  */
 export const ROUTES = {
   ingest: route("POST", "/ingest", { request: ingestBatch, reply: json(ingestAckResponse) }),
+  /** The home page's list of lectures and their reviews. Read-only. */
+  lectures: route("GET", "/lectures", { reply: json(lecturesResponse) }),
   captureView: route("GET", "/captures/:captureId", { reply: json(captureResponse) }),
   answerInvite: route("POST", "/captures/:captureId/invite", { request: inviteAnswerRequest, reply: json(inviteState) }),
   reviewOptions: route("GET", "/captures/:captureId/review-options", { reply: json(reviewOptionsResponse) }),

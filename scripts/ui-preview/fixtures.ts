@@ -67,6 +67,7 @@ const illustration = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 4
 export const api: AppApi = {
   async review() { log("review.read"); return view; },
   async captureView() { log("capture.read"); return capture; },
+  async lectures() { log("lectures.read"); return { lectures: [] }; },
   async reviewOptions() {
     log("review.options");
     const scope = { chunkRevisions: [ids.chunk], supportedClaims: 3, partial: [{ kind: "capture_gap", gap }] };

@@ -34,7 +34,7 @@ import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, EvidenceId, IdPart, 
 import { Material, interval } from "../src/shared/time";
 import type { Interval } from "../src/shared/time";
 import {
-  ROUTES, captureResponse, encodeMaterial, evidenceBundleResponse, ingestAckResponse, recordViewResponse, reviewOptionsResponse, reviewViewResponse, saveResponse, startReviewResponse, tutorStreamEvent,
+  ROUTES, captureResponse, encodeMaterial, lecturesResponse, evidenceBundleResponse, ingestAckResponse, recordViewResponse, reviewOptionsResponse, reviewViewResponse, saveResponse, startReviewResponse, tutorStreamEvent,
 } from "../src/shared/wire";
 import { fakeTask, ok, testDb } from "./fakes";
 import type { FakeStep } from "./fakes";
@@ -1504,5 +1504,35 @@ describe("capture and review are independent", () => {
     const stop = { kind: "control", action: "stop", reason: "user", clientSeq: 7, wallMs: 2000 };
     expect(await ackOf(await ingest(rig.base, [stop], rig.capture))).toMatchObject({ capture: { status: { state: "stopped" } } });
     expect((await rig.turn(started.reviewId, { kind: "resume" })).events.at(-1)?.type).toBe("turn_complete");
+  });
+});
+
+describe("GET /lectures", () => {
+  const OTHER = stableId("cap", "http-test-other");
+  const get = async (base: string) => lecturesResponse.parse(await (await fetch(`${base}/lectures`, { headers: bearer })).json());
+
+  test("needs the token and the loopback host, and is empty before anything is captured", async () => {
+    const rig = reviewRig();
+    expect((await fetch(`${rig.base}/lectures`)).status).toBe(401);
+    expect((await fetch(`${rig.base}/lectures`, { headers: { ...bearer, Origin: PAGE } })).status).toBe(403);
+    expect((await fetch(`${rig.base}/lectures`, { method: "POST", headers: bearer })).status).toBe(404);
+    expect(await get(rig.base)).toEqual({ lectures: [] });
+  });
+
+  test("lists captures newest first with their titles, watched seconds, status and reviews (read-only)", async () => {
+    const rig = reviewRig();
+    await ingest(rig.base, wireFacts(0, 4), OTHER);
+    await ingest(rig.base, wireFacts(0, 4), rig.capture);
+    const reviewId = await startedIn(rig);
+    await rig.turn(reviewId, { kind: "pause" });
+
+    const before = rig.db.sql.query<{ n: number }, []>("SELECT (SELECT COUNT(*) FROM capture_facts) + (SELECT COUNT(*) FROM reviews) + (SELECT COUNT(*) FROM review_turns) AS n").get()!.n;
+    const { lectures } = await get(rig.base);
+    expect(lectures.map((l) => l.captureId)).toEqual([rig.capture, OTHER]);
+    expect(lectures[0]).toMatchObject({ videos: 1, watchedSeconds: 10, sourceTitles: [expect.any(String)] });
+    expect(lectures[0]!.reviews).toEqual([{ reviewId, startedMs: expect.any(Number), phase: "paused", saved: "unsaved", mainQuestions: expect.any(Number) }]);
+    expect(lectures[1]!.reviews).toEqual([]);
+    const after = rig.db.sql.query<{ n: number }, []>("SELECT (SELECT COUNT(*) FROM capture_facts) + (SELECT COUNT(*) FROM reviews) + (SELECT COUNT(*) FROM review_turns) AS n").get()!.n;
+    expect(after).toBe(before);
   });
 });

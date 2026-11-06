@@ -51,6 +51,8 @@ export type EvidenceStore = {
   ingest(batch: { readonly captureId: CaptureId; readonly facts: readonly CaptureFact[] }): { readonly ackedThroughSeq: number };
   captureView(captureId: CaptureId): CaptureView;
   activeCaptures(): readonly CaptureId[];
+  /** Every capture that has stored facts, most recently captured first. Read-only. */
+  captures(): readonly CaptureId[];
   watchOrder(captureId: CaptureId): WatchOrder;
   /** Watched passages + kept/uncertain frames + gaps + ads inside `material`. User-deleted evidence is left out. */
   bundle(material: Material): EvidenceBundle;
@@ -308,6 +310,13 @@ export function createEvidence(db: Db, dataDir: string, deps: {
         captureId, status: p.status, sources: p.sources, currentSourceId: p.currentSourceId, transcript: p.transcript, health: p.health,
         watchedSeconds: Material.duration(p.watched),
       };
+    },
+
+    captures() {
+      return db.sql
+        .query<{ capture_id: string }, []>("SELECT capture_id FROM capture_facts GROUP BY capture_id ORDER BY MAX(seq) DESC")
+        .all()
+        .map((r) => r.capture_id as CaptureId);
     },
 
     activeCaptures() {

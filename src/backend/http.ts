@@ -406,6 +406,18 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
           cors,
         );
       }
+      case "lectures": {
+        const lectures = evidence.captures().map((id) => {
+          const c = evidence.captureView(id);
+          const reviewList = reviews.list(id).map(({ reviewId: rid, startedMs }) => {
+            const v = reviews.view(rid);
+            const saved: ReviewSaveState = record ? record.saveState(rid) : "unsaved";
+            return { reviewId: rid, startedMs, phase: v.state.phase, saved, mainQuestions: v.state.mainQuestions };
+          });
+          return { captureId: id, sourceTitles: c.sources.map((s) => s.title), videos: c.sources.length, watchedSeconds: c.watchedSeconds, status: c.status, reviews: reviewList };
+        });
+        return reply("lectures", { lectures }, cors);
+      }
       case "captureView":
         return reply("captureView", { capture: evidence.captureView(captureId!), invite: reviews.invite(captureId!) }, cors);
       case "answerInvite": {
