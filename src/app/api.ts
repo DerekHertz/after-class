@@ -14,14 +14,14 @@
  * same request (R15 for turns, not only for the final save).
  */
 import { z } from "zod";
-import type { CaptureId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, TurnId } from "../shared/ids";
+import type { CaptureId, ConceptId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, TurnId } from "../shared/ids";
 import type {
-  EvidenceBundle, InviteAnswer, LearnerAct, LinkDecision, ObservationStatus, RecordView, ReviewOptions, ReviewView, SaveResult, StartChoice,
+  EvidenceBundle, InviteAnswer, LearnerAct, TopicDiagram, LinkDecision, ObservationStatus, RecordView, ReviewOptions, ReviewView, SaveResult, StartChoice,
   StartResult, UsageSummary,
 } from "../shared/domain";
 import type { Material } from "../shared/time";
 import type { LecturesResponse, TutorStreamEvent } from "../shared/wire";
-import { ROUTES, lecturesResponse, parseStartReviewRequest, parseTurnRequest, routeUrl, voiceStatusResponse } from "../shared/wire";
+import { ROUTES, diagramsResponse, lecturesResponse, parseStartReviewRequest, topicDiagramResponse, parseTurnRequest, routeUrl, voiceStatusResponse } from "../shared/wire";
 import {
   captureResponsez, encodeMaterial, evidenceBundlez, recordViewz, reviewOptionsz, reviewViewz, saveResultz, startResultz, usageSummaryz,
 } from "./decode";
@@ -56,6 +56,10 @@ export type AppApi = Api & {
   resolveDispute(id: ObservationId, outcome: "learner_was_right" | "it_was_my_gap"): Promise<void>;
   overrideObservation(id: ObservationId, status: ObservationStatus): Promise<void>;
   deleteEvidence(ids: readonly EvidenceId[]): Promise<void>;
+  /** Frame and summary state of every topic in the review. Makes no model call. */
+  diagrams(reviewId: ReviewId): Promise<readonly TopicDiagram[]>;
+  /** Starts the topic summary (or retries a failed one); answers with where it stands. Poll `diagrams` for the result. */
+  requestDiagram(reviewId: ReviewId, topicId: ConceptId): Promise<TopicDiagram>;
   /** Re-queues the capture's unfinished chunks and those with no supported claim. */
   retryPreparation(captureId: CaptureId): Promise<void>;
   /** Whether the backend can speak tutor sentences with ElevenLabs (false in replay mode or without a key). */
@@ -155,6 +159,8 @@ export function createApi(token: string, options: ApiOptions = {}): AppApi {
     resolveDispute: (id, outcome) => command("POST", `/record/observations/${enc(id)}/dispute-resolution`, { outcome }),
     overrideObservation: (id, status) => command("POST", `/record/observations/${enc(id)}/override`, { status }),
     retryPreparation: (captureId) => command(ROUTES.retryPreparation.method, routeUrl(ROUTES.retryPreparation, { captureId })),
+    diagrams: async (reviewId) => (await call(diagramsResponse, ROUTES.diagrams.method, routeUrl(ROUTES.diagrams, { reviewId }))).topics,
+    requestDiagram: (reviewId, topicId) => call(topicDiagramResponse, ROUTES.requestDiagram.method, routeUrl(ROUTES.requestDiagram, { reviewId, topicId })),
     voiceAvailable: async () => (await call(voiceStatusResponse, ROUTES.voiceStatus.method, ROUTES.voiceStatus.path)).available,
     speech,
     deleteEvidence: (ids) => command("POST", "/record/evidence/delete", { evidenceIds: ids }),

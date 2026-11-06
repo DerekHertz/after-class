@@ -18,6 +18,8 @@ import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, T
 import type { Speaker, SpeechInput } from "./speech";
 import type { UnsentStore } from "./unsent";
 import { BundleInspector, ErrorNote, EvidencePane, Link, useAsync } from "./ui";
+import { DiagramPanel, ShowDiagramButton, useDiagrams } from "./diagram";
+import { currentQuestionTopic } from "./diagram-view";
 
 export type ReviewDeps = { readonly api: AppApi; readonly speaker: Speaker; readonly speech: SpeechInput; readonly unsent: UnsentStore };
 
@@ -34,6 +36,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const [selection, setSelection] = useState<SourceSelection>({ kind: "automatic" });
   const [sourceOpen, setSourceOpen] = useState(INITIAL_SOURCE_OPEN);
   const [notebookOpen, setNotebookOpen] = useState(false);
+  const [diagramTopic, setDiagramTopic] = useState<ConceptId | null>(null);
+  const diagrams = useDiagrams(api, reviewId);
   const [listening, setListening] = useState(false);
   const controller = useMemo(() => createReviewController({ api, reviewId, speaker, unsent }), [api, reviewId, speaker, unsent]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
@@ -82,6 +86,16 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     requestAnimationFrame(() => sourceHeading.current?.focus());
   }
 
+  /** Flow D: Ask "show me the diagram" on a topic, any time in the review. The conversation stays where it is. */
+  function showDiagram(topicId: ConceptId) {
+    setDiagramTopic(topicId);
+    if (!sourceOpen) reactToCompanion("draw");
+    setSourceOpen(true);
+    const known = diagrams.topics?.find((t) => t.topicId === topicId);
+    if (known === undefined || known.summary.state === "not_requested") void diagrams.request(topicId);
+    else diagrams.reload();
+  }
+
   function closeSource() {
     setSelection({ kind: "automatic" });
     setSourceOpen(false);
@@ -102,6 +116,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   }
 
   const lines = conversationLines(view.turns, view.topics);
+  const questionTopic = currentQuestionTopic(view, diagrams.topics ?? []);
+  const shownDiagram = diagrams.topics?.find((t) => t.topicId === diagramTopic) ?? null;
   const checklist = needsChecklist(state);
   const soft = softTargetPrompt(view.turns);
   const actions = availableActions(view.state, soft !== null);
@@ -172,6 +188,9 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
               <Actions ids={actions.filter((a) => a === "continue" || a === "wrap_up")} disabled={streaming} send={(id) => void controller.send(toAct(id, "", "text"))} />
             </div>
           )}
+          {!checklist && questionTopic !== null && (
+            <p className="current-topic">Topic: <strong>{questionTopic.label}</strong> <ShowDiagramButton topic={{ id: questionTopic.topicId, label: questionTopic.label }} onShow={showDiagram} /></p>
+          )}
           {checklist && <TopicChecklist topics={view.topics} disabled={streaming} onStart={(fuzzy, note) => void controller.send({ kind: "begin", fuzzy, ...(note === "" ? {} : { note }) })} />}
           {!checklist && <Composer
             actions={actions.filter((a) => !["continue", "wrap_up", "pause", "resume", "end"].includes(a))}
@@ -185,6 +204,14 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             live={state.live}
             send={(id, text, modality) => controller.send(toAct(id, text, modality))}
           />}
+          {!checklist && view.topics.length > 0 && (
+            <details className="review-topics">
+              <summary>Topics in this review</summary>
+              <ul>
+                {view.topics.map((t) => <li key={t.id}>{t.label} <ShowDiagramButton topic={t} onShow={showDiagram} /></li>)}
+              </ul>
+            </details>
+          )}
           {view.observations.length > 0 && (
             <details className="review-observations">
               <summary>What the tutor observed</summary>
@@ -216,6 +243,9 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             <button type="button" onClick={closeSource}>Close evidence</button>
             {selection.kind === "pinned" && <button type="button" onClick={() => setSelection({ kind: "automatic" })}>Follow current reply</button>}
           </div>
+          {diagramTopic !== null && (shownDiagram
+            ? <DiagramPanel api={api} topic={shownDiagram} error={diagrams.error} onRequest={() => void diagrams.request(diagramTopic)} onCite={openSource} onClose={() => setDiagramTopic(null)} />
+            : <div className="diagram-panel">{diagrams.error !== null ? <ErrorNote error={diagrams.error} retry={diagrams.reload} /> : <p className="muted" role="status">Loading the diagram...</p>}<button type="button" onClick={() => setDiagramTopic(null)}>Close diagram</button></div>)}
           <EvidencePane key={evidenceIds.join(",")} api={api} ids={evidenceIds} titles={titles} videos={videos} />
           <ScopeEvidence api={api} view={view} titles={titles} onSource={openSource} />
         </aside>

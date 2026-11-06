@@ -11,7 +11,7 @@
 import { z } from "zod";
 import { FRAME_BOUNDS } from "./domain";
 import type {
-  CaptureFact, CaptureView, Claim, ClaimDraft, DetourState, EvidenceBundle, Frame, FrozenScope, InviteAnswer, InviteState, LearnerAct,
+  CaptureFact, CaptureView, Claim, ClaimDraft, DetourState, DiagramSummary, TopicDiagram, EvidenceBundle, Frame, FrozenScope, InviteAnswer, InviteState, LearnerAct,
   LinkDecision, Note, Observation, ObservationStatus, Passage, RecordView, ReviewOptions, ReviewView, SaveResult, Seq, StartChoice,
   StartResult, Turn, TurnEvent, TutorMove, UsageSummary,
 } from "./domain";
@@ -476,6 +476,27 @@ export const tutorStreamEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("turn_failed"), error: z.string(), retryable: z.boolean() }),
 ]) satisfies z.ZodType<TurnEvent>;
 
+// ───────────────────────────── Diagrams ─────────────────────────────────────
+
+const diagramSummaryz = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("no_claims") }),
+  z.object({ state: z.literal("not_requested") }),
+  z.object({ state: z.literal("preparing") }),
+  z.object({ state: z.literal("ready"), title: z.string(), lines: z.array(z.object({ text: z.string().min(1), evidence: nonEmpty(idOf("ev")) })) }),
+  z.object({ state: z.literal("failed"), error: z.string() }),
+]) satisfies z.ZodType<DiagramSummary>;
+
+export const topicDiagramResponse = z.object({
+  topicId: idOf("cpt"),
+  label: z.string(),
+  claimIds: z.array(idOf("clm")),
+  frame: z.object({ id: idOf("ev"), mediaS: mediaS, sourceId: idOf("src"), videoId: z.string().nullable(), title: z.string().nullable() }).nullable(),
+  summary: diagramSummaryz,
+}) satisfies z.ZodType<TopicDiagram>;
+
+/** Every topic of the review's frozen scope, with its frame and where its summary stands. Reading it makes no model call. */
+export const diagramsResponse = z.object({ topics: z.array(topicDiagramResponse) });
+
 // ───────────────────────────── Record, save, usage ──────────────────────────
 
 const noteAuthor = z.enum(["learner", "tutor", "source"]);
@@ -512,7 +533,7 @@ export const saveResponse = z.discriminatedUnion("kind", [
 ]) satisfies z.ZodType<SaveResult>;
 
 const COST_KINDS = ["measured", "notional", "estimated", "unknown"] as const;
-const PURPOSES = ["boundary", "frame_change", "claim_check", "interpretation", "claim_revision", "resource_search", "tutor_turn", "wrap_up"] as const;
+const PURPOSES = ["boundary", "frame_change", "claim_check", "interpretation", "claim_revision", "resource_search", "tutor_turn", "wrap_up", "diagram_summary"] as const;
 
 /** A kind with no calls may be omitted by the backend; it decodes as zero calls and no amount, never as $0. */
 export const usageResponse = z
@@ -611,6 +632,10 @@ export const ROUTES = {
   sendTurn: route("POST", "/reviews/:reviewId/turns", { request: turnRequest, reply: { kind: "ndjson", event: tutorStreamEvent } }),
   review: route("GET", "/reviews/:reviewId", { reply: json(reviewViewResponse) }),
   save: route("POST", "/reviews/:reviewId/save", { reply: json(saveResponse) }),
+  /** Frame and summary state of every topic in the review's frozen scope. Read-only: makes no model call. */
+  diagrams: route("GET", "/reviews/:reviewId/diagrams", { reply: json(diagramsResponse) }),
+  /** Starts the topic's state-change summary (one Claude call per topic and evidence set, memoized) and answers with where it stands. Asking again after a failure retries. */
+  requestDiagram: route("POST", "/reviews/:reviewId/diagrams/:topicId", { reply: json(topicDiagramResponse) }),
   record: route("GET", "/record", { query: recordQuery, reply: json(recordViewResponse) }),
   usage: route("GET", "/usage", { reply: json(usageResponse) }),
   evidence: route("GET", "/evidence", { query: evidenceQuery, reply: json(evidenceBundleResponse) }),

@@ -568,6 +568,40 @@ export type SaveResult =
   | { readonly kind: "saved"; readonly notes: number; readonly observations: number; readonly links: number }
   | { readonly kind: "save_failed"; readonly error: string; readonly retryable: true };
 
+// ───────────────────────────── Diagrams ─────────────────────────────────────
+
+/** The frame shown for a topic, with where it came from. `videoId` is null when the source is unknown, so no link is drawn. */
+export type DiagramFrame = {
+  readonly id: EvidenceId;
+  readonly mediaS: MediaSeconds;
+  readonly sourceId: SourceId;
+  readonly videoId: string | null;
+  readonly title: string | null;
+};
+
+/**
+ * R19: "Every line of a diagram summary cites something I watched; a line without a citation is never shown."
+ * `evidence` is never empty and names only evidence of the topic inside the review's scope.
+ */
+export type DiagramLine = { readonly text: string; readonly evidence: NonEmpty<EvidenceId> };
+
+export type DiagramSummary =
+  /** The topic has no usable claim now, so there is nothing cited to summarize. */
+  | { readonly state: "no_claims" }
+  | { readonly state: "not_requested" }
+  | { readonly state: "preparing" }
+  | { readonly state: "ready"; readonly title: string; readonly lines: readonly DiagramLine[] }
+  | { readonly state: "failed"; readonly error: string };
+
+export type TopicDiagram = {
+  readonly topicId: ConceptId;
+  readonly label: string;
+  /** The topic's claims usable now (R3) inside the review's frozen scope (R7): lets the app tell which topic a question is about. */
+  readonly claimIds: readonly ClaimId[];
+  readonly frame: DiagramFrame | null;
+  readonly summary: DiagramSummary;
+};
+
 // ───────────────────────────── Usage ────────────────────────────────────────
 
 /**
@@ -585,7 +619,7 @@ export type Provider = "jev" | "claude";
 
 export type Purpose =
   | "boundary" | "frame_change" | "claim_check" | "interpretation" | "claim_revision"
-  | "resource_search" | "tutor_turn" | "wrap_up";
+  | "resource_search" | "tutor_turn" | "wrap_up" | "diagram_summary";
 
 export type UsageOutcome = "ok" | "error" | "aborted";
 

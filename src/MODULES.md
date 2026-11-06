@@ -15,6 +15,7 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 | Review lifecycle | W7 | `src/backend/review/index.ts`, `src/backend/review/core.ts` | `invite_answers`, `reviews`, `review_turns` | `Reviews`, `createReviews` |
 | Tutor and record | W8 | `src/backend/review/tutor.ts`, `src/backend/review/clamp.ts`, `src/backend/review/detour.ts`, `src/backend/record/*` | `notes`, `note_edits`, `note_deletions`, `note_evidence`, `observations`, `observation_decisions`, `link_suggestions`, `link_decisions`, `saved_reviews`, `save_failures` | `TutorInput`, `TutorOutput`, `WrapUpInput`, `WrapUpOutput`, `parseMoveHeader`, `validateMove`, `allowedMoves`, `reviewState`, `clampStatus`, `isLearningGap`, `LearningRecord` (now with `saveState(reviewId)`), `createRecord`, `RecordBundle` |
 | Review app | W9 | `src/app/*` | none (IndexedDB holding unsent turns) | `Api`, `createApi` |
+| Diagrams | review app PR | `src/backend/diagram/*` | none (the summary is a `diagram_summary` memo entry) | `Diagrams`, `createDiagrams`, `diagramSummaryTask`, `DiagramSummaryInput`, `DiagramSummaryOutput` |
 
 ## Working rules
 
@@ -35,6 +36,7 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 - `POST /captures/:captureId/retry-preparation` (`retryPreparation`) takes no body and replies 204. It re-queues the capture's chunks that are unfinished or have no supported claim; the app's "Check again" is its caller.
 - `POST /reviews/:reviewId/turns` runs one turn per review: a second post with a different `turnId` while one runs answers 409; the same `turnId` joins and replays. A stream still open after 5 minutes ends with `turn_failed` (retryable) while the turn finishes; its resend replays it.
 - `ReviewView.saved` is `LearningRecord.saveState(reviewId)`: `saved` once `saved_reviews` has the review, `save_pending` after a failed save with none since (`save_failures`, survives a restart), else `unsaved`.
+- `GET /reviews/:reviewId/diagrams` lists every topic of the review's frozen scope with its frame and where its summary stands (`no_claims`, `not_requested`, `preparing`, `ready`, `failed`) and makes no model call. `POST /reviews/:reviewId/diagrams/:topicId` starts that topic's summary (one `diagram_summary` Claude call per topic and evidence set, memoized) and answers with the same shape; asking again after `failed` retries. R19 is enforced in the task and again when the summary is read.
 - A `Material` crosses JSON as `Material.canonical` rows. Use `encodeMaterial` and `decodeMaterial`; the `GET /evidence?material=` value is `encodeURIComponent(encodeMaterial(m))`.
 - Response schemas live in `wire.ts`. `src/app/decode.ts` re-exports them as aliases.
 - Frozen exports that changed after the Tutor and record row was written: `RecordBundle.observations` carries `assessable` per observation, and `clampStatus(proposed, facts, dispute, assessable)` takes a fourth argument; when a thread's claim is not assessable at save, the status is `not_assessed` (R3).

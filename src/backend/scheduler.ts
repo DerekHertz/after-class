@@ -72,6 +72,7 @@ const PRIORITY: Readonly<Record<Purpose, number>> = {
   resource_search: 4,
   tutor_turn: 5,
   wrap_up: 5,
+  diagram_summary: 5,
 };
 
 const realTimers: Timers = {

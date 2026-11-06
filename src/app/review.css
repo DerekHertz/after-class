@@ -9,3 +9,16 @@
 .review .review-help summary { font-style: italic; }
 .source-heading button { margin: 4px 8px 4px 0; }
 .review .notebook-heading button { font-size: .85rem; }
+.diagram-panel { border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 16px; }
+.diagram-panel h3 { margin: 4px 0; }
+.diagram-frame { margin: 8px 0; }
+.diagram-frame .frame { max-width: 100%; height: auto; }
+.diagram-lines { padding-left: 20px; }
+.diagram-lines li { margin: 6px 0; }
+.diagram-lines .citation { font-size: .8rem; margin-left: 4px; }
+.review .review-topics { flex: 0 0 auto; font-size: .85rem; margin-top: 8px; }
+.review .review-topics ul { list-style: none; padding-left: 0; }
+.review .current-topic { flex: 0 0 auto; font-size: .9rem; margin: 8px 0 0; }
+.illustrated-page { border: 1px solid var(--border); border-radius: 6px; padding: 16px; margin: 16px 0; }
+.illustrated-page h3 { margin: 0; }
+.illustrated-page .frame { max-width: 100%; height: auto; }

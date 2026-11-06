@@ -156,6 +156,10 @@ const bundleJson = {
   gaps: [gap],
   ads: [{ sourceId: src, atContentS: 60, wallDurationMs: 15000, signals: ["dom_class"] }],
 };
+const topicDiagramJson = {
+  topicId: cpt, label: "Clocks", claimIds: [clm], frame: { id: ev2, mediaS: 12, sourceId: src, videoId: "QgWz_s7uugE", title: "Locks" },
+  summary: { state: "ready", title: "What does a clock give you?", lines: [{ text: "Clock A reads 5, clock B reads 2.", evidence: [ev1, ev2] }] },
+};
 const readyScope = { chunkRevisions: [crv], supportedClaims: 4, partial: [] };
 
 type Fixture = {
@@ -182,6 +186,8 @@ const fixtures: Record<RouteName, Fixture> = {
   sendTurn: { params: { reviewId: rvw }, request: { turnId: trn, act: { kind: "answer", text: "An ordering.", modality: "speech" } }, response: { type: "learner_turn_stored", turnId: trn }, app: turnEventz },
   review: { params: { reviewId: rvw }, response: reviewJson, app: reviewViewz },
   save: { params: { reviewId: rvw }, response: { kind: "saved", notes: 1, observations: 1, links: 0 }, app: saveResultz },
+  diagrams: { params: { reviewId: rvw }, response: { topics: [topicDiagramJson] } },
+  requestDiagram: { params: { reviewId: rvw, topicId: cpt }, response: topicDiagramJson },
   record: { query: { reviewId: rvw }, response: recordJson, app: recordViewz },
   usage: { response: { byKind: { unknown: { calls: 3, usd: null } }, byPurpose: { boundary: { calls: 3, errors: 0, unknownCost: 3 } } }, app: usageSummaryz },
   evidence: { query: { captureId: cap }, response: bundleJson, app: evidenceBundlez },
@@ -283,6 +289,8 @@ describe("both clients stay inside ROUTES", () => {
     },
     review: (a) => a.review(rvw),
     save: (a) => a.save(rvw),
+    diagrams: (a) => a.diagrams(rvw),
+    requestDiagram: (a) => a.requestDiagram(rvw, cpt),
     record: (a) => a.record({ reviewId: rvw }),
     usage: (a) => a.usage(),
     evidence: (a) => a.evidence({ ids: [ev1, ev2] }),

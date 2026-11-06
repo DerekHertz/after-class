@@ -26,7 +26,7 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import { parseId } from "../shared/ids";
 import type { IdKind } from "../shared/ids";
-import type { CaptureId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, SourceId, TurnId } from "../shared/ids";
+import type { CaptureId, ConceptId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, SourceId, TurnId } from "../shared/ids";
 import type { EvidenceBundle, Frame, FrozenScope, Passage, ReviewSaveState, ReviewView, StartResult, TurnEvent } from "../shared/domain";
 import { Material } from "../shared/time";
 import type { Interval } from "../shared/time";
@@ -42,6 +42,7 @@ import type { Segmentation } from "./segmentation";
 import type { Ledger } from "./providers/ledger";
 import type { Memo } from "./providers/memo";
 import type { Voice } from "./providers/elevenlabs";
+import type { Diagrams } from "./diagram";
 
 export type Modules = {
   readonly evidence: EvidenceStore;
@@ -52,6 +53,7 @@ export type Modules = {
   readonly ledger: Ledger;
   readonly memo: Memo;
   readonly voice: Voice;
+  readonly diagrams: Diagrams;
 };
 
 export type AuthConfig = { readonly port: number; readonly extensionId: string; readonly token: string };
@@ -93,7 +95,7 @@ export type ServeOptions = {
    * a route that needs a missing one answers 501, and a review's `saved` reads "unsaved".
    */
   readonly modules: Pick<Modules, "ledger" | "reviews"> & { readonly evidence: EvidenceStore & Pick<EvidenceStoreWithProbe, "watchedMaterial"> }
-    & Partial<Pick<Modules, "record" | "preparation" | "segmentation" | "voice">>;
+    & Partial<Pick<Modules, "record" | "preparation" | "segmentation" | "voice" | "diagrams">>;
   /** `port` 0 binds a free port (tests); the Host check then uses the bound port. */
   readonly auth: AuthConfig;
   /** Directory holding the bundled review app (scripts/build-app.ts writes dist/app). */
@@ -116,7 +118,7 @@ export const MAX_BODY_BYTES = 16 * 1024 * 1024;
 
 /** Path parameter name → id kind, so `matchRoute` (which does not validate) never hands a raw string to a module. */
 const PARAM_KIND = {
-  captureId: "cap", reviewId: "rvw", evidenceId: "ev", noteId: "note", linkId: "lnk", observationId: "obs",
+  captureId: "cap", reviewId: "rvw", topicId: "cpt", evidenceId: "ev", noteId: "note", linkId: "lnk", observationId: "obs",
 } as const satisfies Record<string, IdKind>;
 
 const SECURITY_HEADERS = { "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" } as const;
@@ -375,7 +377,7 @@ function ndjson(events: AsyncIterable<TurnEvent>, cors: Record<string, string>, 
 }
 
 async function mounted(name: string, matched: { readonly params: Record<string, string> }, req: Request, opts: ServeOptions, port: number, cors: Record<string, string>, guard: TurnGuard): Promise<Response | null> {
-  const { evidence, reviews, record, preparation, segmentation, voice } = opts.modules;
+  const { evidence, reviews, record, preparation, segmentation, voice, diagrams } = opts.modules;
   const captureId = matched.params.captureId as CaptureId | undefined;
   const reviewId = matched.params.reviewId as ReviewId | undefined;
   const noteId = matched.params.noteId as NoteId | undefined;
@@ -457,6 +459,18 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
         if (!toSave) return failure(404, "unknown review", cors);
         if (toSave.state.phase !== "ended") return failure(409, "the review has not ended, so it cannot be saved", cors);
         return reply("save", await record.save(reviewId!), cors);
+      }
+      case "diagrams": {
+        if (!diagrams) return null;
+        const topics = diagrams.list(reviewId!);
+        if (topics === null) return failure(404, "unknown review", cors);
+        return reply("diagrams", { topics }, cors);
+      }
+      case "requestDiagram": {
+        if (!diagrams) return null;
+        const started = diagrams.request(reviewId!, matched.params.topicId as ConceptId);
+        if (started === null) return failure(404, "unknown review or topic", cors);
+        return reply("requestDiagram", started.diagram, cors);
       }
       case "retryPreparation": {
         if (!preparation || !segmentation) return null;

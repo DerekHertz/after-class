@@ -5,6 +5,7 @@ import type { AppApi } from "./api";
 import { formatClock, formatInterval, noteView, observationRow, STATUS_LABEL, usageRows } from "./core";
 import type { SourceTitles } from "./core";
 import { ErrorNote, EvidencePane, Link, useAsync } from "./ui";
+import { IllustratedReview } from "./diagram";
 
 
 const LINK_TYPES: readonly LinkType[] = ["prerequisite_of", "part_of", "example_of", "contrasts_with", "related_to"];
@@ -38,12 +39,15 @@ export function RecordScreen({ api, reviewId, indexed = false }: { readonly inde
 
   const [page, setPage] = useState("index");
   const data = record.data;
+  // Only a saved review has notes, so only a saved review gets illustrated pages. One review's record shows that review alone.
+  const illustratedReviews = data ? [...new Set(data.notes.map((n) => n.reviewId))].filter((id) => reviewId === null || id === reviewId) : [];
   const pages = data ? [
     ...data.notes.map((note, index) => {
       const view = noteView(note);
       const title = view.userEdit?.trim() || view.segments.find(segment => segment.author === "learner")?.text || view.segments[0]?.text;
       return { id: String(note.id), title: title?.slice(0, 100) || `Review note ${index + 1}` };
     }),
+    ...(illustratedReviews.length > 0 ? [{ id: "illustrated", title: "Illustrated pages" }] : []),
     { id: "observations", title: "Tutor observations" },
     { id: "links", title: "Concept connections" },
   ] : [];
@@ -65,7 +69,14 @@ export function RecordScreen({ api, reviewId, indexed = false }: { readonly inde
       {saving && <p className="page-loading" role="status">Saving your change...</p>}
       {indexed && page === "index" && data && <nav aria-label="Notebook index"><h2>Index</h2><ol>{pages.map(entry => <li key={entry.id}><button onClick={() => turnPage(entry.id)}>{entry.title}</button></li>)}</ol></nav>}
       {indexed && page !== "index" && <button onClick={() => turnPage("index")}>Return to index</button>}
-      {data && (!indexed || page !== "index") && <fieldset key={page} data-notebook-page={indexed ? (["links", "observations"].includes(page) ? page : "note") : undefined} className="record-content" disabled={saving} aria-label="Saved learning record"><RecordBody api={api} data={indexed ? { ...data, notes: data.notes.filter(note => note.id === page) } : data} run={run} /></fieldset>}
+      {data && (!indexed || page === "illustrated") && illustratedReviews.length > 0 && (
+        <section className="record-section illustrated-pages" aria-labelledby="record-illustrated-heading" data-notebook-page={indexed ? "illustrated" : undefined}>
+          <h2 id="record-illustrated-heading">Illustrated pages</h2>
+          <p className="muted">One page per topic you were asked about: the question, the lecturer's frame, what changes, your answer, and its status.</p>
+          {illustratedReviews.map((id) => <IllustratedReview key={id} api={api} reviewId={id} auto={reviewId !== null} />)}
+        </section>
+      )}
+      {data && (!indexed || (page !== "index" && page !== "illustrated")) && <fieldset key={page} data-notebook-page={indexed ? (["links", "observations"].includes(page) ? page : "note") : undefined} className="record-content" disabled={saving} aria-label="Saved learning record"><RecordBody api={api} data={indexed ? { ...data, notes: data.notes.filter(note => note.id === page) } : data} run={run} /></fieldset>}
     </main>
   );
 }
