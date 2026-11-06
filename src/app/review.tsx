@@ -7,10 +7,10 @@ import type { AppApi } from "./api";
 import { useAppearance, useSceneActivity } from "./appearance";
 import { RoomTools } from "./room-tools";
 import { reactToCompanion } from "./companion-reaction";
-import { createReviewController } from "./controller";
+import { beginOnce, createReviewController } from "./controller";
 import type { SessionState } from "./controller";
 import {
-  ACTION_LABEL, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
+  ACTION_LABEL, INITIAL_STUDY_OPEN, isRoomLanding, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
   softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer,
 } from "./core";
 import type { ActionId, Line, SourceSelection } from "./core";
@@ -33,8 +33,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const [selection, setSelection] = useState<SourceSelection>({ kind: "automatic" });
   const [sourceOpen, setSourceOpen] = useState(true);
   const [notebookOpen, setNotebookOpen] = useState(false);
-  const [studyOpen, setStudyOpen] = useState(false);
-  const roomLanding = !studyOpen && appearance.detail === "hd-pixel";
+  const [studyOpen, setStudyOpen] = useState(INITIAL_STUDY_OPEN);
+  const roomLanding = isRoomLanding(studyOpen, appearance.detail);
   const [listening, setListening] = useState(false);
   const controller = useMemo(() => createReviewController({ api, reviewId, speaker, unsent }), [api, reviewId, speaker, unsent]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
@@ -57,6 +57,9 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   useEffect(() => {
     void controller.load();
   }, [controller]);
+  // Flow D: the tutor opens with a recall question, so an empty active review sends `begin` once.
+  const begin = useMemo(() => beginOnce(controller), [controller]);
+  useEffect(() => { begin(state); }, [begin, state]);
 
   const captureId = state.view?.captureId ?? null;
   const capture = useAsync(() => (captureId === null ? Promise.resolve(null) : api.captureView(captureId)), [api, captureId]);

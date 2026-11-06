@@ -1070,3 +1070,46 @@ describe("R9 review and capture are independent", () => {
     expect(r.reviews.view(r.reviewId).scope).toEqual(r.scope);
   });
 });
+
+// ───────────────────────────── begin: the tutor opens the review ─────────────────────────────
+
+describe("begin (flow D: the tutor opens with a recall question)", () => {
+  const begin: LearnerAct = { kind: "begin" };
+  /** The real W8 rules, so ask_main must carry the thread id code minted. */
+  function opening() {
+    const r = startedRig();
+    const t = tutorHarness(r.db, (input) => reply({ kind: "ask_main", threadId: nextThreadId(input.state), claimIds: [input.claims[0]!.id] }, "What is the main idea?"));
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { now: () => 1_000_000 });
+    return { ...r, t, reviews };
+  }
+
+  test("accepted as the very first turn: the allowed move is ask_main and the stored tutor turn is a main question", async () => {
+    const x = opening();
+    const events = await collect(x.reviews.turn(x.reviewId, randomId("turn"), begin));
+    expect(x.t.calls[0]!.allowed).toEqual(["ask_main"]);
+    expect(types(events)).toContain("learner_turn_stored");
+    expect(events.find((e) => e.type === "move")).toMatchObject({ move: { kind: "ask_main" } });
+    expect(types(events).at(-1)).toBe("turn_complete");
+    const turns = x.reviews.view(x.reviewId).turns;
+    expect(turns.map((t) => t.actor)).toEqual(["learner", "tutor"]);
+    expect(turns[0]).toMatchObject({ act: { kind: "begin" } });
+    expect(x.reviews.view(x.reviewId).state.mainQuestions).toBe(1);
+  });
+
+  test("a resend of the same begin turn id stores nothing twice", async () => {
+    const x = opening();
+    const id = randomId("turn");
+    await collect(x.reviews.turn(x.reviewId, id, begin));
+    await collect(x.reviews.turn(x.reviewId, id, begin));
+    expect(x.reviews.view(x.reviewId).turns).toHaveLength(2);
+  });
+
+  test("refused, and stored nowhere, when any turn already exists", async () => {
+    const x = opening();
+    await collect(x.reviews.turn(x.reviewId, randomId("turn"), answer()));
+    const before = x.reviews.view(x.reviewId).turns.length;
+    const events = await collect(x.reviews.turn(x.reviewId, randomId("turn"), begin));
+    expect(events).toEqual([{ type: "turn_failed", error: "this review has already begun", retryable: false }]);
+    expect(x.reviews.view(x.reviewId).turns).toHaveLength(before);
+  });
+});

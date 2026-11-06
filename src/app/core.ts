@@ -215,8 +215,16 @@ export type Line = {
   readonly evidenceIds: readonly EvidenceId[];
 };
 
+/** A review opens on the conversation, for every appearance. The room view stays one click away ("Back to room"). */
+export const INITIAL_STUDY_OPEN = true;
+
+export function isRoomLanding(studyOpen: boolean, detail: string): boolean {
+  return !studyOpen && detail === "hd-pixel";
+}
+
 export function learnerActText(act: LearnerAct): string {
   switch (act.kind) {
+    case "begin": return "Review started";
     case "answer": return act.text;
     case "skip": return "(skipped this question)";
     case "dont_know": return "I don't know.";
@@ -263,7 +271,8 @@ export function conversationLines(turns: readonly Turn[]): Line[] {
   for (const t of turns) {
     switch (t.actor) {
       case "learner":
-        lines.push({ key: t.id, speaker: "you", label: "You", text: learnerActText(t.act), evidenceIds: [] });
+        if (t.act.kind === "begin") lines.push({ key: t.id, speaker: "system", label: "Note", text: learnerActText(t.act), evidenceIds: [] });
+        else lines.push({ key: t.id, speaker: "you", label: "You", text: learnerActText(t.act), evidenceIds: [] });
         break;
       case "tutor":
         if (t.say.trim() !== "") lines.push({ key: t.id, speaker: "tutor", label: MOVE_LABEL[t.move.kind], text: t.say, evidenceIds: moveEvidence(t.move) });

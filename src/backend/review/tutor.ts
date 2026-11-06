@@ -395,6 +395,7 @@ function renderTurn(t: Turn): string {
   switch (t.actor) {
     case "learner": {
       const act = t.act;
+      if (act.kind === "begin") return "learner (learner opened the review)";
       const text = act.kind === "answer" || act.kind === "dispute" ? `: ${JSON.stringify(act.text)}` : "";
       return `learner${thread} ${act.kind}${text}`;
     }
