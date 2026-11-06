@@ -114,6 +114,29 @@ ${appendOnly("usage_events", "R17")}
 CREATE TRIGGER usage_events_no_delete BEFORE DELETE ON usage_events
 BEGIN SELECT RAISE(ABORT, 'R17: usage events are never deleted'); END;`,
     },
+    {
+      id: "002-voice-usage",
+      sql: `
+-- R17: "Every paid call records a usage event; unknown cost is stored as unknown, not zero."
+-- Text-to-speech has no memo key and no token counts, so its calls get their own table instead of a rebuild of
+-- usage_events (whose provider and purpose CHECKs are frozen). ElevenLabs bills characters at a plan-dependent rate,
+-- so the cost is stored as unknown, with the characters sent.
+CREATE TABLE voice_usage_events (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL CHECK (provider IN ('elevenlabs')),
+  model TEXT NOT NULL,
+  voice_id TEXT NOT NULL,
+  characters INTEGER NOT NULL CHECK (characters >= 0),
+  outcome TEXT NOT NULL CHECK (outcome IN ('ok','error','aborted')),
+  cost_kind TEXT NOT NULL CHECK (cost_kind = 'unknown'),
+  cost_reason TEXT NOT NULL,
+  started_ms INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0)
+) STRICT;
+${appendOnly("voice_usage_events", "R17")}
+CREATE TRIGGER voice_usage_events_no_delete BEFORE DELETE ON voice_usage_events
+BEGIN SELECT RAISE(ABORT, 'R17: usage events are never deleted'); END;`,
+    },
   ],
 
   evidence: [

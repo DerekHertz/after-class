@@ -10,6 +10,7 @@ import { parseRoute } from "./core";
 import { RecordScreen, UsageScreen } from "./record";
 import { ReviewScreen } from "./review";
 import { browserSpeaker, browserSpeechInput } from "./speech";
+import { audioElementPlayer, chooseSpeaker, createElevenLabsSpeaker, synthPlayback } from "./voice";
 import { createIndexedDbUnsent } from "./unsent";
 import { Link, navigate, usePathname } from "./ui";
 
@@ -20,7 +21,16 @@ function readToken(): string {
 }
 
 const api: AppApi = createApi(readToken());
-const speaker = browserSpeaker();
+const chromeVoice = browserSpeaker();
+const speaker = chooseSpeaker(
+  api.voiceAvailable().catch(() => false),
+  createElevenLabsSpeaker({
+    fetchAudio: (text, signal) => api.speech(text, signal),
+    play: audioElementPlayer(),
+    fallback: typeof speechSynthesis === "undefined" ? () => ({ done: Promise.resolve(), stop() {} }) : synthPlayback(speechSynthesis),
+  }),
+  chromeVoice,
+);
 const speech = browserSpeechInput();
 const unsent = createIndexedDbUnsent();
 

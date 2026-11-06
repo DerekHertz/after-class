@@ -32,7 +32,7 @@ import { Material } from "../shared/time";
 import type { Interval } from "../shared/time";
 import {
   BadRequest, ROUTES, matchRoute, parseDisputeResolutionRequest, parseEvidenceDeleteRequest, parseIngestBatch, parseInviteAnswerRequest,
-  parseLinkDecisionRequest, parseNoteEditRequest, parseObservationOverrideRequest, parseStartReviewRequest, parseTurnRequest,
+  parseLinkDecisionRequest, parseNoteEditRequest, parseObservationOverrideRequest, parseSpeakRequest, parseStartReviewRequest, parseTurnRequest,
 } from "../shared/wire";
 import type { EvidenceStore, EvidenceStoreWithProbe } from "./evidence";
 import type { Preparation } from "./preparation";
@@ -41,6 +41,7 @@ import type { LearningRecord } from "./record";
 import type { Segmentation } from "./segmentation";
 import type { Ledger } from "./providers/ledger";
 import type { Memo } from "./providers/memo";
+import type { Voice } from "./providers/elevenlabs";
 
 export type Modules = {
   readonly evidence: EvidenceStore;
@@ -50,6 +51,7 @@ export type Modules = {
   readonly record: LearningRecord;
   readonly ledger: Ledger;
   readonly memo: Memo;
+  readonly voice: Voice;
 };
 
 export type AuthConfig = { readonly port: number; readonly extensionId: string; readonly token: string };
@@ -91,7 +93,7 @@ export type ServeOptions = {
    * a route that needs a missing one answers 501, and a review's `saved` reads "unsaved".
    */
   readonly modules: Pick<Modules, "ledger" | "reviews"> & { readonly evidence: EvidenceStore & Pick<EvidenceStoreWithProbe, "watchedMaterial"> }
-    & Partial<Pick<Modules, "record" | "preparation" | "segmentation">>;
+    & Partial<Pick<Modules, "record" | "preparation" | "segmentation" | "voice">>;
   /** `port` 0 binds a free port (tests); the Host check then uses the bound port. */
   readonly auth: AuthConfig;
   /** Directory holding the bundled review app (scripts/build-app.ts writes dist/app). */
@@ -373,7 +375,7 @@ function ndjson(events: AsyncIterable<TurnEvent>, cors: Record<string, string>, 
 }
 
 async function mounted(name: string, matched: { readonly params: Record<string, string> }, req: Request, opts: ServeOptions, port: number, cors: Record<string, string>, guard: TurnGuard): Promise<Response | null> {
-  const { evidence, reviews, record, preparation, segmentation } = opts.modules;
+  const { evidence, reviews, record, preparation, segmentation, voice } = opts.modules;
   const captureId = matched.params.captureId as CaptureId | undefined;
   const reviewId = matched.params.reviewId as ReviewId | undefined;
   const noteId = matched.params.noteId as NoteId | undefined;
@@ -509,6 +511,15 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
         const { evidenceIds } = parseEvidenceDeleteRequest(await readJson(req));
         evidence.deleteByUser(evidenceIds, crypto.randomUUID());
         return noContent(cors);
+      }
+      case "voiceStatus":
+        return replyWire("voiceStatus", { available: voice?.available === true }, cors);
+      case "speak": {
+        const { text } = parseSpeakRequest(await readJson(req));
+        if (voice === undefined || !voice.available) return failure(503, "voice unavailable", cors);
+        const result = await voice.speak(text, req.signal);
+        if (result.kind === "failed") return failure(result.status, result.status === 504 ? "voice timed out" : "voice failed", cors);
+        return new Response(result.body, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store", ...SECURITY_HEADERS, ...cors } });
       }
       default:
         return null;

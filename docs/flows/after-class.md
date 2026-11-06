@@ -174,6 +174,8 @@ Speech: input via Chrome Web Speech API. Output must not sound robotic (Derek); 
 
 Voice provider: parked by Derek (2026-11-03). Candidates when resumed are OpenAI gpt-4o-mini-tts, ElevenLabs and Cartesia, chosen by a blind listening test. Chrome speechSynthesis is the fallback only.
 
+Amendment (2026-11-06), Derek: "great. i have 3 months of eleven labs that we can use to make the voice session for socratic review more enjoyable. can we get the wired in while i test the current version?" Tutor output now uses ElevenLabs through the backend: model `eleven_flash_v2_5` (ElevenLabs' low-latency model), default voice `JBFqnCBsd6RMkjVDRZzb` ("George", the voice id in ElevenLabs' quickstart), configurable with `AFTERCLASS_ELEVENLABS_MODEL` and `AFTERCLASS_ELEVENLABS_VOICE_ID`. The key is `ELEVENLABS_API_KEY` in `keys.env`; it stays in the backend. Chrome speechSynthesis stays the fallback (replay mode, no key, or any failed sentence). Speech input is unchanged (Chrome Web Speech). No blind listening test was run: Derek chose ElevenLabs directly. Each ElevenLabs call records a usage event with the characters sent and cost stored as unknown (R17).
+
 Models: interpretation and tutor default to Claude Opus 5.5 ($4/$20 per MTok, cache read $0.20). Sonnet 5.5 ($2/$10) is the comparison arm in a lab test. Prices are from the Claude API reference cached 2026-10-06.
 
 ## Live-call scope (approved 2026-11-03)

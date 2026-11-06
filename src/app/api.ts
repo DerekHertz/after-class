@@ -21,7 +21,7 @@ import type {
 } from "../shared/domain";
 import type { Material } from "../shared/time";
 import type { TutorStreamEvent } from "../shared/wire";
-import { ROUTES, parseStartReviewRequest, parseTurnRequest, routeUrl } from "../shared/wire";
+import { ROUTES, parseStartReviewRequest, parseTurnRequest, routeUrl, voiceStatusResponse } from "../shared/wire";
 import {
   captureResponsez, encodeMaterial, evidenceBundlez, recordViewz, reviewOptionsz, reviewViewz, saveResultz, startResultz, usageSummaryz,
 } from "./decode";
@@ -57,6 +57,10 @@ export type AppApi = Api & {
   deleteEvidence(ids: readonly EvidenceId[]): Promise<void>;
   /** Re-queues the capture's unfinished chunks and those with no supported claim. */
   retryPreparation(captureId: CaptureId): Promise<void>;
+  /** Whether the backend can speak tutor sentences with ElevenLabs (false in replay mode or without a key). */
+  voiceAvailable(): Promise<boolean>;
+  /** One tutor sentence as audio/mpeg. `signal` cancels the request, which cancels the upstream call. */
+  speech(text: string, signal?: AbortSignal): Promise<Blob>;
 };
 
 export class ApiError extends Error {
@@ -110,6 +114,19 @@ export function createApi(token: string, options: ApiOptions = {}): AppApi {
     await send(method, path, body);
   };
 
+  async function speech(text: string, signal?: AbortSignal): Promise<Blob> {
+    const body = ROUTES.speak.request!.parse({ text });
+    const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+    let res: Response;
+    try {
+      res = await doFetch(`${base}${ROUTES.speak.path}`, { method: ROUTES.speak.method, headers, body: JSON.stringify(body), ...(signal ? { signal } : {}) });
+    } catch (e) {
+      throw new ApiError(e instanceof Error ? e.message : "network error", 0);
+    }
+    if (!res.ok) throw new ApiError(await errorMessage(res), res.status);
+    return res.blob();
+  }
+
   async function* sendTurn(reviewId: ReviewId, turnId: TurnId, act: LearnerAct): AsyncGenerator<TutorStreamEvent> {
     const request = parseTurnRequest({ turnId, act });
     const res = await send("POST", `/reviews/${enc(reviewId)}/turns`, request);
@@ -136,6 +153,8 @@ export function createApi(token: string, options: ApiOptions = {}): AppApi {
     resolveDispute: (id, outcome) => command("POST", `/record/observations/${enc(id)}/dispute-resolution`, { outcome }),
     overrideObservation: (id, status) => command("POST", `/record/observations/${enc(id)}/override`, { status }),
     retryPreparation: (captureId) => command(ROUTES.retryPreparation.method, routeUrl(ROUTES.retryPreparation, { captureId })),
+    voiceAvailable: async () => (await call(voiceStatusResponse, ROUTES.voiceStatus.method, ROUTES.voiceStatus.path)).available,
+    speech,
     deleteEvidence: (ids) => command("POST", "/record/evidence/delete", { evidenceIds: ids }),
   };
 }
