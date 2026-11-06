@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * Experiment 7, prerequisite 2: the arm config of six wordings, the opt-in lab run (frame relevance over kept frames, the
  * lessonFramingCloses routing, the 4,000-call Jev cap), and the optimizer's exp7 mode (draft template, held-out guard over
@@ -317,8 +318,12 @@ const prepared = (h: Harness) => {
 
 describe("the draft template", () => {
   const doc = readFileSync(join(repo, TEMPLATE7_DOC), "utf8");
-  test("is marked DRAFT at the top and its approval mechanism is stated", () => {
-    expect(doc.split("\n").slice(0, 4).join("\n")).toContain(DRAFT_BANNER);
+  test("records Derek's approval at the top, and the draft text in the doc is exactly the approved text", () => {
+    const top = doc.split("\n").slice(0, 4).join("\n");
+    expect(top).toContain('APPROVED by Derek in chat on 2026-11-05 ("Approve the draft")');
+    expect(top).toContain(String(APPROVED_EXP7_TEMPLATE_SHA256));
+    const text = doc.slice(doc.indexOf("<!-- BEGIN DRAFT TEMPLATE -->\n") + 30, doc.indexOf("<!-- END DRAFT TEMPLATE -->"));
+    expect(createHash("sha256").update(text).digest("hex")).toBe(APPROVED_EXP7_TEMPLATE_SHA256 as string);
     expect(DRAFT_BANNER).toBe("DRAFT — not approved by Derek; no live call may use it until an approved copy with matching SHA exists.");
   });
 
@@ -331,14 +336,21 @@ describe("the draft template", () => {
     expect(flat(sources)).toContain("for providing evidence, jev is significantly cheaper for catching those frames.");
   });
 
-  test("a live run is refused without an approved copy; an approved copy with another SHA, or any copy while no SHA is set, is refused", () => {
-    expect(APPROVED_EXP7_TEMPLATE_SHA256).toBeNull();
+  test("a live run is refused without an approved copy; the approved copy is accepted; a changed copy is refused", () => {
+    expect(APPROVED_EXP7_TEMPLATE_SHA256).toBe("1595e63c4f869faca2bb1a3826c3164f2dd8530fe54ba30bcfa18314af19a8ff");
     expect(() => loadTemplate7(repo, { live: true })).toThrow(/needs --approved-template/);
-    const copy = join(tmp("approved"), "approved.md");
     const text = doc.slice(doc.indexOf("<!-- BEGIN DRAFT TEMPLATE -->\n") + 30, doc.indexOf("<!-- END DRAFT TEMPLATE -->"));
+    const copy = join(tmp("approved"), "approved.md");
     writeFileSync(copy, `<!-- BEGIN APPROVED TEMPLATE -->\n${text}<!-- END APPROVED TEMPLATE -->\n`);
-    expect(() => loadTemplate7(repo, { live: true, approvedPath: copy })).toThrow(/no experiment 7 optimizer template is approved yet/);
-    expect(() => loadTemplate7(repo, { live: false, approvedPath: copy })).toThrow(/no experiment 7 optimizer template is approved yet/);
+    const ok = loadTemplate7(repo, { live: true, approvedPath: copy });
+    expect(ok.approved).toBe(true);
+    expect(ok.text).toBe(text);
+    const changed = join(tmp("approved-changed"), "approved.md");
+    writeFileSync(changed, `<!-- BEGIN APPROVED TEMPLATE -->\n${text.replace("Jev", "Jev ")}<!-- END APPROVED TEMPLATE -->\n`);
+    expect(() => loadTemplate7(repo, { live: true, approvedPath: changed })).toThrow(/is not the experiment 7 template Derek approved/);
+    const draftMarkers = join(tmp("approved-draft"), "approved.md");
+    writeFileSync(draftMarkers, doc);
+    expect(() => loadTemplate7(repo, { live: true, approvedPath: draftMarkers })).toThrow(/no BEGIN\/END APPROVED TEMPLATE markers/);
     expect(loadTemplate7(repo, { live: false }).approved).toBe(false);
   });
 

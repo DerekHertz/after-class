@@ -1,6 +1,6 @@
 # Experiment 7: the optimizer prompt template (DRAFT)
 
-**DRAFT — not approved by Derek; no live call may use it until an approved copy with matching SHA exists.**
+**APPROVED by Derek in chat on 2026-11-05 ("Approve the draft").** The text between the markers below is the approved text, unchanged (SHA-256 `1595e63c4f869faca2bb1a3826c3164f2dd8530fe54ba30bcfa18314af19a8ff`, recorded as `APPROVED_EXP7_TEMPLATE_SHA256`). A live run reads an approved copy of it (`--approved-template`, kept at `data/lab/exp7/optimizer-prompt-approved-2026-11-05.md`); any change to the text needs his new approval. Earlier status: DRAFT — not approved by Derek; no live call may use it until an approved copy with matching SHA exists.
 
 This is a builder's draft of the prompt that asks a Claude model (Fable, per `docs/experiments/07-jev-saves-the-tutor.md`) to refine the wording of experiment 7's three new questions on clips 1 to 22 only. It is modeled on the approved experiment 6 template (`docs/experiments/exp6-optimizer-prompt.md`): Derek's definitions, flow B and the quoted lines of the experiment 7 doc are copied from those documents, not retyped; the parts that are new (what Jev sees for the new questions, the evidence columns, the answer shape) are the builder's and need Derek's reading before approval.
 

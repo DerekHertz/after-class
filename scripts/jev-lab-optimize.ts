@@ -54,7 +54,8 @@ export const APPROVED_TEMPLATE_SHA256 = "a10cf915d4b789951c10174e19f58574830e8fb
 export const TEMPLATE7_DOC = "docs/experiments/exp7-optimizer-prompt.md";
 export const TEMPLATE7_DRAFT_BEGIN = "<!-- BEGIN DRAFT TEMPLATE -->\n";
 export const TEMPLATE7_DRAFT_END = "<!-- END DRAFT TEMPLATE -->";
-export const APPROVED_EXP7_TEMPLATE_SHA256: string | null = null;
+/** SHA-256 of the experiment 7 template Derek approved in chat on 2026-11-05 ("Approve the draft"): the draft text in TEMPLATE7_DOC, unchanged. */
+export const APPROVED_EXP7_TEMPLATE_SHA256: string | null = "1595e63c4f869faca2bb1a3826c3164f2dd8530fe54ba30bcfa18314af19a8ff";
 /** Experiment 7's Claude ceiling (Budget: wording rounds and tutor interpretation, 80 in all), counted in its own ledger, never in data/lab/propose. */
 export const EXP7_BUDGET_CLAUDE_CALLS = 80;
 export const DRAFT_BANNER = "DRAFT — not approved by Derek; no live call may use it until an approved copy with matching SHA exists.";
