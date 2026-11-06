@@ -10,7 +10,7 @@ import { reactToCompanion } from "./companion-reaction";
 import { beginOnce, createReviewController, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
 import {
-  ACTION_LABEL, END_CONFIRM_TEXT, INITIAL_SOURCE_OPEN, endFlow, shouldAutoSendSpeech, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
+  ACTION_LABEL, END_CONFIRM_TEXT, INITIAL_SOURCE_OPEN, endFlow, shouldAutoSendSpeech, shouldStopListening, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
   softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer,
 } from "./core";
 import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, TurnStatus } from "./core";
@@ -362,12 +362,12 @@ export function Composer({
   const heard = useRef<Heard | null>(null);
   /** The latest props, for speech callbacks that outlive the render that started them. */
   const latest = useRef({ allowed: false, send });
-  latest.current = { allowed: hasText && !disabled, send };
+  latest.current = { allowed: hasText && !disabled && showSpeak, send };
   useEffect(() => { onListeningChange?.(listening); }, [listening, onListeningChange]);
   useEffect(() => () => { speech.stop(); }, [speech]);
   useEffect(() => {
-    if (!hasText && listening) { speech.stop(); setListening(false); }
-  }, [hasText, listening, speech]);
+    if (shouldStopListening(listening, hasText, showSpeak)) { speech.stop(); heard.current = null; setListening(false); }
+  }, [hasText, showSpeak, listening, speech]);
 
   function toggleListening() {
     if (listening) {

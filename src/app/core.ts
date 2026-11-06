@@ -374,6 +374,11 @@ export function shouldAutoSendSpeech(heard: Heard | null, answerAllowed: boolean
   return heard !== null && heard.final && heard.text.trim() !== "" && answerAllowed;
 }
 
+/** The microphone should be off: there is no answer to give, or voice was switched off while listening. */
+export function shouldStopListening(listening: boolean, answerPossible: boolean, voiceOn: boolean): boolean {
+  return listening && (!answerPossible || !voiceOn);
+}
+
 export type TurnStatus =
   | { readonly kind: "idle"; readonly text: null }
   | { readonly kind: "listening"; readonly text: string; readonly transcript: string }

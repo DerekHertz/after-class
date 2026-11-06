@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { VOICE_KEY, persistVoice, readVoice } from "../src/app/appearance";
+import { shouldAutoSendSpeech, shouldStopListening } from "../src/app/core";
 import { Composer } from "../src/app/review";
 import { RoomTools } from "../src/app/room-tools";
 import { SceneShell } from "../src/app/scene";
@@ -66,6 +67,17 @@ describe("gateSpeaker", () => {
     s.speak("Two.");
     s.stop();
     expect(r.log).toEqual(["made", "begin", "speak One.", "stop"]);
+  });
+});
+
+describe("voice switched off while listening", () => {
+  test("the microphone stops, and a late final transcript is not sent", () => {
+    expect(shouldStopListening(true, true, false)).toBe(true);
+    expect(shouldStopListening(true, true, true)).toBe(false);
+    expect(shouldStopListening(true, false, true)).toBe(true);
+    expect(shouldStopListening(false, true, false)).toBe(false);
+    // The composer folds the voice setting into `allowed`, so onEnd cannot send once voice is off.
+    expect(shouldAutoSendSpeech({ text: "the cache", final: true }, false)).toBe(false);
   });
 });
 
