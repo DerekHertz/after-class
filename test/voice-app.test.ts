@@ -18,14 +18,15 @@ function deferred<T = void>() {
 }
 
 /** Fake audio backend: each fetch is held until the test releases it; each play is held until it "ends". */
-function rig(opts: { prefetch?: number } = {}) {
+function rig(opts: { prefetch?: number; ignoreAbort?: boolean } = {}) {
   const fetches: { text: string; signal: AbortSignal; release: () => void; fail: (e: unknown) => void }[] = [];
   const events: string[] = [];
   const plays: { text: string; end: () => void; failPlay: (e: unknown) => void; stopped: boolean }[] = [];
   const spoken: { text: string; end: () => void; stopped: boolean }[] = [];
   const texts = new WeakMap<Blob, string>();
+  const { ignoreAbort, ...speakerOpts } = opts;
   const speaker = createElevenLabsSpeaker({
-    ...opts,
+    ...speakerOpts,
     fetchAudio: (text, signal) => {
       const d = deferred<Blob>();
       fetches.push({
@@ -37,7 +38,7 @@ function rig(opts: { prefetch?: number } = {}) {
         },
       });
       events.push(`fetch ${text}`);
-      signal.addEventListener("abort", () => d.reject(new DOMException("aborted", "AbortError")));
+      if (!ignoreAbort) signal.addEventListener("abort", () => d.reject(new DOMException("aborted", "AbortError")));
       return d.promise;
     },
     play: (blob) => {
@@ -59,6 +60,29 @@ function rig(opts: { prefetch?: number } = {}) {
 }
 
 describe("createElevenLabsSpeaker", () => {
+  test("a sentence whose audio arrives after stop() is never played or spoken", async () => {
+    const r = rig({ ignoreAbort: true });
+    r.speaker.beginTurn();
+    r.speaker.speak("Stale.");
+    await settle();
+    r.speaker.stop();
+    r.fetches[0]!.release();
+    await settle();
+    expect(r.plays).toHaveLength(0);
+    expect(r.spoken).toHaveLength(0);
+  });
+
+  test("a sentence whose fetch is aborted by stop() does not fall back to the synth voice", async () => {
+    const r = rig();
+    r.speaker.beginTurn();
+    r.speaker.speak("Stale.");
+    await settle();
+    r.speaker.stop();
+    await settle();
+    expect(r.plays).toHaveLength(0);
+    expect(r.spoken).toHaveLength(0);
+  });
+
   test("plays sentences in order, whatever order their audio arrives in", async () => {
     const r = rig();
     r.speaker.beginTurn();
