@@ -123,10 +123,10 @@ Tuning rounds on the first half (clips 1 to 22, 4 labeled boundaries). Bars: rec
 | --- | --- | --- | --- | --- | --- | --- |
 | baseline (exp 2 round 2) | product wording, yes at 0.4 | 1 of 4 | 1.52 | 0 of 25 | 96.4% | 2 |
 | opus-1 r1 | lesson-level new-concept and wrapped-up stopping-point wording, context 180 s | 2 of 4 | 0.76 | 1 of 25 | 96.9% | 3 |
-| opus-1 r2 | "clean break" stopping point, frame wording widened | 2 of 4 | 2.54 | 0 of 25 | 76.0% | 2 |
+| opus-1 r2 | "clean break" stopping point, new concept narrowed, frame wording widened | 2 of 4 | 2.54 | 0 of 25 | 76.0% | 2 |
 | opus-1 r3 | "whole lesson wrapped up" stopping point, yes at 0.35, no at 0.25 | 2 of 4 | 0.25 | 0 of 25 | 68.6% | 3 |
 | fable-1 r1 | lesson-level new concept, stopping point leaning yes, yes at 0.45, windows 45 s, context 150 s | 2 of 4 | 0.76 | 0 of 25 | 96.2% | 3 |
-| fable-1 r2 | stricter new concept ("unrelated subject"), yes at 0.5, context 120 s | 0 of 4 | 0 | 0 of 25 | 96.2% | 3 |
+| fable-1 r2 | stricter new concept ("unrelated subject"), stopping point says yes on truncated captions, yes at 0.5, context 120 s | 0 of 4 | 0 | 0 of 25 | 96.2% | 3 |
 | fable-1 r3 | round-1 cues plus targeted exclusions, yes at 0.42 | 3 of 4 | 3.30 | 0 of 25 | 96.2% | 3 |
 
 Selected by decision 5 (code, first-half reports only): opus-1 round 3 (tie on bars and recall, fewer false closes); fable-1 round 3 (tie on bars, higher recall).
