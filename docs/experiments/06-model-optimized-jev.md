@@ -40,7 +40,7 @@ None of the following exists on `master` when this was written. Each is built, t
 - `jev-lab-propose`: the timing pilot, the labeler, the deterministic comparison of two models' proposals, and the Claude-call rails named below (stages 2 and 3).
 - The optimizer runner: it builds the first-half-only prompt, validates a proposal against decision 4, applies it, and re-runs Jev (stage 6).
 - Scoring an arm's selected round, which is not always the last tune round (decision 5).
-- Separate lab run directories per arm, a per-directory Jev ceiling (decision 6, Amendment 2 to it: now 2,400 for both experiments, so nothing separate to build; this line first said "raise to 1,000 while experiment 2 keeps 800"), and a persisted Jev-call counter across the arms' directories for the 3,000 total (decisions 6 and 7).
+- Separate lab run directories per arm, a per-directory Jev ceiling (decision 6, Amendment 2 to it: now 2,400 for both experiments, so nothing separate to build; this line first said "raise to 1,000 while experiment 2 keeps 800"), and a persisted Jev-call counter across the arms' directories for the 5,000 total (decision 6, Amendment 2; this line first said 3,000) (decisions 6 and 7).
 - A code check that no optimizer or labeler prompt contains held-out material (see "Fixed").
 
 ## Fixed, to be enforced in code
