@@ -30,7 +30,7 @@ Frame dedupe and the claim check stay as they are.
 
 1. **Data: the existing captures.** Fable refines the wording of the questions on the tuning clips only (clips 1 to 22 of the 43-clip set), as in experiment 6. Measurements are on clips 23 to 43, which are experiment 6's held-out half: it was scored once per arm for boundaries and those results are known. The tutor-token and quality measurements here are new and were never part of any tuning, so using that half for them is sound. Task 3's boundary result on it is NOT a clean held-out result, because the intro/conclusion routing was designed after experiment 6's held-out results were seen (including that 8 of Fable's 11 false closes fall within 6 s of a clip start); it is reported as exploratory, with no boundary bar. The 11-clip set is not used: experiment 2 run 1 tuned on its clips 1 to 7.
 2. **Two arms, same captures, same tutor step.**
-   - **Today:** the product as it is (Jev dedupe, product boundary wording, every kept frame and every earlier claim sent).
+   - **Today:** the product as it is (Jev dedupe, product boundary wording, every kept frame, and on delta calls the existing claims inside the same chunk revision).
    - **Scoped Jev:** tasks 1 to 3 on top of dedupe, with the wording fixed before the run.
 3. **The tutor's step.** The product's own `interpretTask` (Opus 5.5, effort high) prepares each chunk in both arms.
 4. **What is measured.** Per arm: tutor input and output tokens (images and text separately), frames and earlier claims sent, interpretation calls, wall time, notional cost at the flow doc's Opus prices; Jev calls and latency.
@@ -39,7 +39,7 @@ Frame dedupe and the claim check stay as they are.
 
 ## Bars (ADOPTED 2026-11-05, set before any result)
 
-- The scoped-Jev arm sends the tutor at most 50% of the Today arm's input tokens. Both arms already send only the frames Jev's dedupe kept, so this needs task 1 to remove a large share of the kept frames (roughly 60% or more if task 2 saves nothing).
+- The scoped-Jev arm sends the tutor at most 50% of the Today arm's input tokens. Both arms already send only the frames Jev's dedupe kept, so this needs task 1 to remove a large share of the kept frames: roughly 40% or more if task 2 saves nothing, using this doc's estimated token counts (1,200 tokens per image, about 25k of transcript).
 - Derek rates it the same or better on at least 80% of topics.
 - No claim in the scoped-Jev arm loses a frame it needed (each case Derek marks as needed counts against it).
 
