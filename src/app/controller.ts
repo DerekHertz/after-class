@@ -71,21 +71,12 @@ export type ControllerDeps = {
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /**
- * Flow D: "[agent] Open recall question on the frozen scope (no recap first)."
- * True for a loaded, active review with no turns, nothing unsent and nothing streaming: the tutor has not opened yet.
+ * Flow D: "[code]  Show the topics in the frozen scope as a checklist."
+ * True for a loaded, active review with no turns, nothing unsent and nothing streaming: the learner has not started it yet.
+ * The review no longer begins by itself; the learner marks topics and starts it (a `begin` act with `fuzzy` and `note`).
  */
-export function needsBegin(state: SessionState): boolean {
+export function needsChecklist(state: SessionState): boolean {
   return state.view !== null && state.view.state.phase === "active" && state.view.turns.length === 0 && state.unsent.length === 0 && state.live === null;
-}
-
-/** Sends `begin` at most once per call of this factory, however often the state is offered. A retry goes through the unsent store, with the same turn id. */
-export function beginOnce(controller: Pick<ReviewController, "send">): (state: SessionState) => void {
-  let sent = false;
-  return (state) => {
-    if (sent || !needsBegin(state)) return;
-    sent = true;
-    void controller.send({ kind: "begin" });
-  };
 }
 
 /**

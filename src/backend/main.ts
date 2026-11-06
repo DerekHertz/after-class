@@ -341,6 +341,7 @@ export async function main(options: MainOptions = {}): Promise<Running> {
     stopEarly: preparation.stopEarly,
     assessableIn: preparation.assessableIn,
     claimsIn: preparation.claimsIn,
+    concepts: preparation.concepts,
     bundle: evidence.bundle,
     watchedSeconds: (captureId) => evidence.captureView(captureId).watchedSeconds,
     runTutor: (input, streamTo, signal) => memo.run(tasks.tutor, input, { signal, streamTo }),
@@ -362,7 +363,7 @@ export async function main(options: MainOptions = {}): Promise<Running> {
     claims: usableNow,
     async wrapUp(reviewId) {
       const turns = reviews.view(reviewId).turns;
-      const threads = [...new Set(turns.flatMap((t) => (t.actor === "tutor" && t.move.kind === "ask_main" ? [t.move.threadId] : [])))];
+      const threads = [...new Set(turns.flatMap((t) => (t.actor === "tutor" && (t.move.kind === "ask_main" || t.move.kind === "quick_check") ? [t.move.threadId] : [])))];
       const result = await memo.run(tasks.wrapUp, { turns, claims: usableNow(reviewId), threads });
       if (result.kind === "hit") return result.value;
       throw new Error(result.kind === "failed" ? `wrap-up failed: ${result.lastError}` : `wrap-up ${result.kind}`);

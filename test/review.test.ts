@@ -157,6 +157,8 @@ const kit: TutorKit = {
       reviewId,
       phase: ended ? "ended" : lastAct === "pause" ? "paused" : "active",
       mainQuestions: tutors.filter((t) => t.move.kind === "ask_main").length,
+      quickChecks: 0,
+      fuzzy: [],
       openThread,
       lastLearnerAct: lastLearner,
       detour: { kind: "none" },

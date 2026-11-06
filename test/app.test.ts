@@ -15,7 +15,7 @@ import { ApiError, createApi, evidenceParams } from "../src/app/api";
 import type { Api } from "../src/app/api";
 import { OptionsView, checkAgain } from "../src/app/capture";
 import type { AppApi } from "../src/app/api";
-import { beginOnce, createReviewController, needsBegin, needsResume, resumeOnce } from "../src/app/controller";
+import { createReviewController, needsChecklist, needsResume, resumeOnce } from "../src/app/controller";
 import { learnerAct } from "../src/shared/wire";
 import type { SessionState } from "../src/app/controller";
 import {
@@ -25,8 +25,8 @@ import {
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { StreamError, ndjson, tutorEvents } from "../src/app/ndjson";
 import { UsageTable } from "../src/app/record";
-import { Composer, SaveBanner, UndeliveredNote } from "../src/app/review";
 import { gateSpeaker } from "../src/app/voice";
+import { Composer, SaveBanner, TopicChecklist, UndeliveredNote } from "../src/app/review";
 import { createSpeechInput, createSynthSpeaker } from "../src/app/speech";
 import type { RecognitionLike, Speaker } from "../src/app/speech";
 import { BundleInspector, EvidencePane } from "../src/app/ui";
@@ -62,9 +62,10 @@ function turnJson(n: number, actor: "learner" | "tutor" | "code", rest: Record<s
 function reviewJson(overrides: { turns?: unknown[]; phase?: string; saved?: string; detour?: unknown; observations?: unknown[]; owesMove?: boolean } = {}) {
   return {
     reviewId, captureId,
+    topics: [{ id: cpt, label: "Logical clocks", summary: "Order events without a shared clock." }, { id: stableId("cpt", "concept-2"), label: "Vector clocks", summary: "" }],
     scope: { chunkRevisions: [crv], material: canonicalMaterial, claimsAtStart: [clm], partial: [{ kind: "capture_gap", gap: gapJson }], frozenAtSeq: 7 },
     state: {
-      reviewId, phase: overrides.phase ?? "active", mainQuestions: 1, openThread: thr, lastLearnerAct: null,
+      reviewId, phase: overrides.phase ?? "active", mainQuestions: 1, quickChecks: 0, fuzzy: [], openThread: thr, lastLearnerAct: null,
       detour: overrides.detour ?? { kind: "none" }, openDispute: null, corrections: [], activeSeconds: 30, softTargetS: 600,
       softTargetOffered: false, wrapUpRequested: false,
     },
@@ -1148,42 +1149,45 @@ describe("review composer", () => {
   });
 });
 
-describe("opening the review (flow D: tutor opens with a recall question)", () => {
+describe("opening the review (flow D: topic checklist, then the learner starts it)", () => {
   const state = (o: Partial<SessionState> = {}): SessionState => ({
     view: parsedReview(), loadError: null, live: null, unsent: [], sendError: null, saving: false, saveError: null, savedSummary: null, storageDegraded: false, ...o,
   });
-  const unsentTurn = { turnId: stableId("turn", "u"), reviewId, act: { kind: "begin" } as LearnerAct, createdAtMs: 1 };
-  const run = (states: SessionState[]) => {
-    const sent: LearnerAct[] = [];
-    const offer = beginOnce({ send: async (a) => (sent.push(a), true) });
-    for (const s of states) offer(s);
-    return sent;
-  };
+  const cpt2 = stableId("cpt", "concept-2");
+  const topics = [{ id: cpt, label: "Logical clocks", summary: "Order events without a shared clock." }, { id: cpt2, label: "Vector clocks", summary: "" }];
 
-  test("the wire schema round-trips begin and rejects other spellings", () => {
+  test("the wire schema round-trips begin with fuzzy and note, with or without them, and rejects other spellings", () => {
     expect(learnerAct.parse({ kind: "begin" })).toEqual({ kind: "begin" });
+    expect(learnerAct.parse({ kind: "begin", fuzzy: [], note: "  the ordering part " })).toEqual({ kind: "begin", fuzzy: [], note: "the ordering part" });
+    expect(learnerAct.parse({ kind: "begin", fuzzy: [cpt, cpt2] })).toEqual({ kind: "begin", fuzzy: [cpt, cpt2] });
+    expect(learnerAct.safeParse({ kind: "begin", fuzzy: ["nope"] }).success).toBe(false);
     expect(learnerAct.safeParse({ kind: "begins" }).success).toBe(false);
   });
 
-  test("an empty active review sends begin exactly once, however often it re-renders", () => {
-    expect(run([state(), state(), state({ sendError: null })])).toEqual([{ kind: "begin" }]);
+  test("the review view carries its topics in scope order", () => {
+    expect(parsedReview().topics.map((t) => t.label)).toEqual(["Logical clocks", "Vector clocks"]);
   });
 
-  test("a review with turns, a paused or ended review, unsent turns or a stream in flight sends nothing", () => {
-    expect(run([state({ view: parsedReview({ turns: [tutorAsk] }) })])).toEqual([]);
-    expect(run([state({ view: parsedReview({ phase: "paused" }) })])).toEqual([]);
-    expect(run([state({ view: parsedReview({ phase: "ended" }) })])).toEqual([]);
-    expect(run([state({ unsent: [unsentTurn] })])).toEqual([]);
-    expect(run([state({ live: startLive(stableId("turn", "x")) })])).toEqual([]);
-    expect(run([state({ view: null })])).toEqual([]);
-    expect(needsBegin(state())).toBe(true);
+  test("an empty active review shows the checklist; a review with turns, paused, ended, unsent or streaming does not", () => {
+    expect(needsChecklist(state())).toBe(true);
+    expect(needsChecklist(state({ view: parsedReview({ turns: [tutorAsk] }) }))).toBe(false);
+    expect(needsChecklist(state({ view: parsedReview({ phase: "paused" }) }))).toBe(false);
+    expect(needsChecklist(state({ view: parsedReview({ phase: "ended" }) }))).toBe(false);
+    expect(needsChecklist(state({ unsent: [{ turnId: stableId("turn", "u"), reviewId, act: { kind: "begin" } as LearnerAct, createdAtMs: 1 }] }))).toBe(false);
+    expect(needsChecklist(state({ live: startLive(stableId("turn", "x")) }))).toBe(false);
+    expect(needsChecklist(state({ view: null }))).toBe(false);
   });
 
-  test("it waits for the view, then sends once", () => {
-    expect(run([state({ view: null }), state(), state()])).toEqual([{ kind: "begin" }]);
+  test("nothing begins by itself on load: the controller sends no turn until the learner acts", async () => {
+    const h = setup({ sendTurn: async function* () {} });
+    await h.controller.load();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.sends).toEqual([]);
+    expect("beginOnce" in (await import("../src/app/controller"))).toBe(false);
+    expect(await Bun.file(new URL("../src/app/review.tsx", import.meta.url)).text()).not.toContain("beginOnce");
   });
 
-  test("through the controller: a failed begin is resent with the same turn id", async () => {
+  test("starting sends one begin carrying the marked topics and the note; a failed begin is resent with the same turn id", async () => {
     const h = setup({
       sendTurn: async function* ({ turnId }, n) {
         if (n === 0) throw new ApiError("down", 0);
@@ -1192,18 +1196,39 @@ describe("opening the review (flow D: tutor opens with a recall question)", () =
       },
     });
     await h.controller.load();
-    beginOnce(h.controller)(h.controller.getState());
-    await new Promise((r) => setTimeout(r, 10));
-    expect(h.sends.map((s) => s.act)).toEqual([{ kind: "begin" }]);
+    await h.controller.send({ kind: "begin", fuzzy: [cpt], note: "ordering" });
+    expect(h.sends.map((s) => s.act)).toEqual([{ kind: "begin", fuzzy: [cpt], note: "ordering" }]);
     await h.controller.retryTurn();
     expect(h.sends).toHaveLength(2);
     expect(h.sends[1]!.turnId).toBe(h.sends[0]!.turnId);
+    expect(h.sends[1]!.act).toEqual({ kind: "begin", fuzzy: [cpt], note: "ordering" });
   });
 
-  test("the begin act is a system note, never a learner line", () => {
-    const lines = conversationLines(parsedReview({ turns: [turnJson(1, "learner", { act: { kind: "begin" } }), tutorAsk] }).turns);
-    expect(lines.map((l) => l.speaker)).toEqual(["system", "tutor"]);
-    expect(lines[0]!.text).toBe("Review started");
+  test("the checklist lists every topic with its summary, an optional note box, Start review and the None path", () => {
+    const html = renderToStaticMarkup(createElement(TopicChecklist, { topics, disabled: false, onStart: () => {} }));
+    expect(html).toContain("Logical clocks");
+    expect(html).toContain("Order events without a shared clock.");
+    expect(html).toContain("Vector clocks");
+    expect(html.match(/type="checkbox"/g)).toHaveLength(2);
+    expect(html).toContain("<textarea");
+    expect(html).toContain(">Start review</button>");
+    expect(html).toContain(">None, just quiz me</button>");
+  });
+
+  test("the begin act is a system line naming the learner's picks and note, never a learner line", () => {
+    const begin = (act: unknown) => parsedReview({ turns: [turnJson(1, "learner", { act }), tutorAsk] });
+    const plain = conversationLines(begin({ kind: "begin" }).turns);
+    expect(plain.map((l) => l.speaker)).toEqual(["system", "tutor"]);
+    expect(plain[0]!.text).toBe("Review started");
+    const picked = begin({ kind: "begin", fuzzy: [cpt, cpt2], note: "the ordering" });
+    expect(conversationLines(picked.turns, picked.topics)[0]!).toMatchObject({ speaker: "system", text: "You marked: Logical clocks, Vector clocks. Your note: the ordering" });
+    const none = begin({ kind: "begin", fuzzy: [] });
+    expect(conversationLines(none.turns, none.topics)[0]!.text).toBe("Review started");
+  });
+
+  test("a quick check is labelled Quick check", () => {
+    const qc = turnJson(2, "tutor", { move: { kind: "quick_check", threadId: stableId("thr", "thread-2"), claimIds: [clm] }, say: "In a sentence, what is a vector clock?" });
+    expect(conversationLines(parsedReview({ turns: [tutorAsk, qc] }).turns).map((l) => l.label)).toEqual(["Question", "Quick check"]);
   });
 });
 

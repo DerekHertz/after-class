@@ -2,12 +2,13 @@ import { RecordScreen } from "./record";
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { MutableRefObject } from "react";
 import { Material } from "../shared/time";
-import type { EvidenceId, ReviewId } from "../shared/ids";
+import type { ConceptId, EvidenceId, ReviewId } from "../shared/ids";
+import type { Concept } from "../shared/domain";
 import type { AppApi } from "./api";
 import { useAppearance, useSceneActivity } from "./appearance";
 import { RoomTools } from "./room-tools";
 import { reactToCompanion } from "./companion-reaction";
-import { beginOnce, createReviewController, resumeOnce } from "./controller";
+import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
 import {
   ACTION_LABEL, END_CONFIRM_TEXT, INITIAL_SOURCE_OPEN, endFlow, shouldAutoSendSpeech, shouldStopListening, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
@@ -55,10 +56,9 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   useEffect(() => {
     void controller.load();
   }, [controller]);
-  // Flow D: the tutor opens with a recall question, so an empty active review sends `begin` once.
-  const begin = useMemo(() => beginOnce(controller), [controller]);
+  // Flow D: the learner starts the review from the topic checklist; nothing begins by itself.
   const resume = useMemo(() => resumeOnce(controller), [controller]);
-  useEffect(() => { begin(state); resume(state); }, [begin, resume, state]);
+  useEffect(() => { resume(state); }, [resume, state]);
 
   const captureId = state.view?.captureId ?? null;
   const capture = useAsync(() => (captureId === null ? Promise.resolve(null) : api.captureView(captureId)), [api, captureId]);
@@ -101,7 +101,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     );
   }
 
-  const lines = conversationLines(view.turns);
+  const lines = conversationLines(view.turns, view.topics);
+  const checklist = needsChecklist(state);
   const soft = softTargetPrompt(view.turns);
   const actions = availableActions(view.state, soft !== null);
   const streaming = state.live?.status === "streaming";
@@ -171,7 +172,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
               <Actions ids={actions.filter((a) => a === "continue" || a === "wrap_up")} disabled={streaming} send={(id) => void controller.send(toAct(id, "", "text"))} />
             </div>
           )}
-          <Composer
+          {checklist && <TopicChecklist topics={view.topics} disabled={streaming} onStart={(fuzzy, note) => void controller.send({ kind: "begin", fuzzy, ...(note === "" ? {} : { note }) })} />}
+          {!checklist && <Composer
             actions={actions.filter((a) => !["continue", "wrap_up", "pause", "resume", "end"].includes(a))}
             disabled={streaming || state.unsent.length > 0}
             sendError={state.sendError}
@@ -182,7 +184,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             speechToggle={speechToggle}
             live={state.live}
             send={(id, text, modality) => controller.send(toAct(id, text, modality))}
-          />
+          />}
           {view.observations.length > 0 && (
             <details className="review-observations">
               <summary>What the tutor observed</summary>
@@ -220,6 +222,42 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
         </div>
       </div>
     </main>
+  );
+}
+
+/**
+ * Flow D: "[code]  Show the topics in the frozen scope as a checklist."
+ * "[user]  Mark the topics I'm fuzzy on (or none), optionally add a note on what feels fuzzy."
+ * Starting sends one `begin` act carrying the marked concept IDs (empty for the None path) and the note.
+ */
+export function TopicChecklist({ topics, disabled, onStart }: { readonly topics: readonly Concept[]; readonly disabled: boolean; readonly onStart: (fuzzy: readonly ConceptId[], note: string) => void }) {
+  const [marked, setMarked] = useState<ReadonlySet<ConceptId>>(new Set());
+  const [note, setNote] = useState("");
+  const noteId = useId();
+  const toggle = (id: ConceptId) => setMarked((m) => { const next = new Set(m); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  return (
+    <form className="note topic-checklist" onSubmit={(e) => { e.preventDefault(); if (marked.size > 0) onStart(topics.filter((t) => marked.has(t.id)).map((t) => t.id), note.trim()); }}>
+      <fieldset disabled={disabled}>
+        <legend>Which of these are you fuzzy on?</legend>
+        {topics.length === 0 && <p className="muted">No topics to list for this review.</p>}
+        <ul className="topic-list">
+          {topics.map((t) => (
+            <li key={t.id}>
+              <label>
+                <input type="checkbox" checked={marked.has(t.id)} onChange={() => toggle(t.id)} /> <strong>{t.label}</strong>
+                {t.summary !== "" && <span className="muted"> {t.summary}</span>}
+              </label>
+            </li>
+          ))}
+        </ul>
+        <label htmlFor={noteId}>Anything in particular that feels fuzzy? (optional)</label>
+        <textarea id={noteId} value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} />
+        <p className="actions">
+          <button type="submit" disabled={marked.size === 0}>Start review</button>
+          <button type="button" data-action="none" onClick={() => onStart([], note.trim())}>None, just quiz me</button>
+        </p>
+      </fieldset>
+    </form>
   );
 }
 

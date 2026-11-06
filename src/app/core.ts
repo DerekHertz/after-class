@@ -3,7 +3,7 @@
  * React and no IO. Screens render what these return.
  */
 import type {
-  Author, CaptureView, Claim, EvidenceBundle, Gap, GapReason, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
+  Author, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
   ReviewState, ReviewView, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
 } from "../shared/domain";
 import type { EvidenceId, SourceId } from "../shared/ids";
@@ -227,9 +227,18 @@ export function reviewLayout(sourceOpen: boolean): { readonly conversationVisibl
   return { conversationVisible: true, sourceVisible: sourceOpen };
 }
 
-export function learnerActText(act: LearnerAct): string {
+/** The system line for `begin`: what the learner marked as fuzzy, and their note. */
+export function beginText(act: Extract<LearnerAct, { kind: "begin" }>, topics: readonly Concept[] = []): string {
+  const marked = act.fuzzy ?? [];
+  if (marked.length === 0 && act.note === undefined) return "Review started";
+  const labels = marked.map((id) => topics.find((t) => t.id === id)?.label ?? "(topic)");
+  const picks = marked.length === 0 ? "You marked no topics." : `You marked: ${labels.join(", ")}.`;
+  return act.note === undefined ? picks : `${picks} Your note: ${act.note}`;
+}
+
+export function learnerActText(act: LearnerAct, topics: readonly Concept[] = []): string {
   switch (act.kind) {
-    case "begin": return "Review started";
+    case "begin": return beginText(act, topics);
     case "answer": return act.text;
     case "skip": return "(skipped this question)";
     case "dont_know": return "I don't know.";
@@ -250,6 +259,7 @@ export function learnerActText(act: LearnerAct): string {
 
 export const MOVE_LABEL: Readonly<Record<TutorMove["kind"], string>> = {
   ask_main: "Question",
+  quick_check: "Quick check",
   ask_followup: "Follow-up",
   diagnose: "Possible mismatch (tentative)",
   hint: "Hint",
@@ -271,12 +281,12 @@ export function noticeText(turn: Extract<Turn, { actor: "code" }>): string {
   }
 }
 
-export function conversationLines(turns: readonly Turn[]): Line[] {
+export function conversationLines(turns: readonly Turn[], topics: readonly Concept[] = []): Line[] {
   const lines: Line[] = [];
   for (const t of turns) {
     switch (t.actor) {
       case "learner":
-        if (t.act.kind === "begin") lines.push({ key: t.id, speaker: "system", label: "Note", text: learnerActText(t.act), evidenceIds: [] });
+        if (t.act.kind === "begin") lines.push({ key: t.id, speaker: "system", label: "Note", text: learnerActText(t.act, topics), evidenceIds: [] });
         else lines.push({ key: t.id, speaker: "you", label: "You", text: learnerActText(t.act), evidenceIds: [] });
         break;
       case "tutor":
@@ -492,7 +502,7 @@ export function moveEvidence(move: TutorMove | null): readonly EvidenceId[] {
 
 /** Evidence for the pane beside the conversation: the live move if one is streaming, else the latest tutor turn that cites some. */
 export function currentEvidenceIds(turns: readonly Turn[], live: Live | null): readonly EvidenceId[] {
-  if (live?.move?.kind === "ask_main") return [];
+  if (live?.move?.kind === "ask_main" || live?.move?.kind === "quick_check") return [];
   const fromLive = live === null ? [] : moveEvidence(live.move);
   if (fromLive.length > 0) return fromLive;
   for (let i = turns.length - 1; i >= 0; i--) {
@@ -500,7 +510,7 @@ export function currentEvidenceIds(turns: readonly Turn[], live: Live | null): r
     if (t.actor !== "tutor") continue;
     const ids = moveEvidence(t.move);
     if (ids.length > 0) return ids;
-    if (t.move.kind === "ask_main") return [];
+    if (t.move.kind === "ask_main" || t.move.kind === "quick_check") return [];
   }
   return [];
 }
@@ -514,6 +524,7 @@ export const STATUS_LABEL: Readonly<Record<RecordedStatus, string>> = {
   unresolved: "Unresolved",
   not_assessed: "Not assessed",
   disputed: "Disputed",
+  looks_fine: "Looks fine (quick check)",
 };
 
 export type ObservationRow = { readonly id: Observation["id"]; readonly status: string; readonly note: string | null; readonly disputeOpen: boolean };
@@ -523,6 +534,7 @@ export function observationRow(o: Observation): ObservationRow {
   const disputeOpen = o.dispute.kind === "open" || o.dispute.kind === "unsettled";
   let note: string | null = null;
   if (o.status === "disputed") note = "Disputed assessments are not counted as a learning gap unless you resolve them that way.";
+  else if (o.status === "looks_fine") note = "A quick check only shows the topic looks fine; it is not recorded as understood.";
   else if (o.clampedFrom !== null) {
     const f = o.facts;
     const reason =

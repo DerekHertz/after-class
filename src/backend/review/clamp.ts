@@ -30,13 +30,20 @@ export function attributeTurns(turns: readonly Turn[]): readonly Turn[] {
   let open: ThreadId | null = null;
   const detours = detourTracker();
   return [...turns].sort((a, b) => a.seq - b.seq).map((t) => {
-    if (t.actor === "tutor" && t.move.kind === "ask_main") open = t.move.threadId;
+    if (t.actor === "tutor" && (t.move.kind === "ask_main" || t.move.kind === "quick_check")) open = t.move.threadId;
     else if (t.actor === "tutor" && t.move.kind === "close_thread" && t.move.threadId === open) open = null;
     const duringDetour = detours.state.kind === "active";
     detours.step(t);
     if (t.actor !== "learner" || t.threadId !== null || open === null) return t;
     return duringDetour && t.act.kind !== "dispute" ? t : { ...t, threadId: open };
   });
+}
+
+/** Threads opened by a quick check (R18). They are not main questions. */
+export function quickCheckThreads(turns: readonly Turn[]): ReadonlySet<ThreadId> {
+  const out = new Set<ThreadId>();
+  for (const t of turns) if (t.actor === "tutor" && t.move.kind === "quick_check") out.add(t.move.threadId);
+  return out;
 }
 
 /** The threads a tutor move is about. A correction disclosure can touch several. */
@@ -124,10 +131,13 @@ export function threadDispute(threadId: ThreadId, turns: readonly Turn[]): Exclu
  *   help before the first substantive answer:
  *     proposed ∈ {independent, partial}          → "after_help"    (R12)
  *   otherwise                                    → proposed
+ * R18: "A quick check I pass only shows the topic looks fine; it's never recorded as understood the way a main question is."
+ *   quick-check thread, result would be "independent" → "looks_fine"  (never "independent")
  * The learner's override is clamped the same way. Returns what it was clamped from, for the audit line.
  */
-export function clampStatus(proposed: ObservationStatus, facts: ThreadFacts, dispute: DisputeState, assessable: boolean): { readonly status: RecordedStatus; readonly clampedFrom: ObservationStatus | null } {
-  const status = clamped(proposed, facts, dispute, assessable);
+export function clampStatus(proposed: ObservationStatus, facts: ThreadFacts, dispute: DisputeState, assessable: boolean, quickCheck = false): { readonly status: RecordedStatus; readonly clampedFrom: ObservationStatus | null } {
+  const base = clamped(proposed, facts, dispute, assessable);
+  const status = quickCheck && base === "independent" ? "looks_fine" : base;
   return { status, clampedFrom: status === proposed ? null : proposed };
 }
 

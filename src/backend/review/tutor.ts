@@ -7,6 +7,8 @@
  *   R11 detour_step allowed ⇔ detour.kind === "active" (only a learner detour_accept gets there)
  *   R7  cited evidence IDs ⊆ scope material
  *   ≤ 3 main questions; hint/explain requests force that move; a pending correction forces disclosure first
+ *   fuzzy topics (marked at `begin`) get the main questions first; then at most 3 quick checks on unmarked topics (R18);
+ *   a quick check that goes shaky becomes a main question only while fewer than 3 main questions were asked
  *
  * Reply protocol, header first (SYNTHESIS graft 1): the first line is one JSON
  * object, the TutorMove header. Code validates it before anything is spoken.
@@ -17,17 +19,19 @@ import { z } from "zod";
 import { stableId } from "../../shared/ids";
 import type { ClaimId, ConceptId, EvidenceId, Id, IdKind, ResourceId, ThreadId, TurnId } from "../../shared/ids";
 import type {
-  AssessableClaim, Correction, DetourState, EvidenceBundle, FrozenScope, LearnerActKind, Observation, ReviewPhase, ReviewState, Turn,
+  AssessableClaim, Concept, Correction, DetourState, EvidenceBundle, FrozenScope, LearnerActKind, Observation, ReviewPhase, ReviewState, Turn,
   TutorMove, TutorMoveKind,
 } from "../../shared/domain";
 import { Material, contains } from "../../shared/time";
 import { ProviderError } from "../providers/memo";
 import type { Task } from "../providers/memo";
 import type { ClaudeCli, ClaudeRequest } from "../providers/claude";
-import { attributeTurns, moveThreads } from "./clamp";
+import { attributeTurns, moveThreads, quickCheckThreads } from "./clamp";
 import { detourTracker } from "./detour";
 
 export const MAX_MAIN_QUESTIONS = 3;
+/** Flow D: "a sample of at most 3 unmarked topics". */
+export const MAX_QUICK_CHECKS = 3;
 
 /** A learner request the next tutor move must answer, whatever else is going on. */
 const FORCED_RESPONSE: Partial<Record<LearnerActKind, TutorMoveKind>> = {
@@ -41,8 +45,8 @@ function bySeq(turns: readonly Turn[]): readonly Turn[] {
 }
 
 /** The thread the tutor's next ask_main must open. Code mints it, so the model never invents an ID. */
-export function nextThreadId(state: Pick<ReviewState, "reviewId" | "mainQuestions">): ThreadId {
-  return stableId("thr", state.reviewId, state.mainQuestions + 1);
+export function nextThreadId(state: Pick<ReviewState, "reviewId" | "mainQuestions"> & { readonly quickChecks?: number }): ThreadId {
+  return stableId("thr", state.reviewId, state.mainQuestions + (state.quickChecks ?? 0) + 1);
 }
 
 /**
@@ -54,6 +58,8 @@ export function nextThreadId(state: Pick<ReviewState, "reviewId" | "mainQuestion
 export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly Turn[], corrections: readonly Correction[], softTargetS: number, nowMs: number): ReviewState {
   let phase: ReviewPhase = "active";
   let mainQuestions = 0;
+  let quickChecks = 0;
+  let fuzzy: readonly ConceptId[] = [];
   let openThread: ThreadId | null = null;
   let lastLearnerAct: Extract<Turn, { actor: "learner" }> | null = null;
   const detours = detourTracker();
@@ -74,6 +80,9 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
       lastLearnerAct = t;
       const act = t.act;
       switch (act.kind) {
+        case "begin":
+          fuzzy = act.fuzzy ?? [];
+          break;
         case "pause":
           if (phase === "active") {
             stopClock(t.atMs);
@@ -107,6 +116,10 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
           mainQuestions += 1;
           openThread = move.threadId;
           break;
+        case "quick_check":
+          quickChecks += 1;
+          openThread = move.threadId;
+          break;
         case "close_thread":
           if (openThread === move.threadId) openThread = null;
           break;
@@ -134,6 +147,8 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
     reviewId,
     phase,
     mainQuestions,
+    quickChecks,
+    fuzzy,
     openThread,
     lastLearnerAct,
     detour: detours.state,
@@ -183,9 +198,40 @@ function recheckedClaims(openThread: ThreadId | null, ctx: Pick<TutorInput, "tur
   if (openThread === null) return [];
   const usable = new Set(ctx.claims.map((c) => c.id));
   for (const t of ctx.turns) {
-    if (t.actor === "tutor" && t.move.kind === "ask_main" && t.move.threadId === openThread) return t.move.claimIds.filter((id) => !usable.has(id));
+    if (t.actor === "tutor" && (t.move.kind === "ask_main" || t.move.kind === "quick_check") && t.move.threadId === openThread) return t.move.claimIds.filter((id) => !usable.has(id));
   }
   return [];
+}
+
+/**
+ * Where the review is in the fuzzy-first plan (flow D). Derived from the state, the turns and the claims usable now.
+ *   active     the learner marked a topic that has a usable claim (or was already asked about): fuzzy-first applies.
+ *              Otherwise "no topics marked" behaviour: today's open recall questions, and no quick checks.
+ *   fuzzyLeft  marked topics with a usable claim that no main question has asked about yet
+ *   quickLeft  unmarked topics with a usable claim that no question has touched yet (the quick-check sample pool)
+ */
+export type FocusPlan = { readonly active: boolean; readonly fuzzyLeft: readonly ConceptId[]; readonly quickLeft: readonly ConceptId[]; readonly conceptOf: ReadonlyMap<ClaimId, ConceptId> };
+
+export function focusPlan(state: Pick<ReviewState, "fuzzy">, ctx: Pick<TutorInput, "turns" | "claims">): FocusPlan {
+  const conceptOf = new Map<ClaimId, ConceptId>(ctx.claims.map((c) => [c.id, c.conceptId]));
+  const usable = [...new Set(ctx.claims.map((c) => c.conceptId))];
+  const touched = (kind: "ask_main" | "quick_check"): Set<ConceptId> => {
+    const out = new Set<ConceptId>();
+    for (const t of ctx.turns) {
+      if (t.actor === "tutor" && t.move.kind === kind) for (const id of t.move.claimIds) { const c = conceptOf.get(id); if (c !== undefined) out.add(c); }
+    }
+    return out;
+  };
+  const asked = touched("ask_main");
+  const checked = touched("quick_check");
+  const marked = new Set(state.fuzzy);
+  const active = state.fuzzy.some((id) => usable.includes(id) || asked.has(id));
+  return {
+    active,
+    fuzzyLeft: state.fuzzy.filter((id, i) => state.fuzzy.indexOf(id) === i && usable.includes(id) && !asked.has(id)),
+    quickLeft: usable.filter((id) => !marked.has(id) && !asked.has(id) && !checked.has(id)),
+    conceptOf,
+  };
 }
 
 /**
@@ -197,7 +243,12 @@ function recheckedClaims(openThread: ThreadId | null, ctx: Pick<TutorInput, "tur
  *   if wrapUpRequested (learner wrap_up or end): return {"wrap_up"}
  *   just accepted a detour that can start: return {"detour_step"}
  *   s = {}
- *   if openThread: s += {"ask_followup", "diagnose", "close_thread", "propose_detour" (if detour.kind == "none")}
+ *   if openThread is a quick check: s += {"close_thread", "ask_main" (if mainQuestions < 3)}
+ *   else if openThread: s += {"ask_followup", "diagnose", "close_thread", "propose_detour" (if detour.kind == "none")}
+ *   else if fuzzy-first applies (a marked topic has a usable claim):
+ *     marked topics left and mainQuestions < 3: s += {"ask_main"}
+ *     else no marked topic left and quickChecks < 3 and an unmarked topic is left: s += {"quick_check"}
+ *     else: s += {"wrap_up"}
  *   else if mainQuestions < 3: s += {"ask_main"}
  *   else: s += {"wrap_up"}
  *   if detour.kind == "active": s += {"detour_step"}
@@ -215,9 +266,18 @@ export function allowedMoves(state: ReviewState, ctx: Pick<TutorInput, "turns" |
   if (state.wrapUpRequested) return new Set(["wrap_up"]);
   if (last === "detour_accept" && state.detour.kind === "active") return new Set(["detour_step"]);
   const s = new Set<TutorMoveKind>();
-  if (state.openThread !== null) {
+  const plan = focusPlan(state, ctx);
+  if (state.openThread !== null && quickCheckThreads(ctx.turns).has(state.openThread)) {
+    // The learner has answered the quick check: a clear answer closes it, a shaky one may become a main question.
+    s.add("close_thread");
+    if (state.mainQuestions < MAX_MAIN_QUESTIONS && ctx.claims.length > 0) s.add("ask_main");
+  } else if (state.openThread !== null) {
     s.add("ask_followup").add("diagnose").add("close_thread");
     if (state.detour.kind === "none") s.add("propose_detour");
+  } else if (ctx.claims.length > 0 && plan.active) {
+    if (plan.fuzzyLeft.length > 0 && state.mainQuestions < MAX_MAIN_QUESTIONS) s.add("ask_main");
+    else if (plan.fuzzyLeft.length === 0 && state.quickChecks < MAX_QUICK_CHECKS && plan.quickLeft.length > 0) s.add("quick_check");
+    else s.add("wrap_up");
   } else if (state.mainQuestions < MAX_MAIN_QUESTIONS) {
     // R3: nothing is asked on an unusable claim. If every one is only out for a check the tutor waits (no move); if they are gone for good the review ends.
     if (ctx.claims.length > 0) s.add("ask_main");
@@ -229,6 +289,8 @@ export function allowedMoves(state: ReviewState, ctx: Pick<TutorInput, "turns" |
 
 export type TutorInput = {
   readonly state: ReviewState;
+  /** Labels for the topics (concepts) the usable claims belong to, for the prompt. */
+  readonly topics?: readonly Concept[];
   readonly allowed: readonly TutorMoveKind[];
   readonly scope: FrozenScope;
   readonly claims: readonly AssessableClaim[]; // usable now (R3/R7)
@@ -250,6 +312,7 @@ const evidenceIds = z.array(idSchema("ev"));
 
 const tutorMoveSchema: z.ZodType<TutorMove> = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("ask_main"), threadId, claimIds: z.tuple([idSchema("clm")], idSchema("clm")) }),
+  z.object({ kind: z.literal("quick_check"), threadId, claimIds: z.tuple([idSchema("clm")], idSchema("clm")) }),
   z.object({ kind: z.literal("ask_followup"), threadId }),
   z.object({ kind: z.literal("diagnose"), threadId, hypothesis: z.string().min(1), evidence: evidenceIds }),
   z.object({ kind: z.literal("hint"), threadId }),
@@ -310,7 +373,7 @@ function evidenceInScope(ids: readonly EvidenceId[], input: TutorInput): Verdict
 
 function threadsOpened(turns: readonly Turn[]): ReadonlySet<ThreadId> {
   const out = new Set<ThreadId>();
-  for (const t of turns) if (t.actor === "tutor" && t.move.kind === "ask_main") out.add(t.move.threadId);
+  for (const t of turns) if (t.actor === "tutor" && (t.move.kind === "ask_main" || t.move.kind === "quick_check")) out.add(t.move.threadId);
   return out;
 }
 
@@ -352,7 +415,34 @@ export function validateMove(move: TutorMove, input: TutorInput): { readonly ok:
       if (move.threadId !== expected) return no(`ask_main must open thread ${expected}`);
       const usable = new Set(input.claims.map((c) => c.id));
       const unusable = move.claimIds.filter((id) => !usable.has(id));
-      return unusable.length === 0 ? OK : no(`claims not usable for assessment: ${unusable.join(", ")}`);
+      if (unusable.length > 0) return no(`claims not usable for assessment: ${unusable.join(", ")}`);
+      const plan = focusPlan(state, input);
+      const concepts = move.claimIds.map((id) => plan.conceptOf.get(id));
+      if (state.openThread !== null && quickCheckThreads(input.turns).has(state.openThread)) {
+        // A shaky quick check becomes a main question on that topic.
+        const quick = input.turns.find((t) => t.actor === "tutor" && t.move.kind === "quick_check" && t.move.threadId === state.openThread);
+        const topic = quick?.actor === "tutor" && quick.move.kind === "quick_check" ? plan.conceptOf.get(quick.move.claimIds[0]) : undefined;
+        return topic === undefined || concepts.every((c) => c === topic) ? OK : no("a main question after a quick check must stay on the quick-checked topic");
+      }
+      if (plan.active && plan.fuzzyLeft.length > 0 && !concepts.some((c) => c !== undefined && plan.fuzzyLeft.includes(c))) {
+        return no("main questions go to the topics the learner marked as fuzzy first");
+      }
+      return OK;
+    }
+    case "quick_check": {
+      if (state.quickChecks >= MAX_QUICK_CHECKS) return no(`at most ${MAX_QUICK_CHECKS} quick checks`);
+      const expected = nextThreadId(state);
+      if (move.threadId !== expected) return no(`quick_check must open thread ${expected}`);
+      const usable = new Set(input.claims.map((c) => c.id));
+      const unusable = move.claimIds.filter((id) => !usable.has(id));
+      if (unusable.length > 0) return no(`claims not usable for assessment: ${unusable.join(", ")}`);
+      const plan = focusPlan(state, input);
+      if (!plan.active) return no("quick checks only follow topics the learner marked as fuzzy");
+      if (plan.fuzzyLeft.length > 0) return no("quick checks start only after the fuzzy topics are covered");
+      const concepts = new Set(move.claimIds.map((id) => plan.conceptOf.get(id)));
+      if (concepts.size !== 1) return no("a quick check is on one topic");
+      const [topic] = [...concepts];
+      return topic !== undefined && plan.quickLeft.includes(topic) ? OK : no("a quick check goes on an unmarked topic not yet asked or checked");
     }
     case "ask_followup":
     case "close_thread":
@@ -397,6 +487,8 @@ export const TUTOR_SYSTEM = `You are the tutor in After Class, a review of a lec
 How to tutor:
 - Lead with open recall. Your first main question asks the learner to explain the idea in their own words. Never recap, summarize or preview the lecture first.
 - Ask at most 3 main questions in a review, each about the usable claims you are given. Ask follow-ups inside a thread as needed, one question at a time.
+- The learner may have marked topics they feel fuzzy on, and may have left a note. Main questions go to the marked topics first. If a marked topic has no usable claim, say so in one short sentence and carry on as you otherwise would.
+- After the marked topics, a quick check is one short recall question on one unmarked topic, at most 3 per review. It is not a main question and not a follow-up thread. When the learner has answered it: if the answer is clear, close the thread and move on; if it is shaky, ask a main question on that same topic, but only if main questions remain. Never tell the learner a quick check shows they understood.
 - When an answer does not match the lecture, ask one tentative diagnostic question grounded in a passage or frame you cite, for example "The lecture puts it as ... How does that fit with what you said?" It is a question, not a verdict. At most one per thread.
 - If you suspect a missing prerequisite, you may propose a detour and say why. Never start it yourself. A detour step becomes available only after the learner says yes.
 - If the learner disputes an interpretation, recheck the cited source, show what it says, and invite them to explain. If the evidence does not settle it, say so plainly and set "settled": false. You never decide a dispute; the learner does.
@@ -410,6 +502,7 @@ Output format, exactly:
 
 Move headers (use only kinds listed as allowed, and only IDs you are given):
 {"kind":"ask_main","threadId":"<the next thread id you are given>","claimIds":["clm_..."]}
+{"kind":"quick_check","threadId":"<the next thread id you are given>","claimIds":["clm_..."]}
 {"kind":"ask_followup","threadId":"thr_..."}
 {"kind":"diagnose","threadId":"thr_...","hypothesis":"<what you suspect the learner thinks>","evidence":["ev_..."]}
 {"kind":"hint","threadId":"thr_..."}
@@ -426,7 +519,7 @@ function renderTurn(t: Turn): string {
   switch (t.actor) {
     case "learner": {
       const act = t.act;
-      if (act.kind === "begin") return "learner (learner opened the review)";
+      if (act.kind === "begin") return act.fuzzy && act.fuzzy.length > 0 ? `learner (learner opened the review, marking fuzzy: ${act.fuzzy.join(", ")})` : "learner (learner opened the review)";
       const text = act.kind === "answer" || act.kind === "dispute" ? `: ${JSON.stringify(act.text)}` : "";
       return `learner${thread} ${act.kind}${text}`;
     }
@@ -445,9 +538,21 @@ export function tutorPrompt(input: TutorInput): string {
   const { state } = input;
   const sections: string[] = [
     `Allowed moves this turn: ${input.allowed.join(", ")}`,
-    `Main questions asked: ${state.mainQuestions} of ${MAX_MAIN_QUESTIONS}. Next thread id for ask_main: ${nextThreadId(state)}`,
+    `Main questions asked: ${state.mainQuestions} of ${MAX_MAIN_QUESTIONS}. Next thread id for ask_main or quick_check: ${nextThreadId(state)}`,
     `Open thread: ${state.openThread ?? "none"}. Open dispute: ${state.openDispute ?? "none"}. Detour: ${JSON.stringify(state.detour)}`,
   ];
+  if (state.fuzzy.length > 0) {
+    const label = (id: ConceptId) => `${input.topics?.find((c) => c.id === id)?.label ?? "(topic)"} (concept ${id})`;
+    const plan = focusPlan(state, input);
+    const begin = bySeq(input.turns).find((t) => t.actor === "learner" && t.act.kind === "begin");
+    const learnerNote = begin?.actor === "learner" && begin.act.kind === "begin" ? begin.act.note : undefined;
+    sections.push([
+      `Topics the learner marked as fuzzy: ${state.fuzzy.map(label).join("; ")}.${learnerNote ? ` Their note: ${JSON.stringify(learnerNote)}` : ""}`,
+      plan.active
+        ? `Marked topics still to ask a main question about: ${plan.fuzzyLeft.map(label).join("; ") || "none"}. Unmarked topics available for a quick check: ${plan.quickLeft.map(label).join("; ") || "none"}. Quick checks asked: ${state.quickChecks} of ${MAX_QUICK_CHECKS}.`
+        : "None of the marked topics has a usable claim. Say that in one short sentence, then continue as if nothing was marked.",
+    ].join("\n"));
+  }
   const pending = state.corrections.filter((c) => !c.disclosed);
   if (pending.length > 0) sections.push(`Pending corrections to disclose:\n${pending.map((c) => `- ${c.id}: claim ${c.claimId} ${c.change}`).join("\n")}`);
   const rechecked = recheckedClaims(state.openThread, input);
@@ -484,7 +589,7 @@ export function tutorTask(claude: ClaudeCli): Task<TutorInput, TutorOutput> {
     provider: "claude",
     purpose: "tutor_turn",
     model: TUTOR_REQUEST.model,
-    version: "tutor-1",
+    version: "tutor-2",
     maxAttempts: 2,
     canonicalInput: (input) => ({ system: TUTOR_SYSTEM, prompt: tutorPrompt(input), effort: TUTOR_REQUEST.effort }),
     async attempt(input, ctx) {
@@ -523,6 +628,7 @@ Observation status, per thread:
 - unresolved: the learner tried or said they did not know, and it stayed unclear.
 - not_assessed: the learner skipped, or the turns hold no evidence about understanding.
 Give a one-sentence rationale that points at the turns. Code may cap your proposal; never inflate it.
+A thread opened by a quick_check move is a short check on a topic the learner did not mark. Propose its status the same way; code never records it as understood.
 
 Notes, per concept: a tutorSummary of what the review established and what stayed open, written as the tutor's summary (the learner's own words are kept separately). Cite only evidence IDs that appear in the claims or turns.`;
 
