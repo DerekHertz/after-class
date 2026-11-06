@@ -50,6 +50,9 @@ import { createReviews } from "./review";
 import type { Reviews } from "./review";
 import { tutorTask, wrapUpTask } from "./review/tutor";
 import type { TutorInput, TutorOutput, WrapUpInput, WrapUpOutput } from "./review/tutor";
+import { createDiagrams } from "./diagram";
+import type { Diagrams, DiagramSummaryInput, DiagramSummaryOutput } from "./diagram";
+import { diagramSummaryTask } from "./diagram/tasks";
 import { createRecord } from "./record";
 import type { LearningRecord } from "./record";
 import { DEFAULT_LIMITS, createScheduler } from "./scheduler";
@@ -70,6 +73,7 @@ export type TaskSet = {
   readonly preparation: PreparationTasks;
   readonly tutor: Task<TutorInput, TutorOutput>;
   readonly wrapUp: Task<WrapUpInput, WrapUpOutput>;
+  readonly diagramSummary: Task<DiagramSummaryInput, DiagramSummaryOutput>;
 };
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -192,6 +196,7 @@ function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameBytes): 
     },
     tutor: tutorTask(claude),
     wrapUp: wrapUpTask(claude),
+    diagramSummary: diagramSummaryTask(claude, frameBytes),
   };
 }
 
@@ -372,6 +377,23 @@ export async function main(options: MainOptions = {}): Promise<Running> {
     links: preparation.linkSuggestions,
   });
 
+  const diagrams: Diagrams = createDiagrams({
+    review(reviewId) {
+      try {
+        const { captureId, scope, topics } = reviews.view(reviewId);
+        return { captureId, scope, topics };
+      } catch (e) {
+        if (e instanceof Error && e.message.startsWith("unknown review")) return null;
+        throw e;
+      }
+    },
+    usable: usableNow,
+    bundle: evidence.bundle,
+    sources: (captureId) => evidence.captureView(captureId).sources,
+    task: tasks.diagramSummary,
+    memo,
+  });
+
   // Every capture that may still have work: those on disk now, plus any ingested since. A stopped capture keeps preparing.
   const captures = new Set<CaptureId>(db.sql.query<{ capture_id: string }, []>("SELECT DISTINCT capture_id FROM capture_facts").all().map((r) => r.capture_id as CaptureId));
 
@@ -428,7 +450,7 @@ export async function main(options: MainOptions = {}): Promise<Running> {
       ? unavailableVoice
       : createVoice({ apiKey: keys.ELEVENLABS_API_KEY, voiceId, model: voiceModel, db, ...(options.fetch ? { fetch: options.fetch } : {}) });
 
-  const server = serve({ modules: { ledger, evidence: served, reviews, record, preparation, segmentation, voice }, auth: { port, extensionId, token }, appDir });
+  const server = serve({ modules: { ledger, evidence: served, reviews, record, preparation, segmentation, voice, diagrams }, auth: { port, extensionId, token }, appDir });
   const boundPort = server.port as number;
 
   if (extensionId === "") logError("backend: AFTERCLASS_EXTENSION_ID is not set, so the extension's requests are refused (403) until it is");

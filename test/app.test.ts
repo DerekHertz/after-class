@@ -525,7 +525,7 @@ describe("usage view", () => {
     byPurpose: {
       boundary: { calls: 3, errors: 1, unknownCost: 3 }, frame_change: { calls: 0, errors: 0, unknownCost: 0 }, claim_check: { calls: 0, errors: 0, unknownCost: 0 },
       interpretation: { calls: 0, errors: 0, unknownCost: 0 }, claim_revision: { calls: 0, errors: 0, unknownCost: 0 }, resource_search: { calls: 0, errors: 0, unknownCost: 0 },
-      tutor_turn: { calls: 0, errors: 0, unknownCost: 0 }, wrap_up: { calls: 0, errors: 0, unknownCost: 0 },
+      tutor_turn: { calls: 0, errors: 0, unknownCost: 0 }, wrap_up: { calls: 0, errors: 0, unknownCost: 0 }, diagram_summary: { calls: 0, errors: 0, unknownCost: 0 },
     },
   });
 

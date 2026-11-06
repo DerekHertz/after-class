@@ -76,6 +76,8 @@ export const api: AppApi = {
   async startReview(_capture, _choice, reviewId) { log("review.start"); return { kind: "started", reviewId, scope: view.scope }; },
   async answerInvite(_id, answer) { log(`invite.${answer}`); },
   async retryPreparation() { log("preparation.retry"); },
+  async diagrams() { return []; },
+  async requestDiagram() { throw new ApiError("The preview has no diagrams.", 503); },
   async voiceAvailable() { return false; },
   async speech() { throw new Error("the preview has no voice"); },
   async evidence(query) {

@@ -106,6 +106,11 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
         a main question if any are left.
 [agent] No topics marked → today's behavior (open recall question, no recap first).
 [user] Speak/type an answer, skip, "I don't know", hint, explain-it, pause, end.
+[user]  Ask "show me the diagram" on a topic, any time in the review.
+[code]  Show the frame that topic's claims cite (or, if none, the frame captured
+        during its cited passages), with its time and a link to that moment.
+[agent] Add a short state-change summary: what changes, in order, with concrete
+        values first; each line cites the passage or frame it comes from.
 [agent] Up to 3 main questions; follow-ups as needed. Evidence shown beside.
 [agent] Mismatch → one tentative, source-grounded diagnostic question.
 [agent] Prerequisite gap suspected → propose a detour.
@@ -132,16 +137,21 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 [code] Save fails → keep a pending save locally, show it, offer retry
        (stable IDs make retry overwrite, not duplicate).
 [code] Evidence cited by a pending save counts as cited; expiry skips it.  (TLC fix R16)
+[code]  After a review is saved, one illustrated page per topic it covered: the
+        tutor's question, the frame, the state-change summary, my answer, and
+        its status.
 [user] Inspect, edit, accept/correct links, revisit, delete.
 ```
 
 Amendment (2026-11-06), Derek: "I was also thinking it's probably easier if I also state like, here are the areas that like I'm a little bit fuzzy on, and those are the areas that we focus, but then the tutor kind of just checks very quickly that the other areas are good as well." The agent drafted the checklist, fuzzy-first and quick-check lines above (replacing the single "Open recall question" line) and rule R18; Derek replied "Approve as written".
 
+Amendment (2026-11-06), Derek: "diagrams, stuff that like I can use to explore and kind of pick apart the topics. And this should be interpretable, like concise diagrams that kind of describe the state." After Derek pointed to the Illustrated Notes method, the agent drafted the diagram lines above (the "show me the diagram" lines in the review and the illustrated page per topic in the record) and rule R19; Derek replied "Approve as written".
+
 Flow sections A–D approved as a whole on 2026-11-03. The first TLC run broke R3, R4, R7, R8, R14 and R16; Derek approved the six flow fixes marked "TLC fix" above on 2026-11-03 (rules unchanged). The re-check held 10 of 11 rules; R14 broke on a second path (a dispute Derek settles), and Derek approved the "second path" line the same day. The final re-check (2026-11-03) holds all 11 [TLC] rules, and each of the 16 mutants breaks its rule.
 
 ## Rules (approved by Derek, 2026-11-03)
 
-Drafted as candidates by the agent from the PRD and approved flow; Derek approved all seventeen as written. R18 was drafted by the agent and approved by Derek as written on 2026-11-06. Quote verbatim. `[TLC]` rules become model invariants; `[test]` rules are enforced by tests.
+Drafted as candidates by the agent from the PRD and approved flow; Derek approved all seventeen as written. R18 was drafted by the agent and approved by Derek as written on 2026-11-06. R19 likewise on 2026-11-06. Quote verbatim. `[TLC]` rules become model invariants; `[test]` rules are enforced by tests.
 
 - R1 `[test]` Evidence only comes from intervals I actually watched while capture was on.
 - R2 `[test]` Ad time never becomes evidence.
@@ -161,6 +171,7 @@ Drafted as candidates by the agent from the PRD and approved flow; Derek approve
 - R16 `[TLC]` Evidence cited by a saved note is only deleted when I delete it, never by expiry.
 - R17 `[test]` Every paid call records a usage event; unknown cost is stored as unknown, not zero.
 - R18 `[test]` A quick check I pass only shows the topic looks fine; it's never recorded as understood the way a main question is.
+- R19 `[test]` Every line of a diagram summary cites something I watched; a line without a citation is never shown.
 
 ## Stack (approved 2026-11-03)
 

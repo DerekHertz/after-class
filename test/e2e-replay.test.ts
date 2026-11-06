@@ -20,7 +20,7 @@ import type { ClaimDraft, Cost, Observation, RecordView, TutorMove, TutorMoveKin
 import type { CaptureId, EvidenceId, ReviewId, TurnId } from "../src/shared/ids";
 import { stableId } from "../src/shared/ids";
 import {
-  captureResponse, encodeMaterial, evidenceBundleResponse, ingestAckResponse, recordViewResponse, reviewOptionsResponse, reviewViewResponse, saveResponse,
+  captureResponse, diagramsResponse, topicDiagramResponse, encodeMaterial, evidenceBundleResponse, ingestAckResponse, recordViewResponse, reviewOptionsResponse, reviewViewResponse, saveResponse,
   startReviewResponse, tutorStreamEvent, usageResponse,
 } from "../src/shared/wire";
 import type { TutorStreamEvent } from "../src/shared/wire";
@@ -31,6 +31,7 @@ import { boundaryTask, claimSupportTask, frameChangeTask } from "../src/backend/
 import type { JevClient } from "../src/backend/providers/jev";
 import type { ClaudeCli } from "../src/backend/providers/claude";
 import { interpretTask, resourceSearchTask, reviseTask } from "../src/backend/preparation/tasks";
+import { diagramSummaryTask } from "../src/backend/diagram/tasks";
 import { nextThreadId, tutorTask, wrapUpTask } from "../src/backend/review/tutor";
 import type { TutorInput } from "../src/backend/review/tutor";
 import { isLearningGap } from "../src/backend/review/clamp";
@@ -186,8 +187,9 @@ function fakeTasks() {
     };
   });
 
-  const tasks: TaskSet = { boundary, frameChange, preparation: { interpret, revise, checkClaim, searchResources }, tutor, wrapUp };
-  const all = { boundary, frameChange, interpret, revise, checkClaim, searchResources, tutor, wrapUp };
+  const diagramSummary = faked(diagramSummaryTask(spyClaude, () => null), (i) => ({ output: { title: i.topic.label, lines: [{ text: "Replay-data line.", evidence: [(i.passages[0] ?? i.frames[0]!).id] as [EvidenceId] }] }, usage: FAKE_UNKNOWN }));
+  const tasks: TaskSet = { boundary, frameChange, preparation: { interpret, revise, checkClaim, searchResources }, tutor, wrapUp, diagramSummary };
+  const all = { boundary, frameChange, interpret, revise, checkClaim, searchResources, tutor, wrapUp, diagramSummary };
   const callCounts = () => Object.fromEntries(Object.entries(all).map(([k, t]) => [k, t.calls.length]));
   return { tasks, callCounts, unexpected, all };
 }
@@ -592,6 +594,46 @@ describe("REPLAY DATA (fake tasks, no live call): capture to saved record over H
       expect(n("SELECT COUNT(*) AS n FROM usage_events WHERE cost_kind = 'unknown' AND cost_usd IS NOT NULL")).toBe(0);
     } finally {
       db.close();
+    }
+  }, 30_000);
+
+  test("flow D, show me the diagram: frames from the review's own claims, one summary call, then cached, with a usage event", async () => {
+    const product = await plainRun();
+    const own = faked(diagramSummaryTask(spyClaude, () => null), (i) => ({
+      output: { title: `What is ${i.topic.label}?`, lines: [{ text: "Replay-data line.", evidence: [(i.passages[0] ?? i.frames[0]!).id] as [EvidenceId] }, { text: "Out-of-scope replay line.", evidence: [stableId("ev", "outside the review") as EvidenceId] as [EvidenceId] }] },
+      usage: FAKE_UNKNOWN,
+    }));
+    const copy = dir("afterclass-e2e-diagram-");
+    cpSync(product.dataDir, copy, { recursive: true });
+    const s = await bootOn(copy, product.configDir, { ...product.fakes.tasks, diagramSummary: own });
+    try {
+      const listed = diagramsResponse.parse((await call(s, get("diagrams", `/reviews/${REVIEW}/diagrams`))).json).topics;
+      expect(listed.map((t) => t.label)).toEqual(["Alpha", "Beta", "Gamma"]);
+      expect(listed.every((t) => t.summary.state === "not_requested")).toBe(true);
+      expect(own.calls).toHaveLength(0);
+      // Beta's claim cites the slide frame at 50 s; Alpha and Gamma cite captions with no frame inside them
+      const beta = listed[1]!;
+      expect(beta.frame).toMatchObject({ mediaS: 50, videoId: VIDEO, title: "Replay lecture" });
+      expect(listed[0]!.frame).toBeNull();
+      expect(listed[2]!.frame).toBeNull();
+
+      const started = topicDiagramResponse.parse((await call(s, post("start", `/reviews/${REVIEW}/diagrams/${beta.topicId}`))).json);
+      expect(started.summary.state).toBe("preparing");
+      await until(async () => diagramsResponse.parse((await call(s, get("poll", `/reviews/${REVIEW}/diagrams`))).json).topics[1]!.summary.state === "ready");
+      const done = diagramsResponse.parse((await call(s, get("done", `/reviews/${REVIEW}/diagrams`))).json).topics[1]!;
+      expect(done.summary).toMatchObject({ state: "ready", title: "What is Beta?" });
+      // R19: the line citing evidence outside the topic, which the scripted model returned, is not shown
+      expect((done.summary as { lines: { text: string }[] }).lines.map((l) => l.text)).toEqual(["Replay-data line."]);
+
+      const again = topicDiagramResponse.parse((await call(s, post("again", `/reviews/${REVIEW}/diagrams/${beta.topicId}`))).json);
+      expect(again.summary.state).toBe("ready");
+      expect(own.calls).toHaveLength(1);
+
+      const usage = usageResponse.parse((await call(s, get("usage", "/usage", "extension"))).json);
+      expect(usage.byPurpose.diagram_summary).toEqual({ calls: 1, errors: 0, unknownCost: 1 });
+      expect(live).toEqual([]);
+    } finally {
+      await stop(s);
     }
   }, 30_000);
 

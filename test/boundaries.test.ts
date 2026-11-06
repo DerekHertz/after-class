@@ -125,6 +125,9 @@ const RULES: readonly Rule[] = [
 
 const OWNERS = tableOwners();
 
+/** db.ts migration 003-diagram-purpose copies these two providers tables into rebuilt ones (a CHECK cannot be altered); no other write is allowed there. */
+const REBUILT_BY_MIGRATION = new Set(["memo_inputs", "usage_events"]);
+
 function ownerOfFile(path: string): Owner | "none" {
   if (path === "src/backend/db.ts") return "kernel";
   const dir = path.match(/^src\/backend\/(\w+)\//)?.[1];
@@ -164,6 +167,7 @@ describe("module boundaries", () => {
       writtenTables(f.code).flatMap((table) => {
         const owner = OWNERS.get(table);
         const writer = ownerOfFile(f.path);
+        if (f.path === "src/backend/db.ts" && REBUILT_BY_MIGRATION.has(table)) return [];
         return owner !== undefined && owner === writer ? [] : [`${f.path} writes ${table} (owner ${owner ?? "unknown"})`];
       }),
     );

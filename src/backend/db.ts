@@ -34,6 +34,8 @@ export function asSeq(n: number): Seq {
 }
 
 const PURPOSES = `'boundary','frame_change','claim_check','interpretation','claim_revision','resource_search','tutor_turn','wrap_up'`;
+/** 003-diagram-purpose adds "diagram_summary"; 001 keeps the list it was applied with (its text is hashed). */
+const PURPOSES_WITH_DIAGRAM = `${PURPOSES},'diagram_summary'`;
 const OBSERVATION_STATUSES = `'independent','partial','after_help','unresolved','not_assessed'`;
 
 /** R16 holds: an unsaved review keeps its capture's raw evidence. Shared by the raw-evidence triggers. */
@@ -135,6 +137,61 @@ CREATE TABLE voice_usage_events (
 ) STRICT;
 ${appendOnly("voice_usage_events", "R17")}
 CREATE TRIGGER voice_usage_events_no_delete BEFORE DELETE ON voice_usage_events
+BEGIN SELECT RAISE(ABORT, 'R17: usage events are never deleted'); END;`,
+    },
+    {
+      id: "003-diagram-purpose",
+      sql: `
+-- The purpose CHECKs of memo_inputs and usage_events are frozen text, so adding "diagram_summary" rebuilds both tables
+-- with every row copied and every trigger and index put back. memo and memo_failures point at memo_inputs, so the foreign
+-- key check waits until the transaction ends; the rows go back into the new memo_inputs before it does.
+PRAGMA defer_foreign_keys = ON;
+
+CREATE TABLE memo_inputs_save AS SELECT * FROM memo_inputs;
+CREATE TABLE usage_events_save AS SELECT * FROM usage_events;
+DROP TABLE usage_events;
+DROP TABLE memo_inputs;
+
+CREATE TABLE memo_inputs (
+  key TEXT PRIMARY KEY,
+  provider TEXT NOT NULL CHECK (provider IN ('jev','claude')),
+  purpose TEXT NOT NULL CHECK (purpose IN (${PURPOSES_WITH_DIAGRAM})),
+  version TEXT NOT NULL,
+  model TEXT NOT NULL,
+  input_json TEXT NOT NULL,
+  first_seen_ms INTEGER NOT NULL
+) STRICT;
+INSERT INTO memo_inputs SELECT key, provider, purpose, version, model, input_json, first_seen_ms FROM memo_inputs_save;
+
+CREATE TABLE usage_events (
+  id TEXT PRIMARY KEY,
+  memo_key TEXT NOT NULL REFERENCES memo_inputs(key),
+  attempt_no INTEGER NOT NULL CHECK (attempt_no > 0),
+  provider TEXT NOT NULL CHECK (provider IN ('jev','claude')),
+  model TEXT NOT NULL,
+  purpose TEXT NOT NULL CHECK (purpose IN (${PURPOSES_WITH_DIAGRAM})),
+  outcome TEXT NOT NULL CHECK (outcome IN ('ok','error','aborted')),
+  input_tokens INTEGER CHECK (input_tokens IS NULL OR input_tokens >= 0),
+  output_tokens INTEGER CHECK (output_tokens IS NULL OR output_tokens >= 0),
+  cache_read_tokens INTEGER CHECK (cache_read_tokens IS NULL OR cache_read_tokens >= 0),
+  cost_kind TEXT NOT NULL CHECK (cost_kind IN ('measured','notional','estimated','unknown')),
+  cost_usd REAL CHECK (cost_usd IS NULL OR cost_usd >= 0),
+  cost_basis TEXT,
+  cost_reason TEXT,
+  started_ms INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0),
+  UNIQUE (memo_key, attempt_no),
+  CHECK ((cost_kind = 'unknown') = (cost_usd IS NULL)),
+  CHECK ((cost_kind = 'unknown') = (cost_reason IS NOT NULL)),
+  CHECK ((cost_kind IN ('notional','estimated')) = (cost_basis IS NOT NULL))
+) STRICT;
+INSERT INTO usage_events SELECT id, memo_key, attempt_no, provider, model, purpose, outcome, input_tokens, output_tokens, cache_read_tokens,
+  cost_kind, cost_usd, cost_basis, cost_reason, started_ms, duration_ms FROM usage_events_save;
+DROP TABLE usage_events_save;
+DROP TABLE memo_inputs_save;
+CREATE INDEX usage_events_by_purpose ON usage_events (purpose, started_ms);
+${appendOnly("usage_events", "R17")}
+CREATE TRIGGER usage_events_no_delete BEFORE DELETE ON usage_events
 BEGIN SELECT RAISE(ABORT, 'R17: usage events are never deleted'); END;`,
     },
   ],
