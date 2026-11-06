@@ -16,6 +16,22 @@ export function route(newConcept: Verdict, stoppingPoint: Verdict): Route {
   return "continue"; // no/no, and every uncertain combination (flow B: "Jev error/uncertain → treat as \"continue\"")
 }
 
+/** Experiment 7 routing options, off unless a caller passes them (the product never does). */
+export type RoutingOptions = {
+  /**
+   * Design item 6 of docs/experiments/07-jev-saves-the-tutor.md: a window also closes when new concept is yes and the
+   * lesson-framing verdict is yes, whatever the stopping point says. Clip joins add nothing by themselves.
+   * Off (default): the flow B table above, unchanged.
+   */
+  readonly lessonFramingCloses?: boolean;
+};
+
+/** `route`, plus the experiment 7 rule when enabled. A missing lesson-framing verdict reads as uncertain. */
+export function routeWithFraming(newConcept: Verdict, stoppingPoint: Verdict, lessonFraming: Verdict | undefined, opts?: RoutingOptions): Route {
+  if (opts?.lessonFramingCloses === true && newConcept === "yes" && lessonFraming === "yes") return "close";
+  return route(newConcept, stoppingPoint);
+}
+
 function materialOf(passages: readonly Passage[]): Material {
   return Material.of(passages.map((p) => [p.sourceId, [p.interval]] as const));
 }
@@ -130,6 +146,7 @@ export function planChunks(
   judgment: (w: BoundaryWindow) => BoundaryJudgment | "pending" | "failed",
   stopped: boolean,
   cfg: SegmentationConfig,
+  routing?: RoutingOptions,
 ): ChunkPlan {
   const closed: Closed[] = [];
   const notes = new Map<WindowId, string>();
@@ -148,7 +165,7 @@ export function planChunks(
     }
     const newConcept: Verdict = j === "failed" ? "uncertain" : j.newConcept;
     const stoppingPoint: Verdict = j === "failed" ? "uncertain" : j.stoppingPoint;
-    const r = route(newConcept, stoppingPoint);
+    const r = routeWithFraming(newConcept, stoppingPoint, j === "failed" ? undefined : j.lessonFraming, routing);
     const label = j === "failed" ? "judgment failed, read as uncertain/uncertain" : `${newConcept}/${stoppingPoint}`;
 
     const reconsider = reconsiderable;

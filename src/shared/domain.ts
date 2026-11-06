@@ -194,6 +194,9 @@ export type BoundaryJudgment = {
   readonly pNewConcept: number | null;
   readonly pStoppingPoint: number | null;
   readonly questionVersion: string;
+  /** Experiment 7 only (lessonFramingTask). Absent from every product judgment. */
+  readonly lessonFraming?: Verdict;
+  readonly pLessonFraming?: number | null;
 };
 
 /** Flow B routing table, closed set. */
