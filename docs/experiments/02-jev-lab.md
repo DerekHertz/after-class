@@ -382,3 +382,105 @@ The scored run on the held-out half (clips 8 to 11), once, 256 live calls, with 
 [live] Not shown by this lab: model accuracy beyond this label set, other lectures, other machines, learning effectiveness. Labels are Derek's judgment.
 ```
 
+
+### Run 2 (2026-11-05 local evening), the 43-clip set, labels made under Amendment 2
+
+The set is the seven topic-boundary windows of Advanced Operating Systems Part 3 (43 clips, `assembled-2`, replayed live captures made with a test-only autostart extension; every window ran with the tab visible). Labels: `labels-set-2-signed.json`, signed "Derek" on 2026-11-05 after Derek verified Opus and Fable proposals on the sheet; sha256 `0a4789cc...c7a9`. They hold 9 boundaries, 38 visual steps and 75 duplicate groups. The 9 boundaries are the 7 lesson changes plus 2 Derek added himself (clip 2, "Roadblocks Quiz Solution" to "Feasible", in the tuning half; clip 43, NFS to DFS, in the held-out half). The split is before clip 23: tuning clips 1 to 22 (4 boundaries), held-out clips 23 to 43 (5 boundaries). Budget: Amendment 3 (2,400), 1,080 calls used, none failed.
+
+Tuning rounds on the first half (stored judgments reused when only thresholds change):
+
+| Round | Settings | Jev calls | Recall | Jev closes | False closes | Steps lost | Duplicates dropped |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | product defaults (yes at 0.7, no at 0.3) | 542 | 0 of 4 | 0 | 0 | 0 of 25 | 378 of 392 |
+| 2 | yes at 0.4 | 0 | 1 of 4 | 7 | 6 (1.52 per 15 min) | 0 of 25 | 378 of 392 |
+
+Round 3 was not used. The scored run takes the config of the last tune round and a third round could not be undone, so a worse windowing change would have become the baseline for experiment 6; the agent proposed stopping and Derek agreed ("Yes, score now"). Observations from round 1, not results: no stopping-point probability reached 0.7 (maximum 0.59), and at the four labeled joins its first-window values were 0.30, 0.24, 0.41 and 0.44 while ordinary joins reached 0.46, so a threshold alone does not separate topic changes from other joins.
+
+The scored run on the held-out half (clips 23 to 43), once, 538 live calls, with round 2's config. A first attempt refused before any call because the agent had passed `--yes-at`, which a scored run does not accept; no call was made and the score was not used. The report below is pasted unedited from `score-1.report.txt`; `rescore` reproduces it byte for byte.
+
+```text
+[live] Jev lab report score-1
+[live] Data origin: live
+[live] Scope: held-out second halves (scored once)
+[live] Model: jev-1.13.0
+[live] Config: windowNewS=30, contextS=120, timeCapS=480, maxFramesPerWindow=2, reviseOnNextNoNo=false
+[live] Thresholds: yes at or above 0.4, no at or below 0.3
+[live] Budget: "~2400 Jev calls (Amendment 3; ~800 until then), max 3 tuning rounds, tune on first halves, score once on held-out second halves"
+[live] Lecture cap_tgdrnaulw4pau7lyfk2wy2tqlq/set:gj8SEvEc8q8+42: 43 clips in watch order, split at the join before clip 23 (watched 3546.876 s before it and 3221.466 s after; the midpoint of 6768.341 s is 3384.171 s), tune clips 1-22, held-out clips 23-43, scored second half; labels labels-set-2-signed.json sha256 0a4789ccd3d6
+[live]   clip 1: gj8SEvEc8q8, span [0.003, 115.521), watched 115.518 s
+[live]   clip 2: oIwmkFTpo8o, span [0.004, 146.401), watched 146.349 s
+[live]   clip 3: XkOpgZwzF1w, span [0.009, 97.596), watched 97.587 s
+[live]   clip 4: 3pKfZb7cplY, span [0.003, 156.181), watched 156.178 s
+[live]   clip 5: QTpdTk6wMDk, span [0.002, 271.981), watched 271.979 s
+[live]   clip 6: WF9o7pvNvyM, span [0.003, 290.441), watched 290.438 s
+[live]   clip 7: Z0RWTiD_pHM, span [0.003, 202.081), watched 202.078 s
+[live]   clip 8: UtwGUDBZmvo, span [0.003, 309.381), watched 309.378 s
+[live]   clip 9: ORfwa0dxzcE, span [0.006, 57.461), watched 57.455 s
+[live]   clip 10: 61f7BVQO6fY, span [0.018, 167.721), watched 167.703 s
+[live]   clip 11: jxv0AOe4HQo, span [0.007, 180.303), watched 180.296 s
+[live]   clip 12: Uks_t77_nyk, span [0.003, 184.341), watched 184.338 s
+[live]   clip 13: iW9-T8d4nFY, span [0.004, 167.701), watched 167.677 s
+[live]   clip 14: NxsgAAwO0kg, span [0.002, 234.761), watched 234.759 s
+[live]   clip 15: eV86JsLbPt8, span [0.007, 47.181), watched 47.174 s
+[live]   clip 16: 6OiieeFFSCo, span [0.013, 25.761), watched 25.748 s
+[live]   clip 17: rwFYdb1AUxA, span [0.008, 19.001), watched 18.993 s
+[live]   clip 18: eCx87JRJ31s, span [0, 13.621), watched 13.621 s
+[live]   clip 19: i8eTe51yH1s, span [0.003, 58.801), watched 58.798 s
+[live]   clip 20: isg_qmXmcN0, span [0.03, 212.581), watched 212.551 s
+[live]   clip 21: IsJnQgacCmY, span [0.139, 248.041), watched 247.902 s
+[live]   clip 22: ASu4g8Q1dVc, span [0.003, 340.361), watched 340.358 s
+[live]   clip 23: oYA5VHWxA9w, span [0.005, 36.201), watched 36.196 s
+[live]   clip 24: QCL4w7adhTI, span [0.006, 67.761), watched 67.755 s
+[live]   clip 25: IXbsbljB9nQ, span [0.017, 160.981), watched 160.964 s
+[live]   clip 26: mmM7uxkXmRM, span [0.008, 241.221), watched 241.213 s
+[live]   clip 27: -lJxenRuzdc, span [0.087, 401.101), watched 401.014 s
+[live]   clip 28: JcW7DfUP4Lw, span [0, 72.401), watched 72.401 s
+[live]   clip 29: aashdwoAiog, span [0.011, 188.281), watched 188.27 s
+[live]   clip 30: _vr032NsptA, span [0.019, 412.881), watched 412.862 s
+[live]   clip 31: XPDuZ3OpBsI, span [0.104, 244.361), watched 244.257 s
+[live]   clip 32: WumSP2BLj2A, span [0.006, 281.841), watched 281.835 s
+[live]   clip 33: jNjiBT3XRuE, span [0.008, 94.621), watched 94.613 s
+[live]   clip 34: E4TSFpP3cTU, span [0.004, 72.261), watched 72.257 s
+[live]   clip 35: 1JlFKgJ1bUg, span [0.003, 139.141), watched 139.138 s
+[live]   clip 36: 2bY1PxhkBBE, span [0.002, 183.821), watched 183.819 s
+[live]   clip 37: LTVbD9_t4iE, span [0, 86.129), watched 86.129 s
+[live]   clip 38: IffxZvPBAiY, span [0.003, 148.91), watched 148.906 s
+[live]   clip 39: qVEMq_tl5Sk, span [0.015, 32.041), watched 32.026 s
+[live]   clip 40: z_UNXO7yaro, span [0.003, 61.721), watched 61.718 s
+[live]   clip 41: 6ap7_kBQUb4, span [0.011, 29.861), watched 29.85 s
+[live]   clip 42: wOQym_iOULE, span [0.016, 143.761), watched 143.745 s
+[live]   clip 43: 0zRt8G366UU, span [0.002, 122.501), watched 122.499 s
+
+[live] Boundary recall: FAIL
+[live] Bar: "≥70% of labeled boundaries detected within ±60s"
+[live] Measured: 2/5 labeled boundaries detected within ±60s = 40%.
+[live]   cap_tgdrnaulw4pau7lyfk2wy2tqlq/set:gj8SEvEc8q8+42: 2/5 detected; missed at clip 34 0.004s, clip 40 0.003s, clip 43 0.002s
+
+[live] False closes: PASS
+[live] Bar: "≤1 false close per 15 min"
+[live] Measured: 2 false close(s) in 3221.466 s watched = 0.559 per 15 min.
+[live]   cap_tgdrnaulw4pau7lyfk2wy2tqlq/set:gj8SEvEc8q8+42: 4 Jev close(s), 2 false at clip 32 4s, clip 33 10s in 3221.466 s watched
+
+[live] Visual steps: PASS
+[live] Bar: "≤1 important visual step lost per lecture"
+[live] Measured: most lost in one lecture 0 (limit 1); this is the scored half only, not a whole lecture.
+[live]   cap_tgdrnaulw4pau7lyfk2wy2tqlq/set:gj8SEvEc8q8+42: 0/13 lost
+
+[live] Duplicates: PASS
+[live] Bar: "≥50% duplicates dropped"
+[live] Measured: 387/424 labeled duplicates dropped = 91.274%.
+[live]   cap_tgdrnaulw4pau7lyfk2wy2tqlq/set:gj8SEvEc8q8+42: 387/424 dropped
+
+[live] Usage (this run, measured; Jev reports tokens only, so cost is unknown):
+[live]   calls 538 (boundary 100, frame change 438, failed 0); judgments reused from earlier calls 0
+[live]   input tokens 2976666 (0 call(s) without a count), output tokens 14174 (0 call(s) without a count)
+[live]   cost unknown
+[live] Latency (report only, no target): all calls p50 402 ms, p95 921 ms (n=538)
+[live]   boundary p50 351 ms, p95 554 ms (n=100)
+[live]   frame change p50 418 ms, p95 965 ms (n=438)
+
+[live] OVERALL: FAIL (failed: recall)
+[live] Not shown by this lab: model accuracy beyond this label set, other lectures, other machines, learning effectiveness. Labels are Derek's judgment.
+```
+
+Result: boundary recall 2 of 5 (40%), FAIL against the 70% bar; false closes 0.559 per 15 min, PASS; visual steps lost 0 of 13, PASS; duplicates dropped 387 of 424 (91.3%), PASS. OVERALL: FAIL (recall). The detected boundaries are at clips 24 and 29; the misses are clips 34, 40 and 43. This is a Jev result on one set, one labeler and one machine; it is not a claim about other lectures or about learning effectiveness. This run is the baseline for experiment 6 (`06-model-optimized-jev.md`), whose protocol names the 11-clip set and must be read as this set.
