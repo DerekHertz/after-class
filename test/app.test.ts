@@ -15,12 +15,12 @@ import { ApiError, createApi, evidenceParams } from "../src/app/api";
 import type { Api } from "../src/app/api";
 import { OptionsView, checkAgain } from "../src/app/capture";
 import type { AppApi } from "../src/app/api";
-import { beginOnce, createReviewController, needsBegin } from "../src/app/controller";
+import { beginOnce, createReviewController, needsBegin, needsResume, resumeOnce } from "../src/app/controller";
 import { learnerAct } from "../src/shared/wire";
 import type { SessionState } from "../src/app/controller";
 import {
   availableActions, conversationLines, currentEvidenceIds, estimateText, formatClock, inspectBundle, liveText, noteView, observationRow,
-  groupGaps, lectureHeading, optionsScreen, parseRoute, reduceLive, routePath, softTargetPrompt, startLive, toAct, unansweredLearnerTurn, usageRows,
+  groupGaps, lectureHeading, optionsScreen, parseRoute, reduceLive, routePath, softTargetPrompt, startLive, toAct, unansweredLearnerTurn, owedLearnerTurn, usageRows,
 } from "../src/app/core";
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { StreamError, ndjson, tutorEvents } from "../src/app/ndjson";
@@ -58,7 +58,7 @@ function turnJson(n: number, actor: "learner" | "tutor" | "code", rest: Record<s
   return { id: actor === "learner" ? stableId("turn", `l${n}`) : stableId("turn", `${actor}${n}`), reviewId, seq: n, atMs: n * 1000, threadId: actor === "code" ? null : thr, actor, ...rest };
 }
 
-function reviewJson(overrides: { turns?: unknown[]; phase?: string; saved?: string; detour?: unknown; observations?: unknown[] } = {}) {
+function reviewJson(overrides: { turns?: unknown[]; phase?: string; saved?: string; detour?: unknown; observations?: unknown[]; owesMove?: boolean } = {}) {
   return {
     reviewId, captureId,
     scope: { chunkRevisions: [crv], material: canonicalMaterial, claimsAtStart: [clm], partial: [{ kind: "capture_gap", gap: gapJson }], frozenAtSeq: 7 },
@@ -68,6 +68,7 @@ function reviewJson(overrides: { turns?: unknown[]; phase?: string; saved?: stri
       softTargetOffered: false, wrapUpRequested: false,
     },
     turns: overrides.turns ?? [],
+    owesMove: overrides.owesMove ?? false,
     observations: overrides.observations ?? [],
     saved: overrides.saved ?? "unsaved",
   };
@@ -1178,5 +1179,76 @@ describe("opening the review (flow D: tutor opens with a recall question)", () =
     const lines = conversationLines(parsedReview({ turns: [turnJson(1, "learner", { act: { kind: "begin" } }), tutorAsk] }).turns);
     expect(lines.map((l) => l.speaker)).toEqual(["system", "tutor"]);
     expect(lines[0]!.text).toBe("Review started");
+  });
+});
+
+describe("a chain that stopped part-way resumes after reload", () => {
+  const closeThread = turnJson(3, "tutor", { move: { kind: "close_thread", threadId: thr }, say: "Let's leave that question there and move on." });
+  const owing = (o: Parameters<typeof reviewJson>[0] = {}) => parsedReview({ turns: [tutorAsk, learnerAnswer(2), closeThread], owesMove: true, ...o });
+  const state = (view: ReviewView | null, o: Partial<SessionState> = {}): SessionState => ({
+    view, loadError: null, live: null, unsent: [], sendError: null, saving: false, saveError: null, savedSummary: null, storageDegraded: false, ...o,
+  });
+  const run = (states: SessionState[]) => {
+    let n = 0;
+    const offer = resumeOnce({ retryTurn: async () => void n++ });
+    for (const s of states) offer(s);
+    return n;
+  };
+
+  test("the wire schema carries owesMove", () => {
+    expect(owing().owesMove).toBe(true);
+    expect(parsedReview().owesMove).toBe(false);
+    expect(reviewViewz.safeParse({ ...reviewJson(), owesMove: undefined }).success).toBe(false);
+  });
+
+  test("the owed turn is the last learner turn, only for an active review", () => {
+    expect(owedLearnerTurn(owing())?.id).toBe(learnerAnswer(2).id);
+    expect(owedLearnerTurn(parsedReview({ turns: [tutorAsk, learnerAnswer(2)] }))).toBeNull();
+    expect(owedLearnerTurn(owing({ phase: "paused" }))).toBeNull();
+    expect(owedLearnerTurn(owing({ phase: "ended" }))).toBeNull();
+  });
+
+  test("it fires once however often the state is offered, and never for paused, ended, unsent or streaming", () => {
+    expect(run([state(owing()), state(owing()), state(owing())])).toBe(1);
+    expect(run([state(null), state(owing())])).toBe(1);
+    expect(run([state(owing({ phase: "paused" }))])).toBe(0);
+    expect(run([state(owing({ phase: "ended" }))])).toBe(0);
+    expect(run([state(parsedReview({ turns: [tutorAsk] }))])).toBe(0);
+    expect(run([state(owing(), { live: startLive(stableId("turn", "x")) })])).toBe(0);
+    expect(run([state(owing(), { unsent: [{ turnId: stableId("turn", "u"), reviewId, act: answer, createdAtMs: 1 }] })])).toBe(0);
+    expect(needsResume(state(owing()))).toBe(true);
+  });
+
+  test("through the controller: the retry resends the last learner turn id, once", async () => {
+    const h = setup({
+      review: () => owing(),
+      sendTurn: async function* ({ turnId }) {
+        yield { type: "learner_turn_stored", turnId };
+        yield { type: "turn_complete", turnId };
+      },
+    });
+    await h.controller.load();
+    const offer = resumeOnce(h.controller);
+    offer(h.controller.getState());
+    offer(h.controller.getState());
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.sends).toEqual([{ turnId: learnerAnswer(2).id, act: { kind: "answer", text: "An ordering of events.", modality: "speech" } }]);
+  });
+
+  test("a failed automatic continue leaves the Retry button, which resends the same id", async () => {
+    const h = setup({
+      review: () => owing(),
+      sendTurn: async function* ({ turnId }, n) {
+        if (n === 0) throw new ApiError("down", 0);
+        yield { type: "turn_complete", turnId };
+      },
+    });
+    await h.controller.load();
+    resumeOnce(h.controller)(h.controller.getState());
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.controller.getState().live?.status).toBe("failed");
+    expect(needsResume(h.controller.getState())).toBe(false);
+    await h.controller.retryTurn();
+    expect(h.sends.map((s) => s.turnId)).toEqual([learnerAnswer(2).id, learnerAnswer(2).id]);
   });
 });

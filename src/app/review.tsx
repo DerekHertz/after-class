@@ -7,11 +7,11 @@ import type { AppApi } from "./api";
 import { useAppearance, useSceneActivity } from "./appearance";
 import { RoomTools } from "./room-tools";
 import { reactToCompanion } from "./companion-reaction";
-import { beginOnce, createReviewController } from "./controller";
+import { beginOnce, createReviewController, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
 import {
   ACTION_LABEL, END_CONFIRM_TEXT, INITIAL_SOURCE_OPEN, endFlow, shouldAutoSendSpeech, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
-  softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer,
+  softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer,
 } from "./core";
 import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, TurnStatus } from "./core";
 import type { Speaker, SpeechInput } from "./speech";
@@ -57,7 +57,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   }, [controller]);
   // Flow D: the tutor opens with a recall question, so an empty active review sends `begin` once.
   const begin = useMemo(() => beginOnce(controller), [controller]);
-  useEffect(() => { begin(state); }, [begin, state]);
+  const resume = useMemo(() => resumeOnce(controller), [controller]);
+  useEffect(() => { begin(state); resume(state); }, [begin, resume, state]);
 
   const captureId = state.view?.captureId ?? null;
   const capture = useAsync(() => (captureId === null ? Promise.resolve(null) : api.captureView(captureId)), [api, captureId]);
@@ -109,7 +110,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const unanswered = unansweredLearnerTurn(view.turns);
   const heading = lectureHeading([...titles.values()]);
   const scopeSeconds = Material.sources(view.scope.material).reduce((sum, id) => sum + Material.get(view.scope.material, id).intervals().reduce((s, i) => s + (i.end - i.start), 0), 0);
-  const canRetry = !streaming && (state.unsent.length > 0 || unanswered !== null || state.live?.status === "failed");
+  const canRetry = !streaming && (state.unsent.length > 0 || unanswered !== null || owedLearnerTurn(view) !== null || state.live?.status === "failed");
 
   return (
     <main className="review">

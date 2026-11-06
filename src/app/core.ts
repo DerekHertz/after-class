@@ -4,7 +4,7 @@
  */
 import type {
   Author, CaptureView, Claim, EvidenceBundle, Gap, GapReason, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
-  ReviewState, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
+  ReviewState, ReviewView, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
 } from "../shared/domain";
 import type { EvidenceId, SourceId } from "../shared/ids";
 import { IntervalSet, Material } from "../shared/time";
@@ -299,6 +299,19 @@ export function unansweredLearnerTurn(turns: readonly Turn[]): Extract<Turn, { a
     const t = turns[i]!;
     if (t.actor === "code") continue;
     return t.actor === "learner" && EXPECTS_REPLY(t.act) ? t : null;
+  }
+  return null;
+}
+
+/**
+ * The learner turn whose request stopped part-way (the backend says the tutor owes a move). Resending its id
+ * replays the stored moves and goes on, so it cannot duplicate. Null unless the review is active and owes a move.
+ */
+export function owedLearnerTurn(view: Pick<ReviewView, "turns" | "owesMove" | "state">): Extract<Turn, { actor: "learner" }> | null {
+  if (!view.owesMove || view.state.phase !== "active") return null;
+  for (let i = view.turns.length - 1; i >= 0; i--) {
+    const t = view.turns[i]!;
+    if (t.actor === "learner") return t;
   }
   return null;
 }

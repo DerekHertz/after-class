@@ -517,6 +517,8 @@ export type ReviewView = {
   readonly scope: FrozenScope;
   readonly state: ReviewState;
   readonly turns: readonly Turn[];
+  /** The review is active and the last tutor move asked nothing (a disclosure or a closed thread): a request stopped part-way and the tutor owes the next move. */
+  readonly owesMove: boolean;
   readonly observations: readonly Observation[];
   readonly saved: ReviewSaveState;
 };
