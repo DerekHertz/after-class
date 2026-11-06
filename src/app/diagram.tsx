@@ -4,7 +4,7 @@ import type { TopicDiagram } from "../shared/domain";
 import type { AppApi } from "./api";
 import { formatClock } from "./core";
 import type { SourceTitles } from "./core";
-import { citationLabels, frameLink, illustratedPages, needsSummary, NO_FRAME_NOTE, shouldPollDiagrams, SUMMARY_NOTE } from "./diagram-view";
+import { frameLink, lineSources, illustratedPages, needsSummary, NO_FRAME_NOTE, shouldPollDiagrams, SUMMARY_NOTE } from "./diagram-view";
 import type { IllustratedPage } from "./diagram-view";
 import { ErrorNote, EvidencePane, FrameImage, useAsync } from "./ui";
 
@@ -75,8 +75,9 @@ export function DiagramFrameView({ api, topic }: { readonly api: AppApi; readonl
   );
 }
 
-/** The state-change summary, or why there is none. Every line shown carries a citation button (R19). */
-export function DiagramSummaryView({ topic, onRequest, onCite }: { readonly topic: TopicDiagram; readonly onRequest: () => void; readonly onCite: CiteHandler }) {
+/** The state-change summary, or why there is none. Citations (R19) stay on every line but are hidden until one control for the whole diagram shows them. */
+export function DiagramSummaryView({ topic, onRequest, onCite, initialSources = false }: { readonly topic: TopicDiagram; readonly onRequest: () => void; readonly onCite: CiteHandler; readonly initialSources?: boolean }) {
+  const [showSources, setShowSources] = useState(initialSources);
   const s = topic.summary;
   switch (s.state) {
     case "no_claims":
@@ -93,16 +94,20 @@ export function DiagramSummaryView({ topic, onRequest, onCite }: { readonly topi
       return <ErrorNote error={`The summary could not be written: ${s.error}`} retry={onRequest} />;
     case "ready":
       return (
-        <ol className="diagram-lines" aria-label={`State changes: ${s.title}`}>
-          {s.lines.map((line, i) => (
-            <li key={i}>
-              <span>{line.text}</span>{" "}
-              {citationLabels(line, i + 1).map((c) => (
-                <button key={c.ids[0]} type="button" className="citation" aria-label={c.aria} onClick={(e) => onCite(c.ids, "Cited by the diagram summary", e.currentTarget)}>{c.label}</button>
-              ))}
-            </li>
-          ))}
-        </ol>
+        <>
+          <button type="button" className="diagram-sources-toggle" aria-expanded={showSources} onClick={() => setShowSources((v) => !v)}>{showSources ? "Hide sources" : "Show sources"}</button>
+          <ol className="diagram-lines" aria-label={`State changes: ${s.title}`}>
+            {s.lines.map((line, i) => {
+              const src = lineSources(line, i + 1);
+              return (
+                <li key={i}>
+                  <span>{line.text}</span>
+                  {showSources && line.evidence.length > 0 && <>{" "}<button type="button" className="citation" aria-label={src.aria} onClick={(e) => onCite(src.ids, "Cited by the diagram summary", e.currentTarget)}>{src.label}</button></>}
+                </li>
+              );
+            })}
+          </ol>
+        </>
       );
   }
 }
@@ -121,11 +126,11 @@ export function DiagramPanel({ api, topic, error, onRequest, onCite, onClose }: 
     <section className="diagram-panel" aria-label={`Diagram: ${topic.label}`}>
       <div className="source-heading">
         <p className="eyebrow">Diagram · {topic.label}</p>
-        <h3>{heading}</h3>
         <button type="button" onClick={onClose}>Close diagram</button>
       </div>
       <ErrorNote error={error} />
       <DiagramFrameView api={api} topic={topic} />
+      <h3>{heading}</h3>
       <DiagramSummaryView topic={topic} onRequest={onRequest} onCite={onCite} />
     </section>
   );

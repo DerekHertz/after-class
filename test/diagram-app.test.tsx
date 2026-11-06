@@ -1,10 +1,11 @@
 /** The review app's diagram pieces: panel states, citations (R19), links, the illustrated record page. */
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { AppApi } from "../src/app/api";
-import { DiagramPanel, IllustratedPageView, ShowDiagramButton } from "../src/app/diagram";
-import { citationLabels, currentQuestionTopic, frameLink, illustratedPages, NO_FRAME_NOTE, shouldPollDiagrams, SUMMARY_NOTE } from "../src/app/diagram-view";
+import { DiagramPanel, DiagramSummaryView, IllustratedPageView, ShowDiagramButton } from "../src/app/diagram";
+import { currentQuestionTopic, frameLink, lineSources, illustratedPages, NO_FRAME_NOTE, shouldPollDiagrams, SUMMARY_NOTE } from "../src/app/diagram-view";
 import type { Observation, ReviewView, TopicDiagram, Turn } from "../src/shared/domain";
 import { stableId } from "../src/shared/ids";
 import type { ClaimId, ConceptId, EvidenceId, ObservationId, ReviewId, SourceId, ThreadId, TurnId } from "../src/shared/ids";
@@ -38,7 +39,7 @@ const topic = (over: Partial<TopicDiagram> = {}): TopicDiagram => ({
 const panel = (t: TopicDiagram, extra: object = {}) => renderToStaticMarkup(createElement(DiagramPanel, { api, topic: t, error: null, onRequest: noop, onCite: noop, onClose: noop, ...extra }));
 
 describe("the diagram panel", () => {
-  test("shows the frame with its time and a link to that moment, then each summary line with citation buttons", () => {
+  test("shows the frame with its time and a link to that moment, then the title and the lines, sources hidden", () => {
     const html = panel(topic());
     expect(html).toContain("How do clocks order events?");
     expect(html).toContain("Loading frame...");
@@ -46,16 +47,49 @@ describe("the diagram panel", () => {
     expect(html).toContain('href="https://www.youtube.com/watch?v=VIDEO000001&amp;t=125s"');
     expect(html).toContain("Open in YouTube at that moment");
     expect(html).toContain("Node P: local +1, global -1.");
-    expect(html).toContain('aria-label="Open evidence 1 cited by line 1"');
-    expect(html).toContain('aria-label="Open evidence 2 cited by line 2"');
     expect(html).toContain("Close diagram");
+    expect(html.indexOf("Captured frame")).toBeLessThan(html.indexOf("How do clocks order events?"));
+    expect(html.indexOf("How do clocks order events?")).toBeLessThan(html.indexOf("Node P: local"));
   });
 
-  test("R19 in the page: every line shown has at least one citation button", () => {
+  test("citations are hidden by default; one toggle for the whole diagram, collapsed", () => {
     const html = panel(topic());
+    expect(html).not.toContain("citation");
+    expect(html).not.toContain("Sources (");
+    expect(html).not.toContain("Evidence 1");
+    expect(html.match(/diagram-sources-toggle/g)).toHaveLength(1);
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain("Show sources");
+  });
+
+  test("with sources shown, each line has one Sources (n) button with its own count (R19 display only)", () => {
+    const html = renderToStaticMarkup(createElement(DiagramSummaryView, { topic: topic(), onRequest: noop, onCite: noop, initialSources: true }));
+    expect(html).toContain('aria-expanded="true"');
     const items = html.match(/<li>.*?<\/li>/g) ?? [];
     expect(items).toHaveLength(2);
-    for (const li of items) expect(li).toContain('class="citation"');
+    expect(items[0]).toContain("Sources (1)");
+    expect(items[1]).toContain("Sources (2)");
+    for (const li of items) expect(li.match(/class="citation"/g)).toHaveLength(1);
+    expect(html).not.toContain("Evidence 1");
+  });
+
+  test("the preparing state says how long it takes and keeps the frame", () => {
+    const html = panel(topic({ summary: { state: "preparing" } }));
+    expect(html).toContain("Writing the summary… this usually takes 20–30 seconds.");
+    expect(html).toContain("Captured frame");
+  });
+
+  test("the diagram's frame and source stand are never cropped by CSS, and the stage box is left alone", () => {
+    const css = readFileSync(new URL("../src/app/review.css", import.meta.url), "utf8");
+    expect(css).toMatch(/\.source-stand:has\(\.diagram-panel\)\s*\{[^}]*max-height:\s*none[^}]*overflow:\s*visible/);
+    expect(css).toMatch(/\.diagram-panel \.diagram-frame \.frame\s*\{[^}]*max-height:\s*none/);
+    expect(css).not.toContain("!important");
+    expect(css).not.toMatch(/review-source-column[^{]*\{[^}]*aspect-ratio/);
+    expect(css).not.toMatch(/source-stage-art|room-tools/);
+    const tools = readFileSync(new URL("../src/app/room-tools.css", import.meta.url), "utf8");
+    expect(tools).toMatch(/\.review-source-column \{[^}]*aspect-ratio: 2 \/ 3/);
+    expect(tools).toMatch(/\.source-stage-art \{[^}]*inset: 0[^}]*background-size: 100% 100%/);
+    expect(panel(topic())).not.toMatch(/max-height|overflow/);
   });
 
   test("no frame: the summary alone, and it says so", () => {
@@ -102,6 +136,11 @@ describe("the diagram panel", () => {
   test("a request error is shown above the frame", () => {
     expect(panel(topic(), { error: "backend down" })).toContain("backend down");
   });
+
+  test("a line with no evidence gets no Sources button", () => {
+    const t = topic({ summary: { state: "ready", title: "T", lines: [{ text: "No cite.", evidence: [] as never }] } });
+    expect(renderToStaticMarkup(createElement(DiagramSummaryView, { topic: t, onRequest: noop, onCite: noop, initialSources: true }))).not.toContain("Sources (");
+  });
 });
 
 describe("show diagram buttons", () => {
@@ -118,10 +157,8 @@ describe("view logic", () => {
     expect(frameLink({ ...topic().frame!, videoId: null })).toBeNull();
   });
 
-  test("citationLabels give one button per cited item", () => {
-    expect(citationLabels({ evidence: [E1, E2] }, 3).map((c) => [c.label, c.aria, c.ids])).toEqual([
-      ["Evidence 1", "Open evidence 1 cited by line 3", [E1]], ["Evidence 2", "Open evidence 2 cited by line 3", [E2]],
-    ]);
+  test("lineSources gives one button per line, opening all its evidence", () => {
+    expect(lineSources({ evidence: [E1, E2] }, 3)).toEqual({ ids: [E1, E2], label: "Sources (2)", aria: "Open the 2 sources cited by line 3" });
   });
 
   test("polling continues only while a summary is being written", () => {
@@ -203,7 +240,8 @@ describe("illustrated pages", () => {
     expect(html).toContain("An ordering of events.");
     expect(html).toContain("Partial");
     expect(html).toContain("Open in YouTube at that moment");
-    expect(html).toContain('class="citation"');
+    expect(html).not.toContain('class="citation"');
+    expect(html).toContain("Show sources");
   });
 
   test("rendered quick check passed: Looks fine, never 'understood'; no frame and no summary yet are both said", () => {
