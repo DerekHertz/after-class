@@ -11,6 +11,7 @@ import type { ClaimDraft, Purpose, Provider } from "../src/shared/domain";
 import type { CaptureId, IdPart, WindowId } from "../src/shared/ids";
 import { stableId } from "../src/shared/ids";
 import { captureResponse, ingestAckResponse } from "../src/shared/wire";
+import { PRODUCT_JEV_SETUP } from "../src/backend/jev-setup";
 import { loadPairingToken, main, readKeys, resolveMode } from "../src/backend/main";
 import type { MainOptions, Running, TaskSet } from "../src/backend/main";
 import type { SpawnFn } from "../src/backend/providers/claude";
@@ -413,10 +414,10 @@ describe("main, live mode", () => {
     const configDir = dir("afterclass-config-");
     writeFileSync(join(configDir, "keys.env"), `TYPESAFE_API_KEY=${KEY}\n`, { mode: 0o600 });
 
-    const requests: { url: string; auth: string | null }[] = [];
+    const requests: { url: string; auth: string | null; body: string }[] = [];
     const fetchFake = (async (input: Request | string | URL, init?: RequestInit) => {
-      requests.push({ url: String(input), auth: new Headers(init?.headers).get("authorization") });
-      return new Response(JSON.stringify({ model: "jev-1.13", answers: { new_concept: { type: "noul", noul: 0.1 }, stopping_point: { type: "noul", noul: 0.1 } }, usage: { input_tokens: 5, output_tokens: 1 } }), { status: 200 });
+      requests.push({ url: String(input), auth: new Headers(init?.headers).get("authorization"), body: String(init?.body ?? "") });
+      return new Response(JSON.stringify({ model: "jev-1.13", answers: { new_concept: { type: "noul", noul: 0.1 }, stopping_point: { type: "noul", noul: 0.1 }, lesson_framing: { type: "noul", noul: 0.1 }, teaching_change: { type: "noul", noul: 0.1 } }, usage: { input_tokens: 5, output_tokens: 1 } }), { status: 200 });
     }) as typeof fetch;
 
     const spawned: { argv: readonly string[]; env: Record<string, string> }[] = [];
@@ -439,6 +440,15 @@ describe("main, live mode", () => {
       expect(r.url).toBe("https://api.typesafe.ai/v1/systemone");
       expect(r.auth).toBe(`Bearer ${KEY}`);
     }
+    // Composition: the product asks round 1's wordings (experiment 7, arm fable-1), lesson framing in the same boundary request.
+    const asked = requests.map((r) => JSON.parse(r.body) as { questions: Record<string, { instructions: string }> });
+    const boundary = asked.find((a) => "new_concept" in a.questions);
+    expect(boundary).toBeDefined();
+    expect(Object.keys(boundary!.questions)).toEqual(["new_concept", "stopping_point", "lesson_framing"]);
+    expect(boundary!.questions.new_concept!.instructions).toBe(PRODUCT_JEV_SETUP.questions.newConcept);
+    expect(boundary!.questions.stopping_point!.instructions).toBe(PRODUCT_JEV_SETUP.questions.stoppingPoint);
+    expect(boundary!.questions.lesson_framing!.instructions).toBe(PRODUCT_JEV_SETUP.questions.lessonFraming);
+    for (const a of asked) if ("teaching_change" in a.questions) expect(a.questions.teaching_change!.instructions).toBe(PRODUCT_JEV_SETUP.questions.teachingChange);
     const child = spawned[0]!;
     expect(child.argv[0]).toBe("claude");
     expect(child.argv).toContain("--restricted");

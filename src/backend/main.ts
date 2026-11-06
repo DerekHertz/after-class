@@ -32,11 +32,12 @@ import { createJevClient } from "./providers/jev";
 import type { JevClient } from "./providers/jev";
 import { createClaudeCli } from "./providers/claude";
 import type { ClaudeCli, SpawnFn } from "./providers/claude";
-import { boundaryTask, claimSupportTask, frameChangeTask } from "./providers/jev-tasks";
+import { claimSupportTask, productBoundaryTask, productFrameChangeTask } from "./providers/jev-tasks";
 import type { BoundaryInput, FrameChangeInput } from "./providers/jev-tasks";
 import { createEvidence } from "./evidence";
 import type { EvidenceStore, EvidenceStoreWithProbe } from "./evidence";
-import { SEGMENTATION_DEFAULTS, createSegmentation } from "./segmentation";
+import { PRODUCT_JEV_SETUP } from "./jev-setup";
+import { createSegmentation } from "./segmentation";
 import type { Segmentation } from "./segmentation";
 import { createPreparation } from "./preparation";
 import type { Preparation } from "./preparation";
@@ -173,8 +174,8 @@ const refusingClaude: ClaudeCli = {
 
 function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameBytes): TaskSet {
   return {
-    boundary: boundaryTask(jev),
-    frameChange: frameChangeTask(jev),
+    boundary: productBoundaryTask(jev),
+    frameChange: productFrameChangeTask(jev),
     preparation: {
       interpret: interpretTask(claude, frameBytes),
       revise: reviseTask(claude, frameBytes),
@@ -296,7 +297,8 @@ export async function main(options: MainOptions = {}): Promise<Running> {
       boundaryInput,
       nextSeq: () => db.nextSeq(),
     },
-    SEGMENTATION_DEFAULTS,
+    PRODUCT_JEV_SETUP.segmentation,
+    PRODUCT_JEV_SETUP.routing,
   );
 
   const preparationBase = createPreparation(db, {

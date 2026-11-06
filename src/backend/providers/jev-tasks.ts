@@ -5,7 +5,9 @@
  *   frameChangeTask  flow B: does the before→after change add teaching content?
  *   claimSupportTask flow C: does this evidence support the claim in its stated scope?
  *
- * Experiment 7 tasks (docs/experiments/07-jev-saves-the-tutor.md), opt-in, not wired into main.ts; draft wording:
+ * productBoundaryTask / productFrameChangeTask: the product's setup (jev-setup.ts, experiment 7 round 1, approved by Derek 2026-11-06); main.ts wires these.
+ *
+ * Experiment 7 tasks (docs/experiments/07-jev-saves-the-tutor.md), lab-only except lessonFraming, which the product asks inside its boundary request; draft wording:
  *   frameRelevanceTask  do the captions around a kept frame refer to what it shows?
  *   claimRelevanceTask  does an existing claim relate to the new material?
  *   lessonFramingTask   boundaryTask plus a third question: lesson introduction / conclusion?
@@ -22,6 +24,7 @@ import type { IdPart } from "../../shared/ids";
 import { ProviderError } from "./memo";
 import type { Task, UsageReport } from "./memo";
 import { imageFormat } from "./jev";
+import { PRODUCT_JEV_SETUP } from "../jev-setup";
 import type { JevAnswer, JevClient, JevImage, JevQuestion } from "./jev";
 
 // The API rejects short ids: "jev-1.13" and "jev-1.14" are 400 "Unknown model"; "jev-1.13.0", "jev-1.14.0" and "jev-latest" work (checked 2026-11-03).
@@ -30,11 +33,19 @@ export const JEV_MODEL = "jev-1.13.0";
 /** Starting values, tuned on held-out clips (flow B note). Part of every task's version. */
 export const THRESHOLDS = { yesAtOrAbove: 0.7, noAtOrBelow: 0.3 } as const;
 
-export function toVerdict(p: number | null): Verdict {
+export type VerdictThresholds = { readonly yesAtOrAbove: number; readonly noAtOrBelow: number };
+
+/** `toVerdict` with the thresholds as a parameter (the product tasks pass PRODUCT_JEV_SETUP's). */
+export function toVerdictAt(p: number | null, t: VerdictThresholds): Verdict {
   if (p === null || !Number.isFinite(p)) return "uncertain";
-  if (p >= THRESHOLDS.yesAtOrAbove) return "yes";
-  if (p <= THRESHOLDS.noAtOrBelow) return "no";
+  if (p >= t.yesAtOrAbove) return "yes";
+  if (p <= t.noAtOrBelow) return "no";
   return "uncertain";
+}
+
+/** The lab baseline thresholds (0.7/0.3). The product runs PRODUCT_JEV_SETUP.thresholds instead. */
+export function toVerdict(p: number | null): Verdict {
+  return toVerdictAt(p, THRESHOLDS);
 }
 
 /**
@@ -114,8 +125,7 @@ export function lessonFramingWordingVersion(q?: LessonFramingQuestions): string 
 }
 
 const MAX_ATTEMPTS = 3;
-const thresholdTag = `${THRESHOLDS.yesAtOrAbove}/${THRESHOLDS.noAtOrBelow}`;
-const versionOf = (wording: string) => `${wording}@${thresholdTag}`;
+const versionOf = (wording: string, t: VerdictThresholds = THRESHOLDS) => `${wording}@${t.yesAtOrAbove}/${t.noAtOrBelow}`;
 
 type FrameWithBytes = { readonly frame: Frame; readonly bytes: () => Uint8Array };
 
@@ -203,14 +213,33 @@ export function lessonFramingTask(jev: JevClient, framing?: LessonFramingQuestio
   return buildBoundaryTask(jev, questions, framing ?? QUESTIONS.lessonFraming, lessonFramingWordingVersion(framing));
 }
 
-function buildBoundaryTask(jev: JevClient, questions: BoundaryQuestions | undefined, framing: LessonFramingQuestions | null, framingVersion = ""): Task<BoundaryInput, BoundaryJudgment> {
-  const wording = `boundary.${boundaryWordingVersion(questions)}${framing === null ? "" : `+lesson_framing.${framingVersion}`}`;
+/**
+ * The product's boundary task (flow B amendment 2026-11-06): round 1's new concept and stopping point, plus lesson
+ * framing, in one request, judged at round 1's thresholds. Version `boundary.<setup>+lesson_framing.<setup>@0.5/0.3`.
+ */
+export function productBoundaryTask(jev: JevClient): Task<BoundaryInput, BoundaryJudgment> {
+  const s = PRODUCT_JEV_SETUP;
+  return buildBoundaryTask(jev, s.questions, { framing: s.questions.lessonFraming }, s.version, { thresholds: s.thresholds, wording: s.version });
+}
+
+/** The product's frame-change (dedupe) task: round 1's teachingChange at round 1's thresholds. */
+export function productFrameChangeTask(jev: JevClient): Task<FrameChangeInput, Verdict> {
+  const s = PRODUCT_JEV_SETUP;
+  return frameChangeTask(jev, { teachingChange: s.questions.teachingChange }, { thresholds: s.thresholds, wording: s.version });
+}
+
+type ProductSetup = { readonly thresholds: VerdictThresholds; readonly wording: string };
+
+function buildBoundaryTask(jev: JevClient, questions: BoundaryQuestions | undefined, framing: LessonFramingQuestions | null, framingVersion = "", product?: ProductSetup): Task<BoundaryInput, BoundaryJudgment> {
+  const th = product?.thresholds ?? THRESHOLDS;
+  const verdict = (p: number | null) => toVerdictAt(p, th);
+  const wording = `boundary.${product?.wording ?? boundaryWordingVersion(questions)}${framing === null ? "" : `+lesson_framing.${framingVersion}`}`;
   const text = questions ?? QUESTIONS.boundary;
   return {
     provider: "jev",
     purpose: "boundary",
     model: JEV_MODEL,
-    version: versionOf(wording),
+    version: versionOf(wording, th),
     maxAttempts: MAX_ATTEMPTS,
     canonicalInput: (i) => ({ window: i.window.id, new: ids(i.newPassages), context: ids(i.contextPassages), frames: frameIds(i.frames) }),
     async attempt(i, ctx) {
@@ -234,12 +263,12 @@ function buildBoundaryTask(jev: JevClient, questions: BoundaryQuestions | undefi
       return {
         output: {
           windowId: i.window.id,
-          newConcept: toVerdict(pNewConcept),
-          stoppingPoint: toVerdict(pStoppingPoint),
+          newConcept: verdict(pNewConcept),
+          stoppingPoint: verdict(pStoppingPoint),
           pNewConcept,
           pStoppingPoint,
           questionVersion: wording,
-          ...(framing === null ? {} : { lessonFraming: toVerdict(pLessonFraming), pLessonFraming }),
+          ...(framing === null ? {} : { lessonFraming: verdict(pLessonFraming), pLessonFraming }),
         },
         usage,
       };
@@ -261,13 +290,14 @@ const NO_CALL: UsageReport = {
  * Caller maps yes→kept, no→dropped, uncertain/failed→uncertain (kept): "Uncertain visual → keep the frame."
  * The first frame of a source has nothing to compare with and resolves to uncertain without a call.
  */
-export function frameChangeTask(jev: JevClient, questions?: FrameChangeQuestions): Task<FrameChangeInput, Verdict> {
+export function frameChangeTask(jev: JevClient, questions?: FrameChangeQuestions, product?: ProductSetup): Task<FrameChangeInput, Verdict> {
   const text = questions ?? QUESTIONS.frameChange;
+  const th = product?.thresholds ?? THRESHOLDS;
   return {
     provider: "jev",
     purpose: "frame_change",
     model: JEV_MODEL,
-    version: versionOf(`frame_change.${frameChangeWordingVersion(questions)}`),
+    version: versionOf(`frame_change.${product?.wording ?? frameChangeWordingVersion(questions)}`, th),
     maxAttempts: MAX_ATTEMPTS,
     canonicalInput: (i) => ({ before: i.before?.frame.id ?? null, after: i.after.frame.id, nearby: ids(i.nearbyPassages) }),
     async attempt(i, ctx) {
@@ -282,7 +312,7 @@ export function frameChangeTask(jev: JevClient, questions?: FrameChangeQuestions
         },
         ctx.signal,
       );
-      return { output: toVerdict(probability(answers.teaching_change)), usage };
+      return { output: toVerdictAt(probability(answers.teaching_change), th), usage };
     },
     decode: (stored) => verdictSchema.parse(stored),
   };

@@ -194,7 +194,7 @@ export type BoundaryJudgment = {
   readonly pNewConcept: number | null;
   readonly pStoppingPoint: number | null;
   readonly questionVersion: string;
-  /** Experiment 7 only (lessonFramingTask). Absent from every product judgment. */
+  /** The intro/conclusion (lesson framing) verdict: asked by the product since 2026-11-06 (flow B amendment) and by experiment 7's lab. */
   readonly lessonFraming?: Verdict;
   readonly pLessonFraming?: number | null;
 };

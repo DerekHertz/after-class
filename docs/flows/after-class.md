@@ -54,6 +54,19 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 | yes | no | Don't close; flag for re-check on the next window |
 | no | no | Continue collecting |
 
+**Amendment (2026-11-06), Derek: "Yes, use round 1".** The product now uses experiment 7 round 1's Jev setup (arm fable-1; `docs/experiments/07-jev-saves-the-tutor.md`). The approved text and table above are unchanged; this block adds to them.
+
+- Wordings (verbatim):
+  - New concept: "Does state.passage itself switch to a different main subject from the one state.context was teaching: a different system, paper, module or theme, usually opened after state.context wrapped up the previous subject with a conclusion, or announced as what this lesson or module will cover? Answer no if the passage is the next section, mechanism, layer, component, implementation detail, example, history, quiz or recap of the subject in state.context, or if state.context already began or announced this subject (such as 'now let's look at X' or 'as I mentioned'): then any switch happened earlier."
+  - Stopping point: "Could a review chunk end at the end of state.context without cutting a thought in half? Answer yes if state.context finished its point (a conclusion, summary, recap, transition, preview of what comes next, or a completed explanation), or if state.passage starts something new rather than completing what state.context left open. A final caption that is cut off or truncated does not count as unfinished. Answer no only if state.passage directly continues a step, derivation, list, example or argument that state.context was still in the middle of."
+  - Lesson framing (a third question in the same boundary request): "Is state.passage the opening of a lesson or module (a greeting, an announcement of what this lesson or module will cover, or a statement of its goals), or does state.context end with the closing of a lesson (a conclusion, a summary of what was learned, a closing remark, or a pointer to what the next lesson will study)? Answer no if both are ordinary content, including a transition to the next section, step or mechanism inside the same lesson."
+  - Frame change (the dedupe question): "Does state.after show teaching content that state.before did not: a new slide, newly written or revealed text, a new equation, figure, diagram element, annotation or code edit (use state.captions as a hint)? Answer no if the slide content is the same and only the cursor, pointer, highlight, camera, presenter or video controls changed, or if the content merely repeats what was already shown."
+- Verdict thresholds: yes at or above 0.5, no at or below 0.3 (was 0.7 / 0.3).
+- Window: about 45 s of new material (was about 30 s); context 120 s, time cap 8 min, at most 2 frames per window, no boundary revision on a next no/no, as before.
+- One added routing rule: new concept yes AND the intro/conclusion (lesson framing) question yes closes the chunk, regardless of the stopping point. Every other row of the table is unchanged.
+- Frame relevance and claim relevance are not in the product (lab only).
+- Evidence: held-out recall 4/5 at 1.118 false closes per 15 min; the false-close bar fails (see the experiment doc). Derek, 2026-11-06: "it is way better for me to test as the user and collect data rather than sit in these experiments for days on end".
+
 ## C. Preparation and review invites (approved 2026-11-03)
 
 ```text

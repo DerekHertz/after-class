@@ -49,7 +49,7 @@ test("a boundary call that is still in flight is not aborted by the next pump", 
     lookupBoundary: (input) => memo.lookup(task, { w: input.window.id }),
     boundaryInput: (window) => ({ window, newPassages: [], contextPassages: [], frames: [] }),
     nextSeq: () => db.nextSeq(),
-  }, SEGMENTATION_DEFAULTS);
+  }, SEGMENTATION_DEFAULTS, undefined);
 
   const source = (): WorkItem[] =>
     seg.sync(CAP).demand.map((input) => ({
