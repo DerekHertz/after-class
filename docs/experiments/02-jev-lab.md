@@ -19,7 +19,7 @@ Each item below is a definition the bar text leaves open. Derek adopted all ten 
 7. **Steps lost "per lecture".** The scored half is half a lecture. The count is not scaled: PASS only if every lecture that has labeled steps in the held-out half lost 1 or fewer. **[Amended: "lecture" is now a set of clips; see Amendment 1.]**
 8. **What a duplicate is.** A labeled duplicate group is frames showing the same content. The earliest member (by media time) is the original, every later member is a duplicate. A duplicate is dropped when Jev's verdict on its frame is "no". "Uncertain" keeps the frame (flow B: "Uncertain visual → keep the frame."). A label with no frame id resolves to the nearest candidate frame within 2 s (`PROPOSED_DUPLICATE_MATCH_S = 2`); a duplicate that resolves to no frame counts as not dropped. Pooled, PASS at exactly 50%.
 9. **The split.** The midpoint of the lecture span in the label file. Each half is folded by the product's `planChunks` on its own, with no state carried across the split, so a boundary at the very first window of the second half cannot be detected. A window belongs to the lecture and half of its first new passage and its earliest new media second. **[SUPERSEDED for sets of two or more clips by Amendment 1, which keeps this wording only for a one-video lecture.]**
-10. **The budget.** "~800 Jev calls" is read as a hard ceiling of 800 that counts every request, retries included (`BUDGET_CALLS = 800`). One tune round is one `run --phase tune`, whatever it changes. The scored run uses the config of the last tune round. A stored judgment with the same input is reused at no call, but a round that reuses everything still counts as a round.
+10. **The budget.** "~800 Jev calls" is read as a hard ceiling of 800 that counts every request, retries included (`BUDGET_CALLS = 800`; 2,400 from Amendment 3). One tune round is one `run --phase tune`, whatever it changes. The scored run uses the config of the last tune round. A stored judgment with the same input is reused at no call, but a round that reuses everything still counts as a round.
 
 ## Amendment 1 (Derek, 2026-11-04, before any paid call): a lecture is the set of clips
 
@@ -71,7 +71,7 @@ A detection is the start of a window that follows another window of the same hal
 
 - False closes per 15 min: unmatched detections over the pooled watched seconds of the held-out half, counted only when that half has at least one labeled, detectable boundary (a half with none is excluded and listed).
 - Recall pooled; visual steps lost: at most 1 per set (not scaled); duplicates dropped pooled.
-- Budget 800 hard, 3 tune rounds, score once, and every safety rail are unchanged.
+- Budget 800 hard (2,400 from Amendment 3), 3 tune rounds, score once, and every safety rail are unchanged.
 
 ### The visual-step rule (Derek's wording, verbatim)
 
@@ -142,6 +142,14 @@ The held-out half is spent. This definition was written after it was scored once
 An observation made after the fact, not a result: in the tuning half, at yes 0.5, Jev's one close was at the start of clip 7, which on the reading above is the one topic change in that half. It is one boundary.
 
 Next, not yet run: capture more topic changes with automated watching (Derek approved driving Chrome through playlists, and may supply links), label them under this definition, then run tuning and a single scoring on a held-out set that has several boundaries. The counts and budget will be written here before any call. `docs/experiments/06-model-optimized-jev.md` names experiment 2's scoring of the 11-clip set as its baseline; that must be updated to the new set before experiment 6 runs.
+
+## Amendment 3 (Derek, 2026-11-05, before any Jev call on the 43-clip set): the Jev call ceiling is 2,400
+
+Why. Decision 10 read "~800 Jev calls" as a hard ceiling of 800, a number sized for the 11-clip set. The new set is 43 clips (the seven topic-boundary windows of Advanced Operating Systems Part 3, `assembled-2`, labels signed 2026-11-05). `plan` on it counts 542 calls for one tuning round (first half, nothing cached) and 538 for the scored run (second half): 1,080 for one round plus the score, and 2,164 in the worst case of three tuning rounds that each change windowing, so the lab would refuse to run it.
+
+The decision. Derek was asked "Approve a 2,400 Jev ceiling for experiment 2 and 5,000 total for experiment 6?" and answered "Yes, those numbers". The numbers are the agent's: 2,164 plus about 10% for retries, rounded to 2,400. The ceiling is a guard, not an estimate of spend.
+
+What it changes: `BUDGET_CALLS` is 2,400 (was 800) and the budget text says so. Every other part of decision 10 is unchanged: it counts every request including retries, one tune round is one `run --phase tune`, at most 3 tune rounds, the scored run once, and every safety rail. `docs/flows/after-class.md` still quotes "~800 Jev calls", the text Derek approved for the flow; it is not edited, and this amendment is what changes the ceiling for this lab. The older 11-clip run (451 of its 800 calls, superseded by Amendment 2) printed the old budget line in its stored report, so a rescore of that old report now differs from it in that one line only.
 
 ## The four bars
 
@@ -220,8 +228,8 @@ A model call needs all of the following. Each is enforced in code and has a test
 | --- | --- |
 | `--live` | Without it the run uses a deterministic fake client, and the real adapter is never built. |
 | A key | `~/.config/afterclass/keys.env` (or `--keys`), mode 0600, with `TYPESAFE_API_KEY`, read by the backend's own `readKeys`. The key is held only by the Jev adapter. Output, errors, stored judgments and results are redacted for it. |
-| `--max-calls N` | Required, an integer from 1 to 800. The run refuses before its first call if it needs more than N new calls, and aborts before any call beyond N. |
-| The 800 budget | A persisted counter in the lab dir, written before each request, across all phases. A run that would cross 800 refuses up front, and a request that would cross it is never sent, retries included. |
+| `--max-calls N` | Required, an integer from 1 to the ceiling (800; 2,400 from Amendment 3). The run refuses before its first call if it needs more than N new calls, and aborts before any call beyond N. |
+| The call budget (800; 2,400 from Amendment 3) | A persisted counter in the lab dir, written before each request, across all phases. A run that would cross the ceiling refuses up front, and a request that would cross it is never sent, retries included. |
 | `signed_off` labels | For a live run and for any scored run. |
 | 3 tune rounds | A fourth refuses. |
 | Score once | A second score run refuses and points at `rescore`. A scored run in which any Jev call failed writes no result and does not use up the scoring: re-run the same command and only the failed judgments are retried. |
@@ -251,7 +259,7 @@ rescore      --results <file> --labels <file> ... [--expect <report.txt>]
 
 1. `draft-labels` for each lecture, then Derek corrects, confirms and signs the files off.
 2. `split` shows Derek the tune and held-out split before anything runs.
-3. `plan` counts the Jev calls from the real windowing and compares them with 800. It exits non-zero when one tune round plus the scored run is over budget, and prints the worst case (3 tune rounds that each change windowing). No call is made.
+3. `plan` counts the Jev calls from the real windowing and compares them with the ceiling (800; 2,400 from Amendment 3). It exits non-zero when one tune round plus the scored run is over budget, and prints the worst case (3 tune rounds that each change windowing). No call is made.
 4. `run --phase tune --live --max-calls N`, up to 3 times.
 5. `run --phase score --live --max-calls N`, once.
 6. `rescore --results <runs/score-1.jsonl> --labels ... --expect <runs/score-1.report.txt>` re-reads the held-out run from stored judgments, with no Jev call. It prints the report and exits 1 if it differs from the original by a byte. `report` is the same computation without the check.

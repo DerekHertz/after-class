@@ -310,7 +310,7 @@ describe("split and plan", () => {
     expect(plan.tuneRoundCalls).toBe(6 + 1);
     expect(plan.scoreCalls).toBe(6 + 4);
     expect(plan.overBudget).toBe(false);
-    expect(plan.lines.join("\n")).toContain("17 of 800 budgeted: within budget");
+    expect(plan.lines.join("\n")).toContain("17 of 2400 budgeted: within budget");
   });
 });
 
@@ -528,7 +528,7 @@ describe("safety rails", () => {
   test("--max-calls above the budget, or below one, refuses", async () => {
     const o = lab();
     const f = stubFetch();
-    await expect(runLab(live(o, { fetch: f.fn, maxCalls: BUDGET_CALLS + 1 }))).rejects.toThrow("--max-calls must be an integer from 1 to 800");
+    await expect(runLab(live(o, { fetch: f.fn, maxCalls: BUDGET_CALLS + 1 }))).rejects.toThrow("--max-calls must be an integer from 1 to 2400");
     await expect(runLab(live(o, { fetch: f.fn, maxCalls: 0 }))).rejects.toThrow("--max-calls must be");
     noCalls(f);
   });
@@ -565,19 +565,19 @@ describe("safety rails", () => {
     noCalls(f);
   });
 
-  test("the persisted counter refuses a run that would cross 800, before any call", async () => {
+  test("the persisted counter refuses a run that would cross 2400, before any call", async () => {
     const o = lab();
     mkdirSync(join(o.labDir, "live"), { recursive: true });
-    writeFileSync(join(o.labDir, "live", "state.json"), JSON.stringify({ version: 1, callsUsed: 795, tuneRounds: 0, lastTune: null, scoreStatus: "none" }));
+    writeFileSync(join(o.labDir, "live", "state.json"), JSON.stringify({ version: 1, callsUsed: 2395, tuneRounds: 0, lastTune: null, scoreStatus: "none" }));
     const f = stubFetch();
-    await expect(runLab(live(o, { fetch: f.fn }))).rejects.toThrow("795 of 800 are used; no call was made");
+    await expect(runLab(live(o, { fetch: f.fn }))).rejects.toThrow("2395 of 2400 are used; no call was made");
     noCalls(f);
   });
 
   test("the call that would cross the cap is never made, even through retries", async () => {
     const o = lab();
     mkdirSync(join(o.labDir, "live"), { recursive: true });
-    writeFileSync(join(o.labDir, "live", "state.json"), JSON.stringify({ version: 1, callsUsed: 793, tuneRounds: 0, lastTune: null, scoreStatus: "none" }));
+    writeFileSync(join(o.labDir, "live", "state.json"), JSON.stringify({ version: 1, callsUsed: 2393, tuneRounds: 0, lastTune: null, scoreStatus: "none" }));
     const f = stubFetch({ fail: "503" });
     await expect(runLab(live(o, { fetch: f.fn, maxCalls: 100 }))).rejects.toThrow("budget is spent");
     expect(f.seen).toHaveLength(7);
