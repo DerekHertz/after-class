@@ -8,32 +8,48 @@ Derek, 2026-11-05: "what can jev do cheaply so that the tutor just has to interp
 
 Experiments 2 and 6 measured Jev alone against boundary bars. On the 43-clip set, Jev drops 91 to 96% of duplicate frames and loses no visual step, but no configuration passed both boundary bars; Jev with Fable's round-3 wording caught 5 of 5 held-out topic changes at about 3 extra closes per 15 minutes. This experiment asks the question that matters for the product: does Jev's preprocessing cut what the interpretation model (Claude Opus 5.5, the product default) reads and spends, without making the prepared review worse?
 
+## Where the tutor's tokens go today (measured on the 43-clip set, 2026-11-05)
+
+The product's interpretation step (`interpretTask`, Opus 5.5) receives, per chunk, every transcript passage, every kept frame as an image, and every earlier claim of the lecture. On the 43-clip set Jev judged 872 frames and kept 91 (about 10%); 1 kept frame is a talking-head shot. At roughly 1,200 tokens per 1280x720 image (an estimate, not measured), frames are about 1.05M tokens raw and about 110k after Jev, against roughly 25k tokens of transcript for 113 minutes. Earlier claims are re-sent with every chunk, so they grow with the lecture.
+
+Derek, 2026-11-05: "for providing evidence, jev is significantly cheaper for catching those frames. i said we should stream data to the interpretation layer cheaply (maybe this involves jev). jev should have very well scoped tasks."; "i think we can use the existing data"; and on the task list: "task 1 to 3 but i think the intro or conclusion can aid in determining those boundaries".
+
+## The Jev tasks under test (Derek chose tasks 1 to 3, 2026-11-05)
+
+Each is one yes/no question with a narrow scope.
+
+1. **Frame relevance.** For each kept frame: do the captions around it refer to what it shows? Only frames that are referred to go to the tutor. (Frames are about 80% of what the tutor reads after dedupe.)
+2. **Earlier-claim relevance.** For each earlier claim: does it relate to the new material? Only related claims are sent, so the tutor's context stops growing with lecture length.
+3. **Chunk boundaries, with intro and conclusion as evidence.** The boundary questions use the wording Fable wrote in experiment 6, and a new yes/no question per window asks whether the passage is a lesson introduction or the context ends in a conclusion or summary (Derek: "the intro or conclusion can aid in determining those boundaries"). How that answer enters the close decision is PROPOSED below; it changes the product's routing table, so it needs Derek's approval in the flow doc before it ships.
+
+Frame dedupe and the claim check stay as they are.
+
 ## Design (PROPOSED)
 
-1. **Data.** Fresh lectures, never used in experiments 2 or 6: one playlist set of short clips (as before) and one single long lecture (Derek: titles and clip joins are not universal; "this may not be true for longer lectures!"). About 60 to 90 minutes of watched video in all, captured with the autostart build, tab visible.
-2. **Two arms, same captures, same tutor.**
-   - **Raw:** chunks close only on the time cap (8 min) and session end; every captured frame goes to the tutor.
-   - **Jev:** the product pipeline with Jev chunking and frame dedupe, using a configuration fixed BEFORE the run: experiment 6's Fable round-3 wording and thresholds (Fable refining Jev's input, done once, offline). No tuning on the new data.
-3. **The tutor's step.** The product's own `interpretTask` (Opus 5.5, effort high) prepares each chunk in both arms, through `claude -p` as usual.
-4. **What is measured.** Per arm: tutor input and output tokens, frames sent, number of interpretation calls, wall time, notional cost at the flow doc's Opus prices; Jev calls and latency for the Jev arm.
-5. **Quality.** Derek rates the two prepared reviews blind, topic by topic: Jev arm better, same, or worse. The claim check (experiment 3's Jev question) runs on both arms' claims and counts are reported.
+1. **Data: the existing captures.** Fable refines the wording of tasks 1 to 3 (and the intro/conclusion question) on the tuning clips only (clips 1 to 22 of the 43-clip set), as in experiment 6. Everything is measured on material never used for tuning: clips 23 to 43 of the 43-clip set and the 11-clip set.
+2. **Two arms, same captures, same tutor step.**
+   - **Today:** the product as it is (Jev dedupe, product boundary wording, every kept frame and every earlier claim sent).
+   - **Scoped Jev:** tasks 1 to 3 on top of dedupe, with the wording fixed before the run.
+3. **The tutor's step.** The product's own `interpretTask` (Opus 5.5, effort high) prepares each chunk in both arms.
+4. **What is measured.** Per arm: tutor input and output tokens (images and text separately), frames and earlier claims sent, interpretation calls, wall time, notional cost at the flow doc's Opus prices; Jev calls and latency.
+5. **Quality.** Derek rates the two prepared reviews blind, topic by topic: better, same, or worse. Every claim citing a frame that task 1 removed is listed. The claim check runs on both arms.
+6. **Routing for task 3 (PROPOSED).** Close when new concept and stopping point are both yes, OR when new concept is yes and the intro/conclusion question is yes. Clip joins add nothing by themselves.
 
 ## Bars (PROPOSED, set before any result)
 
-- The Jev arm sends the tutor at most 60% of the Raw arm's input tokens.
-- Derek rates the Jev arm the same or better on at least 80% of topics.
+- The scoped-Jev arm sends the tutor at most 50% of the Today arm's input tokens.
+- Derek rates it the same or better on at least 80% of topics.
+- No claim in the scoped-Jev arm loses a frame it needed (each case Derek marks as needed counts against it).
 
 ## Budget (PROPOSED)
 
-- Claude (subscription, notional cost): about 12 interpretation calls for Raw (8-minute chunks over ~90 min) and about 25 for Jev (chunks at Jev closes), so about 40 in all, ceiling 60, plus up to 10 claim-check revisions.
-- Jev: about 600 calls for chunking and frames, plus the claim checks; ceiling 1,500.
+- Claude: Fable refining wording, 3 rounds, about 6 calls; tutor interpretation, about 30 calls per arm, ceiling 80 in all.
+- Jev: tasks 1 and 2 at about one call per kept frame and per earlier claim per chunk, boundary questions per window, tuning rounds included; ceiling 4,000.
 
 ## Open choices for Derek
 
 - The false-close tolerance as a product rule, in Derek's words (his note, 2026-11-05: "honestly probably fine. the user may choose to review on a topic change anyways"). Not written as a rule until he states it.
-- Whether to add other cheap Jev tasks to the Jev arm (for example: mark quiz or talking-head stretches as low value, flag recap passages) or keep this run to chunking and dedupe.
-- Sonnet 5.5 instead of Opus as the tutor in a later run (experiment 4 is that comparison).
-- Whether Fable should also refine the new tasks' wording on a tuning part of the new data before the run (as in experiment 6).
+- Whether the tutor should be Sonnet 5.5 in a later run (experiment 4 compares Sonnet and Opus).
 
 ## What it does not show
 
