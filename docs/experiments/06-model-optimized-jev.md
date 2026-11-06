@@ -4,7 +4,7 @@ Derek's question, 2026-11-04: the flow depends on Jev making the fast decisions 
 
 This experiment is outside the five approved in `docs/flows/after-class.md`. Derek approved it in chat on 2026-11-04 (cost is not a constraint in development; Opus and Fable both used). Every number below that he has not yet said yes to is marked `PROPOSED, needs Derek's OK before any call`.
 
-**Status, 2026-11-05.** Decisions 2 to 6 are adopted (above). Stages 1 to 5 are done on the 43-clip set: assembled (`assembled-2`), model labels (Opus and Fable, 62 Claude calls each), Derek verified and signed `labels-set-2-signed.json`, and the baseline is experiment 2's Run 2 (yes at 0.4, recall 2 of 5 on the held-out half, see `02-jev-lab.md`). Stage 6 (optimizer rounds) and stage 7 are not started; the build prerequisites below that they need are not built. No optimizer call has been made.
+**Status, 2026-11-05.** Decisions 2 to 6 are adopted (above). Stages 1 to 5 are done on the 43-clip set: assembled (`assembled-2`), model labels (Opus 62 Claude calls, Fable 63 with one retry), Derek verified and signed `labels-set-2-signed.json`, and the baseline is experiment 2's Run 2 (yes at 0.4, recall 2 of 5 on the held-out half, see `02-jev-lab.md`). Stage 6 (optimizer rounds) and stage 7 are not started; the build prerequisites below that they need are not built. No optimizer call has been made.
 
 ## Decisions for Derek
 
