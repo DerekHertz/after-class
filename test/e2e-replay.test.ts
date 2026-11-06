@@ -328,14 +328,14 @@ const ACTS: readonly { readonly act: unknown }[] = [
   { act: { kind: "resume" } }, //                                   1  asks Alpha (thread 1)
   { act: { kind: "hint_request" } }, //                             2  hint, BEFORE any answer (R12)
   { act: { kind: "answer", text: "It opens by naming the topic.", modality: "text" } }, //    3  follow-up
-  { act: { kind: "answer", text: "And it says why the topic matters.", modality: "text" } }, // 4  closes thread 1
-  { act: { kind: "resume" } }, //                                   5  asks Beta (thread 2)
-  { act: { kind: "skip" } }, //                                     6  closes thread 2 (R13)
-  { act: { kind: "resume" } }, //                                   7  asks Gamma (thread 3)
-  { act: { kind: "answer", text: "It ends with a new topic.", modality: "text" } }, //     8  follow-up
-  { act: { kind: "dispute", text: "I think the lecture did say that at the end." } }, //     9  answer_dispute, unsettled (R14)
-  { act: { kind: "wrap_up" } }, //                                  10 wrap_up
+  { act: { kind: "answer", text: "And it says why the topic matters.", modality: "text" } }, // 4  closes thread 1, then asks Beta (thread 2) in the same request
+  { act: { kind: "skip" } }, //                                     5  closes thread 2 (R13), then asks Gamma (thread 3) in the same request
+  { act: { kind: "answer", text: "It ends with a new topic.", modality: "text" } }, //     6  follow-up
+  { act: { kind: "dispute", text: "I think the lecture did say that at the end." } }, //     7  answer_dispute, unsettled (R14)
+  { act: { kind: "wrap_up" } }, //                                  8  wrap_up
 ];
+/** Two thread closings each go on to the next question in their own request, so the tutor speaks two more times than the learner. */
+const TUTOR_MOVES = ACTS.length + 2;
 const RESTART_AFTER_TURN = 4;
 
 type Product = {
@@ -393,7 +393,7 @@ async function runProduct(opts: { restartAfterTurn: number | null }): Promise<Pr
   for (const [n, { act }] of ACTS.entries()) {
     const reply = await send(post(`turn ${n + 1}`, `/reviews/${REVIEW}/turns`, { turnId: turnId(n + 1), act }));
     expect(reply.status).toBe(200);
-    expect(reply.events.map((e) => e.type).filter((t) => t !== "say_delta" && t !== "sentence")).toEqual(["learner_turn_stored", "move", "turn_complete"]);
+    expect(reply.events.map((e) => e.type).filter((t) => t !== "say_delta" && t !== "sentence")).toEqual(["learner_turn_stored", ...Array(n === 3 || n === 4 ? 2 : 1).fill("move"), "turn_complete"]);
     if (opts.restartAfterTurn === n + 1) {
       await stop(s);
       s = await bootOn(dataDir, configDir, fakes.tasks);
@@ -567,14 +567,14 @@ describe("REPLAY DATA (fake tasks, no live call): capture to saved record over H
     const calls = fakes.callCounts();
     const total = Object.values(calls).reduce((n, c) => n + c, 0);
     expect(Object.values(usage.byKind).reduce((n, k) => n + k.calls, 0)).toBe(total);
-    expect(usage.byPurpose.tutor_turn.calls).toBe(ACTS.length);
+    expect(usage.byPurpose.tutor_turn.calls).toBe(TUTOR_MOVES);
     expect(usage.byPurpose.wrap_up.calls).toBe(1);
     expect(usage.byPurpose.interpretation.calls).toBe(2);
 
     // fake-priced: Jev measured, tutor notional, the rest unknown
     expect(usage.byKind.measured.calls).toBe(calls.boundary! + calls.frameChange! + calls.checkClaim!);
     expect(usage.byKind.measured.usd).toBeCloseTo(0.001 * usage.byKind.measured.calls, 6);
-    expect(usage.byKind.notional).toEqual({ calls: ACTS.length, usd: expect.closeTo(0.04 * ACTS.length, 6) });
+    expect(usage.byKind.notional).toEqual({ calls: TUTOR_MOVES, usd: expect.closeTo(0.04 * TUTOR_MOVES, 6) });
     expect(usage.byKind.unknown.calls).toBe(calls.interpret! + calls.wrapUp! + calls.searchResources!);
     expect(usage.byKind.unknown.calls).toBeGreaterThan(0);
     // R17: "Every paid call records a usage event; unknown cost is stored as unknown, not zero."

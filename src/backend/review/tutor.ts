@@ -147,6 +147,16 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
 }
 
 /**
+ * Whether the learner has anything to answer after this move. A correction disclosure and a
+ * closed thread ("Let's leave that question there and move on.") ask nothing, so the turn
+ * goes on to the next move in the same request; every other move waits for the learner
+ * (a question, a tentative diagnosis, a detour offer) or ends the review (wrap_up).
+ */
+export function waitsForLearner(move: TutorMove): boolean {
+  return move.kind !== "disclose_correction" && move.kind !== "close_thread";
+}
+
+/**
  * Flow D's TLC fix for R3, "A claim being rechecked is out of assessment until
  * it passes again; an open question on it pauses and the tutor says why."
  * The open thread's claims that are not usable now; any means the thread is paused.

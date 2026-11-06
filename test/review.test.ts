@@ -14,11 +14,11 @@ import type {
 } from "../src/shared/domain";
 import { Material, interval } from "../src/shared/time";
 import type { Interval } from "../src/shared/time";
-import { createReviews } from "../src/backend/review";
+import { MAX_MOVES_PER_TURN, createReviews } from "../src/backend/review";
 import type { Reviews, TutorKit } from "../src/backend/review";
 import { corrections, foldInvites, freezeScope, takeSentences } from "../src/backend/review/core";
 import type { InviteEvent } from "../src/backend/review/core";
-import { nextThreadId } from "../src/backend/review/tutor";
+import { nextThreadId, waitsForLearner } from "../src/backend/review/tutor";
 import type { TutorInput, TutorOutput } from "../src/backend/review/tutor";
 import { createMemo } from "../src/backend/providers/memo";
 import type { Task } from "../src/backend/providers/memo";
@@ -192,6 +192,7 @@ const kit: TutorKit = {
 };
 
 const THREAD: ThreadId = stableId("thr", 1);
+const SECOND_THREAD: ThreadId = stableId("thr", 2);
 
 function askMain(...claimIds: ClaimId[]): TutorMove {
   return { kind: "ask_main", threadId: THREAD, claimIds: claimIds as [ClaimId, ...ClaimId[]] };
@@ -251,13 +252,14 @@ function started(r: StartResult) {
 }
 
 /** One finished chunk [0, 300) with one supported claim, a review started on it. */
-function startedRig(script: Script = () => reply(askMain(), ""), config = {}) {
+function startedRig(script: Script = () => reply(askMain(), ""), config = {}, withSecondClaim = false) {
   const r = rig(script, config);
   r.world.close(0, 0, 300);
   const claim = r.world.claim(1, 10, 20);
+  const claim2 = withSecondClaim ? r.world.claim(2, 30, 40) : null;
   const reviewId = randomId("rvw");
   const res = started(r.reviews.start(r.capture, "prepared_only", reviewId));
-  return { ...r, claim, reviewId, scope: res.scope };
+  return { ...r, claim, claim2, reviewId, scope: res.scope };
 }
 
 // ───────────────────────────── core: invite fold ─────────────────────────────
@@ -730,12 +732,16 @@ describe("R7 scope never grows (the TLC counterexample)", () => {
 describe("code-written disclose_correction when the model fails", () => {
   /** The real W8 rules (allowedMoves, validateMove), so the code move passes the same check a model move would. */
   function stuck(script: Script) {
-    const r = startedRig();
+    const r = startedRig(undefined, {}, true);
     const t = tutorHarness(r.db, script);
     const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { now: () => 1_000_000 });
     return { ...r, t, reviews };
   }
-  const useless: Script = () => reply({ kind: "wrap_up" }, "Bye.");
+  /** Invalid while a correction is pending (so code writes the disclosure); a valid question once it is not. */
+  const useless: Script = (input) =>
+    input.allowed.includes("ask_main")
+      ? reply({ kind: "ask_main", threadId: nextThreadId(input.state), claimIds: [input.claims[0]!.id] }, "A question.")
+      : reply({ kind: "wrap_up" }, "Bye.");
   const disclosures = (reviews: Reviews, reviewId: ReviewId) =>
     reviews.view(reviewId).turns.filter((t) => t.actor === "tutor" && t.move.kind === "disclose_correction");
 
@@ -744,13 +750,14 @@ describe("code-written disclose_correction when the model fails", () => {
     x.world.claims.get(x.claim)!.status = "unverified";
     const events = await collect(x.reviews.turn(x.reviewId, randomId("turn"), answer()));
 
-    expect(x.t.calls).toHaveLength(2);
+    expect(x.t.calls).toHaveLength(3);
     expect(x.t.calls[0]!.allowed).toEqual(["disclose_correction"]);
     const move = events.find((e) => e.type === "move");
     expect(move).toMatchObject({ move: { kind: "disclose_correction", threadIds: [], evidence: [] } });
     const said = events.filter((e) => e.type === "say_delta").map((e) => (e as { text: string }).text).join("");
     expect(said).toContain("claim 1");
     expect(said).toMatch(/no longer/);
+    expect(events.filter((e) => e.type === "move").map((e) => e.type === "move" && e.move.kind)).toEqual(["disclose_correction", "ask_main"]);
     expect(types(events).at(-1)).toBe("turn_complete");
     expect(x.reviews.view(x.reviewId).state.corrections).toMatchObject([{ claimId: x.claim, change: "withdrawn", disclosed: true }]);
   });
@@ -759,7 +766,8 @@ describe("code-written disclose_correction when the model fails", () => {
     let call = 0;
     const x = stuck((input) => {
       call++;
-      return call === 1 ? reply({ kind: "ask_main", threadId: nextThreadId(input.state), claimIds: [input.claims[0]!.id] }, "Question one.") : reply({ kind: "wrap_up" }, "Bye.");
+      if (call === 1) return reply({ kind: "ask_main", threadId: nextThreadId(input.state), claimIds: [input.claims[0]!.id] }, "Question one.");
+      return input.allowed.includes("ask_followup") ? reply({ kind: "ask_followup", threadId: input.state.openThread! }, "Say more.") : reply({ kind: "wrap_up" }, "Bye.");
     });
     await collect(x.reviews.turn(x.reviewId, randomId("turn"), answer("first")));
     x.world.claims.get(x.claim)!.text = "claim 1, reworded";
@@ -783,7 +791,7 @@ describe("code-written disclose_correction when the model fails", () => {
     const turnsBefore = x.reviews.view(x.reviewId).turns;
     const again = await collect(x.reviews.turn(x.reviewId, turnId, answer()));
 
-    expect(x.t.calls).toHaveLength(2);
+    expect(x.t.calls).toHaveLength(3);
     expect(x.reviews.view(x.reviewId).turns).toEqual(turnsBefore);
     expect(disclosures(x.reviews, x.reviewId)).toHaveLength(1);
     expect(again.filter((e) => e.type === "move")).toEqual(first.filter((e) => e.type === "move"));
@@ -801,11 +809,15 @@ describe("code-written disclose_correction when the model fails", () => {
   });
 
   test("when the model succeeds its own disclosure is used and code writes nothing", async () => {
-    const x = stuck((input) => reply({ kind: "disclose_correction", correctionId: input.state.corrections[0]!.id, threadIds: [], evidence: [] }, "Model words."));
+    const x = stuck((input) =>
+      input.allowed.includes("disclose_correction")
+        ? reply({ kind: "disclose_correction", correctionId: input.state.corrections.find((c) => !c.disclosed)!.id, threadIds: [], evidence: [] }, "Model words.")
+        : reply({ kind: "ask_main", threadId: nextThreadId(input.state), claimIds: [input.claims[0]!.id] }, "Then a question."),
+    );
     x.world.claims.get(x.claim)!.status = "unverified";
     const events = await collect(x.reviews.turn(x.reviewId, randomId("turn"), answer()));
-    expect(x.t.calls).toHaveLength(1);
-    expect(events.filter((e) => e.type === "say_delta").map((e) => (e as { text: string }).text).join("")).toBe("Model words.");
+    expect(x.t.calls).toHaveLength(2);
+    expect(events.filter((e) => e.type === "say_delta").map((e) => (e as { text: string }).text).join("")).toBe("Model words.Then a question.");
     expect(disclosures(x.reviews, x.reviewId)).toMatchObject([{ say: "Model words." }]);
   });
 });
@@ -845,12 +857,13 @@ describe("turn", () => {
       call++;
       if (call === 1) return reply(askMain(r.claim), "Question.");
       if (call === 2) return reply({ kind: "ask_followup", threadId: THREAD }, "Say more.");
-      return reply({ kind: "close_thread", threadId: THREAD }, "Good.");
+      if (call === 3) return reply({ kind: "close_thread", threadId: THREAD }, "Good.");
+      return reply({ kind: "ask_main", threadId: SECOND_THREAD, claimIds: [r.claim] }, "Next question.");
     });
     const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit });
     for (let i = 0; i < 4; i++) await collect(reviews.turn(r.reviewId, randomId("turn"), answer(String(i))));
     const learners = reviews.view(r.reviewId).turns.filter((x) => x.actor === "learner");
-    expect(learners.map((x) => x.threadId)).toEqual([null, THREAD, THREAD, null]);
+    expect(learners.map((x) => x.threadId)).toEqual([null, THREAD, THREAD, SECOND_THREAD]);
   });
 
   test("the learner turn is committed before the model is called", async () => {
@@ -934,8 +947,9 @@ describe("turn", () => {
   });
 
   test("R3: a claim that loses its check while the model talks is neither stored nor sent as the move; the repair sees the change", async () => {
-    const r = startedRig();
+    const r = startedRig(undefined, {}, true);
     const t = tutorHarness(r.db, (input) => {
+      if (input.state.corrections.length > 0 && input.state.corrections.every((c) => c.disclosed)) return reply(askMain(r.claim2!), "Tell me about claim two.");
       if (input.repairNote === null) {
         r.world.check(r.claim, "unverified");
         return reply(askMain(r.claim), "Tell me about claim one.");
@@ -948,11 +962,11 @@ describe("turn", () => {
     const namesClaim = (move: TutorMove) => move.kind === "ask_main" && move.claimIds.includes(r.claim);
     expect(events.filter((e) => e.type === "move" && namesClaim(e.move))).toEqual([]);
     expect(reviews.view(r.reviewId).turns.filter((x) => x.actor === "tutor" && namesClaim(x.move))).toEqual([]);
-    expect(t.calls).toHaveLength(2);
+    expect(t.calls).toHaveLength(3);
     expect(t.calls[1]!.repairNote).not.toBeNull();
     expect(t.calls[1]!.claims.map((c) => c.id)).not.toContain(r.claim);
     expect(t.calls[1]!.allowed).toEqual(["disclose_correction"]);
-    expect(events.filter((e) => e.type === "move")).toMatchObject([{ move: { kind: "disclose_correction" } }]);
+    expect(events.filter((e) => e.type === "move")).toMatchObject([{ move: { kind: "disclose_correction" } }, { move: { kind: "ask_main" } }]);
     expect(types(events).at(-1)).toBe("turn_complete");
   });
 
@@ -1161,5 +1175,97 @@ describe("which earlier reviews use up material", () => {
     r.clock.advance(1000);
     const second = started(r.reviews.start(r.capture, "prepared_only", randomId("rvw")));
     expect(r.reviews.list(r.capture).map((x) => x.reviewId)).toEqual([second.reviewId, r.reviewId]);
+  });
+});
+
+// ───────────────────────────── a turn never ends with nothing to answer ─────────────────────────────
+
+describe("a request goes on until a move waits for the learner", () => {
+  const moveKinds = (events: readonly TurnEvent[]) => events.flatMap((e) => (e.type === "move" ? [e.move.kind] : []));
+  const begin: LearnerAct = { kind: "begin" };
+
+  /** Pending corrections are disclosed one per call; once none is pending the tutor asks. */
+  function chaining() {
+    const r = startedRig(undefined, {}, true);
+    const t = tutorHarness(r.db, (input) => {
+      const pending = input.state.corrections.find((c) => !c.disclosed);
+      if (pending) return reply({ kind: "disclose_correction", correctionId: pending.id, threadIds: [], evidence: [] }, "A correction.");
+      return reply({ kind: "ask_main", threadId: nextThreadId(input.state), claimIds: [input.claims[0]?.id ?? r.claim] }, "A question.");
+    });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit });
+    return { ...r, t, reviews };
+  }
+
+  test("begin with pending corrections: every correction is disclosed, then a question, in the one request", async () => {
+    const x = chaining();
+    x.world.check(x.claim, "unverified");
+    x.world.claims.get(x.claim2!)!.text = "claim 2, reworded";
+    const events = await collect(x.reviews.turn(x.reviewId, randomId("turn"), begin));
+    expect(moveKinds(events)).toEqual(["disclose_correction", "disclose_correction", "ask_main"]);
+    expect(types(events).filter((t) => t === "turn_complete")).toHaveLength(1);
+    expect(types(events).at(-1)).toBe("turn_complete");
+    const tutors = x.reviews.view(x.reviewId).turns.filter((t) => t.actor === "tutor");
+    expect(tutors.map((t) => t.actor === "tutor" && t.move.kind)).toEqual(["disclose_correction", "disclose_correction", "ask_main"]);
+    expect(x.reviews.view(x.reviewId).state.openThread).not.toBeNull();
+  });
+
+  test("a correction on a claim already asked about is disclosed, then the next move follows", async () => {
+    const x = chaining();
+    await collect(x.reviews.turn(x.reviewId, randomId("turn"), begin));
+    x.world.claims.get(x.claim)!.text = "claim 1, reworded";
+    const events = await collect(x.reviews.turn(x.reviewId, randomId("turn"), answer()));
+    expect(moveKinds(events)[0]).toBe("disclose_correction");
+    expect(moveKinds(events).length).toBeGreaterThan(1);
+  });
+
+  test("a thread that is closed goes on to the next move", async () => {
+    const r = startedRig();
+    let call = 0;
+    const t = tutorHarness(r.db, () => {
+      call++;
+      if (call === 1) return reply(askMain(r.claim), "Question.");
+      if (call === 2) return reply({ kind: "close_thread", threadId: THREAD }, "Moving on.");
+      return reply({ kind: "wrap_up" }, "Bye.");
+    });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit });
+    await collect(reviews.turn(r.reviewId, randomId("turn"), answer()));
+    const events = await collect(reviews.turn(r.reviewId, randomId("turn"), answer()));
+    expect(moveKinds(events)).toEqual(["close_thread", "wrap_up"]);
+  });
+
+  test("a move that waits for the learner ends the request", async () => {
+    const x = chaining();
+    const events = await collect(x.reviews.turn(x.reviewId, randomId("turn"), begin));
+    expect(moveKinds(events)).toEqual(["ask_main"]);
+    expect(x.t.calls).toHaveLength(1);
+  });
+
+  test("the cap: a tutor that only ever discloses stops at the maximum, never loops", async () => {
+    const r = startedRig();
+    const t = tutorHarness(r.db, () => reply({ kind: "disclose_correction", correctionId: "c", threadIds: [], evidence: [] }, "Again."));
+    const always: TutorKit = { ...kit, allowedMoves: () => new Set<TutorMoveKind>(["disclose_correction"]) };
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: always });
+    const events = await collect(reviews.turn(r.reviewId, randomId("turn"), answer()));
+    expect(moveKinds(events)).toHaveLength(MAX_MOVES_PER_TURN);
+    expect(types(events).at(-1)).toBe("turn_complete");
+    expect(reviews.view(r.reviewId).turns.filter((x) => x.actor === "tutor")).toHaveLength(MAX_MOVES_PER_TURN);
+  });
+
+  test("a retried request replays every stored move", async () => {
+    const x = chaining();
+    x.world.check(x.claim, "unverified");
+    const turnId = randomId("turn");
+    const first = await collect(x.reviews.turn(x.reviewId, turnId, begin));
+    const again = await collect(x.reviews.turn(x.reviewId, turnId, begin));
+    expect(moveKinds(again)).toEqual(moveKinds(first));
+    expect(x.t.calls).toHaveLength(2);
+  });
+
+  test("waitsForLearner: only a disclosure or a closed thread lets the turn go on", () => {
+    expect(waitsForLearner({ kind: "disclose_correction", correctionId: "c", threadIds: [], evidence: [] })).toBe(false);
+    expect(waitsForLearner({ kind: "close_thread", threadId: THREAD })).toBe(false);
+    for (const move of [askMain(), { kind: "ask_followup", threadId: THREAD }, { kind: "wrap_up" }, { kind: "hint", threadId: THREAD }] as TutorMove[]) {
+      expect(waitsForLearner(move)).toBe(true);
+    }
   });
 });
