@@ -12,9 +12,9 @@ import type { BoundaryWindow, ChunkProvenance, Verdict } from "../src/shared/dom
 import type { CaptureId, EvidenceId, WindowId } from "../src/shared/ids";
 import { Material } from "../src/shared/time";
 import { THRESHOLDS } from "../src/backend/providers/jev-tasks";
-import type { SegmentationConfig } from "../src/backend/segmentation";
+import type { RoutingOptions, SegmentationConfig } from "../src/backend/segmentation";
 import { planChunks } from "../src/backend/segmentation";
-import type { ArmQuestions } from "./jev-lab-arm";
+import type { ArmQuestions, Exp7Questions } from "./jev-lab-arm";
 
 export type Origin = "fixture" | "live";
 export type Phase = "tune" | "score";
@@ -466,7 +466,7 @@ export type JudgmentRecord = {
   readonly lectureId: string;
   /** The clip the window or frame belongs to (Amendment 1). */
   readonly videoId?: string;
-  readonly purpose: "boundary" | "frame_change";
+  readonly purpose: "boundary" | "frame_change" | "frame_relevance";
   readonly subject: string;
   readonly key: string;
   readonly model: string;
@@ -487,6 +487,9 @@ export type ArmInfo = {
   readonly selectionReason?: string;
 };
 
+/** Experiment 7 only: wordings of the six questions and the opt-in routing. Absent from every experiment 2 and 6 header. */
+export type Exp7Info = { readonly questions: Exp7Questions; readonly lessonFramingCloses: true };
+
 export type RunHeader = ArmInfo & {
   readonly t: "header";
   readonly version: 1;
@@ -497,6 +500,7 @@ export type RunHeader = ArmInfo & {
   readonly model: string;
   readonly config: SegmentationConfig;
   readonly thresholds: Thresholds;
+  readonly exp7?: Exp7Info;
 };
 export type RunEnd = { readonly t: "end"; readonly newCalls: number; readonly judgments: number };
 
@@ -556,6 +560,7 @@ export function detectBoundaries(
   thresholds: Thresholds,
   cfg: SegmentationConfig,
   stopped: boolean,
+  routing?: RoutingOptions,
 ): readonly Detection[] {
   const ordered = [...windows].sort((a, b) => a.ordinal - b.ordinal);
   const real = ordered.map(windowOf);
@@ -567,10 +572,14 @@ export function detectBoundaries(
       if (j.error !== null) return "failed";
       const pNewConcept = j.p.new_concept ?? null;
       const pStoppingPoint = j.p.stopping_point ?? null;
-      return { windowId: w.id, newConcept: verdictAt(pNewConcept, thresholds), stoppingPoint: verdictAt(pStoppingPoint, thresholds), pNewConcept, pStoppingPoint, questionVersion: "lab" };
+      const base = { windowId: w.id, newConcept: verdictAt(pNewConcept, thresholds), stoppingPoint: verdictAt(pStoppingPoint, thresholds), pNewConcept, pStoppingPoint, questionVersion: "lab" };
+      if (routing?.lessonFramingCloses !== true) return base;
+      const pLessonFraming = j.p.lesson_framing ?? null;
+      return { ...base, lessonFraming: verdictAt(pLessonFraming, thresholds), pLessonFraming };
     },
     stopped,
     cfg,
+    routing,
   );
   const out: Detection[] = [];
   for (const chunk of plan.closed) {
@@ -688,6 +697,9 @@ type LectureScore = {
  */
 export const isInFirstWindow = (label: Place, first: { readonly videoId: string; readonly endS: number } | undefined): boolean => first !== undefined && label.videoId === first.videoId && label.mediaS < first.endS;
 
+/** The opt-in experiment 7 routing, from a run's header; undefined for every other run, which keeps flow B's table. */
+export const routingOf = (h: RunHeader): RoutingOptions | undefined => (h.exp7?.lessonFramingCloses === true ? { lessonFramingCloses: true } : undefined);
+
 function scoreLecture(lecture: LectureRecord, labels: AnyLabelFile, results: ParsedResults): LectureScore {
   const view = viewOf(labels);
   const clips = clipsOf(lecture);
@@ -700,7 +712,7 @@ function scoreLecture(lecture: LectureRecord, labels: AnyLabelFile, results: Par
   const windowVideo = new Map(lecture.windows.map((w) => [w.id, w.videoId ?? clips[0]!.videoId] as const));
   const judged = new Map(results.judgments.filter((j) => j.lectureId === lecture.lectureId).map((j) => [`${j.purpose}:${j.subject}`, { p: j.p, error: j.error }] as const));
 
-  const detections = detectBoundaries(lecture.windows, (id) => judged.get(`boundary:${id}`), results.header.thresholds, results.header.config, lecture.captureStopped)
+  const detections = detectBoundaries(lecture.windows, (id) => judged.get(`boundary:${id}`), results.header.thresholds, results.header.config, lecture.captureStopped, routingOf(results.header))
     .map((d) => ({ ...d, videoId: windowVideo.get(d.windowId)! }))
     .filter((d) => inHalf({ videoId: d.videoId, mediaS: d.timeS }));
   const allLabeled = view.boundaries.map((b): Place => ({ videoId: b.videoId, mediaS: b.mediaS })).filter(inHalf);
@@ -745,6 +757,11 @@ function usageLines(results: ParsedResults): string[] {
     `  boundary ${ms(calls.filter((c) => c.purpose === "boundary").map((c) => c.durationMs))}`,
     `  frame change ${ms(calls.filter((c) => c.purpose === "frame_change").map((c) => c.durationMs))}`,
   ];
+  if (results.header.exp7 !== undefined) {
+    const rel = calls.filter((c) => c.purpose === "frame_relevance");
+    lines.splice(2, 0, `  experiment 7: frame relevance calls ${rel.length} (included in the call total above)`);
+    lines.push(`  frame relevance ${ms(rel.map((c) => c.durationMs))}`);
+  }
   return lines;
 }
 

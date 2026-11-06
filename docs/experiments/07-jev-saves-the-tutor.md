@@ -47,6 +47,7 @@ Frame dedupe and the claim check stay as they are.
 
 - Claude: Fable refining wording, 3 rounds, about 6 calls; tutor interpretation, about 30 calls per arm, ceiling 80 in all, counted in experiment 7's own ledger (experiment 6's ledger, capped at 250, has 67 left and is not used).
 - Jev: tasks 1 and 2 at about one call per kept frame and per earlier claim per chunk, boundary questions per window, tuning rounds included; ceiling 4,000.
+- Experiment 7 calls are separated from product calls by memo version, not by purpose (the database only allows the existing purposes); count them by version or use a separate database.
 
 ## Build prerequisites (item 1 built)
 
@@ -60,7 +61,7 @@ Frame dedupe and the claim check stay as they are.
     - Frame relevance: "Do the captions in state.captions refer to what state.frame shows, so that someone reading only the captions would need to see the frame? Answer no if the captions never mention or point to anything visible in the frame, or if the frame only repeats what the captions already say in full."
     - Claim relevance: "Does state.claim relate to the material in state.passages, so that a tutor preparing that material would need the claim to avoid restating it or to supersede it? Answer no if the claim is about a different topic than state.passages."
     - Lesson framing: "Is state.passage the introduction of a lesson (for example a greeting, an announcement of what the lesson covers, or a statement of its goals), or does state.context end with the conclusion or summary of a lesson (for example a recap, a closing remark, or a statement that the lesson is over)? Answer no if both are ordinary lesson content."
-- Fable wording refinement for these questions on clips 1 to 22 (extending the experiment 6 optimizer and its held-out guard).
+- BUILT (item 2, as a draft; no call made): Fable wording refinement for these questions on clips 1 to 22 (extending the experiment 6 optimizer and its held-out guard). `jev-lab-optimize.ts propose --exp7` builds the prompt from a draft template (`docs/experiments/exp7-optimizer-prompt.md`, not approved; dry run only, a live run needs an approved copy with a matching SHA), `jev-lab.ts run --exp7` runs the six wordings with the lesson-framing routing and frame relevance over kept frames, and the Claude ceiling (80, its own ledger under `<lab>/exp7`) and Jev ceiling (4,000 across `<lab>/exp7/*`) are enforced in code. Evidence the lab cannot yet produce is shown as "not measured yet" in the prompt: no Jev call has asked the new questions, and the lab holds no claims.
 - An interpretation runner that prepares the same chunks in both arms with the product's `interpretTask`, records tokens (images and text separately), frames and claims sent, calls and time, with Claude-call rails (ceiling 80) and Jev rails (ceiling 4,000).
 - A blind side-by-side rating sheet for Derek, topic by topic, listing every claim whose frame task 1 removed.
 

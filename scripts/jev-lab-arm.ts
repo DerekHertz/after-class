@@ -9,7 +9,7 @@
  * This module has no file or network access and imports nothing from jev-lab.ts (which imports it).
  */
 import { QUESTIONS } from "../src/backend/providers/jev-tasks";
-import type { BoundaryQuestions, FrameChangeQuestions } from "../src/backend/providers/jev-tasks";
+import type { BoundaryQuestions, ClaimRelevanceQuestions, FrameChangeQuestions, FrameRelevanceQuestions, LessonFramingQuestions } from "../src/backend/providers/jev-tasks";
 import type { SegmentationConfig } from "../src/backend/segmentation";
 import type { Report, Thresholds } from "./jev-lab-score";
 
@@ -121,6 +121,87 @@ export function armConfigFromBaseline(lastTune: { readonly config: SegmentationC
     thresholds: { yesAtOrAbove: lastTune.thresholds.yesAtOrAbove, noAtOrBelow: lastTune.thresholds.noAtOrBelow },
     segmentation: { windowNewS: c.windowNewS, contextS: c.contextS, timeCapS: c.timeCapS, maxFramesPerWindow: c.maxFramesPerWindow, reviseOnNextNoNo: c.reviseOnNextNoNo },
   };
+}
+
+// ───────────────────────────── experiment 7 arm config (docs/experiments/07-jev-saves-the-tutor.md) ─────────────────────────────
+// A separate kind, so experiment 6's config shape and `validateArmConfig` above stay exactly as they were.
+
+export const ARM7_KIND = "jev-arm-config-exp7";
+
+/** The three experiment 6 wordings plus the three new questions (frame relevance, claim relevance, lesson framing). */
+export type Exp7Questions = ArmQuestions & { readonly frameRelevance: string; readonly claimRelevance: string; readonly lessonFraming: string };
+
+export type Exp7ArmConfig = {
+  readonly schemaVersion: 1;
+  readonly kind: typeof ARM7_KIND;
+  readonly questions: Exp7Questions;
+  readonly thresholds: Thresholds;
+  readonly segmentation: SegmentationConfig;
+};
+
+/** The draft wordings of `QUESTIONS` (neutral first drafts by the builder, not approved as product wording). */
+export const DRAFT_EXP7_QUESTIONS = {
+  frameRelevance: QUESTIONS.frameRelevance.refersToFrame,
+  claimRelevance: QUESTIONS.claimRelevance.related,
+  lessonFraming: QUESTIONS.lessonFraming.framing,
+} as const;
+
+export const exp7FrameRelevanceOf = (q: Exp7Questions): FrameRelevanceQuestions => ({ refersToFrame: q.frameRelevance });
+export const exp7ClaimRelevanceOf = (q: Exp7Questions): ClaimRelevanceQuestions => ({ related: q.claimRelevance });
+export const exp7LessonFramingOf = (q: Exp7Questions): LessonFramingQuestions => ({ framing: q.lessonFraming });
+
+const EXP7_TOP_KEYS = ["schemaVersion", "kind", "questions", "thresholds", "segmentation"] as const;
+const EXP7_QUESTION_KEYS = ["newConcept", "stoppingPoint", "teachingChange", "frameRelevance", "claimRelevance", "lessonFraming"] as const;
+
+/**
+ * As `validateArmConfig`, for the six wordings. Exactly these keys (an unknown key is refused), each wording a non-empty
+ * string of at most MAX_WORDING_CHARS; thresholds and segmentation are checked by the same predicates.
+ */
+export function validateExp7ArmConfig(x: unknown): { readonly ok: true; readonly config: Exp7ArmConfig } | { readonly ok: false; readonly errors: readonly string[] } {
+  if (!isObject(x)) return { ok: false, errors: ["an experiment 7 arm config must be a JSON object"] };
+  const errors: string[] = [];
+  const exact = (where: string, o: Record<string, unknown>, keys: readonly string[]) => {
+    for (const k of Object.keys(o)) if (!keys.includes(k)) errors.push(`${where}${k} is not allowed: an experiment 7 optimizer may change only the six question wordings, the thresholds and the segmentation`);
+    for (const k of keys) if (!(k in o)) errors.push(`${where}${k} is missing`);
+  };
+  exact("", x, EXP7_TOP_KEYS);
+  if (x.schemaVersion !== 1) errors.push("schemaVersion must be 1");
+  if (x.kind !== ARM7_KIND) errors.push(`kind must be "${ARM7_KIND}"`);
+  const q = x.questions;
+  if (!isObject(q)) errors.push("questions must be an object");
+  else {
+    exact("questions.", q, EXP7_QUESTION_KEYS);
+    for (const k of EXP7_QUESTION_KEYS) {
+      const v = q[k];
+      if (k in q && (typeof v !== "string" || v.trim() === "")) errors.push(`questions.${k} must be a non-empty string`);
+      else if (typeof v === "string" && v.length > MAX_WORDING_CHARS) errors.push(`questions.${k} is ${v.length} characters; at most ${MAX_WORDING_CHARS}`);
+    }
+  }
+  // thresholds and segmentation: validated by the experiment 6 validator over a body that is otherwise valid
+  const shell = validateArmConfig({
+    schemaVersion: 1, kind: ARM_KIND, questions: { newConcept: "x", stoppingPoint: "x", teachingChange: "x" }, thresholds: x.thresholds, segmentation: x.segmentation,
+  });
+  if (!shell.ok) for (const e of shell.errors) errors.push(e);
+  if (errors.length > 0) return { ok: false, errors };
+  const qs = q as Record<string, string>;
+  const base = (shell as { readonly ok: true; readonly config: ArmConfig }).config;
+  return {
+    ok: true,
+    config: {
+      schemaVersion: 1, kind: ARM7_KIND,
+      questions: {
+        newConcept: qs.newConcept!, stoppingPoint: qs.stoppingPoint!, teachingChange: qs.teachingChange!,
+        frameRelevance: qs.frameRelevance!, claimRelevance: qs.claimRelevance!, lessonFraming: qs.lessonFraming!,
+      },
+      thresholds: base.thresholds,
+      segmentation: base.segmentation,
+    },
+  };
+}
+
+/** Round 1's start: an experiment 6 arm config's wording, thresholds and segmentation, with the draft wording of the three new questions. */
+export function exp7ConfigFromArm(c: ArmConfig): Exp7ArmConfig {
+  return { schemaVersion: 1, kind: ARM7_KIND, questions: { ...c.questions, ...DRAFT_EXP7_QUESTIONS }, thresholds: { ...c.thresholds }, segmentation: { ...c.segmentation } };
 }
 
 // ───────────────────────────── round selection (decision 5) ─────────────────────────────

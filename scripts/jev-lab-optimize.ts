@@ -11,6 +11,8 @@
  *       [--previous <proposal dir> ...]      (rounds 2 and 3: the earlier rounds' output dirs, in round order)
  *       [--heldout-report <score-1.report.txt>]   (required with --live-claude: its lines are scanned for in every prompt)
  *       [--dry-run]                          (build the real prompt, run the guard, write prompt.txt; no call, no ledger)
+ *       [--exp7 [--approved-template <file>]]  (experiment 7: the six wordings; the draft template is dry-run only, a live run needs an
+ *                                              approved copy with the matching SHA, --out under <lab>/exp7, Claude ceiling 80 in <lab>/exp7)
  *       [--live-claude --max-claude-calls N --claude-ledger <dir>]   (--claude-ledger is required live and must be the parent of --out)
  *
  * Claude is reached only through `jev-lab-propose`'s rails (the product's createClaudeCli, the same flags and env
@@ -25,8 +27,9 @@ import type { ClaudeCli, SpawnFn } from "../src/backend/providers/claude";
 import type { Passage } from "../src/shared/domain";
 import type { EvidenceId } from "../src/shared/ids";
 import { lectureWork, loadLabels, openCapture, readState, reportFromFile } from "./jev-lab";
-import { ARM_KIND, ARM_NAME, PRODUCT_QUESTIONS, armConfigFromBaseline, validateArmConfig } from "./jev-lab-arm";
-import type { ArmConfig } from "./jev-lab-arm";
+import { ARM7_KIND, ARM_KIND, ARM_NAME, PRODUCT_QUESTIONS, armConfigFromBaseline, exp7ConfigFromArm, validateArmConfig, validateExp7ArmConfig } from "./jev-lab-arm";
+import type { ArmConfig, Exp7ArmConfig } from "./jev-lab-arm";
+import { routeWithFraming } from "../src/backend/segmentation/core";
 import { PROPOSED_MODELS, ProposeRefusal, attemptCall, checkCommon, openSession, parseMaxClaudeCalls, readClips, refuse, writeMeta } from "./jev-lab-propose";
 import type { ClipEvidence } from "./jev-lab-propose";
 import {
@@ -43,6 +46,18 @@ export const TEMPLATE_BEGIN = "<!-- BEGIN APPROVED TEMPLATE -->\n";
 export const TEMPLATE_END = "<!-- END APPROVED TEMPLATE -->";
 /** SHA-256 of the template text Derek approved on 2026-11-05 (the text between the markers, final newline included). */
 export const APPROVED_TEMPLATE_SHA256 = "a10cf915d4b789951c10174e19f58574830e8fb85c747ffd142142e31ca81492";
+/**
+ * Experiment 7 (docs/experiments/07-jev-saves-the-tutor.md, prerequisite 2). The template there is a DRAFT: dry runs fill it,
+ * a live run is refused unless `--approved-template <file>` holds a copy of its text, between the APPROVED markers, whose
+ * SHA-256 is APPROVED_EXP7_TEMPLATE_SHA256. That constant is null until Derek approves a text; then a change records its SHA.
+ */
+export const TEMPLATE7_DOC = "docs/experiments/exp7-optimizer-prompt.md";
+export const TEMPLATE7_DRAFT_BEGIN = "<!-- BEGIN DRAFT TEMPLATE -->\n";
+export const TEMPLATE7_DRAFT_END = "<!-- END DRAFT TEMPLATE -->";
+export const APPROVED_EXP7_TEMPLATE_SHA256: string | null = null;
+/** Experiment 7's Claude ceiling (Budget: wording rounds and tutor interpretation, 80 in all), counted in its own ledger, never in data/lab/propose. */
+export const EXP7_BUDGET_CLAUDE_CALLS = 80;
+export const DRAFT_BANNER = "DRAFT — not approved by Derek; no live call may use it until an approved copy with matching SHA exists.";
 export const OPTIMIZE_SYSTEM = "You tune a yes/no model's configuration for a study tool. You answer with one JSON object and nothing else.";
 
 const repoRoot = resolve(import.meta.dir, "..");
@@ -57,6 +72,30 @@ export function loadTemplate(root = repoRoot): string {
   const text = doc.slice(a + TEMPLATE_BEGIN.length, b);
   if (sha256(text) !== APPROVED_TEMPLATE_SHA256) refuse(`the template in ${TEMPLATE_DOC} is not the text Derek approved on 2026-11-05 (sha256 ${sha256(text)}); a changed template needs his new approval`);
   return text;
+}
+
+/**
+ * The experiment 7 template. Dry runs (and offline scripted runs) may use the draft in the doc. A live run needs an approved
+ * copy, `approvedPath`, whose text between the APPROVED markers hashes to APPROVED_EXP7_TEMPLATE_SHA256; an approved copy
+ * given to any run must match too. Returns the text and whether it is the approved one.
+ */
+export function loadTemplate7(root: string, opts: { readonly live: boolean; readonly approvedPath?: string }): { readonly text: string; readonly approved: boolean } {
+  if (opts.approvedPath !== undefined) {
+    const doc = readFileSync(resolve(opts.approvedPath), "utf8");
+    const a = doc.indexOf(TEMPLATE_BEGIN);
+    const b = doc.indexOf(TEMPLATE_END);
+    if (a < 0 || b < a) return refuse(`${opts.approvedPath} has no BEGIN/END APPROVED TEMPLATE markers`);
+    const text = doc.slice(a + TEMPLATE_BEGIN.length, b);
+    if (APPROVED_EXP7_TEMPLATE_SHA256 === null) refuse("no experiment 7 optimizer template is approved yet (APPROVED_EXP7_TEMPLATE_SHA256 is not set); a changed or new template needs Derek's approval");
+    if (sha256(text) !== APPROVED_EXP7_TEMPLATE_SHA256) refuse(`${opts.approvedPath} is not the experiment 7 template Derek approved (sha256 ${sha256(text)}); a changed template needs his new approval`);
+    return { text, approved: true };
+  }
+  if (opts.live) refuse("a live experiment 7 run needs --approved-template <file>: the draft template in " + TEMPLATE7_DOC + " is not approved by Derek, and no live call may use it");
+  const doc = readFileSync(join(root, TEMPLATE7_DOC), "utf8");
+  const a = doc.indexOf(TEMPLATE7_DRAFT_BEGIN);
+  const b = doc.indexOf(TEMPLATE7_DRAFT_END);
+  if (a < 0 || b < a) return refuse(`${TEMPLATE7_DOC} has no BEGIN/END DRAFT TEMPLATE markers`);
+  return { text: doc.slice(a + TEMPLATE7_DRAFT_BEGIN.length, b), approved: false };
 }
 
 /** `## B. Preprocessing during viewing`: its code block and its routing table, copied from the flow doc, never retyped. */
@@ -157,11 +196,11 @@ export function scanForHeldOut(prompt: string, h: HeldOut, allow: GuardAllow): r
 
 // ───────────────────────────── inputs: tune results, labels, rounds ─────────────────────────────
 
-const canon = (c: ArmConfig) => JSON.stringify({ q: c.questions, t: c.thresholds, s: c.segmentation });
+const canon = (c: ArmConfig | Exp7ArmConfig) => JSON.stringify({ q: c.questions, t: c.thresholds, s: c.segmentation });
 const isRec = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 
 type Loaded = { readonly path: string; readonly results: ParsedResults; readonly report: Report };
-export type PreviousRound = { readonly round: number; readonly rationale: string; readonly config: ArmConfig; readonly report: Report };
+export type PreviousRound = { readonly round: number; readonly rationale: string; readonly config: ArmConfig | Exp7ArmConfig; readonly report: Report };
 
 export type OptimizeInputs = {
   readonly dataDir: string;
@@ -172,12 +211,17 @@ export type OptimizeInputs = {
   readonly baselineStatePath?: string;
   readonly previousDirs: readonly string[];
   readonly heldOutReportPath?: string;
+  /** Experiment 7 mode: the six wordings, the exp7 template and ledger. Off (default): experiment 6, unchanged. */
+  readonly exp7?: boolean;
+  /** Experiment 7: a copy of the approved template (see loadTemplate7). Needed for a live run. */
+  readonly approvedTemplatePath?: string;
 };
 
 export type RoundContext = {
   readonly round: number;
   readonly origin: Origin;
-  readonly config: ArmConfig;
+  readonly config: ArmConfig | Exp7ArmConfig;
+  readonly exp7?: true;
   readonly current: Loaded;
   readonly previous: readonly PreviousRound[];
   readonly info: LabelInfo;
@@ -188,8 +232,8 @@ const headerConfig = (r: ParsedResults): ArmConfig => ({
   segmentation: r.header.config,
 });
 
-/** Works out which round this is and what the current configuration and its first-half report are, refusing every inconsistent combination. */
-export function resolveRound(inp: OptimizeInputs, info: LabelInfo): RoundContext {
+/** The tune results named by --from-results, read and checked the same way for experiment 6 and 7. */
+function loadTuneRuns(inp: OptimizeInputs, info: LabelInfo): { readonly loaded: Loaded[]; readonly origin: Origin } {
   if (!ARM_NAME.test(inp.arm)) refuse(`--arm must be letters, digits and dashes, got "${inp.arm}"`);
   if (inp.fromResults.length === 0) refuse("propose needs at least one --from-results <tune results.jsonl>");
   if (info.labels.status !== "signed_off") refuse(`${info.file} is not signed off; the optimizer only sees Derek's signed labels`);
@@ -209,6 +253,13 @@ export function resolveRound(inp: OptimizeInputs, info: LabelInfo): RoundContext
   const origin = origins[0]!;
   if (loaded.some((l) => l.results.lectures.length !== 1 || l.results.lectures[0]!.lectureId !== lectureIdOfLabels(info.labels))) refuse("a tune results file does not hold exactly the lecture of --labels");
   if (loaded.some((l) => l.results.lectures[0]!.half !== "first")) refuse("a tune results file holds a half other than the first");
+  return { loaded, origin };
+}
+
+/** Works out which round this is and what the current configuration and its first-half report are, refusing every inconsistent combination. */
+export function resolveRound(inp: OptimizeInputs, info: LabelInfo): RoundContext {
+  if (inp.exp7 === true) return resolveRound7(inp, info);
+  const { loaded, origin } = loadTuneRuns(inp, info);
 
   const armRuns = loaded.filter((l) => l.results.header.arm === inp.arm).sort((a, b) => a.results.header.round - b.results.header.round);
   const baseline = loaded.filter((l) => l.results.header.arm === undefined);
@@ -260,6 +311,57 @@ export function resolveRound(inp: OptimizeInputs, info: LabelInfo): RoundContext
   return { round, origin, config: last.config, current: armRuns[armRuns.length - 1]!, previous, info };
 }
 
+const headerConfig7 = (r: ParsedResults): Exp7ArmConfig => ({ schemaVersion: 1, kind: ARM7_KIND, questions: r.header.exp7!.questions, thresholds: r.header.thresholds, segmentation: r.header.config });
+
+/**
+ * Experiment 7 rounds. Round 1 takes exactly one --from-results: an experiment 2 or 6 tune run (no experiment 7 wordings);
+ * its wording, thresholds and segmentation are the start, with the draft wording of the three new questions. Rounds 2 and 3
+ * take this arm's own experiment 7 tune runs in <lab>/exp7/<arm>/<origin> and the earlier proposal dirs, as for experiment 6.
+ */
+function resolveRound7(inp: OptimizeInputs, info: LabelInfo): RoundContext {
+  const { loaded, origin } = loadTuneRuns(inp, info);
+  const armRuns = loaded.filter((l) => l.results.header.exp7 !== undefined).sort((a, b) => a.results.header.round - b.results.header.round);
+  const baseline = loaded.filter((l) => l.results.header.exp7 === undefined);
+  const wrongArm = armRuns.find((l) => l.results.header.arm !== inp.arm);
+  if (wrongArm !== undefined) refuse(`--from-results has an experiment 7 run of arm "${String(wrongArm.results.header.arm)}", not of --arm ${inp.arm}`);
+
+  const runsDir = join(resolve(inp.labDir), "exp7", inp.arm, origin);
+  const onDisk = existsSync(join(runsDir, "runs")) ? readdirSync(join(runsDir, "runs")).filter((f) => /^tune-\d+\.jsonl$/.test(f)).length : 0;
+  if (existsSync(join(runsDir, "runs", "score-1.jsonl"))) refuse(`experiment 7 arm ${inp.arm} was already scored on the held-out half; nothing is proposed after that`);
+  const scoreState = existsSync(join(runsDir, "state.json")) ? readState(runsDir).scoreStatus : "none";
+  if (scoreState !== "none") refuse(`experiment 7 arm ${inp.arm}'s held-out scoring is ${scoreState}; nothing is proposed after that`);
+  if (onDisk !== armRuns.length) refuse(`experiment 7 arm ${inp.arm} has ${onDisk} tune round(s) in ${runsDir} but --from-results names ${armRuns.length} of this arm's; pass every round's tune results, in order`);
+  armRuns.forEach((r, i) => {
+    if (r.results.header.round !== i + 1) refuse(`the arm's tune results must be rounds 1 to ${armRuns.length} in order; got round ${r.results.header.round} at position ${i + 1}`);
+  });
+  const round = armRuns.length + 1;
+  if (round > MAX_TUNE_ROUNDS) refuse(`experiment 7 arm ${inp.arm} has used its ${MAX_TUNE_ROUNDS} tune rounds; there is no round ${round}`);
+
+  if (round === 1) {
+    if (baseline.length !== 1 || loaded.length !== 1) refuse("experiment 7 round 1 takes exactly one --from-results: an experiment 2 or 6 tune run (the configuration to start from)");
+    if (inp.previousDirs.length > 0) refuse("round 1 has no earlier proposals; --previous is for rounds 2 and 3");
+    const cur = baseline[0]!;
+    const config = exp7ConfigFromArm({ schemaVersion: 1, kind: ARM_KIND, questions: cur.results.header.questions ?? PRODUCT_QUESTIONS, thresholds: cur.results.header.thresholds, segmentation: cur.results.header.config });
+    return { round, origin, config, exp7: true, current: cur, previous: [], info };
+  }
+
+  if (baseline.length > 0) refuse(`round ${round} takes only arm ${inp.arm}'s own experiment 7 tune results, not an experiment 2 or 6 run`);
+  if (inp.previousDirs.length !== armRuns.length) refuse(`round ${round} needs --previous for each of the ${armRuns.length} earlier proposal dir(s), in round order; got ${inp.previousDirs.length}`);
+  const previous = inp.previousDirs.map((d, i): PreviousRound => {
+    const dir = resolve(d);
+    const cfgPath = join(dir, "arm-config.json");
+    const ratPath = join(dir, "rationale.txt");
+    if (!existsSync(cfgPath) || !existsSync(ratPath)) return refuse(`${d} has no arm-config.json and rationale.txt (a complete proposal dir of this tool)`);
+    const checked = validateExp7ArmConfig(JSON.parse(readFileSync(cfgPath, "utf8")));
+    if (!checked.ok) return refuse(`${cfgPath} is not a valid experiment 7 config: ${checked.errors.join("; ")}`);
+    const run = armRuns[i]!;
+    if (canon(checked.config) !== canon(headerConfig7(run.results))) refuse(`${cfgPath} is not the config that round ${i + 1}'s tune run used; the proposal dirs and the tune results must match round for round`);
+    return { round: i + 1, rationale: readFileSync(ratPath, "utf8").trim(), config: checked.config, report: run.report };
+  });
+  const last = previous[previous.length - 1]!;
+  return { round, origin, config: last.config, exp7: true, current: armRuns[armRuns.length - 1]!, previous, info };
+}
+
 // ───────────────────────────── the prompt, filled ─────────────────────────────
 
 const num = (x: number) => String(Number(x.toFixed(2)));
@@ -297,7 +399,7 @@ type TunePieces = {
 };
 
 /** Per clip, window, frame and label sections of the FIRST half only. Held-out clips, windows, frames and labels are never read here. */
-function tunePieces(ctx: RoundContext, clips: readonly ClipEvidence[], lecture: LectureRecord, contextRange: (ids: readonly string[]) => string): TunePieces {
+function tunePieces(ctx: Pick<RoundContext, "current" | "info">, clips: readonly ClipEvidence[], lecture: LectureRecord, contextRange: (ids: readonly string[]) => string, exp7 = false): TunePieces {
   const splitter = splitterOf(lecture);
   const order = clipsOf(lecture).map((c) => c.videoId);
   const numberOf = (v: string) => order.indexOf(v) + 1;
@@ -319,12 +421,13 @@ function tunePieces(ctx: RoundContext, clips: readonly ClipEvidence[], lecture: 
   const results = ctx.current.results;
   const thresholds = results.header.thresholds;
   const judged = new Map(results.judgments.map((j) => [`${j.purpose}:${j.subject}`, j.p] as const));
-  const pOf = (purpose: "boundary" | "frame_change", id: string) => judged.get(`${purpose}:${id}`);
+  const pOf = (purpose: "boundary" | "frame_change" | "frame_relevance", id: string) => judged.get(`${purpose}:${id}`);
+  const routing = exp7 ? ({ lessonFramingCloses: true } as const) : undefined;
   const closeBefore = new Set(
     detectBoundaries(lecture.windows, (id) => {
       const p = pOf("boundary", id);
       return p === undefined ? undefined : { p, error: null };
-    }, thresholds, results.header.config, lecture.captureStopped).map((d) => d.windowId),
+    }, thresholds, results.header.config, lecture.captureStopped, routing).map((d) => d.windowId),
   );
   const boundaries = view.boundaries.filter((b) => inFirst(b.videoId, b.mediaS));
   const windows = [...lecture.windows].sort((a, b) => a.ordinal - b.ordinal).map((w) => {
@@ -333,6 +436,13 @@ function tunePieces(ctx: RoundContext, clips: readonly ClipEvidence[], lecture: 
     const nc = verdictAt(p?.new_concept ?? null, thresholds);
     const sp = verdictAt(p?.stopping_point ?? null, thresholds);
     const near = boundaries.filter((b) => b.videoId === v && Math.abs(b.mediaS - w.startS) <= TOLERANCE_S + 1e-9).sort((a, b) => Math.abs(a.mediaS - w.startS) - Math.abs(b.mediaS - w.startS))[0];
+    if (exp7) {
+      const lfP = p?.lesson_framing;
+      const lf = lfP === undefined ? undefined : verdictAt(lfP, thresholds);
+      const lfText = lf === undefined ? "p(lesson framing) not measured yet (no Jev call has asked it on this window)" : `p(lesson framing) ${p2(lfP)} = ${lf}`;
+      const routed = routeWithFraming(nc, sp, lf, { lessonFramingCloses: true }) === "close" ? `close the chunk at the boundary${nc === "yes" && sp === "yes" ? "" : " (new concept yes and lesson framing yes)"}` : route(nc, sp);
+      return `clip ${numberOf(v)}; new passage ${num(w.startS)} to ${num(w.endS)} s; context ${contextRange(w.contextPassages)}; p(new concept) ${p2(p?.new_concept)} = ${nc}; p(stopping point) ${p2(p?.stopping_point)} = ${sp}; ${lfText}; routed: ${routed}; a chunk closes before this window: ${closeBefore.has(w.id) ? "yes" : "no"}; labeled boundary within ${TOLERANCE_S} s: ${near === undefined ? "no" : `yes (at ${num(near.mediaS)} s)`}`;
+    }
     return `clip ${numberOf(v)}; new passage ${num(w.startS)} to ${num(w.endS)} s; context ${contextRange(w.contextPassages)}; p(new concept) ${p2(p?.new_concept)} = ${nc}; p(stopping point) ${p2(p?.stopping_point)} = ${sp}; routed: ${route(nc, sp)}; a chunk closes before this window: ${closeBefore.has(w.id) ? "yes" : "no"}; labeled boundary within ${TOLERANCE_S} s: ${near === undefined ? "no" : `yes (at ${num(near.mediaS)} s)`}`;
   });
 
@@ -340,13 +450,19 @@ function tunePieces(ctx: RoundContext, clips: readonly ClipEvidence[], lecture: 
   const groups = view.duplicateGroups
     .map((g) => ({ ...g, frames: [...g.frames].filter((f) => inFirst(f.videoId, f.mediaS)).sort((a, b) => order.indexOf(a.videoId) - order.indexOf(b.videoId) || a.mediaS - b.mediaS) }))
     .filter((g) => g.frames.length >= 2);
-  const frames = [...lecture.frames].sort((a, b) => order.indexOf(a.videoId ?? "") - order.indexOf(b.videoId ?? "") || a.mediaS - b.mediaS).map((f) => {
+  const keptOnly = (f: { readonly id: string; readonly hasBefore: boolean }) => !exp7 || !f.hasBefore || verdictAt(pOf("frame_change", f.id)?.teaching_change ?? null, thresholds) !== "no";
+  const frames = [...lecture.frames].filter(keptOnly).sort((a, b) => order.indexOf(a.videoId ?? "") - order.indexOf(b.videoId ?? "") || a.mediaS - b.mediaS).map((f) => {
     const v = f.videoId ?? order[0]!;
     const p = f.hasBefore ? pOf("frame_change", f.id) : undefined;
     const verdict = f.hasBefore ? verdictAt(p?.teaching_change ?? null, thresholds) : "no before-frame";
     const step = steps.find((s) => s.videoId === v && f.mediaS >= s.mediaS && f.mediaS < s.mediaS + PROPOSED_STEP_CATCH_S);
     const dup = groups.some((g) => g.frames.slice(1).some((m) => m.videoId === v && (m.frameId === f.id || (m.frameId === undefined && Math.abs(m.mediaS - f.mediaS) <= PROPOSED_DUPLICATE_MATCH_S + 1e-9))));
     const label = [...(step ? [`visual step (labeled at ${num(step.mediaS)} s)`] : []), ...(dup ? ["duplicate of an earlier frame"] : [])];
+    if (exp7) {
+      const rp = pOf("frame_relevance", f.id);
+      const rel = !f.hasBefore ? "frame relevance not asked (the first frame of a clip has no before-frame input in the lab; it is kept)" : rp === undefined ? "p(frame relevance) not measured yet (no Jev call has asked it on this frame)" : `p(frame relevance) ${p2(rp.refers_to_frame)} = ${verdictAt(rp.refers_to_frame ?? null, thresholds)} (frame ${verdictAt(rp.refers_to_frame ?? null, thresholds) === "no" ? "dropped" : "sent to the tutor"})`;
+      return `clip ${numberOf(v)}; ${secs(f.mediaS)}; p(teaching change) ${p2(p?.teaching_change)}; verdict ${verdict} (dedupe: frame kept); ${rel}; Derek's label: ${label.length === 0 ? "neither" : label.join(" and ")}`;
+    }
     return `clip ${numberOf(v)}; ${secs(f.mediaS)}; p(teaching change) ${p2(p?.teaching_change)}; verdict ${verdict} (frame ${verdict === "no" ? "dropped" : "kept"}); Derek's label: ${label.length === 0 ? "neither" : label.join(" and ")}`;
   });
 
@@ -360,12 +476,19 @@ function tunePieces(ctx: RoundContext, clips: readonly ClipEvidence[], lecture: 
 
   const sections = {
     transcript: ["Transcripts of the tuning clips, in watch order (times are media seconds of the clip):", "", ...transcript].join("\n").trimEnd(),
-    windows: ["Boundary windows of the tuning clips, with Jev's p values and verdicts at the current thresholds:", ...windows.map((w) => `- ${w}`)].join("\n"),
-    frames: ["Judged frames of the tuning clips:", ...(frames.length === 0 ? ["- none"] : frames.map((f) => `- ${f}`))].join("\n"),
+    windows: ["Boundary windows of the tuning clips, with Jev's p values and verdicts at the current thresholds" + (exp7 ? " (routing: close on new concept and stopping point both yes, or new concept and lesson framing both yes):" : ":"), ...windows.map((w) => `- ${w}`)].join("\n"),
+    frames: [exp7 ? "Kept frames of the tuning clips (frames the dedupe step did not drop):" : "Judged frames of the tuning clips:", ...(frames.length === 0 ? ["- none"] : frames.map((f) => `- ${f}`))].join("\n"),
     labels: ["Derek's verified labels for the tuning clips:", ...labels].join("\n"),
   };
   return { firstClips, firstNumbers: new Map(order.map((v, i) => [v, i + 1] as const)), sections, firstPassages: firstPassages.map((p) => p.text), nClips: firstClips.length, mClips: order.length };
 }
+
+/** The lab holds no claims (they come from the interpretation step, which has not run on these clips), so there is nothing to show; said plainly, never faked. */
+export const claimRelevanceSection = (): string =>
+  [
+    "Claim-relevance items of the tuning clips:",
+    "- none can be shown. Claims come from the interpretation step, which has not been run on these clips, so the lab holds no claims and no delta calls, and no Jev call has asked the claim-relevance question about any claim. There is no measured evidence for `claimRelevance` in this prompt; its current wording is the draft shown in the configuration above.",
+  ].join("\n");
 
 export type BuiltPrompt = { readonly prompt: string; readonly heldOut: HeldOut; readonly allow: GuardAllow; readonly forbiddenInWording: ForbiddenWording; readonly nClips: number; readonly mClips: number };
 export type ForbiddenWording = { readonly titles: readonly string[]; readonly videoIds: readonly string[] };
@@ -380,8 +503,12 @@ function fillLine(text: string, startsWith: string, fill: string): string {
   return lines.join("\n");
 }
 
-export function buildOptimizerPrompt(inp: OptimizeInputs, ctx: RoundContext, root = repoRoot): BuiltPrompt {
-  const template = loadTemplate(root);
+/** Round-1 text for experiment 7, where the current report is an experiment 2 or 6 run that never saw the new questions. */
+const EXP7_ROUND1_NOTE = "round 0: experiment 6's selected configuration, run before any lesson-framing or frame-relevance question was asked of Jev";
+
+export function buildOptimizerPrompt(inp: OptimizeInputs, ctx: RoundContext, root = repoRoot, live = false): BuiltPrompt {
+  const exp7 = ctx.exp7 === true;
+  const template = exp7 ? loadTemplate7(root, { live, ...(inp.approvedTemplatePath === undefined ? {} : { approvedPath: inp.approvedTemplatePath }) }).text : loadTemplate(root);
   const lecture = ctx.current.results.lectures[0]!;
   const captureId = viewOf(ctx.info.labels).captureId;
   const { clips } = readClips(resolve(inp.dataDir), captureId);
@@ -394,8 +521,8 @@ export function buildOptimizerPrompt(inp: OptimizeInputs, ctx: RoundContext, roo
       const ps = ids.map((id) => found.get(id as EvidenceId)).filter((e): e is Passage => e?.kind === "passage");
       return ps.length === 0 ? "none" : `${num(Math.min(...ps.map((p) => p.interval.start)))} to ${num(Math.max(...ps.map((p) => p.interval.end)))} s`;
     };
-    pieces = tunePieces(ctx, clips, lecture, contextRange);
-    heldWindows = heldOutWindows(cap, ctx, inp);
+    pieces = tunePieces(ctx, clips, lecture, contextRange, exp7);
+    heldWindows = heldOutWindows(cap, ctx);
   } finally {
     cap.close();
   }
@@ -408,10 +535,11 @@ export function buildOptimizerPrompt(inp: OptimizeInputs, ctx: RoundContext, roo
   text = fillLine(text, "<<flow B,", loadFlowB(root));
   text = fillLine(text, "<<the arm's current config", "```json\n" + JSON.stringify({ questions: ctx.config.questions, thresholds: ctx.config.thresholds, segmentation: ctx.config.segmentation }, null, 2) + "\n```");
   text = text.replace("<<N>>", String(pieces.nClips)).replace("<<M>>", String(pieces.mClips));
-  text = fillLine(text, "<<the first-half report", `Report of the current configuration on the tuning clips (round ${ctx.round - 1 === 0 ? "0, the baseline" : String(ctx.round - 1)}):\n${bars}`);
+  text = fillLine(text, "<<the first-half report", `Report of the current configuration on the tuning clips (${exp7 && ctx.round === 1 ? EXP7_ROUND1_NOTE : `round ${ctx.round - 1 === 0 ? "0, the baseline" : String(ctx.round - 1)}`}):\n${bars}`);
   text = fillLine(text, "<<per clip, in watch order", pieces.sections.transcript);
   text = fillLine(text, "<<per boundary window", pieces.sections.windows);
-  text = fillLine(text, "<<per judged frame", pieces.sections.frames);
+  text = fillLine(text, exp7 ? "<<per kept frame" : "<<per judged frame", pieces.sections.frames);
+  if (exp7) text = fillLine(text, "<<per claim-relevance item", claimRelevanceSection());
   text = fillLine(text, "<<Derek's verified labels", pieces.sections.labels);
   text = fillLine(text, "<<on rounds 2 and 3", ctx.previous.length === 0 ? "" : reports.join("\n\n"));
   if (/<<[^>]*>>/.test(text)) refuse("the template still has an unfilled placeholder");
@@ -435,7 +563,7 @@ export function buildOptimizerPrompt(inp: OptimizeInputs, ctx: RoundContext, roo
 
 // ───────────────────────────── the held-out side (used only to scan, never to build) ─────────────────────────────
 
-function heldOutWindows(cap: ReturnType<typeof openCapture>, ctx: RoundContext, inp: OptimizeInputs): { ids: string[]; evidence: string[] } {
+function heldOutWindows(cap: ReturnType<typeof openCapture>, ctx: RoundContext): { ids: string[]; evidence: string[] } {
   const ids = new Set<string>();
   const evidence = new Set<string>();
   const configs = [ctx.current.results.header.config, ...ctx.previous.map((p) => p.config.segmentation), ctx.config.segmentation];
@@ -488,7 +616,7 @@ function heldOutOf(ctx: RoundContext, clips: readonly ClipEvidence[], lecture: L
 
 // ───────────────────────────── reply handling ─────────────────────────────
 
-export type Proposal = { readonly config: ArmConfig; readonly rationale: string };
+export type Proposal = { readonly config: ArmConfig | Exp7ArmConfig; readonly rationale: string };
 export type ParsedProposal = { readonly ok: true; readonly value: Proposal } | { readonly ok: false; readonly error: string };
 const MM_SS = /(?<![\d:])\d{1,2}:\d{2}(?::\d{2})?(?![\d:])/;
 
@@ -496,7 +624,7 @@ const MM_SS = /(?<![\d:])\d{1,2}:\d{2}(?::\d{2})?(?![\d:])/;
  * One JSON object (one code fence allowed): `rationale` plus a body that `validateArmConfig` accepts once `rationale` is
  * removed, and no question wording that names a clip title, a videoId or a mm:ss time of this lecture set. Nothing is repaired.
  */
-export function parseProposal(text: string, forbidden: ForbiddenWording): ParsedProposal {
+export function parseProposal(text: string, forbidden: ForbiddenWording, exp7 = false): ParsedProposal {
   const fenced = text.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
   let raw: unknown;
   try {
@@ -507,7 +635,7 @@ export function parseProposal(text: string, forbidden: ForbiddenWording): Parsed
   if (!isRec(raw)) return { ok: false, error: "the reply must be one JSON object" };
   const { rationale, ...body } = raw;
   if (typeof rationale !== "string" || rationale.trim() === "") return { ok: false, error: "rationale must be a non-empty string" };
-  const checked = validateArmConfig(body);
+  const checked: ReturnType<typeof validateArmConfig> | ReturnType<typeof validateExp7ArmConfig> = exp7 ? validateExp7ArmConfig(body) : validateArmConfig(body);
   if (!checked.ok) return { ok: false, error: checked.errors.join("; ") };
   const errors: string[] = [];
   for (const [k, v] of Object.entries(checked.config.questions)) {
@@ -537,17 +665,17 @@ export type OptimizeOutcome = { readonly armConfigPath: string; readonly readmeP
 
 const retryText = (prompt: string, reason: string) => `${prompt}\n\nYour previous reply was refused: ${reason}\nReply again with ONLY the corrected JSON object, in the same shape.`;
 
-function readme(info: { model: string; effort: string; origin: Origin; arm: string; round: number; calls: number; status: string; rationale?: string; files: readonly string[]; guard: string }): string {
+function readme(info: { model: string; effort: string; origin: Origin; arm: string; round: number; calls: number; status: string; rationale?: string; files: readonly string[]; guard: string; exp7?: boolean }): string {
   return [
     `# Optimizer proposal: arm ${info.arm}, round ${info.round}, by ${info.model}`,
     "",
-    `A model's proposal (effort ${info.effort}), not Derek's labels, not a result. It limits itself to decision 4 (the three question wordings, the thresholds, the segmentation), checked by \`validateArmConfig\`. Jev has not been run with it.`,
+    `A model's proposal (effort ${info.effort}), not Derek's labels, not a result. It limits itself to ${info.exp7 === true ? "the six question wordings, the thresholds and the segmentation, checked by \`validateExp7ArmConfig\`" : "decision 4 (the three question wordings, the thresholds, the segmentation), checked by \`validateArmConfig\`"}. Jev has not been run with it.`,
     "",
     ...(info.origin === "fixture" ? ["**Origin: fixture.** A scripted client answered, not a model. These are test files, not a proposal by the model named above.", ""] : []),
     `- Status: ${info.status}`,
     `- Claude calls made (retries included): ${info.calls}`,
     `- Held-out guard: ${info.guard}`,
-    "- The prompt was built from the approved template (docs/experiments/exp6-optimizer-prompt.md) and the FIRST HALF only; no frame images were attached. Every prompt and response is stored verbatim in calls/ (secrets from the environment are replaced by [redacted]).",
+    `- The prompt was built from the approved template (${info.exp7 === true ? "the approved copy of docs/experiments/exp7-optimizer-prompt.md" : "docs/experiments/exp6-optimizer-prompt.md"}) and the FIRST HALF only; no frame images were attached. Every prompt and response is stored verbatim in calls/ (secrets from the environment are replaced by [redacted]).`,
     ...(info.rationale === undefined ? [] : ["", "Rationale (the model's, verbatim):", "", info.rationale]),
     "",
     "Files:",
@@ -572,16 +700,20 @@ export function dryRunRound(opts: DryRunOptions): DryRunOutcome {
   if (outDir === data || outDir.startsWith(data + sep)) refuse(`--out ${outDir} is inside the data dir; the data dir is never written`);
   const info = loadLabels([resolve(opts.labelFile)])[0]!;
   const ctx = resolveRound(opts, info);
-  const built = buildOptimizerPrompt(opts, ctx);
+  const built = buildOptimizerPrompt(opts, ctx, repoRoot, false);
   const hits = scanForHeldOut(built.prompt, built.heldOut, built.allow);
   mkdirSync(outDir, { recursive: true });
+  const exp7 = opts.exp7 === true;
   const promptPath = join(outDir, "prompt.txt");
   const guardPath = join(outDir, "guard.json");
   const readmePath = join(outDir, "README.md");
-  writeFileSync(promptPath, built.prompt);
+  // An experiment 7 dry run uses the draft template unless an approved copy is given: its file says so on top (the guard scanned the prompt without the banner).
+  const drafted = exp7 && opts.approvedTemplatePath === undefined;
+  writeFileSync(promptPath, drafted ? `${DRAFT_BANNER}\n\n${built.prompt}` : built.prompt);
   writeFileSync(guardPath, JSON.stringify({ dryRun: true, passed: hits.length === 0, hits, heldOutReportScanned: opts.heldOutReportPath !== undefined }, null, 2) + "\n");
   writeFileSync(readmePath, [
-    `# Optimizer dry run: arm ${opts.arm}, round ${ctx.round}, for ${opts.model}`, "",
+    `# Optimizer dry run${exp7 ? " (experiment 7)" : ""}: arm ${opts.arm}, round ${ctx.round}, for ${opts.model}`, "",
+    ...(drafted ? [`**${DRAFT_BANNER}**`, ""] : []),
     "No Claude call was made and the Claude ledger was not touched. This is the prompt the live run would send, and the held-out guard's verdict on it.", "",
     `- Guard: ${hits.length === 0 ? "passed" : `REFUSED: ${hits.map((h) => h.detail).join("; ")}`}`,
     `- Held-out report scanned: ${opts.heldOutReportPath === undefined ? "NO (no --heldout-report given; a live run requires it)" : "yes"}`,
@@ -592,29 +724,47 @@ export function dryRunRound(opts: DryRunOptions): DryRunOutcome {
   return { promptPath, guardPath, readmePath, round: ctx.round, hits, promptChars: built.prompt.length };
 }
 
+/** Experiment 7's own Claude ledger: ceiling 80, and never above it (the command line has no flag for it; `ceiling` is a test seam that may only lower it). */
+function exp7Ceiling(opts: { readonly ceiling?: number }): number {
+  if (opts.ceiling !== undefined && opts.ceiling > EXP7_BUDGET_CLAUDE_CALLS) refuse(`the experiment 7 Claude ceiling is ${EXP7_BUDGET_CLAUDE_CALLS}; a higher ceiling (${opts.ceiling}) is refused`);
+  return opts.ceiling ?? EXP7_BUDGET_CLAUDE_CALLS;
+}
+
+/**
+ * Experiment 7 counts its Claude calls in its own ledger, <lab>/exp7 (the doc: "experiment 6's ledger, capped at 250, has 67 left
+ * and is not used"): --out must be a direct child of it, and a live run's --claude-ledger must be it.
+ */
+function checkExp7Ledger(opts: OptimizeOptions, outDir: string): void {
+  const ledger = join(resolve(opts.labDir), "exp7");
+  if (dirname(outDir) !== ledger) refuse(`an experiment 7 --out must be a directory directly inside ${ledger}, the experiment 7 Claude ledger; experiment 6's data/lab/propose ledger is not used (07 doc, Budget)`);
+  if (opts.live && opts.claudeLedger !== undefined && resolve(opts.claudeLedger) !== ledger) refuse(`--claude-ledger ${opts.claudeLedger} must be ${ledger}, experiment 7's own ledger`);
+}
+
 export async function proposeRound(opts: OptimizeOptions): Promise<OptimizeOutcome> {
   const { effort, origin } = checkCommon({ model: opts.model, outDir: opts.outDir, live: opts.live, ...(opts.maxClaudeCalls === undefined ? {} : { maxClaudeCalls: opts.maxClaudeCalls }), ...(opts.client === undefined ? {} : { client: opts.client }) });
   if (opts.live && opts.heldOutReportPath === undefined) refuse("a live run needs --heldout-report <experiment 2's score-1.report.txt>: its lines are scanned for in every prompt");
   const outDir = resolve(opts.outDir);
+  const ceiling = opts.exp7 === true ? exp7Ceiling(opts) : opts.ceiling;
+  if (opts.exp7 === true) checkExp7Ledger(opts, outDir);
   if (opts.live) {
     if (opts.claudeLedger === undefined) refuse("a live run needs --claude-ledger <dir>, the parent of --out that holds claude-state.live.json, so these calls count against the shared 250-call cap");
-    if (resolve(opts.claudeLedger) !== dirname(outDir)) {
+    if (opts.exp7 !== true && resolve(opts.claudeLedger) !== dirname(outDir)) {
       refuse(`--claude-ledger ${opts.claudeLedger} must be the parent of --out (${dirname(outDir)}), so that this run's calls count in the same ledger and call floor as the labelers'`);
     }
   }
   const labels = loadLabels([resolve(opts.labelFile)]);
   const info = labels[0]!;
   const ctx = resolveRound(opts, info);
-  const built = buildOptimizerPrompt(opts, ctx);
+  const built = buildOptimizerPrompt(opts, ctx, repoRoot, opts.live);
   const first = scanForHeldOut(built.prompt, built.heldOut, built.allow);
 
   const { session: s, cleanup } = openSession(
-    { model: opts.model, outDir, live: opts.live, effort, ...(opts.maxClaudeCalls === undefined ? {} : { maxClaudeCalls: opts.maxClaudeCalls }), ...(opts.client === undefined ? {} : { client: opts.client }), ...(opts.spawn ? { spawn: opts.spawn } : {}), ...(opts.env ? { env: opts.env } : {}), ...(opts.now ? { now: opts.now } : {}), ...(opts.ceiling === undefined ? {} : { ceiling: opts.ceiling }), ...(opts.out ? { out: opts.out } : {}), ledgerDir: opts.claudeLedger ?? dirname(outDir) },
+    { model: opts.model, outDir, live: opts.live, effort, ...(opts.maxClaudeCalls === undefined ? {} : { maxClaudeCalls: opts.maxClaudeCalls }), ...(opts.client === undefined ? {} : { client: opts.client }), ...(opts.spawn ? { spawn: opts.spawn } : {}), ...(opts.env ? { env: opts.env } : {}), ...(opts.now ? { now: opts.now } : {}), ...(ceiling === undefined ? {} : { ceiling }), ...(opts.out ? { out: opts.out } : {}), ledgerDir: opts.claudeLedger ?? dirname(outDir) },
     effort, origin, 1, resolve(opts.dataDir),
   );
   const readmePath = join(outDir, "README.md");
   const armConfigPath = join(outDir, "arm-config.json");
-  const base = { model: opts.model, effort, origin, arm: opts.arm, round: ctx.round };
+  const base = { model: opts.model, effort, origin, arm: opts.arm, round: ctx.round, ...(opts.exp7 === true ? { exp7: true } : {}) };
   const files = ["arm-config.json (jev-arm-config, validated; give it to `jev-lab run --phase tune --arm-config`)", "rationale.txt", "guard.json", "calls/<n>.prompt.txt, calls/<n>.response.txt, calls/<n>.meta.json"];
   const guardNote = (hits: readonly GuardHit[]) => (hits.length === 0 ? "passed before every call (first-half inputs only, scanned for held-out ids, titles, passages, label times, report lines)" : `REFUSED: ${hits.map((h) => h.detail).join("; ")}`);
   s.say(`optimizer round ${ctx.round} for arm ${opts.arm} with ${opts.model} (effort ${effort}): ${built.nClips} of ${built.mClips} clips in the prompt`);
@@ -634,7 +784,7 @@ export async function proposeRound(opts: OptimizeOptions): Promise<OptimizeOutco
       }
       const r = await attemptCall(s, { kind: "optimize", system: OPTIMIZE_SYSTEM, prompt, images: [], attempt });
       if (r.ok) {
-        const parsed = parseProposal(r.text, built.forbiddenInWording);
+        const parsed = parseProposal(r.text, built.forbiddenInWording, opts.exp7 === true);
         if (parsed.ok) {
           const proposal = parsed.value;
           writeFileSync(armConfigPath, JSON.stringify(JSON.parse(s.redact(JSON.stringify(proposal.config))), null, 2) + "\n");
@@ -669,7 +819,7 @@ async function cli(argv: readonly string[]): Promise<number> {
     options: {
       data: { type: "string" }, labels: { type: "string" }, lab: { type: "string" }, arm: { type: "string" }, model: { type: "string" }, out: { type: "string" },
       "from-results": { type: "string", multiple: true }, "baseline-state": { type: "string" }, previous: { type: "string", multiple: true }, "heldout-report": { type: "string" },
-      "dry-run": { type: "boolean" }, "live-claude": { type: "boolean" }, "max-claude-calls": { type: "string" }, "claude-ledger": { type: "string" },
+      "dry-run": { type: "boolean" }, "live-claude": { type: "boolean" }, "max-claude-calls": { type: "string" }, "claude-ledger": { type: "string" }, exp7: { type: "boolean" }, "approved-template": { type: "string" },
     },
   });
   if (command !== "propose") return usage("the only command is propose");
@@ -681,6 +831,7 @@ async function cli(argv: readonly string[]): Promise<number> {
       fromResults: values["from-results"] ?? [], previousDirs: values.previous ?? [],
       ...(values["baseline-state"] ? { baselineStatePath: values["baseline-state"] } : {}),
       ...(values["heldout-report"] ? { heldOutReportPath: values["heldout-report"] } : {}),
+      ...(values.exp7 === true ? { exp7: true } : {}), ...(values["approved-template"] ? { approvedTemplatePath: values["approved-template"] } : {}),
     });
     console.log(`[dry-run] round ${r.round}: guard passed, prompt ${r.promptChars} characters, wrote ${r.promptPath}; no Claude call was made`);
     return 0;
@@ -691,6 +842,7 @@ async function cli(argv: readonly string[]): Promise<number> {
     fromResults: values["from-results"] ?? [], previousDirs: values.previous ?? [], live: values["live-claude"] === true,
     ...(values["baseline-state"] ? { baselineStatePath: values["baseline-state"] } : {}),
     ...(values["heldout-report"] ? { heldOutReportPath: values["heldout-report"] } : {}),
+    ...(values.exp7 === true ? { exp7: true } : {}), ...(values["approved-template"] ? { approvedTemplatePath: values["approved-template"] } : {}),
     ...(max === undefined ? {} : { maxClaudeCalls: max }),
     ...(values["claude-ledger"] ? { claudeLedger: resolve(values["claude-ledger"]) } : {}),
   });
