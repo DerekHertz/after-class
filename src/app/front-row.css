@@ -20,6 +20,7 @@
 .appearance-options button { border-radius: 0; border-width: 2px; }
 .appearance-options small { font-family: var(--font); }
 
+/* --fr-nav-reserve is measured by reserveNavSpace(); these values only cover the first paint. */
 .scene-shell .review.front-row { --fr-nav-reserve: 64px; position: relative; max-width: none; min-height: 0; margin: 0; padding: 0; border: 0; background: transparent; color: var(--fr-bar-ink); font-family: var(--font); }
 .scene-shell .front-row .front-row-bar { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; background: none; border: 0; color: var(--fr-bar-ink); font-family: 'After Class Pixel', var(--font); }
 .front-row .front-row-title { display: flex; flex-direction: column; justify-content: center; min-width: 0; max-width: 100%; min-height: 44px; padding: 3px 12px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); box-shadow: 0 3px 0 #00000040; }
@@ -55,7 +56,13 @@
 
 .front-row-scene .current-exchange { margin: 0; padding: 0; background: none; border: 0; }
 .front-row-scene .current-exchange:focus-visible { outline: 3px dashed var(--fr-board-ink); outline-offset: 6px; }
-.front-row-scene .front-row-eyebrow { display: flex; align-items: center; gap: 14px; margin: 0 0 .7em; color: var(--fr-board-ink-soft); font: 600 clamp(.9rem, 1.25cqw, 1.2rem)/1.2 'After Class Pixel', var(--font); letter-spacing: .14em; text-transform: uppercase; }
+/* The topic heading shares its row with Show diagram, so the diagram costs the board no extra line. */
+.front-row-scene .front-row-heading { display: flex; align-items: center; gap: 8px 14px; margin: 0 0 10px; }
+.front-row-scene .front-row-heading .show-diagram { flex: none; white-space: nowrap; }
+.front-row-scene[data-board-align="center"] .front-row-heading { display: grid; grid-template-columns: 1fr auto 1fr; }
+.front-row-scene[data-board-align="center"] .front-row-heading .front-row-eyebrow { grid-column: 2; }
+.front-row-scene[data-board-align="center"] .front-row-heading .show-diagram { justify-self: end; }
+.front-row-scene .front-row-eyebrow { flex: 1 1 auto; display: flex; align-items: center; gap: 14px; margin: 0; color: var(--fr-board-ink-soft); font: 600 clamp(.9rem, 1.25cqw, 1.2rem)/1.2 'After Class Pixel', var(--font); letter-spacing: .14em; text-transform: uppercase; }
 .front-row-scene .front-row-eyebrow::after { content: ""; flex: 1 1 3em; max-width: 14em; height: 3px; background: currentColor; }
 .front-row-scene[data-board-align="center"] .front-row-eyebrow { justify-content: center; }
 .front-row-scene[data-board-align="center"] .front-row-eyebrow::before { content: ""; flex: 0 1 3em; height: 3px; background: currentColor; }
@@ -73,8 +80,6 @@
 .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) :is(button, .citation) { min-height: 40px; padding: 6px 12px; border: 2px solid var(--fr-board-ink-soft); border-radius: 0; background: transparent; color: var(--fr-board-ink); font: 500 1rem/1.15 'After Class Pixel', var(--font); text-decoration: none; }
 .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) .citation::before { filter: var(--fr-board-icon-filter, none); }
 .front-row-scene[data-board-tone="dark"] { --fr-board-icon-filter: invert(1); }
-.front-row-scene .current-topic { margin: .9em 0 0; color: var(--fr-board-ink-soft); font-size: 1rem; }
-.front-row-scene .current-topic strong { color: var(--fr-board-ink); }
 
 /* Setup: topic choices on the board, the note and Start on the desk. The form box itself does not render. */
 .front-row-scene .topic-checklist { display: contents; }
@@ -170,6 +175,8 @@
   .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { position: absolute; left: var(--fr-board-left); width: var(--fr-board-width); top: max(var(--fr-board-top), calc(var(--fr-inset-top) + var(--fr-nav-reserve))); bottom: calc(100% - var(--fr-board-top) - var(--fr-board-height)); overflow: auto; overscroll-behavior: contain; }
   .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { position: absolute; left: var(--fr-mat-left); top: var(--fr-mat-top); width: var(--fr-mat-width); height: var(--fr-mat-height); overflow: auto; overscroll-behavior: contain; }
   .front-row-scene[data-board-align="center"] .front-row-area[data-area="board"] { display: flex; flex-direction: column; justify-content: safe center; }
+  /* The harbor mat is drawn in perspective and is narrower at the top than its box, so the top row's last control is inset. */
+  .front-row-scene[data-mat-actions="beside"] .composer .review-help { margin-right: 2cqw; }
   .front-row-scene .front-row-buddy { position: absolute; left: max(var(--fr-buddy-left), var(--fr-inset-x)); top: var(--fr-buddy-top); width: var(--fr-buddy-width); height: var(--fr-buddy-height); }
   .front-row-scene .front-row-notebook { position: absolute; left: min(var(--fr-book-left), calc(100% - var(--fr-inset-x) - var(--fr-book-width))); top: var(--fr-book-top); width: var(--fr-book-width); height: var(--fr-book-height); }
 }

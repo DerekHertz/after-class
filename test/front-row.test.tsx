@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { COMPANIONS, SCENES, parseAppearance } from "../src/app/appearance";
 import type { CompanionId, SceneId } from "../src/app/appearance";
-import { CROP_LIMIT, FRONT_ROW_ROOMS, FrontRowScene, PLATE, roomStyle, stageBox, topCropLimit } from "../src/app/front-row";
+import { CROP_LIMIT, FRONT_ROW_ROOMS, FrontRowScene, PLATE, reserveNavSpace, roomStyle, stageBox, topCropLimit } from "../src/app/front-row";
 import type { FrontRowLayout, PlateBox } from "../src/app/front-row";
 import { contrast, medianColor, readPng } from "./png";
 
@@ -126,5 +126,32 @@ describe("switching room or companion keeps one tree", () => {
     expect(html).not.toContain("data-companion");
     expect(html).toContain('<span class="quiet-status" role="status">Ready when you are</span>');
     expect(html).toContain(">My notebook</span></button>");
+  });
+});
+
+describe("the board starts below the navigation", () => {
+  test("the reserve follows the navigation's measured bottom, including when it wraps to a second row", () => {
+    const reserve = new Map<string, string>();
+    let resize = () => {};
+    const original = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      constructor(callback: () => void) { resize = callback; }
+      observe() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    try {
+      const style = { setProperty: (name: string, value: string) => reserve.set(name, value), removeProperty: (name: string) => reserve.delete(name) };
+      const bar = { offsetTop: 8, offsetHeight: 44, parentElement: { style } };
+      const release = reserveNavSpace(bar as unknown as HTMLElement);
+      resize();
+      expect(reserve.get("--fr-nav-reserve")).toBe("64px");
+      bar.offsetHeight = 102;
+      resize();
+      expect(reserve.get("--fr-nav-reserve")).toBe("122px");
+      release();
+      expect(reserve.has("--fr-nav-reserve")).toBe(false);
+    } finally {
+      globalThis.ResizeObserver = original;
+    }
   });
 });

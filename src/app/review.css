@@ -42,7 +42,6 @@
 .scene-shell .review .source-stand .diagram-panel .diagram-frame .frame { display: block; width: 100%; height: auto; max-height: none; object-fit: contain; }
 .review .review-topics { flex: 0 0 auto; font-size: .85rem; margin-top: 8px; }
 .review .review-topics ul { list-style: none; padding-left: 0; }
-.review .current-topic { flex: 0 0 auto; font-size: .9rem; margin: 8px 0 0; }
 /* The question being worked on is the strongest thing in the notebook; earlier lines read quieter in their own history. */
 .review .conversation-notebook .current-exchange { flex: 0 0 auto; padding: 2px 14px 0; background: #fff8e6; border: 1px solid var(--border); border-left: 6px solid #c57d56; border-radius: 6px; }
 .review .conversation-notebook .current-exchange:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }

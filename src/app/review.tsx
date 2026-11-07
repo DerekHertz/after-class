@@ -1,12 +1,12 @@
 import { RecordScreen } from "./record";
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { MutableRefObject, Ref } from "react";
+import type { Ref } from "react";
 import { Material } from "../shared/time";
 import type { ConceptId, EvidenceId, ReviewId } from "../shared/ids";
 import type { Concept } from "../shared/domain";
 import type { AppApi } from "./api";
 import { useAppearance, useSceneActivity } from "./appearance";
-import { FrontRowScene } from "./front-row";
+import { FrontRowScene, reserveNavSpace } from "./front-row";
 import { reactToCompanion } from "./companion-reaction";
 import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
@@ -156,11 +156,13 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const questionMarker = view.state.mainQuestions > 0 ? `Question ${view.state.mainQuestions}` : null;
   const hasHistory = lines.earlier.length > 0 || view.topics.length > 0 || view.observations.length > 0;
 
-  /** The board: the question being worked on, and what is happening to the turn. */
   const boardContent = <>
     {(lines.current.length > 0 || live !== null) && (
       <section ref={currentQuestion} className="current-exchange" aria-labelledby="current-exchange-heading" tabIndex={-1}>
-        <h2 id="current-exchange-heading" className="front-row-eyebrow"><span className="visually-hidden">Current question: </span>{questionTopic?.label ?? questionMarker ?? "Current question"}</h2>
+        <div className="front-row-heading">
+          <h2 id="current-exchange-heading" className="front-row-eyebrow"><span className="visually-hidden">Current question: </span>{questionTopic?.label ?? questionMarker ?? "Current question"}</h2>
+          {questionTopic !== null && <ShowDiagramButton topic={{ id: questionTopic.topicId, label: questionTopic.label }} onShow={showDiagram} />}
+        </div>
         <ol className="lines">
           {lines.current.map((l) => <LineItem key={l.key} line={l} onSource={openSource} {...(l.key === questionKey ? { focusRef: questionLine } : {})} />)}
           {live !== null && (
@@ -188,12 +190,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
         <Actions ids={actions.filter((a) => a === "continue" || a === "wrap_up")} disabled={streaming} send={(id) => void controller.send(toAct(id, "", "text"))} />
       </div>
     )}
-    {questionTopic !== null && (
-      <p className="current-topic">Topic: <strong>{questionTopic.label}</strong> <ShowDiagramButton topic={{ id: questionTopic.topicId, label: questionTopic.label }} onShow={showDiagram} /></p>
-    )}
   </>;
 
-  /** The desk: the learner's own response field and the ways to send it. */
   const deskContent = <Composer
     actions={actions.filter((a) => !["continue", "wrap_up", "pause", "resume", "end"].includes(a))}
     disabled={streaming || state.unsent.length > 0}
@@ -214,7 +212,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   return (
     <main className="review front-row" data-panels={sourceOpen || historyOpen ? "open" : "closed"}>
       {notebookOpen && <dialog className="room-notebook-dialog" ref={node => { if (node && !node.open) node.showModal(); }} onClose={() => setNotebookOpen(false)}><button onClick={() => setNotebookOpen(false)}>Close notebook</button><RecordScreen api={api} reviewId={null} /></dialog>}
-      <header className="review-header front-row-bar">
+      <header ref={reserveNavSpace} className="review-header front-row-bar">
         <div className="front-row-title">
           <h1>{heading.title}</h1>
           <p className="review-scope-line">Reviewing {heading.detail ?? "this lecture"} · {formatClock(scopeSeconds)} of lecture</p>
@@ -325,7 +323,6 @@ export function TopicChecklist({ topics, disabled, onStart }: { readonly topics:
   const toggle = (id: ConceptId) => setMarked((m) => { const next = new Set(m); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   return (
     <form className="topic-checklist" aria-labelledby={STARTING_POINT_HEADING} onSubmit={(e) => { e.preventDefault(); onStart(topics.filter((t) => marked.has(t.id)).map((t) => t.id), note.trim()); }}>
-      {/* In the room the choices sit on the board and the note and Start sit on the desk. */}
       <div className="setup-choices">
         <h2 id={STARTING_POINT_HEADING}>Choose a starting point</h2>
         <p className="muted">Mark any topic that feels fuzzy and the tutor starts there, then does a quick check on up to 3 of the others. Mark none and the tutor starts with open recall questions.</p>
@@ -466,7 +463,7 @@ export function TurnStatusNote({ status }: { readonly status: TurnStatus }) {
 }
 
 export function Composer({
-  actions, disabled, sendError, speech, showSpeak = true, onSpeaking, onListeningChange, speechToggle, live, send,
+  actions, disabled, sendError, speech, showSpeak = true, onSpeaking, onListeningChange, live, send,
 }: {
   readonly actions: readonly ActionId[];
   readonly disabled: boolean;
@@ -476,7 +473,6 @@ export function Composer({
   readonly showSpeak?: boolean;
   readonly onSpeaking: () => void;
   readonly onListeningChange?: (listening: boolean) => void;
-  readonly speechToggle?: MutableRefObject<(() => void) | null>;
   /** The tutor turn in flight, for the status line. */
   readonly live?: Live | null;
   readonly send: (id: ActionId, text: string, modality: "speech" | "text") => Promise<boolean>;
@@ -531,11 +527,6 @@ export function Composer({
       },
     });
   }
-
-  useEffect(() => {
-    if (speechToggle) speechToggle.current = toggleListening;
-    return () => { if (speechToggle) speechToggle.current = null; };
-  }, [speechToggle, listening, speech, onSpeaking]);
 
   async function submit(id: ActionId, text: string, how: "speech" | "text") {
     if (submitting.current) return;

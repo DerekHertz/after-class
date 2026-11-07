@@ -83,7 +83,7 @@ export const FRONT_ROW_ROOMS = {
   "study-bench": {
     cropTop: 0,
     surfaceName: "Learning board",
-    board: { align: "center", box: { left: 0.205, top: 0.255, right: 0.795, bottom: 0.565 }, tone: "dark", fill: "#0f725e", ink: "#fbf6e6", inkSoft: "#dff3e6" },
+    board: { align: "center", box: { left: 0.205, top: 0.24, right: 0.795, bottom: 0.572 }, tone: "dark", fill: "#0f725e", ink: "#fbf6e6", inkSoft: "#dff3e6" },
     mat: { box: { left: 0.2, top: 0.735, right: 0.83, bottom: 0.955 }, tone: "light", fill: "#feebcd", ink: "#22252e", inkSoft: "#4f4a40", actions: "beside" },
     companion: { left: 0.015, top: 0.68, right: 0.16, bottom: 0.915 },
     notebook: { left: 0.855, top: 0.795, right: 0.99, bottom: 0.965 },
@@ -152,9 +152,20 @@ export function roomStyle(scene: SceneId): CSSProperties {
 }
 
 /**
- * Before the first turn the scene holds the starting-point form, whose topic choices sit on the board and whose note and
- * Start sit on the desk. Once the review runs, the board holds the question and the desk holds the response field.
+ * Keeps `--fr-nav-reserve` on the review at the measured bottom of its navigation, so the board's text starts below the
+ * chips however many rows they wrap into. The wrap depends on the lecture title and which buttons the phase shows, so no
+ * breakpoint can predict it. Used as a ref callback on the navigation.
  */
+export function reserveNavSpace(bar: HTMLElement): () => void {
+  const review = bar.parentElement;
+  if (review === null || typeof ResizeObserver === "undefined") return () => {};
+  const observer = new ResizeObserver(() => review.style.setProperty("--fr-nav-reserve", `${bar.offsetTop + bar.offsetHeight + NAV_GAP}px`));
+  observer.observe(bar);
+  return () => { observer.disconnect(); review.style.removeProperty("--fr-nav-reserve"); };
+}
+
+const NAV_GAP = 12;
+
 export type FrontRowLayout =
   | { readonly kind: "setup"; readonly form: ReactNode }
   | { readonly kind: "review"; readonly board: ReactNode; readonly desk: ReactNode };
