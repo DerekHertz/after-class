@@ -21,13 +21,14 @@ const data: RecordView = {
 describe("notebook pages", () => {
   test("a partial processing invitation keeps the estimate honest and the available choices visible", () => {
     const html = renderToStaticMarkup(createElement(OptionsView, {
-      screen: { kind: "processing", pendingChunks: 2, estimate: null, ready: { supportedClaims: 1, partial: ["A section is still being prepared."] }, offers: [
+      screen: { kind: "processing", pendingChunks: 2, estimate: null, ready: { topics: ["Pivots"], supportedClaims: 1, covered: [], limits: ["Frame capture stalled."] }, offers: [
         { choice: "prepared_only", label: "Review now", note: "Only prepared material." },
         { choice: "stop_early", label: "Stop early", note: "Keep completed work." },
       ] }, busy: true, onStart() {}, onRetry() {}, api, titles: new Map(),
     }));
     expect(html).toContain("No reliable time estimate yet.");
-    expect(html).toContain("This review is partial.");
+    expect(html).toContain("What this review cannot cover");
+    expect(html).toContain("Frame capture stalled.");
     expect(html).toContain("Review now");
     expect(html).toContain("Stop early");
     expect(html.match(/disabled=""/g)?.length).toBe(2);

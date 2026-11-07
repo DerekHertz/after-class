@@ -342,7 +342,17 @@ export type FrozenScope = {
   readonly frozenAtSeq: Seq;
 };
 
-export type ScopePreview = { readonly chunkRevisions: NonEmpty<ChunkRevisionId>; readonly supportedClaims: number; readonly partial: readonly PartialReason[] };
+/**
+ * What a review started now would cover. `topics` are the concepts of the supported claims, in scope order, each once;
+ * `material` is the watched time the scope would freeze. A topic is not a claim, so the two counts differ.
+ */
+export type ScopePreview = {
+  readonly chunkRevisions: NonEmpty<ChunkRevisionId>;
+  readonly supportedClaims: number;
+  readonly topics: readonly Concept[];
+  readonly material: Material;
+  readonly partial: readonly PartialReason[];
+};
 
 export type ReviewOptions =
   | { readonly kind: "ready"; readonly scope: ScopePreview }

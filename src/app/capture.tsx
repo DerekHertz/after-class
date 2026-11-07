@@ -4,7 +4,7 @@ import type { CaptureId, ReviewId } from "../shared/ids";
 import type { ReviewOptions, StartChoice } from "../shared/domain";
 import type { AppApi } from "./api";
 import { formatClock, inspectBundle, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
-import type { OptionsScreen, SourceTitles, StartOffer } from "./core";
+import type { OptionsScreen, ScopeSummary, SourceTitles, StartOffer } from "./core";
 import { BundleInspector, ErrorNote, EvidencePane, Link, navigate, useAsync } from "./ui";
 
 
@@ -27,8 +27,7 @@ export function OptionsView({ screen, busy, onStart, onRetry, api, titles }: Opt
         <section className="invitation-paper" aria-labelledby="invitation-heading">
           <p className="page-kicker">A little space to think</p>
           <h2 id="invitation-heading">Ready to review</h2>
-          <p>{screen.supportedClaims} claim{screen.supportedClaims === 1 ? "" : "s"} supported by the lecture evidence.</p>
-          <Partial items={screen.partial} />
+          <ScopeDetails scope={screen.scope} />
           <Offers offers={screen.offers} busy={busy} onStart={onStart} />
         </section>
       );
@@ -36,18 +35,14 @@ export function OptionsView({ screen, busy, onStart, onRetry, api, titles }: Opt
       return (
         <section className="invitation-paper" aria-labelledby="invitation-heading">
           <p className="page-kicker">Getting your lecture ready</p>
-          <h2 id="invitation-heading">Processing</h2>
+          <h2 id="invitation-heading">{screen.ready ? "Some topics are ready" : "Preparing your lecture"}</h2>
           <p>
-            {screen.pendingChunks} section{screen.pendingChunks === 1 ? " is" : "s are"} still being prepared.
+            {screen.pendingChunks} {screen.ready ? "more " : ""}section{screen.pendingChunks === 1 ? " is" : "s are"} still being prepared.
+            {screen.ready && <> {screen.pendingChunks === 1 ? "It is" : "They are"} not in a review you start now.</>}
             {screen.estimate !== null && <> Estimated time left: {screen.estimate}.</>}
           </p>
           {screen.estimate === null && <p className="muted">No reliable time estimate yet.</p>}
-          {screen.ready && (
-            <>
-              <p>{screen.ready.supportedClaims} claim{screen.ready.supportedClaims === 1 ? " is" : "s are"} ready now.</p>
-              <Partial items={screen.ready.partial} />
-            </>
-          )}
+          {screen.ready && <ScopeDetails scope={screen.ready} />}
           <Offers offers={screen.offers} busy={busy} onStart={onStart} />
           <p className="muted">This page checks again every few seconds.</p>
         </section>
@@ -97,25 +92,45 @@ export function OptionsView({ screen, busy, onStart, onRetry, api, titles }: Opt
   }
 }
 
-function Partial({ items }: { readonly items: readonly string[] }) {
-  if (items.length === 0) return null;
+/** The named topics, the watched stretches they come from, and what this review cannot cover. A claim count stands in only when no topic has a name. */
+function ScopeDetails({ scope }: { readonly scope: ScopeSummary }) {
   return (
-    <div className="note partial-notice">
-      <strong>This review is partial.</strong>
-      <ul>{items.map((t, i) => <li key={i}>{t}</li>)}</ul>
-    </div>
+    <>
+      <h3>Topics in this review</h3>
+      {scope.topics.length > 0
+        ? <ul className="scope-topics">{scope.topics.map((t, i) => <li key={i}>{t}</li>)}</ul>
+        : <p>Topic names are not available for this material. It has {scope.supportedClaims} claim{scope.supportedClaims === 1 ? "" : "s"} that passed the evidence check.</p>}
+      {scope.covered.length > 0 && <p className="muted">From {scope.covered.join("; ")}.</p>}
+      {scope.limits.length > 0 && (
+        <div className="note partial-notice">
+          <strong>What this review cannot cover</strong>
+          <ul>{scope.limits.map((t, i) => <li key={i}>{t}</li>)}</ul>
+        </div>
+      )}
+    </>
   );
 }
 
+/** The first offer is the usual start. The rest sit behind a disclosure, each with what it gives up. */
 function Offers({ offers, busy, onStart }: { readonly offers: readonly StartOffer[]; readonly busy: boolean; readonly onStart: (c: StartChoice) => void }) {
+  const [usual, ...others] = offers;
+  if (usual === undefined) return null;
   return (
     <div className="invitation-offers">
-      {offers.map((o) => (
-        <div className="invitation-offer" key={o.choice}>
-          <button className={o.choice === "prepared_only" ? "page-primary" : undefined} type="button" disabled={busy} onClick={() => onStart(o.choice)}>{o.label}</button>
-          <span className="muted"> {o.note}</span>
-        </div>
-      ))}
+      <div className="invitation-offer">
+        <button className="page-primary" type="button" disabled={busy} onClick={() => onStart(usual.choice)}>{usual.label}</button>
+        {usual.note !== "" && <span className="muted"> {usual.note}</span>}
+      </div>
+      {others.length > 0 && (
+        <details className="invitation-more">
+          <summary>Other ways to start</summary>
+          {others.map((o) => (
+            <p key={o.choice}>
+              <button type="button" disabled={busy} onClick={() => onStart(o.choice)}>{o.label}</button> <span className="muted">{o.note}</span>
+            </p>
+          ))}
+        </details>
+      )}
     </div>
   );
 }

@@ -7,7 +7,7 @@ import { createElement, isValidElement } from "react";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "bun:test";
-import type { LearnerAct, ReviewView, TurnEvent, UsageSummary } from "../src/shared/domain";
+import type { LearnerAct, ReviewView, ScopePreview, TurnEvent, UsageSummary } from "../src/shared/domain";
 import { stableId, randomId } from "../src/shared/ids";
 import type { ReviewId, TurnId } from "../src/shared/ids";
 import { Material, interval } from "../src/shared/time";
@@ -20,7 +20,7 @@ import { learnerAct } from "../src/shared/wire";
 import type { SessionState } from "../src/app/controller";
 import {
   availableActions, conversationLines, currentEvidenceIds, estimateText, formatClock, inspectBundle, liveText, noteView, observationRow,
-  groupGaps, lectureHeading, optionsScreen, parseRoute, reduceLive, routePath, softTargetPrompt, startLive, toAct, unansweredLearnerTurn, owedLearnerTurn, usageRows,
+  coveredLines, groupGaps, lectureHeading, optionsScreen,parseRoute, reduceLive, routePath, softTargetPrompt, startLive, toAct, unansweredLearnerTurn, owedLearnerTurn, usageRows,
 } from "../src/app/core";
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { StreamError, ndjson, tutorEvents } from "../src/app/ndjson";
@@ -53,7 +53,7 @@ const claimJson = (status: string) => ({
   originalCheck: null, revision: null, revisionCheck: null, status,
 });
 
-const READY = { kind: "ready", scope: { chunkRevisions: [crv], supportedClaims: 4, partial: [] } };
+const READY = { kind: "ready", scope: { chunkRevisions: [crv], supportedClaims: 4, topics: [], material: [[src, [[0, 120]]]], partial: [] } };
 
 function turnJson(n: number, actor: "learner" | "tutor" | "code", rest: Record<string, unknown>) {
   return { id: actor === "learner" ? stableId("turn", `l${n}`) : stableId("turn", `${actor}${n}`), reviewId, seq: n, atMs: n * 1000, threadId: actor === "code" ? null : thr, actor, ...rest };
@@ -276,31 +276,52 @@ describe("createApi", () => {
 describe("review options screens", () => {
   const titles = new Map([[src, "Lamport clocks"]]);
 
-  test("ready offers one start and lists why the review is partial", () => {
+  const scopeOf = (over: Partial<ScopePreview> = {}): ScopePreview =>
+    ({ chunkRevisions: [crv], supportedClaims: 1, topics: [], material: Material.of([[src, [interval(0, 600)]]]), partial: [], ...over });
+  const topic = (label: string) => ({ id: stableId("cpt", label), label, summary: "" });
+
+  test("ready offers one start, names the topics and covered time, and says what each capture gap leaves out", () => {
     const screen = optionsScreen(
-      { kind: "ready", scope: { chunkRevisions: [crv], supportedClaims: 1, partial: [{ kind: "unverified_claims", count: 2 }, { kind: "capture_gap", gap: { sourceId: src, interval: interval(120, 180), channel: "frames", reason: "hidden_tab" } }] } },
+      { kind: "ready", scope: scopeOf({ supportedClaims: 5, topics: [topic("Logical clocks"), topic("Happened-before")], partial: [{ kind: "unverified_claims", count: 2 }, { kind: "capture_gap", gap: { sourceId: src, interval: interval(120, 180), channel: "frames", reason: "hidden_tab" } }] }) },
       titles,
     );
-    expect(screen).toMatchObject({ kind: "ready", supportedClaims: 1, offers: [{ choice: "prepared_only" }] });
+    expect(screen).toMatchObject({ kind: "ready", offers: [{ choice: "prepared_only", label: "Start review" }] });
     if (screen.kind !== "ready") throw new Error("unreachable");
-    expect(screen.partial[0]).toBe("2 claims were not confirmed by the source and will not be used to assess you.");
-    expect(screen.partial[1]).toBe("Tab was hidden, so frames stalled in Lamport clocks, 2:00 to 3:00.");
+    expect(screen.scope.topics).toEqual(["Logical clocks", "Happened-before"]);
+    expect(screen.scope.covered).toEqual(["Lamport clocks, 0:00 to 10:00"]);
+    expect(screen.scope.limits[0]).toBe("2 claims were not confirmed by the source and will not be used to assess you.");
+    expect(screen.scope.limits[1]).toBe("Tab was hidden, so frames stalled in Lamport clocks, 2:00 to 3:00. Anything shown only on screen there cannot be asked about or checked.");
+  });
+
+  test("covered time names one stretch exactly and sums several", () => {
+    expect(coveredLines(Material.of([[src, [interval(0, 60), interval(120, 300)]]]), titles)).toEqual(["Lamport clocks, 2 stretches, 4:00 in all"]);
+    expect(coveredLines(Material.empty, titles)).toEqual([]);
+  });
+
+  test("a scope with no topic names says so and falls back to its claim count, never calling claims topics", () => {
+    const out = html({ kind: "ready", scope: scopeOf({ supportedClaims: 3 }) });
+    expect(out).toContain("Topic names are not available for this material. It has 3 claims that passed the evidence check.");
+    expect(out).not.toMatch(/3 topics/);
+    const named = html({ kind: "ready", scope: scopeOf({ supportedClaims: 3, topics: [topic("Logical clocks")] }) });
+    expect(named).toContain("<li>Logical clocks</li>");
+    expect(named).not.toContain("claims that passed");
   });
 
   test("many capture gaps of one kind in one video become one line, in the place the first held", () => {
     const gap = (start: number, end: number, reason: "partially_watched_segment" | "hidden_tab" = "partially_watched_segment") =>
       ({ kind: "capture_gap", gap: { sourceId: src, interval: interval(start, end), channel: "transcript", reason } }) as const;
     const screen = optionsScreen(
-      { kind: "ready", scope: { chunkRevisions: [crv], supportedClaims: 1, partial: [gap(0, 2), { kind: "unverified_claims", count: 1 }, gap(10, 13), gap(20, 25), gap(30, 90, "hidden_tab")] } },
+      { kind: "ready", scope: scopeOf({ partial: [gap(0, 2), { kind: "unverified_claims", count: 1 }, gap(10, 13), gap(20, 25), gap(30, 90, "hidden_tab")] }) },
       titles,
     );
     if (screen.kind !== "ready") throw new Error("unreachable");
-    expect(screen.partial).toEqual([
-      "Caption line only partly watched, so not used in Lamport clocks, 3 places, 0:10 in all.",
-      "Tab was hidden, so frames stalled in Lamport clocks, 0:30 to 1:30.",
+    const said = "What was said there is not in this review, so it cannot be asked about or checked.";
+    expect(screen.scope.limits).toEqual([
+      `Caption line only partly watched, so not used in Lamport clocks, 3 places, 0:10 in all. ${said}`,
+      `Tab was hidden, so frames stalled in Lamport clocks, 0:30 to 1:30. ${said}`,
       "1 claim was not confirmed by the source and will not be used to assess you.",
     ]);
-    expect(groupGaps([gap(0, 2).gap, gap(5, 6).gap], titles)).toEqual([{ where: "Lamport clocks, 2 places, 0:03 in all", reason: "Caption line only partly watched, so not used", count: 2 }]);
+    expect(groupGaps([gap(0, 2).gap, gap(5, 6).gap], titles)).toEqual([{ where: "Lamport clocks, 2 places, 0:03 in all", reason: "Caption line only partly watched, so not used", count: 2, channel: "transcript" }]);
   });
 
   test("a lecture heading names the shared course instead of every video title", () => {
@@ -323,8 +344,28 @@ describe("review options screens", () => {
   test("processing offers a start only when something is ready, and both ways of starting then", () => {
     const none = optionsScreen({ kind: "processing", readyNow: null, pendingChunks: 1, estimateS: null });
     expect(none.kind === "processing" && none.offers).toEqual([]);
-    const some = optionsScreen({ kind: "processing", readyNow: { chunkRevisions: [crv], supportedClaims: 3, partial: [{ kind: "chunks_still_preparing", count: 1 }] }, pendingChunks: 1, estimateS: 120 });
+    const some = optionsScreen({ kind: "processing", readyNow: scopeOf({ supportedClaims: 3, partial: [{ kind: "chunks_still_preparing", count: 1 }] }), pendingChunks: 1, estimateS: 120 });
     expect(some.kind === "processing" && some.offers.map((o) => o.choice)).toEqual(["prepared_only", "stop_early"]);
+    // The pending section has its own sentence on this screen, so it is not listed again as a limit.
+    expect(some.kind === "processing" && some.ready?.limits).toEqual([]);
+  });
+
+  test("processing makes starting with ready topics the usual path and puts stopping behind a disclosure that says what it cancels", () => {
+    const out = html({ kind: "processing", readyNow: scopeOf({ topics: [topic("Logical clocks")] }), pendingChunks: 2, estimateS: null });
+    expect(out).toContain("Some topics are ready");
+    expect(out).toContain("2 more sections are still being prepared. They are not in a review you start now.");
+    expect(out).toContain("<li>Logical clocks</li>");
+    expect(out).toMatch(/class="page-primary"[^>]*>Start with ready topics</);
+    expect(out).toContain("The other 2 sections keep preparing for a later review.");
+    const more = out.slice(out.indexOf("<details"));
+    expect(more).toContain("<summary>Other ways to start</summary>");
+    expect(more).toContain(">Stop preparing and start</button>");
+    expect(more).toContain("Cancels the preparation still running for 2 sections.");
+    expect(out.indexOf("Stop preparing and start")).toBeGreaterThan(out.indexOf("<details"));
+    const waiting = html({ kind: "processing", readyNow: null, pendingChunks: 1, estimateS: null });
+    expect(waiting).toContain("Preparing your lecture");
+    expect(waiting).toContain("1 section is still being prepared.");
+    expect(waiting).not.toContain("<button");
   });
 
   test("nothing to review lists gaps, unverified claims with their status, and a watch link per rewatch interval", () => {
@@ -345,7 +386,7 @@ describe("review options screens", () => {
   test("the rendered screens carry the content", () => {
     expect(html({ kind: "processing", readyNow: null, pendingChunks: 2, estimateS: null })).toContain("No reliable time estimate yet.");
     expect(html({ kind: "processing", readyNow: null, pendingChunks: 2, estimateS: 300 })).toContain("about 5 min");
-    expect(html({ kind: "ready", scope: { chunkRevisions: [crv], supportedClaims: 4, partial: [] } })).toContain("Review now");
+    expect(html({ kind: "ready", scope: scopeOf({ supportedClaims: 4 }) })).toContain("Start review");
     expect(html({ kind: "nothing_to_review", gaps: [], unverified: [], rewatch: [] })).toContain("Nothing to review yet");
   });
 
@@ -1204,15 +1245,19 @@ describe("opening the review (flow D: topic checklist, then the learner starts i
     expect(h.sends[1]!.act).toEqual({ kind: "begin", fuzzy: [cpt], note: "ordering" });
   });
 
-  test("the checklist lists every topic with its summary, an optional note box, Start review and the None path", () => {
+  test("the checklist is a starting-point choice: every topic with its summary, an optional note box, and one start that works with nothing marked", () => {
     const html = renderToStaticMarkup(createElement(TopicChecklist, { topics, disabled: false, onStart: () => {} }));
+    expect(html).toContain('<h2 id="starting-point-heading">Choose a starting point</h2>');
+    expect(html).toContain("Mark none and the tutor starts with open recall questions.");
     expect(html).toContain("Logical clocks");
     expect(html).toContain("Order events without a shared clock.");
     expect(html).toContain("Vector clocks");
     expect(html.match(/type="checkbox"/g)).toHaveLength(2);
     expect(html).toContain("<textarea");
-    expect(html).toContain(">Start review</button>");
-    expect(html).toContain(">None, just quiz me</button>");
+    // The start is the default path: enabled with nothing marked, and it sends the None path.
+    expect(html).toMatch(/<button type="submit" class="primary-action">Start review<\/button>/);
+    expect(html).not.toContain("None, just quiz me");
+    expect(html).not.toContain("Question");
   });
 
   test("the begin act is a system line naming the learner's picks and note, never a learner line", () => {

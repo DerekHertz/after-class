@@ -4,7 +4,7 @@
  */
 import type {
   Author, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
-  ReviewState, ReviewView, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
+  ReviewState, ReviewView, ScopePreview, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
 } from "../shared/domain";
 import type { EvidenceId, SourceId } from "../shared/ids";
 import { IntervalSet, Material } from "../shared/time";
@@ -62,10 +62,17 @@ export const GAP_LABEL: Readonly<Record<GapReason, string>> = {
   implausible_span: "Watched time did not add up, so it was set aside",
 };
 
+/** What a capture gap means for a review: which part of that stretch cannot be asked about or checked. */
+export const GAP_CONSEQUENCE: Readonly<Record<Gap["channel"], string>> = {
+  transcript: "What was said there is not in this review, so it cannot be asked about or checked.",
+  frames: "Anything shown only on screen there cannot be asked about or checked.",
+  playback: "Nothing from that stretch is in this review.",
+};
+
 export function partialText(reason: PartialReason, titles: SourceTitles = new Map()): string {
   switch (reason.kind) {
     case "capture_gap":
-      return `${GAP_LABEL[reason.gap.reason]} in ${titleOf(titles, reason.gap.sourceId)}, ${formatInterval(reason.gap.interval)}.`;
+      return `${GAP_LABEL[reason.gap.reason]} in ${titleOf(titles, reason.gap.sourceId)}, ${formatInterval(reason.gap.interval)}. ${GAP_CONSEQUENCE[reason.gap.channel]}`;
     case "stopped_early":
       return `Preparation was stopped early; ${reason.droppedClaims} claim${reason.droppedClaims === 1 ? "" : "s"} left out.`;
     case "unverified_claims":
@@ -79,7 +86,7 @@ export function partialText(reason: PartialReason, titles: SourceTitles = new Ma
  * Capture gaps grouped per video and reason, so a long capture shows one line per
  * kind of gap instead of one per stretch. A group of one keeps its exact interval.
  */
-export function groupGaps(gaps: readonly Gap[], titles: SourceTitles = new Map()): readonly { readonly where: string; readonly reason: string; readonly count: number }[] {
+export function groupGaps(gaps: readonly Gap[], titles: SourceTitles = new Map()): readonly { readonly where: string; readonly reason: string; readonly count: number; readonly channel: Gap["channel"] }[] {
   const groups = new Map<string, Gap[]>();
   for (const g of gaps) {
     const key = `${g.reason}\u0000${g.sourceId}`;
@@ -93,6 +100,7 @@ export function groupGaps(gaps: readonly Gap[], titles: SourceTitles = new Map()
       where: group.length === 1 ? `${title}, ${formatInterval(first.interval)}` : `${title}, ${group.length} places, ${formatClock(total)} in all`,
       reason: GAP_LABEL[first.reason],
       count: group.length,
+      channel: first.channel,
     };
   });
 }
@@ -103,7 +111,7 @@ export function partialLines(reasons: readonly PartialReason[], titles: SourceTi
   const grouped = groupGaps(gaps, titles);
   const firstGap = reasons.findIndex((r) => r.kind === "capture_gap");
   const lines = reasons.filter((r) => r.kind !== "capture_gap").map((r) => partialText(r, titles));
-  const gapLines = grouped.map((g) => `${g.reason} in ${g.where}.`);
+  const gapLines = grouped.map((g) => `${g.reason} in ${g.where}. ${GAP_CONSEQUENCE[g.channel]}`);
   if (firstGap < 0) return lines;
   const before = reasons.slice(0, firstGap).filter((r) => r.kind !== "capture_gap").length;
   return [...lines.slice(0, before), ...gapLines, ...lines.slice(before)];
@@ -127,11 +135,21 @@ export function lectureHeading(titles: readonly string[]): { readonly title: str
 
 export type StartOffer = { readonly choice: StartChoice; readonly label: string; readonly note: string };
 
+/**
+ * What a review started now would cover, in the learner's terms: the named topics, the watched stretches, and what it
+ * cannot cover. `supportedClaims` is only for the case with no topic names; a claim count is never shown as a topic count.
+ */
+export type ScopeSummary = {
+  readonly topics: readonly string[];
+  readonly supportedClaims: number;
+  readonly covered: readonly string[];
+  readonly limits: readonly string[];
+};
+
 export type OptionsScreen =
   | {
       readonly kind: "ready";
-      readonly supportedClaims: number;
-      readonly partial: readonly string[];
+      readonly scope: ScopeSummary;
       readonly offers: readonly StartOffer[];
     }
   | {
@@ -139,7 +157,8 @@ export type OptionsScreen =
       /** Null unless the backend gave a usable estimate: an unreliable estimate is never invented. */
       readonly estimate: string | null;
       readonly pendingChunks: number;
-      readonly ready: { readonly supportedClaims: number; readonly partial: readonly string[] } | null;
+      readonly ready: ScopeSummary | null;
+      /** The first offer is the usual start; the rest are secondary and say what they give up. */
       readonly offers: readonly StartOffer[];
     }
   | {
@@ -168,26 +187,54 @@ export const CLAIM_STATUS_LABEL = {
 export const claimText = (c: Claim): string => (c.revision ?? c.original).text;
 export const claimEvidence = (c: Claim): readonly EvidenceId[] => (c.revision ?? c.original).evidence;
 
+const sections = (n: number): string => `${n} section${n === 1 ? "" : "s"}`;
+
+/** One line per video: its watched stretch, or how many stretches and their total when there are several. */
+export function coveredLines(material: Material, titles: SourceTitles = new Map()): readonly string[] {
+  return Material.sources(material).flatMap((id) => {
+    const spans = Material.get(material, id).intervals();
+    const only = spans[0];
+    if (only === undefined) return [];
+    const total = spans.reduce((sum, i) => sum + (i.end - i.start), 0);
+    return [spans.length === 1 ? `${titleOf(titles, id)}, ${formatInterval(only)}` : `${titleOf(titles, id)}, ${spans.length} stretches, ${formatClock(total)} in all`];
+  });
+}
+
+export function scopeSummary(scope: ScopePreview, titles: SourceTitles = new Map()): ScopeSummary {
+  return {
+    topics: scope.topics.map((t) => t.label),
+    supportedClaims: scope.supportedClaims,
+    covered: coveredLines(scope.material, titles),
+    limits: partialLines(scope.partial, titles),
+  };
+}
+
 export function optionsScreen(options: ReviewOptions, titles: SourceTitles = new Map(), videos: SourceVideos = new Map()): OptionsScreen {
   switch (options.kind) {
     case "ready":
       return {
         kind: "ready",
-        supportedClaims: options.scope.supportedClaims,
-        partial: partialLines(options.scope.partial, titles),
-        offers: [{ choice: "prepared_only", label: "Review now", note: "Anything still preparing keeps preparing for later." }],
+        scope: scopeSummary(options.scope, titles),
+        offers: [{ choice: "prepared_only", label: "Start review", note: "" }],
       };
     case "processing": {
       const ready = options.readyNow;
+      const one = options.pendingChunks === 1;
+      const rest = sections(options.pendingChunks);
       return {
         kind: "processing",
         estimate: estimateText(options.estimateS),
         pendingChunks: options.pendingChunks,
-        ready: ready && { supportedClaims: ready.supportedClaims, partial: partialLines(ready.partial, titles) },
+        // The pending sections get their own sentence on this screen, so they are not repeated as a limit.
+        ready: ready && scopeSummary({ ...ready, partial: ready.partial.filter((r) => r.kind !== "chunks_still_preparing") }, titles),
         offers: ready
           ? [
-              { choice: "prepared_only", label: "Review what is ready", note: "The rest keeps preparing for a later review." },
-              { choice: "stop_early", label: "Stop preparing and review", note: "Cancels pending work in this review. Finished claims are kept." },
+              { choice: "prepared_only", label: "Start with ready topics", note: `${one ? "The other section keeps" : `The other ${rest} keep`} preparing for a later review.` },
+              {
+                choice: "stop_early",
+                label: "Stop preparing and start",
+                note: `Cancels the preparation still running for ${rest}. Anything ${one ? "it has" : "they have"} already checked joins this review. Anything not yet checked is left out.`,
+              },
             ]
           : [],
       };

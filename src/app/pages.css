@@ -13,6 +13,10 @@
 .invitation-offer { flex: 1 1 14rem; max-width: 24rem; }
 .invitation-offer button { display: block; margin-bottom: 8px; }
 .invitation-offer .muted { display: block; font-size: .9rem; }
+.invitation-more { flex: 1 1 100%; }
+.invitation-more summary { cursor: pointer; color: var(--accent); }
+.invitation-more p { margin-block: 8px 0; }
+.scope-topics { margin-block: 8px 12px; padding-left: 1.2em; }
 .notebook-page button, .notebook-page select { min-height: 44px; }
 .notebook-page .page-primary { background: var(--accent); border-color: var(--accent); color: var(--surface); padding: 10px 24px; }
 .notebook-page :is(button, select, textarea, a, summary):focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }

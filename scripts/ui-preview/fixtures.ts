@@ -46,6 +46,10 @@ const illustration = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 4
 export function createFixture(scenario: Scenario): Fixture {
   const material = [[ids.source, [[0, 760]]]];
   const gap = { sourceId: ids.source, interval: { start: 600, end: 640 }, channel: "frames", reason: "hidden_tab" };
+  const topics = [
+    { id: ids.concept, label: "Circular wait", summary: "Each thread holds a resource while waiting for one another thread holds." },
+    { id: ids.ordering, label: "Resource ordering", summary: "Acquiring resources in one global order removes the circular wait." },
+  ];
   const firstQuestion = "Two threads are waiting on each other. How could that happen?";
   /**
    * A review view as the backend sends it. A saved review also has a quick check on a second topic and the observations
@@ -85,10 +89,7 @@ export function createFixture(scenario: Scenario): Fixture {
     const checklist = s === "fuzzy-checklist";
     return {
       reviewId, captureId: ids.capture,
-      topics: [
-        { id: ids.concept, label: "Circular wait", summary: "Each thread holds a resource while waiting for one another thread holds." },
-        { id: ids.ordering, label: "Resource ordering", summary: "Acquiring resources in one global order removes the circular wait." },
-      ],
+      topics,
       scope: { chunkRevisions: [ids.chunk], material, claimsAtStart: [ids.claim, ids.orderingClaim], partial: [{ kind: "capture_gap", gap }], frozenAtSeq: 7 },
       state: { reviewId, phase: s === "paused" ? "paused" : s === "save-failure" || s === "saving" || saved ? "ended" : "active", mainQuestions: checklist ? 0 : 1, quickChecks: saved ? 1 : 0, fuzzy: saved ? [ids.concept] : [], openThread: checklist || saved ? null : ids.thread, lastLearnerAct: null,
         detour: s === "detour" ? { kind: "proposed", turnId: id("turn", "detour"), topic: "Resource ordering", needsResource: null } : s === "resource-wait" ? { kind: "awaiting_resource", resourceId: id("res", "resource"), topic: "Resource ordering" } : { kind: "none" },
@@ -131,7 +132,7 @@ export function createFixture(scenario: Scenario): Fixture {
     async lectures() { log("lectures.read"); return lecturesResponse.parse({ lectures: [] }); },
     async reviewOptions() {
       log("review.options");
-      const scope = { chunkRevisions: [ids.chunk], supportedClaims: 3, partial: [{ kind: "capture_gap", gap }] };
+      const scope = { chunkRevisions: [ids.chunk], supportedClaims: 3, topics, material, partial: [{ kind: "capture_gap", gap }] };
       return reviewOptionsz.parse(scenario === "capture-empty" ? { kind: "nothing_to_review", gaps: [gap], unverified: [], rewatch: [{ sourceId: ids.source, interval: { start: 600, end: 640 } }] } : scenario === "capture-processing" ? { kind: "processing", readyNow: scope, pendingChunks: 2, estimateS: null } : { kind: "ready", scope });
     },
     async startReview(_capture, _choice, reviewId) { log("review.start"); return { kind: "started", reviewId, scope: view.scope }; },

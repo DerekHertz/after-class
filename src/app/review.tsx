@@ -146,10 +146,11 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
       <SaveBanner state={state} onRetry={() => void controller.save()} reviewId={reviewId} />
       <ErrorNote error={state.loadError} retry={() => void controller.load()} />
       <div className={`review-workspace${sourceOpen ? "" : " source-closed"}`}>
-        <section className="conversation-notebook" aria-labelledby="conversation-heading">
-          <div className="notebook-heading">
+        <section className="conversation-notebook" aria-labelledby={checklist ? STARTING_POINT_HEADING : "conversation-heading"}>
+          {/* Before the first turn this is a setup choice, not a conversation: no heading, question number or empty history. */}
+          {!checklist && <div className="notebook-heading">
             <h2 id="conversation-heading">Conversation</h2>
-            <span className="question-marker">Question {view.state.mainQuestions}</span>
+            {view.state.mainQuestions > 0 && <span className="question-marker">Question {view.state.mainQuestions}</span>}
             <button type="button" onClick={() => {
               followHistory.current = true;
               if (history.current) history.current.scrollTop = history.current.scrollHeight;
@@ -158,8 +159,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
               if (sourceOpen) closeSource();
               else { sourceOrigin.current = e.currentTarget; reactToCompanion("draw"); setSourceOpen(true); }
             }}>{sourceOpen ? "Close source" : "Open source"}</button>
-          </div>
-          <div ref={history} onScroll={() => {
+          </div>}
+          {!checklist && <div ref={history} onScroll={() => {
             const el = history.current;
             if (el) followHistory.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
           }} className="conversation-history" role="region" aria-label="Conversation history" tabIndex={0}>
@@ -173,7 +174,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
               </li>
             )}
           </ol>
-          </div>
+          </div>}
           {canRetry && (
             <UndeliveredNote
               unsent={state.unsent.length}
@@ -255,10 +256,13 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   );
 }
 
+const STARTING_POINT_HEADING = "starting-point-heading";
+
 /**
  * Flow D: "[code]  Show the topics in the frozen scope as a checklist."
  * "[user]  Mark the topics I'm fuzzy on (or none), optionally add a note on what feels fuzzy."
- * Starting sends one `begin` act carrying the marked concept IDs (empty for the None path) and the note.
+ * Starting sends one `begin` act carrying the marked concept IDs and the note. Starting with none marked is the None path,
+ * so the learner can always start without choosing.
  */
 export function TopicChecklist({ topics, disabled, onStart }: { readonly topics: readonly Concept[]; readonly disabled: boolean; readonly onStart: (fuzzy: readonly ConceptId[], note: string) => void }) {
   const [marked, setMarked] = useState<ReadonlySet<ConceptId>>(new Set());
@@ -266,9 +270,11 @@ export function TopicChecklist({ topics, disabled, onStart }: { readonly topics:
   const noteId = useId();
   const toggle = (id: ConceptId) => setMarked((m) => { const next = new Set(m); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   return (
-    <form className="note topic-checklist" onSubmit={(e) => { e.preventDefault(); if (marked.size > 0) onStart(topics.filter((t) => marked.has(t.id)).map((t) => t.id), note.trim()); }}>
+    <form className="note topic-checklist" onSubmit={(e) => { e.preventDefault(); onStart(topics.filter((t) => marked.has(t.id)).map((t) => t.id), note.trim()); }}>
+      <h2 id={STARTING_POINT_HEADING}>Choose a starting point</h2>
+      <p className="muted">Mark any topic that feels fuzzy and the tutor starts there, then does a quick check on up to 3 of the others. Mark none and the tutor starts with open recall questions.</p>
       <fieldset disabled={disabled}>
-        <legend>Which of these are you fuzzy on?</legend>
+        <legend>Topics that feel fuzzy (optional)</legend>
         {topics.length === 0 && <p className="muted">No topics to list for this review.</p>}
         <ul className="topic-list">
           {topics.map((t) => (
@@ -283,8 +289,7 @@ export function TopicChecklist({ topics, disabled, onStart }: { readonly topics:
         <label htmlFor={noteId}>Anything in particular that feels fuzzy? (optional)</label>
         <textarea id={noteId} value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} />
         <p className="actions">
-          <button type="submit" disabled={marked.size === 0}>Start review</button>
-          <button type="button" data-action="none" onClick={() => onStart([], note.trim())}>None, just quiz me</button>
+          <button type="submit" className="primary-action">{marked.size === 0 ? "Start review" : `Start with ${marked.size} marked topic${marked.size === 1 ? "" : "s"}`}</button>
         </p>
       </fieldset>
     </form>
