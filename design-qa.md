@@ -1,75 +1,63 @@
-# Reference fidelity QA
+# Front-row pixel skins review
 
 final result: passed
 
-This is technical reference QA; Derek's final visual verdict remains pending on PR #44.
+This is an implementation QA result for the tested fixture states, not a merge authorization or Derek's visual sign-off. The reviewed product-code commit is `494faae7c492f7741171eb56d6687b2084c5d363`. This report and its screenshots are a documentation-only follow-up.
 
-## Comparison target and evidence
+## Visual target and evidence
 
-Source visual truth: `docs/design/component-review-2026-11-03/conversation-and-source.png`, plus approved room boards and `mascot-studies-2026-11-03` in PR #42. Source composition1487×1058px normalized to1440×1024 CSS pixels; implementation1440×1024 at1× browser capture. The small source aspect adjustment is explicit. Both show active Locks & deadlocks with open evidence. All18 independent room/companion choices were exercised.
+Derek selected all three refined anime pixel concepts, then required the artwork to fill the interface without an opaque outer frame. His later browser comment also rejected the flat blue backdrop around source and history. Those instructions supersede the solid header bands in the source references.
 
-Full-view combined input: `docs/trail/frontend-v2/comparison-final.png`. Focused combined input: `docs/trail/frontend-v2/focused-comparison.png`. Implementation captures: `last-desk.png`, `projection-booth.png`, `study-bench.png` in that directory. Mobile390×844 capture: `mobile-study-bench.png` (full-page1639px); no mobile reference was supplied, so mobile checks are usability checks.
+| Room | Selected source | Rendered desktop |
+| --- | --- | --- |
+| Rail-side Classroom | [Reference](docs/design/front-row/selected/rail-classroom.png) | [1440x900](docs/design/front-row/review/rail-final-desktop.jpg) |
+| Harbor Study Terrace | [Reference](docs/design/front-row/selected/harbor-terrace.png) | [1440x900](docs/design/front-row/review/harbor-final-desktop.jpg) |
+| Lantern Canal Film Club | [Reference](docs/design/front-row/selected/canal-film-club.png) | [1440x900](docs/design/front-row/review/canal-final-desktop.jpg) |
 
-## Findings and fidelity surfaces
+Sources are1586x992 pixels. Desktop captures are1440x900 pixels at a1440x900 CSS viewport, one captured pixel per CSS pixel. The aspect ratios are almost identical. Each source and its rendered room were opened together in the same comparison input. This is a proportional composition comparison, not a pixel-difference score. The mock has a single illustrative question; the real fixture also contains an explanation, provenance and a diagram control. The extra content and smaller type needed for it are intentional product behavior. Companion choices are independent, so their selection can differ from the mock.
 
-No remaining actionable P0/P1/P2 in final desktop evidence; independent visual verifier concurs.
+The full-resolution comparisons make the board, typing field, caret/focus outline and action labels readable without a separate enlarged crop. Live DOM bounds were checked for the board, navigation, desk and phone help controls.
 
-- Typography: Young Serif display and DM Sans body/control fonts replace generic approximations. Reviewed hierarchy, weights, wrapping and optical scale in the combined focused crop. Native text remains selectable. Source quote/caption sizes were increased after the first comparison.
-- Layout: notebook begins near95px and extends to974px at the reference viewport; illustrated evidence occupies left region with character/physical recorder on desk. Actual scroll surfaces constrain overflowing content. Mobile uses notebook-first reading order. All rooms fit390px width; keyboard End reaches remaining dialogue and evidence, confirmed by scroll endpoints.
-- Tokens: warm cream paper, ochre trim, cobalt interaction and mint/indigo room palettes follow the source. Shadows preserve object grounding. Disabled empty-answer control stays muted by real action validity.
-- Assets: fifteen PNGs replace custom vector room/character approximations. Detail, crop, scale and transparent edges inspected; alpha validated independently. Room-specific microphones and spring key preserve identity. Standard control icons are upstream Feather, with bundled license notices.
-- Copy/content: actual API-backed dialogue and provenance remain DOM. Extra fixture explanation changes vertical density; backend does not expose total-question count or follow-up evidence, so these are not invented. The illustrative lecture frame is labeled fixture, not source art. Contract-valid hint/options stay in the existing expandable actions.
+Additional evidence:
 
-## Comparison history
+- [History with artwork behind its panels](docs/design/front-row/review/history-art-1676.jpg),1676x954 viewport and capture, matching the reported blue-background problem.
+- [Phone source panel over artwork](docs/design/front-row/review/canal-source-phone-final.jpg),390x844 viewport and capture.
+- Phone layout captures: [rail](docs/design/front-row/review/rail-final-phone.jpg), [harbor](docs/design/front-row/review/harbor-final-phone.jpg), [canal](docs/design/front-row/review/canal-final-phone.jpg). These full-page captures are390x922 from a390x844 viewport. Assess the first844px for the required initial view. The black area beyond that viewport is a fixed-background full-page capture artifact; the actual scrolled phone viewport above confirms artwork behind the companion/source area.
 
-1. Prior implementation used simplified SVG artwork and failed the user's reference expectation. Replaced room/companion art with generated transparent detailed assets informed by approved studies. Initial correction capture: `iteration-1-last-desk.png`; combined evidence: `comparison-iteration-1.png`.
-2. First comparison found undersized character/recorder and weak typography hierarchy. Increased asset scale, adjusted title/notebook positioning, sourced fonts, increased type and applied textured paper. `iteration-2-last-desk.png` records intermediate result; final full/focused comparisons record final result.
-3. Independent review found P2 Booth source text over projector reel. Shortened source viewport to36.5% and frame to170px. Revised `projection-booth.png` shows caption ending around642px before reel starts around674px. Independent fix-round verified resolution.
-4. Production code review found missing shipped MIT attribution. Build now emits original MIT/OFL notices and an absolute license link. Independent real HTTP test returned200 text/plain and preserved notices verbatim. No visual change from this packaging fix.
+The app ran from the isolated deterministic preview at http://127.0.0.1:8820/. No live lectures, provider calls or claimed learning-effectiveness results were involved.
 
-## Interactions and limits
+## Findings and fixes
 
-Actual browser checks: all18 combinations retain draft with no extra API reads; physical prop starts shared simulated speech, Composer stops it; reduced-motion preference honored; all three mobile room widths390px; both scroll endpoints reachable. Console error check returned empty. Previous streaming, retry, source pinning and save recovery evidence remains in `docs/trail/frontend/README.md`.
+1. P1, the initial room had106px solid header bands and side gutters. The full-viewport stage and navigation chips removed the outer frame. The final desktop captures show art to every edge.
+2. P1, opening source narrowed the room and clipped answer/help controls. Source and history now open as paper panels below an unchanged room. All three selected artworks remain behind those panels.
+3. P2, the canal keyboard shortcut clipped at the mat bottom and phone help ended around893px. The shortcut moved beside the field label on desktop. The phone lost the extra scenery strip and uses a readable80px input. Direct help now ends at739.6px in all three ordinary390x844 fixtures, with44px button heights and no horizontal overflow.
+4. P2, desktop navigation covered the rail topic heading after wrapping. The navigation now measures the space it occupies. After the final resize check, navigation ended at109.1px and board content began at121px.
+5. P2, the harbor diagram action was mostly below the board edge. It now shares the topic-heading row and the board's safe content area is taller. The ordinary fixture has299px client and scroll height, so it needs no board scrolling.
+6. P1, the source/history area fell back to a flat blue background. A fixed selected-room artwork backdrop now covers the scrolling review. The reported1676x954 history view and the phone source view were inspected after the fix.
+7. P2, switching from phone to desktop exposed a hidden32px scroll offset in the decorative scene. The scene now uses overflow:clip, while board and desk retain intentional scrolling. After repeating the resize and input-focus sequence, scene scrollTop was0 and the stage bounds were0..900. The blurred fallback strip was also removed.
 
-P3 polish: faint idle companion caption and redundant lower source label at mobile. These do not hide persistent controls. No real microphone/provider/capture run in this fixture session. Layered object hover/press depth is implemented; no claim of full3D or Tinycharts-equivalent scene motion.
+The initial pass was blocked. The first full-viewport pass fixed1-3 and exposed4-5. The next pass fixed4-5. Derek's browser comment identified6, which was then fixed. The final cross-size pass identified7. All final desktop captures were taken after the fix for7. The backdrop/phone evidence predates only that desktop-specific clipping change.
 
-## Implementation checklist
+## Required fidelity checks
 
-- Detailed art, transparent edges and correct room objects: complete.
-- Real controls/controller continuity: complete.
-- Full and focused post-fix comparison: complete.
-- Narrow width and scroll access: complete.
-- License output and independent follow-up: complete.
-- Final visual acceptance: reserved for Derek on PR #44.
+- Fonts and typography: local Pixelify Sans loads for board, input and controls. Editable text, placeholder, labels, caret and focus remain real DOM. Required labels are readable at the tested sizes. The visual hierarchy follows a dominant question, smaller explanation and a desk answer field.
+- Spacing and layout: desktop board and desk stay on their painted surfaces. There is no solid outer frame. Ordinary phone question, input, Share, Hint and I don't know fit within844px. Source/history do not squeeze the scene. The phone deliberately recomposes the controls instead of shrinking desktop coordinates.
+- Colors: the rail and harbor use cream text on green boards and dark text on cream mats. The canal uses navy text on a cream screen and cream text on a navy mat. Existing asset tests sample the actual plate colors for contrast. Local navigation/paper backing remains for readable controls, distinct from the removed page-sized frame.
+- Images: each room uses its generated plate and each companion uses its transparent sprite sheet. The rail train/city, harbor coastline and rainy canal remain distinct. All six sprites were inspected and their choices exercised. No visible red alpha fringe appeared on the room backgrounds. No CSS illustration replaces the supplied artwork.
+- Content: controls describe actual actions. Source provenance and fixture labels remain truthful. The mock's illustrative question is replaced by the fixture's real review content. No rewards, timers or learning-effectiveness claims were added.
 
-## Tactile motion follow-up (2026-11-04)
+## Functional checks
 
-final result: passed
+In the browser, the answer draft survived room and companion switches. Hint preserved that draft; Share submitted it. Finish & save required confirmation, displayed the saved result and focused its heading. Setup with one marked topic and a note started the review and focused the first question. Notebook open/close preserved the draft. Source and long history opened with their headings focused, and Back to the question returned to and focused the current exchange. Reduced-motion and hidden-companion preferences worked. All six choices and their previews were present. No browser console errors were observed in the checked flows.
 
-Code `167caaa` preserves the chosen artwork/layout and adds object motion. Fresh combined comparison: `docs/trail/frontend-motion/reference-comparison.jpg`, source 1487×1058 normalized to 1440×1024; implementation 1440×1024 at 1×. Same active review/source-open state; original fixture-content differences above still apply. The full paired input was opened and inspected. Focused character/typography comparison from the previous round remains applicable because those assets and review type/layout were preserved; the new companion motion changes pose over time only.
+The final code passed `bun run typecheck`, `bun test` with1646 pass,4 todo and0 fail across61 files, `bun run build:app`, and `bun run scripts/preview-ui.ts --build-only`. The independent code review found no additional major behavior regression beyond the layout issues above. The behavior checks were run across the implementation iterations; the final two changes only affect artwork backgrounds and decorative overflow.
 
-All five fidelity surfaces rechecked: review typography, paper/grid rhythm and palette retained; notebook now shares Young Serif/DM Sans; source/drawer/character image quality retained; actual evidence/type/time copy replaces record IDs. Fresh screenshot evidence: `docs/trail/frontend-motion/{study-bench,08-notebook,09-mobile-listening}.jpg`. Settled notebook capture confirmed opacity 1 and resolved timestamp labels. Viewports 1440×1024 desktop and 390×844 mobile; final preview override reset.
+## Limits and follow-up polish
 
-New audit findings and post-fix evidence: masthead intercepted header pointer actions (P1); pointer Pause/Resume verified after empty masthead area passed events through. Mobile recorder overlapped drawer handle (P2); final 390px center hit is source-handle, drawer opens without speech. Notebook IDs/citation ambiguity (P2); visible IDs removed in favor of actual wording/rationale, citation timestamps resolved in08-notebook. Pending notebook animation could commit after Back in a completion ordering edge (P2); independently reproduced and fixed by invalidating pending navigation before cancel.
+- Mobile was checked through a390x844 browser viewport, not a physical iPhone or Android device. Mobile Safari fixed-background behavior remains untested.
+- The ordinary question and a long conversation were checked. This is not exhaustive testing of every possible long topic title, localization, zoom level, live voice path or provider failure combination.
+- Closing the notebook leaves focus on the document body. Code review confirmed the exact handler predates this diff. It is a known follow-up, not a new regression from these changes.
+- P3: the harbor's compact topic heading can wrap to two lines. It remains readable and the diagram control is visible.
+- P3: navigation is more detailed than the illustrative mock because it retains history, source, pause and save. A later product pass could consolidate those controls. This does not block the requested removal of opaque page framing.
 
-Physical drawer/speech/cover motion, repeated-key guard, active speech shutdown on pause, draft continuity, citation focus return, manual reduced motion, all three room skins and no console errors verified. Details and fresh screenshot sequence are in `docs/trail/frontend-motion/README.md`. No remaining actionable P0/P1/P2 established by the final checks; P3 notes remain in the guide. This technical verdict is separate from Derek's final visual acceptance.
-
-## Annotated mechanical correction (2026-11-04)
-
-final result: passed
-
-Source target is the five user-supplied browser annotations on PR53 at 1676×954. Fresh implementation captures in `docs/trail/mechanical-controls/` use 1676×954 and 390×844; the combined before/after `comparison.jpg` uses previous PR53 and revised Study Bench at 1440×1024, 1×CSS pixels, captured through the browser. Both active/source-open states and notebook composition match; fixture content retained. Full comparison was opened and inspected. A separate focused montage was unnecessary: both control labels/actuators are legible in this combined input, and each generated component layer and full-resolution pressed capture was additionally opened for alignment inspection.
-
-Five surfaces: fonts/hierarchy and cream/cobalt/mint tokens retained; notebook spacing and reading rhythm retained; key/body registration and transparency inspected; actual DOM Speak/Stop label aligned to the moving cap; source copy simplified to Lecture source with explicit Roll up/Unroll accessible actions. New physical assets preserve the approved ink/grain/detail direction. New source body removes paper only; fixed posts, rollers, chassis and table remain visually registered.
-
-Iteration findings: prior whole-device compression and floating label(P1) replaced with independent body/key layers. Copied drawer-front movement(P2) removed in favor of sheet retraction. First native button covered the full sprite canvas, so centered pointer activation missed its clipped cap(P2); native button bounds now match the key, verified by real center clicks. Paper texture modulo 128 caused a discontinuity(P2); raw scrollTop now feeds it continuously. Booth intermediate live Stop label on a fixed plate(P2) replaced by static Voice legend and an icon on its independently moving orange actuator, with 44px native target. Fresh booth-fixed desktop/mobile captures were independently rechecked.
-
-Evidence: `bench-pressed.jpg`, `last-desk-pressed.jpg`, `booth-fixed-desktop.jpg`, `booth-fixed-pressed.jpg`, `paper-retracted.jpg`, `mobile-pressed.jpg`, `browser-checks.json`. Native scrolling updates decorative grain/roller while evidence scrolls once and the typed draft stays intact. Reduced motion removes interpolation/decorative feed. Console error list empty. Full suite 941 pass, 4 pre-existing TODOs; independent exact code head `9030574` passed 99 focused checks, typecheck/build and effect probes.
-
-No remaining actionable P0/P1/P2 proven in the final captures. Mascot roaming/emotes deliberately remain lower priority than these MVP controls, per the user’s annotation. Real microphone/provider behavior and final user visual acceptance remain outside technical QA.
-
-### Content-feed clarification
-
-final result: passed
-
-Removed the rotating side-fitting layer after the user's clarification. Native content now feeds beneath a14px soft upper edge when scrolled; the mask disappears at scrollTop0. Source sheet retraction remains. Fresh1303×954 browser evidence: `docs/trail/mechanical-controls/content-feed-edge.jpg`. Fonts, spacing, tokens and image assets are unchanged; zero spinning layers remain. Typecheck and49 focused tests pass. This small cue does not claim a3D paper curl.
+No project verification skill was found, so this is not a formal pstack shipping verdict. The work remains a draft PR stacked on #128. Do not merge based on this report alone.

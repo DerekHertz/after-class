@@ -54,3 +54,9 @@ These items are not verified:
 - The navigation still places its row between masthead chips that use fixed reserves of 13rem and 14rem. The measured reserve keeps the board below it, but a long lecture title can still take a full row.
 - In a preview on black, some sheet outlines, such as Mote's, show a reddish fringe. It needs a check on the real backgrounds.
 - Asset folders used only by the old rooms remain: `hd-pixel`, `companions-v2`, `controls-v3` and most of `scenes-v2`.
+
+## Independent browser review
+
+Codex completed the browser review on product-code commit `494faae7c492f7741171eb56d6687b2084c5d363`. The final review supersedes the pending-browser notes above. See [design-qa.md](../../../design-qa.md) for comparisons, fixes, screenshots, tested behavior and remaining limits. The final correction prevents the scene itself from scrolling and removes the blur from its fallback art. All three rooms retain the selected artwork around source and history. The PR remains a draft without merge authorization.
+
+Per-run local Claude token usage is recorded in [token-report.md](token-report.md).
