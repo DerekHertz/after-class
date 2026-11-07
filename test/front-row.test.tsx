@@ -4,6 +4,8 @@ import { COMPANIONS, SCENES, parseAppearance } from "../src/app/appearance";
 import type { CompanionId, SceneId } from "../src/app/appearance";
 import { CROP_LIMIT, FRONT_ROW_ROOMS, FrontRowScene, PLATE, reserveNavSpace, roomStyle, stageBox, topCropLimit } from "../src/app/front-row";
 import type { FrontRowLayout, PlateBox } from "../src/app/front-row";
+import { OBJECT_ART_SIZE, ROOM_OBJECTS } from "../src/app/room-object";
+import type { ObjectArt, RoomObject } from "../src/app/room-object";
 import { contrast, medianColor, readPng } from "./png";
 
 const rooms = Object.keys(FRONT_ROW_ROOMS) as SceneId[];
@@ -126,6 +128,37 @@ describe("switching room or companion keeps one tree", () => {
     expect(html).not.toContain("data-companion");
     expect(html).toContain('<span class="quiet-status" role="status">Ready when you are</span>');
     expect(html).toContain(">My notebook</span></button>");
+  });
+});
+
+describe("the folio and the notebook are the supplied art, and their pages read clearly", () => {
+  const objects = Object.keys(ROOM_OBJECTS) as RoomObject[];
+  const art = (object: RoomObject) => readPng(new URL(`../src/app/assets/room-objects/${object === "source" ? "source-folio" : "review-notebook"}.png`, import.meta.url));
+  const pixel = (png: ReturnType<typeof art>, x: number, y: number) => png.rgba.subarray((y * png.width + x) * 4, (y * png.width + x) * 4 + 4);
+
+  test("each frame is the measured size, with transparent outer corners so the room shows around it", () => {
+    for (const object of objects) {
+      const png = art(object);
+      expect({ object, width: png.width, height: png.height, alpha: png.alpha }).toEqual({ object, ...OBJECT_ART_SIZE, alpha: true });
+      for (const [x, y] of [[0, 0], [png.width - 1, 0], [0, png.height - 1], [png.width - 1, png.height - 1]] as const) expect({ object, x, y, alpha: pixel(png, x, y)[3] }).toEqual({ object, x, y, alpha: 0 });
+    }
+  });
+
+  test("ink, soft ink, links and errors pass WCAG AA on the parchment each page actually has", () => {
+    for (const object of objects) {
+      const page = medianColor(art(object), ROOM_OBJECTS[object].page);
+      const spec: ObjectArt = ROOM_OBJECTS[object];
+      for (const ink of [spec.ink, spec.inkSoft, spec.link, spec.danger]) expect({ object, ink, aa: contrast(ink, page) >= 4.5 }).toEqual({ object, ink, aa: true });
+    }
+  });
+
+  test("the notebook's repeating cut starts and ends at the same point of the ring column, so the rings tile without a seam", () => {
+    const png = art("history");
+    const { slice } = ROOM_OBJECTS.history;
+    const end = png.height - slice.bottom;
+    let diff = 0;
+    for (let x = 0; x < slice.left; x++) for (let c = 0; c < 3; c++) diff += Math.abs(pixel(png, x, slice.top)[c]! - pixel(png, x, end)[c]!);
+    expect(diff / (slice.left * 3)).toBeLessThan(12);
   });
 });
 

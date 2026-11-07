@@ -135,6 +135,6 @@ export function DiagramPanel({ api, topic, error, onRequest, onCite, onClose }: 
 }
 
 /** A "Show diagram" button for one topic. */
-export function ShowDiagramButton({ topic, onShow }: { readonly topic: { readonly id: ConceptId; readonly label: string }; readonly onShow: (topicId: ConceptId) => void }) {
-  return <button type="button" className="show-diagram" aria-label={`Show diagram: ${topic.label}`} onClick={() => onShow(topic.id)}>Show diagram</button>;
+export function ShowDiagramButton({ topic, onShow }: { readonly topic: { readonly id: ConceptId; readonly label: string }; readonly onShow: (topicId: ConceptId, origin: HTMLButtonElement) => void }) {
+  return <button type="button" className="show-diagram" aria-label={`Show diagram: ${topic.label}`} onClick={(e) => onShow(topic.id, e.currentTarget)}>Show diagram</button>;
 }

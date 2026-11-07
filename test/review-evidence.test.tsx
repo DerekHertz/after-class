@@ -1,6 +1,5 @@
 /** Issue #115: help beside the response, one source panel with labelled lecture and tutor content, a way back to the question. */
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { AppApi } from "../src/app/api";
@@ -9,6 +8,8 @@ import type { ActionId } from "../src/app/core";
 import { DiagramPanel } from "../src/app/diagram";
 import { Composer } from "../src/app/review";
 import { EvidenceGroups } from "../src/app/ui";
+import { RoomInspector, returnTarget, sourceButtonLabel } from "../src/app/room-object";
+import type { Inspecting } from "../src/app/room-object";
 import type { SpeechInput } from "../src/app/speech";
 import type { Frame, Passage, ReviewState, TopicDiagram } from "../src/shared/domain";
 import { stableId } from "../src/shared/ids";
@@ -108,28 +109,53 @@ describe("one source panel, no indistinguishable duplicate frames", () => {
   });
 });
 
-describe("the source panel reads in the page and leads back to the question", () => {
-  const tsx = readFileSync(new URL("../src/app/review.tsx", import.meta.url), "utf8");
-  const aside = /<aside[\s\S]*?<\/aside>/.exec(tsx)![0];
+describe("the folio and the notebook open over the room, one at a time, only when asked", () => {
+  const heading = { current: null };
+  const held = (object: Inspecting, children?: string) => renderToStaticMarkup(
+    <RoomInspector object={object} headingRef={heading} onPutDown={noop}>{children}</RoomInspector>,
+  );
 
-  test("the panel ends with a way back to the question, and the composer is never inside the panel", () => {
-    expect(aside).toContain("Back to the question");
-    expect(aside).not.toContain("<Composer");
-    expect(aside.indexOf("<EvidencePane")).toBeLessThan(aside.indexOf("<DiagramPanel"));
-    expect(/<EvidencePane[^>]*\bgrouped\b/.test(aside)).toBe(true);
-    const back = /function returnToQuestion\(\) \{[\s\S]*?\n  \}/.exec(tsx)![0];
-    expect(back).not.toMatch(/setSourceOpen|setSelection|setDiagramTopic/);
+  test("with nothing picked up the dialog is empty, so cited evidence alone never covers the question", () => {
+    const html = held(null, "Each thread holds a lock");
+    expect(html).toBe('<dialog class="room-object"></dialog>');
   });
 
-  test("every control that closes the panel has the same name", () => {
-    expect(aside).not.toContain("Close evidence");
-    expect(aside).toContain(">Close source</button>");
+  test("the source button says how much the current reply cites, without opening anything", () => {
+    expect(sourceButtonLabel(0)).toBe("Open source");
+    expect(sourceButtonLabel(1)).toBe("Open source · 1 cited");
+    expect(sourceButtonLabel(3)).toBe("Open source · 3 cited");
   });
 
-  test("the source panel takes its natural height, so a cited passage never hides in a second scroll area", () => {
-    const css = readFileSync(new URL("../src/app/front-row.css", import.meta.url), "utf8");
-    const stand = /\.scene-shell \.front-row \.front-row-panel \{[^}]*\}/.exec(css)![0];
-    expect(stand).toContain("max-height: none");
-    expect(stand).toContain("overflow: visible");
+  test("the folio and the notebook share one dialog and only the held one is shown", () => {
+    const source = held("source", "Each thread holds a lock");
+    expect(source).toContain('data-object="source"');
+    expect(source).toContain(">Lecture evidence</h2>");
+    expect(source).toContain(">Close source</button>");
+    expect(source).toContain("Each thread holds a lock");
+    expect(source).not.toContain("Earlier in this review");
+    const history = held("history", "What is a deadlock?");
+    expect(history).toContain('data-object="history"');
+    expect(history).toContain(">Earlier in this review</h2>");
+    expect(history).toContain(">Hide earlier</button>");
+    expect(history).not.toContain("Lecture evidence");
+  });
+
+  test("each object has one scrolling page, labelled by its heading, between a heading that stays and a way back that stays", () => {
+    for (const object of ["source", "history"] as const) {
+      const html = held(object, "Body");
+      expect(html.match(/role="region"/g)).toHaveLength(1);
+      const label = /<h2[^>]*id="([^"]+)"/.exec(html)![1];
+      expect(html).toContain(`aria-labelledby="${label}" tabindex="0">Body</div>`);
+      expect(html.indexOf("</h2>")).toBeLessThan(html.indexOf(">Body<"));
+      expect(html.indexOf(">Body<")).toBeLessThan(html.indexOf(">Back to the question</button>"));
+    }
+  });
+
+  test("putting an object down returns focus to the control that picked it up, or to the question once that control is gone", () => {
+    const button = { isConnected: true, name: "Lecture source · 2 items" };
+    const question = { isConnected: true, name: "current question" };
+    expect(returnTarget(button, question)).toBe(button);
+    expect(returnTarget({ ...button, isConnected: false }, question)).toBe(question);
+    expect(returnTarget(null, question)).toBe(question);
   });
 });

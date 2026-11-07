@@ -11,7 +11,7 @@ import { reactToCompanion } from "./companion-reaction";
 import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
 import {
-  ACTION_LABEL, END_CONFIRM_TEXT, composerActions, INITIAL_SOURCE_OPEN, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
+  ACTION_LABEL, END_CONFIRM_TEXT, composerActions, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
   softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer,
 } from "./core";
 import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, StartHandoff, TurnStatus } from "./core";
@@ -21,28 +21,27 @@ import { BundleInspector, ErrorNote, EvidencePane, useAsync } from "./ui";
 import { CompletionPanel } from "./completion";
 import { DiagramPanel, ShowDiagramButton, useDiagrams } from "./diagram";
 import { currentQuestionTopic } from "./diagram-view";
+import { RoomInspector, returnTarget, sourceButtonLabel } from "./room-object";
+import type { Inspecting, PutDown, RoomObject } from "./room-object";
 
 export type ReviewDeps = { readonly api: AppApi; readonly speaker: Speaker; readonly speech: SpeechInput; readonly unsent: UnsentStore };
 
 /**
- * The review is a front-row seat in the learner's room: the current question is written on the board, the response
- * field lies on the desk, and the lecture source and earlier conversation open below the room on demand.
+ * The review is a front-row seat in the learner's room: the current question is written on the board and the response
+ * field lies on the desk. The lecture folio and the review notebook are picked up over the room, one at a time, only
+ * when the learner asks; the response field stays mounted underneath, so a draft survives.
  */
 export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewDeps & { readonly reviewId: ReviewId }) {
   const { appearance, voice, activity } = useAppearance();
-  const history = useRef<HTMLDivElement>(null);
   const board = useRef<HTMLElement>(null);
   const currentQuestion = useRef<HTMLElement>(null);
-  const sourceHeading = useRef<HTMLHeadingElement>(null);
-  const sourceToggle = useRef<HTMLButtonElement>(null);
-  const sourceOrigin = useRef<HTMLButtonElement | null>(null);
-  const historyHeading = useRef<HTMLHeadingElement>(null);
-  const historyToggle = useRef<HTMLButtonElement>(null);
+  const objectHeading = useRef<HTMLHeadingElement>(null);
+  const objectPage = useRef<HTMLDivElement>(null);
+  const pickedUpFrom = useRef<HTMLElement | null>(null);
   const diagramSection = useRef<HTMLDivElement>(null);
   const followHistory = useRef(true);
   const [selection, setSelection] = useState<SourceSelection>({ kind: "automatic" });
-  const [sourceOpen, setSourceOpen] = useState(INITIAL_SOURCE_OPEN);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [inspecting, setInspecting] = useState<Inspecting>(null);
   const [notebookOpen, setNotebookOpen] = useState(false);
   const [diagramTopic, setDiagramTopic] = useState<ConceptId | null>(null);
   const diagrams = useDiagrams(api, reviewId);
@@ -73,58 +72,50 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const titles = sourceTitles(capture.data?.capture ?? null);
 
   const automaticIds = currentEvidenceIds(state.view?.turns ?? [], state.live);
-  const automaticKey = automaticIds.join(",");
   useEffect(() => {
-    if (automaticKey !== "") setSourceOpen(true);
-  }, [automaticKey]);
-  useEffect(() => {
-    if (followHistory.current && history.current) history.current.scrollTop = history.current.scrollHeight;
-  }, [historyOpen, state.view?.turns.length, state.live?.deltaText, state.live?.sentences.length]);
+    const page = objectPage.current;
+    if (inspecting === "history" && followHistory.current && page) page.scrollTop = page.scrollHeight;
+  }, [inspecting, state.view?.turns.length]);
   useSceneActivity(state.saving ? "saving" : listening ? "listening" : state.view?.state.phase === "paused" ? "paused" : state.live?.status === "streaming" ? "waiting" : "idle");
 
+  /** Picks up an object. Switching from one object to the other keeps the control that picked up the first. */
+  function inspect(object: RoomObject, origin: HTMLElement | null) {
+    if (inspecting === null) pickedUpFrom.current = origin;
+    if (object === "source" && inspecting !== "source") reactToCompanion("draw");
+    if (object === "history") followHistory.current = true;
+    setInspecting(object);
+  }
+
   function openSource(ids: readonly EvidenceId[], label: string, origin: HTMLButtonElement) {
-    sourceOrigin.current = origin;
     setSelection({ kind: "pinned", ids, label });
-    if (!sourceOpen) reactToCompanion("draw");
-    setSourceOpen(true);
-    requestAnimationFrame(() => sourceHeading.current?.focus());
+    if (inspecting === "source") {
+      objectPage.current?.scrollTo({ top: 0 });
+      objectHeading.current?.focus({ preventScroll: true });
+    }
+    inspect("source", origin);
   }
 
   /** Flow D: Ask "show me the diagram" on a topic, any time in the review. The conversation stays where it is. */
-  function showDiagram(topicId: ConceptId) {
+  function showDiagram(topicId: ConceptId, origin: HTMLElement) {
     setDiagramTopic(topicId);
-    if (!sourceOpen) reactToCompanion("draw");
-    setSourceOpen(true);
+    inspect("source", origin);
     requestAnimationFrame(() => diagramSection.current?.focus());
     const known = diagrams.topics?.find((t) => t.topicId === topicId);
     if (known === undefined || known.summary.state === "not_requested") void diagrams.request(topicId);
     else diagrams.reload();
   }
 
-  function closeSource() {
+  /** Puts the object down. The source follows the current reply again next time it is picked up. */
+  function putDown(to: PutDown) {
+    const question = currentQuestion.current ?? board.current;
+    const target = to === "origin" ? returnTarget(pickedUpFrom.current, question) : question;
+    pickedUpFrom.current = null;
     setSelection({ kind: "automatic" });
-    setSourceOpen(false);
-    const origin = sourceOrigin.current;
-    if (origin?.closest(".source-stand")) sourceToggle.current?.focus();
-    else (origin?.isConnected ? origin : sourceToggle.current)?.focus();
-  }
-
-  function toggleHistory() {
-    if (historyOpen) {
-      setHistoryOpen(false);
-      historyToggle.current?.focus();
-      return;
-    }
-    followHistory.current = true;
-    setHistoryOpen(true);
-    requestAnimationFrame(() => historyHeading.current?.focus());
-  }
-
-  /** Where a panel stacks under the scene, this brings the question and the response field back without closing it. */
-  function returnToQuestion() {
-    const target = currentQuestion.current ?? board.current;
-    target?.scrollIntoView({ block: "start" });
-    target?.focus({ preventScroll: true });
+    setInspecting(null);
+    requestAnimationFrame(() => {
+      target?.focus({ preventScroll: true });
+      if (to === "question") target?.scrollIntoView({ block: "nearest" });
+    });
   }
 
   const view = state.view;
@@ -210,7 +201,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   }} />;
 
   return (
-    <main className="review front-row" data-panels={sourceOpen || historyOpen ? "open" : "closed"}>
+    <main className="review front-row">
       {notebookOpen && <dialog className="room-notebook-dialog" ref={node => { if (node && !node.open) node.showModal(); }} onClose={() => setNotebookOpen(false)}><button onClick={() => setNotebookOpen(false)}>Close notebook</button><RecordScreen api={api} reviewId={null} /></dialog>}
       <header ref={reserveNavSpace} className="review-header front-row-bar">
         <div className="front-row-title">
@@ -219,16 +210,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
         </div>
         <div className="review-navigation">
           <span className="review-phase">{questionMarker === null ? view.state.phase : `${questionMarker} · ${view.state.phase}`}</span>
-          {!checklist && hasHistory && <button ref={historyToggle} type="button" aria-expanded={historyOpen} aria-controls="review-history" onClick={toggleHistory}>{historyOpen ? "Hide earlier" : "Earlier in this review"}</button>}
-          {!checklist && <button ref={sourceToggle} type="button" aria-expanded={sourceOpen} aria-controls="review-source" onClick={(e) => {
-            if (sourceOpen) closeSource();
-            else {
-              sourceOrigin.current = e.currentTarget;
-              reactToCompanion("draw");
-              setSourceOpen(true);
-              requestAnimationFrame(() => sourceHeading.current?.focus());
-            }
-          }}>{sourceOpen ? "Close source" : "Open source"}</button>}
+          {!checklist && hasHistory && <button type="button" aria-haspopup="dialog" onClick={(e) => inspect("history", e.currentTarget)}>Earlier in this review</button>}
+          {!checklist && <button type="button" aria-haspopup="dialog" onClick={(e) => inspect("source", e.currentTarget)}>{sourceButtonLabel(automaticIds.length)}</button>}
           <Actions ids={actions.filter(id => id === "pause" || id === "resume" || id === "end")} disabled={streaming || state.unsent.length > 0} send={id => void controller.send(toAct(id, "", "text"))} />
         </div>
       </header>
@@ -245,65 +228,58 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           boardRef={board}
           layout={checklist ? { kind: "setup", form: setupForm } : { kind: "review", board: boardContent, desk: deskContent }}
         />
-        <div className="front-row-panels">
-          <section id="review-history" className="front-row-panel front-row-history" aria-labelledby="conversation-history-heading" hidden={!historyOpen}>
-            <div className="front-row-panel-head">
-              <h2 ref={historyHeading} tabIndex={-1} id="conversation-history-heading">Earlier in this review</h2>
-              <button type="button" onClick={toggleHistory}>Hide earlier</button>
-            </div>
-            {lines.earlier.length > 0
-              ? <div ref={history} onScroll={() => {
-                const el = history.current;
-                if (el) followHistory.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-              }} className="conversation-history" role="region" aria-labelledby="conversation-history-heading" tabIndex={0}>
-                <ol className="lines">
-                  {lines.earlier.map((l) => <LineItem key={l.key} line={l} onSource={openSource} />)}
-                </ol>
-              </div>
-              : <p className="muted">Nothing earlier yet. The current question is on the board.</p>}
-            {view.topics.length > 0 && (
-              <details className="review-topics">
-                <summary>Topics in this review</summary>
-                <ul>
-                  {view.topics.map((t) => <li key={t.id}>{t.label} <ShowDiagramButton topic={t} onShow={showDiagram} /></li>)}
-                </ul>
-              </details>
-            )}
-            {view.observations.length > 0 && (
-              <details className="review-observations">
-                <summary>What the tutor observed</summary>
-                <ul>
-                  {view.observations.map((o) => {
-                    const row = observationRow(o);
-                    return (
-                      <li key={o.id}>
-                        <strong>{row.status}</strong>
-                        {row.note && <span className="muted"> {row.note}</span>}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </details>
-            )}
-            <button type="button" className="source-return" onClick={returnToQuestion}>Back to the question</button>
-          </section>
-          <aside id="review-source" className="source-stand front-row-panel" aria-labelledby="source-heading" hidden={!sourceOpen}>
-            <div className="source-heading">
-              <p className="eyebrow">From the lecture</p>
-              <h2 ref={sourceHeading} tabIndex={-1} id="source-heading">Lecture evidence</h2>
-              <p className="source-selection-label">{selection.kind === "pinned" ? selection.label : "From the current tutor explanation or check"}</p>
-              <button type="button" onClick={closeSource}>Close source</button>
-              {selection.kind === "pinned" && <button type="button" onClick={() => setSelection({ kind: "automatic" })}>Follow current reply</button>}
-            </div>
-            <EvidencePane key={evidenceIds.join(",")} api={api} ids={evidenceIds} titles={titles} videos={videos} grouped shownFrame={shownDiagram?.frame ?? null} />
-            {diagramTopic !== null && <div ref={diagramSection} tabIndex={-1} className="tutor-diagram">{shownDiagram
-              ? <DiagramPanel key={shownDiagram.topicId} api={api} topic={shownDiagram} error={diagrams.error} onRequest={() => void diagrams.request(diagramTopic)} onCite={openSource} onClose={() => setDiagramTopic(null)} />
-              : <div className="diagram-panel">{diagrams.error !== null ? <ErrorNote error={diagrams.error} retry={diagrams.reload} /> : <p className="muted" role="status">Loading the diagram...</p>}<button type="button" onClick={() => setDiagramTopic(null)}>Close diagram</button></div>}</div>}
-            <ScopeEvidence api={api} view={view} titles={titles} onSource={openSource} />
-            <button type="button" className="source-return" onClick={returnToQuestion}>Back to the question</button>
-          </aside>
-        </div>
       </div>
+      <RoomInspector
+        object={inspecting}
+        headingRef={objectHeading}
+        pageRef={objectPage}
+        onPutDown={putDown}
+        onPageScroll={() => {
+          const page = objectPage.current;
+          if (inspecting === "history" && page) followHistory.current = page.scrollHeight - page.scrollTop - page.clientHeight < 40;
+        }}
+        detail={inspecting === "source" && <p className="source-selection-label">{selection.kind === "pinned" ? selection.label : "From the current tutor explanation or check"}</p>}
+        tools={inspecting === "source" && selection.kind === "pinned" && <button type="button" onClick={() => setSelection({ kind: "automatic" })}>Follow current reply</button>}
+      >
+        {inspecting === "history" && <>
+          {lines.earlier.length > 0
+            ? <ol className="lines">
+              {lines.earlier.map((l) => <LineItem key={l.key} line={l} onSource={openSource} />)}
+            </ol>
+            : <p className="muted">Nothing earlier yet. The current question is on the board.</p>}
+          {view.topics.length > 0 && (
+            <details className="review-topics">
+              <summary>Topics in this review</summary>
+              <ul>
+                {view.topics.map((t) => <li key={t.id}>{t.label} <ShowDiagramButton topic={t} onShow={showDiagram} /></li>)}
+              </ul>
+            </details>
+          )}
+          {view.observations.length > 0 && (
+            <details className="review-observations">
+              <summary>What the tutor observed</summary>
+              <ul>
+                {view.observations.map((o) => {
+                  const row = observationRow(o);
+                  return (
+                    <li key={o.id}>
+                      <strong>{row.status}</strong>
+                      {row.note && <span className="muted"> {row.note}</span>}
+                    </li>
+                  );
+                })}
+              </ul>
+            </details>
+          )}
+        </>}
+        {inspecting === "source" && <>
+          <EvidencePane key={evidenceIds.join(",")} api={api} ids={evidenceIds} titles={titles} videos={videos} grouped shownFrame={shownDiagram?.frame ?? null} />
+          {diagramTopic !== null && <div ref={diagramSection} tabIndex={-1} className="tutor-diagram">{shownDiagram
+            ? <DiagramPanel key={shownDiagram.topicId} api={api} topic={shownDiagram} error={diagrams.error} onRequest={() => void diagrams.request(diagramTopic)} onCite={openSource} onClose={() => setDiagramTopic(null)} />
+            : <div className="diagram-panel">{diagrams.error !== null ? <ErrorNote error={diagrams.error} retry={diagrams.reload} /> : <p className="muted" role="status">Loading the diagram...</p>}<button type="button" onClick={() => setDiagramTopic(null)}>Close diagram</button></div>}</div>}
+          <ScopeEvidence api={api} view={view} titles={titles} onSource={openSource} />
+        </>}
+      </RoomInspector>
     </main>
   );
 }

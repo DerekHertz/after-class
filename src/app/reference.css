@@ -18,12 +18,4 @@
 .review .source-heading h2 { font: 400 1.5rem/1.25 'After Class Serif', Georgia, serif; margin: 0 0 4px; }
 .review .source-selection-label { margin: 0 0 6px; font-size: .82rem; line-height: 1.4; }
 .review .source-heading button { padding: 0; min-height: 32px; font-size: .85rem; background: transparent; border: 0; color: var(--accent); text-decoration: underline; }
-.review .source-stand .frame { width: 100%; max-height: 260px; object-fit: contain; background: transparent; border: 0; border-radius: 0; }
-.review .source-stand figcaption, .review .source-stand blockquote footer { font-size: .8rem; line-height: 1.5; }
-.review .source-stand blockquote { margin: 10px 0; padding: 8px 0; border: 0; border-top: 1px solid var(--border); }
-.review .source-stand blockquote p { font: italic 1rem/1.45 'After Class Serif', Georgia, serif; margin: 0 0 6px; }
-.review .source-stand > details { margin-top: 10px; border-color: var(--border); }
-.review .source-stand summary { padding: 8px 0; font-size: .85rem; }
-.review .source-stand .inspector { font-size: .8rem; }.review .source-stand .inspector h4 { font-size: .85rem; }
-.review .source-stand .scope-source-list button { font-size: .8rem; }
 .review > .note { position: relative; z-index: 5; max-width: 94%; margin: 0 auto 12px; }

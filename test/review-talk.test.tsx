@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { INITIAL_SOURCE_OPEN, currentExchange, reduceLive, reviewLayout, shouldAutoSendSpeech, startLive, turnStatus } from "../src/app/core";
+import { currentExchange, reduceLive, shouldAutoSendSpeech, startLive, turnStatus } from "../src/app/core";
 import type { Line, Live } from "../src/app/core";
 import { Composer, TurnStatusNote } from "../src/app/review";
 import type { SpeechInput } from "../src/app/speech";
@@ -12,19 +12,12 @@ const ask: TutorMove = { kind: "wrap_up" };
 const quiet: SpeechInput = { supported: true, start() {}, stop() {} };
 
 describe("the conversation is never hidden", () => {
-  test("the source panel starts closed, and toggling it never touches the conversation", () => {
-    expect(INITIAL_SOURCE_OPEN).toBe(false);
-    for (const open of [true, false]) expect(reviewLayout(open)).toEqual({ conversationVisible: true, sourceVisible: open });
-  });
-
   test("the review page never hides the conversation or offers the room-only landing", () => {
     const tsx = readFileSync(new URL("../src/app/review.tsx", import.meta.url), "utf8");
     expect(tsx).not.toContain("roomLanding");
     expect(tsx).not.toContain("studyOpen");
     expect(tsx).not.toContain("Back to room");
     expect(tsx).not.toMatch(/conversation-notebook"[^>]*hidden=/);
-    const closeSource = /function closeSource\(\) \{[\s\S]*?\n  \}/.exec(tsx)![0];
-    expect(closeSource).not.toMatch(/set(Study|Conversation|Room)/);
   });
 
   test("no stylesheet hides the conversation or turns it into an overlay", () => {
@@ -61,11 +54,10 @@ describe("the current question stays with the composer", () => {
     expect(currentExchange(begin)).toEqual({ earlier: begin, current: [] });
   });
 
-  test("the current question and composer come before the earlier history, and the composer keeps one place", () => {
+  test("the current question comes before the composer, and the composer keeps one place", () => {
     const tsx = readFileSync(new URL("../src/app/review.tsx", import.meta.url), "utf8");
     const at = (needle: string) => { const i = tsx.indexOf(needle); expect(i).toBeGreaterThan(-1); return i; };
     expect(at('className="current-exchange"')).toBeLessThan(at("<Composer"));
-    expect(at("<Composer")).toBeLessThan(at('className="conversation-history"'));
     expect(tsx.match(/<Composer\b/g)).toHaveLength(1);
   });
 });

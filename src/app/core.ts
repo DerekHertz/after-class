@@ -263,18 +263,6 @@ export type Line = {
   readonly evidenceIds: readonly EvidenceId[];
 };
 
-/**
- * The conversation is always on the page, under the scene, for every appearance; nothing hides it.
- * The source panel is a side panel that starts closed, opens when the learner asks or a reply cites evidence,
- * and closing it changes nothing else.
- */
-export const INITIAL_SOURCE_OPEN = false;
-
-/** What the page shows after the source panel is toggled. The conversation is never part of the choice. */
-export function reviewLayout(sourceOpen: boolean): { readonly conversationVisible: true; readonly sourceVisible: boolean } {
-  return { conversationVisible: true, sourceVisible: sourceOpen };
-}
-
 /** The system line for `begin`: what the learner marked as fuzzy, and their note. */
 export function beginText(act: Extract<LearnerAct, { kind: "begin" }>, topics: readonly Concept[] = []): string {
   const marked = act.fuzzy ?? [];
