@@ -168,7 +168,7 @@
 }
 .scene-shell .review .room-object:not([open]) { display: none; }
 .room-object[data-object="source"] { --obj-art: url('./assets/room-objects/source-folio.png'); }
-.room-object[data-object="history"] { --obj-art: url('./assets/room-objects/review-notebook.png'); }
+:is(.room-object[data-object="history"], .review-complete) { --obj-art: url('./assets/room-objects/review-notebook.png'); }
 .room-object::backdrop { background: color-mix(in srgb, var(--fr-bar, #1a2b3b) 38%, transparent); }
 .scene-shell .review .room-object :focus-visible { outline: 3px solid var(--obj-ink); outline-offset: 2px; }
 
