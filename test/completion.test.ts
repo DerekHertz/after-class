@@ -61,6 +61,46 @@ describe("completion summary from saved observations", () => {
     expect(outcome.revisit).toEqual(["Resource ordering", "Circular wait"]);
   });
 
+  test("a gap status the learner settled as supported is shown as the tutor's assessment and is not named for revisit", async () => {
+    const { fixture } = await load("record");
+    const statuses = ["partial", "unresolved"] as const;
+    let n = 0;
+    const view = await savedWith(fixture, (o) => [{ ...o, status: statuses[n++]!, dispute: { kind: "resolved_by_learner", outcome: "learner_was_right" } }]);
+    const outcome = completionOf(view);
+    expect(outcome.groups.map((g) => g.group)).toEqual(["supported"]);
+    expect(outcome.groups[0]!.items.map((i) => [i.label, i.status, i.resolution])).toEqual([
+      ["Circular wait", "The tutor assessed it as Partial", "You marked your explanation as supported"],
+      ["Resource ordering", "The tutor assessed it as Unresolved", "You marked your explanation as supported"],
+    ]);
+    expect(outcome.revisit).toEqual([]);
+    expect(outcome.disputed).toBe(0);
+    const html = banner({ view, loadError: null, live: null, unsent: [], storageDegraded: false, sendError: null, saving: false, saveError: null, savedSummary: null });
+    expect(html).toContain("You marked your explanation as supported (2)");
+    expect(html).not.toContain("Next time, start with");
+    expect(html).not.toContain("Still unresolved");
+  });
+
+  test("a gap status the learner chose to revisit stays in its group and is named for revisit", async () => {
+    const { fixture } = await load("record");
+    const statuses = ["partial", "unresolved"] as const;
+    let n = 0;
+    const view = await savedWith(fixture, (o) => [{ ...o, status: statuses[n++]!, dispute: { kind: "resolved_by_learner", outcome: "it_was_my_gap" } }]);
+    const outcome = completionOf(view);
+    expect(outcome.groups.map((g) => [g.group, g.items.map((i) => [i.status, i.resolution])])).toEqual([
+      ["with_help", [["Partial", "You chose to revisit this"]]],
+      ["unresolved", [["Unresolved", "You chose to revisit this"]]],
+    ]);
+    expect(outcome.revisit).toEqual(["Resource ordering", "Circular wait"]);
+  });
+
+  test("the disputed prompt offers the neutral choices and never assigns fault", async () => {
+    const { controller } = await load("review");
+    await controller.send({ kind: "end" });
+    const html = banner(controller.getState());
+    expect(html).toContain("For each one, you can mark your explanation as supported, choose to revisit it, or leave it disputed for now.");
+    expect(html).not.toMatch(/tutor was wrong|your gap/i);
+  });
+
   test("with no saved observations every topic reads as not assessed and the panel says so", async () => {
     const { fixture } = await load("record");
     const view = await savedWith(fixture, () => []);

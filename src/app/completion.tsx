@@ -40,6 +40,7 @@ export function CompletionPanel({ view, reviewId, savedSummary, justSaved, onSou
             {g.items.map((item) => (
               <li key={item.key}>
                 <strong>{item.label}</strong> <span className="muted">{item.status}</span>
+                {item.resolution !== null && <span className="muted">. {item.resolution}.</span>}
                 {onSource && item.evidence.length > 0 && (
                   <>
                     {" "}
@@ -56,7 +57,7 @@ export function CompletionPanel({ view, reviewId, savedSummary, justSaved, onSou
       <div className="review-complete-next">
         <h3>Next</h3>
         {outcome.revisit.length > 0 && <p>Next time, start with {outcome.revisit.join(", ")}.</p>}
-        {outcome.disputed > 0 && <p>Settle {outcome.disputed === 1 ? "the disputed item" : `the ${outcome.disputed} disputed items`} in your notebook: say whether the tutor was wrong or it was your gap.</p>}
+        {outcome.disputed > 0 && <p>Settle {outcome.disputed === 1 ? "the disputed item" : `the ${outcome.disputed} disputed items`} in your notebook. For each one, you can mark your explanation as supported, choose to revisit it, or leave it disputed for now.</p>}
         <p className="actions"><Link to={{ page: "record", reviewId }}>Open this review in my notebook</Link></p>
       </div>
     </section>
