@@ -538,16 +538,98 @@ export function observationRow(o: Observation): ObservationRow {
   else if (o.clampedFrom !== null) {
     const f = o.facts;
     const reason =
-      f.endedBySkip || f.saidDontKnowOnly
-        ? "the question was skipped or left unanswered"
-        : f.firstHelpSeq !== null && (f.firstSubstantiveAnswerSeq === null || f.firstHelpSeq < f.firstSubstantiveAnswerSeq)
-          ? "the tutor helped before your answer"
-          : "the record rules";
+      o.dispute.kind === "resolved_by_learner" && o.dispute.outcome === "it_was_my_gap"
+        ? "you chose to revisit this topic"
+        : f.endedBySkip || f.saidDontKnowOnly
+          ? "the question was skipped or left unanswered"
+          : f.firstHelpSeq !== null && (f.firstSubstantiveAnswerSeq === null || f.firstHelpSeq < f.firstSubstantiveAnswerSeq)
+            ? "the tutor helped before your answer"
+            : "the record rules";
     note = `The tutor proposed "${STATUS_LABEL[o.clampedFrom]}"; recorded as "${STATUS_LABEL[o.status]}" because ${reason}.`;
   } else if (o.dispute.kind === "resolved_by_learner") {
-    note = o.dispute.outcome === "it_was_my_gap" ? "You resolved the dispute as your own gap." : "You resolved the dispute: the tutor was wrong.";
+    const outcome = o.dispute.outcome;
+    note = DISPUTE_CHOICES.find((c) => c.outcome === outcome)?.resolvedNote ?? null;
   }
   return { id: o.id, status: STATUS_LABEL[o.status], note, disputeOpen };
+}
+
+/**
+ * How the learner settles an open dispute, in neutral words. `outcome` is the existing record.resolveDispute value;
+ * `null` keeps the dispute open, which is also what doing nothing does.
+ */
+export const DISPUTE_CHOICES = [
+  {
+    outcome: null,
+    label: "Keep unresolved",
+    meaning: "Stays disputed. It is not counted as a learning gap, and you can decide later.",
+    resolvedNote: null,
+  },
+  {
+    outcome: "learner_was_right",
+    label: "My explanation was supported",
+    meaning: "Closes the dispute. The tutor's assessment stays visible for reference but is not counted as a learning gap.",
+    resolvedNote: "You marked your explanation as supported. The tutor's assessment is kept for reference and is not counted as a learning gap.",
+  },
+  {
+    outcome: "it_was_my_gap",
+    label: "I want to revisit this",
+    meaning: "Closes the dispute and counts this topic as something to revisit (a learning gap).",
+    resolvedNote: "You chose to revisit this topic, so it is counted as a learning gap.",
+  },
+] as const satisfies readonly { readonly outcome: "learner_was_right" | "it_was_my_gap" | null; readonly label: string; readonly meaning: string; readonly resolvedNote: string | null }[];
+
+export type DisputeOutcome = NonNullable<(typeof DISPUTE_CHOICES)[number]["outcome"]>;
+
+/** What a notebook row shows so the learner knows which assessment they are changing before they change it. */
+export type ObservationContext = {
+  /** The topic's name, or names when the thread covered more than one. */
+  readonly topic: string | null;
+  readonly kind: "Question" | "Quick check";
+  readonly question: string | null;
+  /** What the learner did on the thread: their answers, or that they skipped or did not know. */
+  readonly answers: readonly string[];
+  /** The learner's own words when they disputed the assessment. */
+  readonly dispute: string | null;
+  /** The tutor's assessment as it proposed it, before any record rule or dispute. */
+  readonly assessed: string;
+  /** The tutor's written reason, latest first: its reply to the dispute, else its reading of the answer. */
+  readonly reasoning: { readonly label: string; readonly text: string } | null;
+  /** Lecture evidence the tutor cited on this thread. */
+  readonly evidence: readonly EvidenceId[];
+};
+
+const CONTEXT_ANSWER_ACTS: ReadonlySet<LearnerAct["kind"]> = new Set(["answer", "skip", "dont_know"]);
+
+export function observationContext(o: Observation, review: Pick<ReviewView, "topics" | "turns"> | null): ObservationContext {
+  const turns = review?.turns ?? [];
+  const names = o.conceptIds.flatMap((id) => review?.topics.find((t) => t.id === id)?.label ?? []);
+  const asked = turns.find((t) => t.actor === "tutor" && (t.move.kind === "ask_main" || t.move.kind === "quick_check") && t.move.threadId === o.threadId);
+  const kind = asked?.actor === "tutor" && asked.move.kind === "quick_check" ? "Quick check" : "Question";
+  const answers = o.facts.learnerTurns.flatMap((id) => {
+    const t = turns.find((turn) => turn.id === id);
+    return t?.actor === "learner" && CONTEXT_ANSWER_ACTS.has(t.act.kind) ? [learnerActText(t.act)] : [];
+  });
+  const onThread = turns.filter((t) => t.threadId === o.threadId || (t.actor === "tutor" && t.move.kind === "disclose_correction" && t.move.threadIds.includes(o.threadId)));
+  const disputeTurn = onThread.findLast((t) => t.actor === "learner" && t.act.kind === "dispute");
+  const dispute = disputeTurn?.actor === "learner" && disputeTurn.act.kind === "dispute" ? disputeTurn.act.text : null;
+  let reasoning: ObservationContext["reasoning"] = null;
+  for (const t of onThread.toReversed()) {
+    if (t.actor !== "tutor") continue;
+    if (t.move.kind === "answer_dispute" && t.say.trim() !== "") reasoning = { label: "The tutor's reply to your dispute", text: t.say };
+    else if (t.move.kind === "diagnose" && t.move.hypothesis.trim() !== "") reasoning = { label: "The tutor's reading of your answer", text: t.move.hypothesis };
+    if (reasoning !== null) break;
+  }
+  const evidence = [...new Set(onThread.flatMap((t) => (t.actor === "tutor" ? moveEvidence(t.move) : [])))];
+  return {
+    topic: names.length > 0 ? names.join(" · ") : null,
+    kind,
+    question: asked?.actor === "tutor" ? asked.say : null,
+    answers,
+    dispute,
+    assessed: STATUS_LABEL[o.proposed],
+    reasoning,
+    evidence,
+  };
 }
 
 export const AUTHOR_LABEL: Readonly<Record<Author, string>> = { learner: "You", tutor: "Tutor", source: "Lecture" };

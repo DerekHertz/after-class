@@ -15,7 +15,7 @@ function id<K extends IdKind>(kind: K, name: string): Id<K> {
   return parsed;
 }
 export const ids = { capture: id("cap", "capture"), review: id("rvw", "review"), source: id("src", "lecture"), thread: id("thr", "main"), claim: id("clm", "main"), passage: id("ev", "passage"), frame: id("ev", "frame"), chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait") };
-export const scenarios = ["review", "long-history", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "capture-ready", "capture-processing", "capture-empty", "record", "record-empty", "record-error", "usage"] as const;
+export const scenarios = ["review", "long-history", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "capture-ready", "capture-processing", "capture-empty", "record", "record-disputes", "record-empty", "record-error", "usage"] as const;
 export type Scenario = typeof scenarios[number];
 export const scenario = scenarios.find(s => s === new URLSearchParams(location.search).get("scenario")) ?? "review";
 const material = [[ids.source, [[0, 760]]]];
@@ -33,9 +33,25 @@ turns.push(answer(turns.length + 1, "One holds lock A and wants B. The other hol
 turns.push(turn("tutor", turns.length + 1, { move: { kind: "explain", threadId: ids.thread, evidence: [ids.frame, ids.passage] }, say: "The lecture calls this circular wait. Each thread is holding a resource while waiting for the other." }));
 turns.push(turn("tutor", turns.length + 1, { move: { kind: "ask_followup", threadId: ids.thread }, say: "What would have to change for either thread to continue?" }));
 if (scenario === "soft-target") turns.push(turn("code", turns.length + 1, { notice: { kind: "soft_target_reached", elapsedS: 600 } }));
+// Two disputed topics on two threads, so each notebook row has to say which assessment it changes (#112).
+const ordering = { concept: id("cpt", "ordering"), claim: id("clm", "ordering"), thread: id("thr", "ordering") };
+const disputes = scenario === "record-disputes";
+const orderingLearnerTurns: string[] = [];
+if (disputes) {
+  turns.push(turn("learner", turns.length + 1, { act: { kind: "dispute", text: "I did describe the cycle: each thread waits on the other." } }));
+  turns.push(turn("tutor", turns.length + 1, { move: { kind: "answer_dispute", threadId: ids.thread, evidence: [ids.passage], settled: false }, say: "The lecture treats holding one lock while waiting for another as the condition; your answer named the waiting but not the holding." }));
+  const onOrdering = (actor: string, rest: object) => ({ ...turn(actor, turns.length + 1, rest), threadId: ordering.thread });
+  turns.push(onOrdering("tutor", { move: { kind: "ask_main", threadId: ordering.thread, claimIds: [ordering.claim] }, say: "Why does acquiring locks in one global order prevent deadlock?" }));
+  const orderingAnswer = onOrdering("learner", { act: { kind: "answer", text: "Nobody can wait on a lock that comes earlier in the order, so no cycle can form.", modality: "text" } });
+  orderingLearnerTurns.push(orderingAnswer.id);
+  turns.push(orderingAnswer);
+  turns.push(onOrdering("tutor", { move: { kind: "diagnose", threadId: ordering.thread, hypothesis: "The answer skips that every thread must follow the same order.", evidence: [id("ev", "later-passage")] }, say: "Nearly." }));
+  turns.push(onOrdering("learner", { act: { kind: "dispute", text: "One global order already means every thread follows it." } }));
+}
 if (scenario === "correction") turns.push(turn("code", turns.length + 1, { notice: { kind: "correction_pending", correctionId: "fixture-correction", affectedClaims: [ids.claim] } }));
 let view: ReviewView = reviewViewz.parse({
   reviewId: ids.review, captureId: ids.capture,
+  ...(disputes ? { topics: [{ id: ids.concept, label: "Circular wait", summary: "" }, { id: ordering.concept, label: "Lock ordering", summary: "" }] } : {}),
   scope: { chunkRevisions: [ids.chunk], material, claimsAtStart: [ids.claim], partial: [{ kind: "capture_gap", gap }], frozenAtSeq: 7 },
   state: { reviewId: ids.review, phase: scenario === "paused" ? "paused" : scenario === "save-failure" || scenario === "saving" ? "ended" : "active", mainQuestions: 1, openThread: ids.thread, lastLearnerAct: null,
     detour: scenario === "detour" ? { kind: "proposed", turnId: id("turn", "detour"), topic: "Resource ordering", needsResource: null } : scenario === "resource-wait" ? { kind: "awaiting_resource", resourceId: id("res", "resource"), topic: "Resource ordering" } : { kind: "none" },
@@ -46,7 +62,8 @@ const capture = captureResponsez.parse({ capture: { captureId: ids.capture, stat
 const laterPassage = id("ev", "later-passage");
 const evidence = evidenceBundlez.parse({ material, passages: [{ kind: "passage", id: ids.passage, sourceId: ids.source, transcriptRevId: id("trv", "captions"), interval: { start: 402, end: 423 }, text: "Each thread holds a lock while waiting for the other.", origin: "panel" }, { kind: "passage", id: laterPassage, sourceId: ids.source, transcriptRevId: id("trv", "captions"), interval: { start: 480, end: 505 }, text: "Acquiring resources in the same order removes this circular wait.", origin: "panel" }], frames: [{ kind: "frame", id: ids.frame, sourceId: ids.source, mediaS: 402, width: 800, height: 450, teaching: "kept" }], gaps: [gap], ads: [] });
 const observation = { id: id("obs", "disputed"), reviewId: ids.review, threadId: ids.thread, claimIds: [ids.claim], conceptIds: [ids.concept], proposed: "partial", status: "disputed", clampedFrom: null, dispute: { kind: "open", turnId: id("turn", "dispute") }, corrections: [], facts: { threadId: ids.thread, firstSubstantiveAnswerSeq: 2, firstHelpSeq: 3, endedBySkip: false, saidDontKnowOnly: false, learnerTurns: [id("turn", "learner-2")], helpTurns: [id("turn", "tutor-3")] } };
-let record = recordViewz.parse({ notes: scenario === "record-empty" ? [] : [{ id: id("note", "note"), reviewId: ids.review, conceptId: ids.concept, generated: [{ author: "learner", text: "Each thread holds something the other needs.", turnId: null, evidence: [] }, { author: "tutor", text: "Look at the order in which resources are acquired.", turnId: null, evidence: [ids.passage] }, { author: "source", text: "Circular wait is one condition for deadlock.", turnId: null, evidence: [ids.frame] }], userEdit: null, evidence: [ids.passage, ids.frame] }], observations: scenario === "record-empty" ? [] : [observation], links: scenario === "record-empty" ? [] : [{id:id("lnk","link"),from:ids.concept,to:id("cpt","ordering"),type:"related_to",evidence:[ids.passage],rationale:"Resource ordering changes the circular-wait condition.",decision:"suggested"}], unavailableEvidence: [] });
+const orderingObservation = { ...observation, id: id("obs", "ordering"), threadId: ordering.thread, claimIds: [ordering.claim], conceptIds: [ordering.concept], dispute: { kind: "open", turnId: id("turn", "ordering-dispute") }, facts: { ...observation.facts, threadId: ordering.thread, firstHelpSeq: null, learnerTurns: orderingLearnerTurns, helpTurns: [] } };
+let record = recordViewz.parse({ notes: scenario === "record-empty" ? [] : [{ id: id("note", "note"), reviewId: ids.review, conceptId: ids.concept, generated: [{ author: "learner", text: "Each thread holds something the other needs.", turnId: null, evidence: [] }, { author: "tutor", text: "Look at the order in which resources are acquired.", turnId: null, evidence: [ids.passage] }, { author: "source", text: "Circular wait is one condition for deadlock.", turnId: null, evidence: [ids.frame] }], userEdit: null, evidence: [ids.passage, ids.frame] }], observations: scenario === "record-empty" ? [] : disputes ? [observation, orderingObservation] : [observation], links: scenario === "record-empty" ? [] : [{id:id("lnk","link"),from:ids.concept,to:id("cpt","ordering"),type:"related_to",evidence:[ids.passage],rationale:"Resource ordering changes the circular-wait condition.",decision:"suggested"}], unavailableEvidence: [] });
 const ledger: string[] = [];
 const listeners = new Set<() => void>();
 function log(call: string) { ledger.push(call); for (const listener of listeners) listener(); }
@@ -116,7 +133,7 @@ export const api: AppApi = {
   async record() { log("record.read"); if (scenario === "record-error" && attempts++ === 0) throw new ApiError("Fixture notebook could not load. Retry is available.", 503); return record; },
   async editNote(noteId, text) { log("note.edit"); record = { ...record, notes: record.notes.map(note => note.id === noteId ? { ...note, userEdit: text } : note) }; },
   async deleteNote(noteId) { log("note.delete"); record = { ...record, notes: record.notes.filter(note => note.id !== noteId) }; },
-  async decideLink(linkId, decision) { log("link.decide"); record = {...record, links:record.links.map(link=>link.id===linkId?{...link,decision}:link)}; }, async resolveDispute(obsId, outcome) { log("dispute.resolve"); record = {...record,observations:record.observations.map(obs=>obs.id===obsId?{...obs,dispute:{kind:"resolved_by_learner",outcome}}:obs)}; }, async overrideObservation(obsId,status) { log("observation.override"); record={...record,observations:record.observations.map(obs=>obs.id===obsId?{...obs,status}:obs)}; },
+  async decideLink(linkId, decision) { log("link.decide"); record = {...record, links:record.links.map(link=>link.id===linkId?{...link,decision}:link)}; }, async resolveDispute(obsId, outcome) { log("dispute.resolve"); record = {...record,observations:record.observations.map(obs=>obs.id===obsId?{...obs,status:outcome==="it_was_my_gap"&&!["partial","unresolved"].includes(obs.proposed)?"unresolved":obs.proposed,dispute:{kind:"resolved_by_learner",outcome}}:obs)}; }, async overrideObservation(obsId,status) { log("observation.override"); record={...record,observations:record.observations.map(obs=>obs.id===obsId?{...obs,status}:obs)}; },
   async deleteEvidence(evidenceIds) { log("evidence.delete"); record = { ...record, unavailableEvidence: evidenceIds.map(id => ({ kind: "deleted", id, deletedAtMs: 1000 })) }; },
   async usage() { return usageSummaryz.parse({ byKind: {}, byPurpose: {} }); },
 };

@@ -1,9 +1,9 @@
 import { useId, useRef, useState } from "react";
 import type { EvidenceId, ReviewId } from "../shared/ids";
-import type { EvidenceBundle, LinkDecision, LinkType, Note, ObservationStatus, RecordView, UsageSummary } from "../shared/domain";
+import type { EvidenceBundle, LinkDecision, LinkType, Note, Observation, ObservationStatus, RecordView, ReviewView, UsageSummary } from "../shared/domain";
 import type { AppApi } from "./api";
-import { formatClock, formatInterval, noteView, observationRow, STATUS_LABEL, usageRows } from "./core";
-import type { SourceTitles } from "./core";
+import { DISPUTE_CHOICES, formatClock, formatInterval, noteView, observationContext, observationRow, STATUS_LABEL, usageRows } from "./core";
+import type { DisputeOutcome, ObservationContext, SourceTitles } from "./core";
 import { ErrorNote, EvidencePane, Link, useAsync } from "./ui";
 import { IllustratedReview } from "./diagram";
 
@@ -92,6 +92,12 @@ export function RecordBody({ api, data, run }: { readonly api: AppApi; readonly 
     const bundles = await Promise.all(batches.map((ids) => api.evidence({ ids })));
     return { frames: bundles.flatMap((bundle) => bundle.frames), passages: bundles.flatMap((bundle) => bundle.passages) };
   }, [api, citationKey]);
+  // Topic names, answers and the tutor's reasons live in each review's turns, so an observation row reads them from its review.
+  const observedReviews = [...new Set(data.observations.map((o) => o.reviewId))].sort();
+  const reviews = useAsync(async (): Promise<ReadonlyMap<ReviewId, ReviewView>> => {
+    const views = await Promise.all(observedReviews.map((id) => api.review(id)));
+    return new Map(views.map((v) => [v.reviewId, v]));
+  }, [api, observedReviews.join(",")]);
   return (
     <>
       <section className="record-section" aria-labelledby="record-notes-heading">
@@ -102,33 +108,14 @@ export function RecordBody({ api, data, run }: { readonly api: AppApi; readonly 
 
       <section className="record-section" aria-labelledby="record-observations-heading">
       <h2 id="record-observations-heading">What the tutor observed</h2>
-      <p className="muted">These observations describe the review. You can correct them or settle an open dispute.</p>
+      <p className="muted">Each observation names its topic, your answer, and the tutor's reasons, with the sources it cited. You can correct a status or settle an open dispute.</p>
       {data.observations.length === 0 && <p className="muted">No observations.</p>}
+      {data.observations.length > 0 && reviews.loading && reviews.data === null && <p className="muted" role="status">Loading topics and answers...</p>}
+      {reviews.error !== null && <ErrorNote error={`Topics and answers could not be loaded: ${reviews.error}`} retry={reviews.reload} />}
       <ul className="record-list">
-        {data.observations.map((o) => {
-          const row = observationRow(o);
-          return (
-            <li key={o.id}>
-              <strong>{row.status}</strong>
-              {row.note && <span className="muted"> {row.note}</span>}
-              <div className="actions">
-                <label>
-                  Correct status{" "}
-                  <select value="" onChange={(e) => e.target.value && void run(() => api.overrideObservation(o.id, e.target.value as ObservationStatus))}>
-                    <option value="">Choose...</option>
-                    {OVERRIDES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-                  </select>
-                </label>
-                {row.disputeOpen && (
-                  <>
-                    <button type="button" onClick={() => void run(() => api.resolveDispute(o.id, "learner_was_right"))}>The tutor was wrong</button>
-                    <button type="button" onClick={() => void run(() => api.resolveDispute(o.id, "it_was_my_gap"))}>It was my gap</button>
-                  </>
-                )}
-              </div>
-            </li>
-          );
-        })}
+        {data.observations.map((o, index) => (
+          <ObservationItem key={o.id} api={api} observation={o} index={index} context={reviews.data === null ? null : observationContext(o, reviews.data.get(o.reviewId) ?? null)} run={run} />
+        ))}
       </ul>
 
       </section>
@@ -153,6 +140,85 @@ export function RecordBody({ api, data, run }: { readonly api: AppApi; readonly 
       </ul>
       </section>
     </>
+  );
+}
+
+/**
+ * One observation, under its topic: the question, your answer, the tutor's assessment and reasons, and the sources it
+ * cited, all before the controls that change it. `context` is null while the review's turns are loading.
+ */
+export function ObservationItem({ api, observation: o, index, context, run }: {
+  readonly api: AppApi;
+  readonly observation: Observation;
+  readonly index: number;
+  readonly context: ObservationContext | null;
+  readonly run: (a: () => Promise<void>) => Promise<void>;
+}) {
+  const id = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [choice, setChoice] = useState<DisputeOutcome | null>(null);
+  const [showSources, setShowSources] = useState(false);
+  const row = observationRow(o);
+  const topic = context?.topic ?? `Observation ${index + 1}`;
+  const evidence = context?.evidence ?? [];
+
+  async function settle(outcome: DisputeOutcome) {
+    await run(() => api.resolveDispute(o.id, outcome));
+    setChoice(null);
+    heading.current?.focus();
+  }
+
+  return (
+    <li className="observation-row" aria-labelledby={`${id}-topic`}>
+      <h3 id={`${id}-topic`} ref={heading} tabIndex={-1}>{topic}</h3>
+      <p className="observation-status"><strong>Status: {row.status}</strong>{row.note && <span className="muted"> {row.note}</span>}</p>
+      {context === null ? (
+        <p className="muted">The question and your answer are not loaded yet.</p>
+      ) : (
+        <dl className="observation-context">
+          {context.question !== null && <><dt>{context.kind}</dt><dd>{context.question}</dd></>}
+          <dt>Your answer</dt>
+          <dd className="author-learner">{context.answers.length > 0 ? context.answers.join(" ") : "No answer recorded."}</dd>
+          {context.dispute !== null && <><dt>What you disputed</dt><dd className="author-learner">{context.dispute}</dd></>}
+          <dt>The tutor's assessment</dt>
+          <dd className="author-tutor">{context.assessed}</dd>
+          {context.reasoning !== null && <><dt>{context.reasoning.label}</dt><dd className="author-tutor">{context.reasoning.text}</dd></>}
+        </dl>
+      )}
+      {context !== null && evidence.length === 0 && <p className="muted">The tutor cited no lecture source on this question.</p>}
+      {evidence.length > 0 && (
+        <button type="button" aria-expanded={showSources} aria-controls={`${id}-sources`} onClick={() => setShowSources((v) => !v)}>
+          {showSources ? "Hide sources" : `Show sources (${evidence.length})`}
+        </button>
+      )}
+      {showSources && evidence.length > 0 && (
+        <section id={`${id}-sources`} className="record-evidence" aria-label={`Sources the tutor cited: ${topic}`}>
+          <EvidencePane api={api} ids={evidence} titles={noTitles} />
+        </section>
+      )}
+      <div className="actions">
+        <label>
+          Correct status{" "}
+          <select aria-label={`Correct status: ${topic}`} value="" onChange={(e) => e.target.value && void run(() => api.overrideObservation(o.id, e.target.value as ObservationStatus))}>
+            <option value="">Choose...</option>
+            {OVERRIDES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+          </select>
+        </label>
+      </div>
+      {row.disputeOpen && (
+        <fieldset className="dispute-choices">
+          <legend>Settle the dispute about {topic}</legend>
+          {DISPUTE_CHOICES.map((c) => (
+            <label key={c.label} className="dispute-choice">
+              <input type="radio" name={`${id}-dispute`} checked={choice === c.outcome} onChange={() => setChoice(c.outcome)} aria-describedby={`${id}-${c.outcome ?? "keep"}`} />
+              <span>{c.label}</span>
+              <span id={`${id}-${c.outcome ?? "keep"}`} className="muted">{c.meaning}</span>
+            </label>
+          ))}
+          <button type="button" disabled={choice === null} onClick={() => choice !== null && void settle(choice)}>Save decision</button>
+        </fieldset>
+      )}
+    </li>
   );
 }
 

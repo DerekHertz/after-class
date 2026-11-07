@@ -471,7 +471,7 @@ describe("record view logic", () => {
     expect(row).toMatchObject({ status: "Disputed", disputeOpen: true });
     expect(row.note).toContain("not counted as a learning gap");
     const resolved = observationRow(observation({ status: "unresolved", dispute: { kind: "resolved_by_learner", outcome: "it_was_my_gap" } }));
-    expect(resolved).toMatchObject({ disputeOpen: false, note: "You resolved the dispute as your own gap." });
+    expect(resolved).toMatchObject({ disputeOpen: false, note: "You chose to revisit this topic, so it is counted as a learning gap." });
   });
 
   test("a note keeps learner, tutor and source text apart, and your edit never replaces the generated text", () => {
