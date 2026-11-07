@@ -1,25 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-page="popup">
 <head>
 <meta charset="utf-8">
 <title>After Class</title>
-<style>
-  :root { color-scheme: light dark; --fg: #1f2328; --muted: #656d76; --line: #d0d7de; --bg: #ffffff; --accent: #0b5cad; --warn: #9a4a00; --bad: #b42318; --ok: #1a7f37; }
-  @media (prefers-color-scheme: dark) { :root { --fg: #e6edf3; --muted: #9198a1; --line: #30363d; --bg: #0d1117; --accent: #58a6ff; --warn: #e3a042; --bad: #ff7b72; --ok: #56d364; } }
-  body { margin: 0; width: 340px; background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, sans-serif; }
-  main { padding: 12px 14px 14px; display: grid; gap: 10px; }
-  h1 { font-size: 14px; margin: 0; }
-  .status { font-weight: 600; }
-  .status[data-tone="ok"] { color: var(--ok); } .status[data-tone="warn"] { color: var(--warn); } .status[data-tone="bad"] { color: var(--bad); }
-  .row { display: flex; gap: 6px; flex-wrap: wrap; }
-  button { font: inherit; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); cursor: pointer; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button:disabled { opacity: .5; cursor: default; }
-  dl { margin: 0; display: grid; grid-template-columns: 5.5em 1fr; gap: 3px 8px; }
-  dt { color: var(--muted); } dd { margin: 0; overflow-wrap: anywhere; }
-  .invite { border: 1px solid var(--warn); border-radius: 8px; padding: 8px 10px; display: grid; gap: 6px; }
-  .note { color: var(--muted); } .error { color: var(--bad); }
-</style>
+<link rel="stylesheet" href="stationery.css">
 </head>
 <body>
 <main id="root"></main>

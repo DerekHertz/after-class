@@ -567,6 +567,22 @@ describe("extension build", () => {
     expect(manifest.host_permissions).not.toContain("http://localhost:4317/*");
   });
 
+  test("every file the popup and options pages load, and every font their stylesheets load, is local and in the build", async () => {
+    const out = scratchDir("afterclass-build-pages-");
+    await buildExtension(out);
+    const refs = (file: string, pattern: RegExp) => [...readFileSync(join(out, file), "utf8").matchAll(pattern)].map((m) => m[1]!);
+    const pageFiles = ["popup.html", "options.html"].flatMap((page) => refs(page, /(?:href|src)="([^"]+)"/g));
+    const sheets = pageFiles.filter((f) => f.endsWith(".css"));
+    expect(sheets.length).toBeGreaterThan(0);
+    const loaded = [...pageFiles, ...sheets.flatMap((sheet) => refs(sheet, /url\(['"]?([^'")]+)['"]?\)/g))];
+    expect(loaded.some((f) => f.endsWith(".ttf"))).toBe(true);
+    for (const f of loaded) {
+      expect(f).not.toMatch(/^(https?:)?\/\//);
+      expect(existsSync(join(out, f))).toBe(true);
+    }
+    expect(existsSync(join(out, "fonts/OFL-PixelifySans.txt"))).toBe(true);
+  });
+
   test("the product build has no autostart code and keeps its name; only the test build has it, under a name that says so", async () => {
     const product = scratchDir("afterclass-build-product-");
     const test = scratchDir("afterclass-build-autostart-");

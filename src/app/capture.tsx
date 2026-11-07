@@ -5,6 +5,7 @@ import type { ReviewOptions, StartChoice } from "../shared/domain";
 import type { AppApi } from "./api";
 import { formatClock, inspectBundle, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
 import type { OptionsScreen, ScopeSummary, SourceTitles, StartOffer } from "./core";
+import { objectFrame } from "./room-object";
 import { BundleInspector, ErrorNote, EvidencePane, Link, navigate, useAsync } from "./ui";
 
 
@@ -212,7 +213,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
   }
 
   return (
-    <main className="notebook-page capture-page">
+    <main className="notebook-page capture-page room-paper" {...objectFrame("source")}>
       <header className="page-heading">
         <div><p className="page-kicker">After Class</p><h1>Your lecture</h1></div>
         <nav aria-label="Capture navigation"><Link to={{ page: "record", reviewId: null }}>My notebook</Link> <Link to={{ page: "usage" }}>Usage</Link></nav>

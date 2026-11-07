@@ -6,6 +6,7 @@ import type { AppApi } from "./api";
 import { formatDuration, lectureHeading } from "./core";
 import type { Route } from "./core";
 import { currentQuestionTopic, isQuestion } from "./diagram-view";
+import { objectFrame } from "./room-object";
 import { ErrorNote, Link, navigate, useAsync } from "./ui";
 
 type Lecture = LecturesResponse["lectures"][number];
@@ -166,7 +167,7 @@ export function OpenById() {
 export function HomeScreen({ api }: { readonly api: AppApi }) {
   const lectures = useAsync(() => api.lectures(), [api]);
   return (
-    <main className="notebook-page home-page">
+    <main className="notebook-page home-page room-paper" {...objectFrame("source")}>
       <header className="page-heading">
         <div><p className="page-kicker">After Class</p><h1>Your lectures</h1></div>
         <nav aria-label="Home navigation"><Link to={{ page: "record", reviewId: null }}>My notebook</Link><Link to={{ page: "usage" }}>Usage</Link></nav>

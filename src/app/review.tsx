@@ -21,7 +21,7 @@ import { BundleInspector, ErrorNote, EvidencePane, useAsync } from "./ui";
 import { CompletionPanel } from "./completion";
 import { DiagramPanel, ShowDiagramButton, useDiagrams } from "./diagram";
 import { currentQuestionTopic } from "./diagram-view";
-import { RoomInspector, returnTarget } from "./room-object";
+import { RoomInspector, objectFrame, returnTarget } from "./room-object";
 import type { Inspecting, PutDown, RoomObject } from "./room-object";
 
 export type ReviewDeps = { readonly api: AppApi; readonly speaker: Speaker; readonly speech: SpeechInput; readonly unsent: UnsentStore };
@@ -128,7 +128,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const view = state.view;
   if (view === null) {
     return (
-      <main className="review review-loading">
+      <main className="notebook-page review-loading room-paper" {...objectFrame("source")}>
         <h1>Review</h1>
         <ErrorNote error={state.loadError} retry={() => void controller.load()} />
         {state.loadError === null && <p className="muted">Loading...</p>}
@@ -208,7 +208,10 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
 
   return (
     <main className="review front-row">
-      {notebookOpen && <dialog className="room-notebook-dialog" ref={node => { if (node && !node.open) node.showModal(); }} onClose={closeNotebook}><button type="button" onClick={closeNotebook}>Close notebook</button><RecordScreen api={api} reviewId={null} /></dialog>}
+      {notebookOpen && <dialog className="room-object room-notebook-dialog" {...objectFrame("history")} aria-label="Saved notes" ref={node => { if (node && !node.open) node.showModal(); }} onClose={closeNotebook}>
+        <div className="room-object-tools"><button type="button" onClick={closeNotebook}>Close notebook</button></div>
+        <RecordScreen api={api} reviewId={null} />
+      </dialog>}
       <header ref={reserveNavSpace} className="review-header front-row-bar">
         <div className="front-row-title">
           <h1>{heading.title}</h1>

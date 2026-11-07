@@ -1,12 +1,3 @@
-.room-notebook-dialog { width: min(85vw, 780px); max-height: 78vh; overflow: auto; border: 1px solid #8e744d; border-radius: 8px; padding: 18px; }
-.room-notebook-dialog::backdrop { background: #231a12a8; }
-.room-notebook-dialog { background: repeating-linear-gradient(to bottom, #fff4d9 0 27px, #b9c5b6 28px, #fff4d9 29px); border-left: 12px double #664932; box-shadow: 3px 3px #c1ac86, 6px 6px #80694d; }
-.room-notebook-dialog > button:first-child { position: sticky; top: 0; z-index: 3; min-height: 44px; background: #fff1ce; color: #392c1c; box-shadow: 0 2px 4px #47311c36; }
-.room-notebook-dialog .record-page { background: transparent; padding-left: clamp(22px, 4vw, 48px); border-left: 4px double #c68776; }
-.room-notebook-dialog::before { content: ""; position: absolute; top: 18px; left: 3px; bottom: 0; width: 18px; pointer-events: none; background: repeating-linear-gradient(172deg, transparent 0 21px, #514638 22px, #d9cfba 24px, #736453 26px, transparent 28px 34px); }
-@media (prefers-reduced-motion: reduce) { .room-notebook-dialog [data-notebook-page] { animation: none; transition: none; } }
-.scene-shell[data-motion="reduced"] [data-notebook-page] { animation: none; transition: none; }
-
 .review .turn-status { width: 100%; margin: 0; padding: 6px 10px; border-radius: 0; background: #efe3c8; color: #35261c; font-weight: 700; }
 .review .turn-status[data-status="listening"] { background: #dfeadb; }
 .review .turn-status-heard { font-weight: normal; font-style: italic; quotes: none; }

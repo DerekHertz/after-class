@@ -13,6 +13,7 @@ import { audioElementPlayer, chooseSpeaker, createElevenLabsSpeaker, gateSpeaker
 import { createIndexedDbUnsent } from "./unsent";
 import { Link, usePathname } from "./ui";
 import { HomeScreen } from "./home";
+import { objectFrame } from "./room-object";
 
 /** The backend writes the pairing token into the served HTML; it is never in the URL or in storage. */
 function readToken(): string {
@@ -38,7 +39,7 @@ const Home = () => <HomeScreen api={api} />;
 
 function NotFound() {
   return (
-    <main>
+    <main className="notebook-page room-paper" {...objectFrame("source")}>
       <h1>Page not found</h1>
       <p>That address is not a page in After Class.</p>
       <p><Link to={{ page: "home" }}>Go to the start</Link></p>

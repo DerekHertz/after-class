@@ -74,6 +74,11 @@ export function objectStyle(object: RoomObject): CSSProperties {
   };
 }
 
+/** The attributes that draw an object's art around an element: which raster (front-row.css) and how ROOM_OBJECTS cuts it. */
+export function objectFrame(object: RoomObject): { readonly "data-object": RoomObject; readonly style: CSSProperties } {
+  return { "data-object": object, style: objectStyle(object) };
+}
+
 /** The open source button says how much the current reply cites, so the learner sees there is something to read. */
 export function sourceButtonLabel(cited: number): string {
   return cited === 0 ? "Open source" : `Open source · ${cited} cited`;
@@ -113,7 +118,7 @@ export function RoomInspector({ object, headingRef, pageRef, onPageScroll, onPut
     <dialog
       ref={dialog}
       className="room-object"
-      {...(object === null ? {} : { "data-object": object, style: objectStyle(object), "aria-labelledby": headingId })}
+      {...(object === null ? {} : { ...objectFrame(object), "aria-labelledby": headingId })}
       onCancel={(e) => { e.preventDefault(); onPutDown("origin"); }}
     >
       {art !== null && <>

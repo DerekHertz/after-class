@@ -10,6 +10,7 @@ import { canChangeObservation, changeObservation, DISPUTE_CHOICES, loadReviewCon
 import type { DisputeChoice, ObservationContext, ReviewContext } from "./observation-view";
 import { focusLectures, notebookLectures, NOTEBOOK_VIEWS, TOPIC_SECTIONS, topicName, viewCounts, withDraft } from "./notebook-view";
 import type { NoteDrafts, NotebookLecture, NotebookTopic, NotebookViewName } from "./notebook-view";
+import { objectFrame } from "./room-object";
 import { ErrorNote, EvidencePane, FrameImage, Link, useAsync } from "./ui";
 import { DiagramSummaryView, POLL_MS } from "./diagram";
 import { frameLink, NO_FRAME_NOTE, shouldPollDiagrams } from "./diagram-view";
@@ -56,7 +57,7 @@ export function RecordScreen({ api, reviewId }: { readonly api: AppApi; readonly
   // Lectures are grouped once the lecture list has answered, so a topic's drafts are not remounted when titles arrive.
   const grouped = lectures.data !== null || lectures.error !== null;
   return (
-    <main className="notebook-page record-page">
+    <main className="notebook-page record-page room-paper" {...objectFrame("history")}>
       <header className="page-heading">
         <div><p className="page-kicker">Kept in your own words</p><h1 tabIndex={-1}>My notebook</h1></div>
         <nav aria-label="Notebook navigation"><Link to={{ page: "home" }}>Your lectures</Link> <Link to={{ page: "usage" }}>Usage</Link></nav>
@@ -599,7 +600,7 @@ export function UsageTable({ summary }: { readonly summary: UsageSummary }) {
 export function UsageScreen({ api }: { readonly api: AppApi }) {
   const usage = useAsync(() => api.usage(), [api]);
   return (
-    <main className="notebook-page usage-page">
+    <main className="notebook-page usage-page room-paper" {...objectFrame("source")}>
       <header className="page-heading"><div><p className="page-kicker">Local usage record</p><h1>Usage</h1></div><nav aria-label="Usage navigation"><Link to={{ page: "record", reviewId: null }}>My notebook</Link><Link to={{ page: "home" }}>Your lectures</Link></nav></header>
       <ErrorNote error={usage.error} retry={usage.reload} />
       {usage.data === null && usage.error === null && <p className="page-loading" role="status">Opening the usage record...</p>}
