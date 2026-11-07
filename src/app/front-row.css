@@ -143,7 +143,8 @@
 .front-row-object:is(:hover, :focus-visible) .front-row-object-art { translate: 0 -4px; filter: drop-shadow(0 8px 0 #00000052) brightness(1.08); }
 .front-row-object:is(:hover, :focus-visible) .front-row-object-tag { background: var(--fr-bar-ink); color: var(--fr-bar); }
 .scene-shell .front-row-scene .front-row-object:focus-visible { outline: 3px solid var(--fr-bar-ink); outline-offset: 2px; }
-@media (prefers-reduced-motion: reduce) { .front-row-object .front-row-object-art { transition: none; } }
+.scene-shell[data-motion="reduced"] .front-row-object .front-row-object-art, .scene-shell[data-motion="reduced"] .front-row-object:is(:hover, :focus-visible) .front-row-object-art { transition: none; translate: none; }
+@media (prefers-reduced-motion: reduce) { .front-row-object .front-row-object-art, .front-row-object:is(:hover, :focus-visible) .front-row-object-art { transition: none; translate: none; } }
 
 /* The lecture folio and the review notebook, picked up over the room. The supplied raster is the frame, cut nine ways by
    ROOM_OBJECTS so its ornaments stay whole at any shape, and the live text sits on its blank page. --u is one pixel of the
@@ -249,7 +250,7 @@
   .front-row-scene .front-row-buddy { position: absolute; left: max(var(--fr-buddy-left), var(--fr-inset-x)); top: var(--fr-buddy-top); width: var(--fr-buddy-width); height: var(--fr-buddy-height); }
   /* The notebook button covers the painted book, so it draws no art of its own. The folio sits on the desk just above the
      book in the same margin, at most 80% of its width, clear of the mat and the board in every room. */
-  .front-row-scene .front-row-object { --fr-book-x: min(var(--fr-book-left), calc(100% - var(--fr-inset-x) - var(--fr-book-width))); position: absolute; }
+  .scene-shell .front-row-scene .front-row-object { --fr-book-x: min(var(--fr-book-left), calc(100% - var(--fr-inset-x) - var(--fr-book-width))); position: absolute; }
   .front-row-scene .front-row-object[data-object="history"] { left: var(--fr-book-x); top: var(--fr-book-top); width: var(--fr-book-width); height: var(--fr-book-height); }
   .front-row-scene .front-row-object[data-object="history"] .front-row-object-art { display: none; }
   .front-row-scene .front-row-object[data-object="source"] { left: calc(var(--fr-book-x) + var(--fr-book-width) * .1); bottom: calc(100% - var(--fr-book-top)); width: calc(var(--fr-book-width) * .8); aspect-ratio: 1448 / 1086; }
