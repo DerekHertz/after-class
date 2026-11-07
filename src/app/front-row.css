@@ -293,7 +293,7 @@
   .front-row-scene .composer > .actions:not(.primary-actions) { justify-self: start; }
   .front-row-scene .setup-start { grid-template-areas: "label label" "field field" "start start"; }
   .front-row-scene .front-row-buddy { grid-area: buddy; justify-content: flex-start; min-width: 0; height: auto; min-height: 84px; padding: 6px 4px; }
-  .front-row-buddy .study-companion { justify-content: flex-start; gap: 10px; min-width: 0; height: auto; }
+  .front-row-buddy .study-companion { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 6px; min-width: 0; width: 100%; height: auto; }
   .front-row-buddy .study-companion > .companion-raster { height: 72px; }
   .front-row-buddy .study-companion > div { position: static; min-width: 0; transform: none; margin: 0 0 6px; white-space: normal; overflow-wrap: break-word; }
   .front-row-buddy .quiet-status { min-width: 0; overflow-wrap: break-word; }
