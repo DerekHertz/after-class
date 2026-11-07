@@ -1,6 +1,4 @@
 .review .source-stand[hidden] { display: none; }
-.review-workspace.source-closed { grid-template-columns: minmax(0, 1fr); max-width: 60rem; margin-inline: auto; }
-.source-closed .conversation-notebook { grid-column: 1; }
 .source-selection-label, .composer-shortcut { font-size: .85rem; color: var(--muted); }
 .review .citation { color: var(--accent); background: transparent; border: 0; text-decoration: underline; padding-inline: 0; text-align: left; }
 .scope-source-list { display: flex; flex-direction: column; gap: 8px; margin-block: 16px; }
@@ -38,9 +36,9 @@
 .diagram-lines li { margin: 6px 0; }
 .diagram-lines .citation { font-size: .8rem; margin-left: 8px; }
 .diagram-sources-toggle { font-size: .85rem; margin: 4px 0; }
-/* The diagram takes its natural height (the page scrolls); the frame is never cropped or height-capped. The HD source
-   stand always takes its natural height (hd-room.css); the painted stand grows only while a diagram is open. */
-.scene-shell:not([data-detail="hd-pixel"]) .review .review-workspace .source-stand:has(.diagram-panel) { height: auto; max-height: none; overflow: visible; z-index: 4; background: var(--surface); padding-bottom: 12px; }
+/* The diagram takes its natural height (the page scrolls); the frame is never cropped or height-capped. The source panel
+   always takes its natural height (front-row.css). */
+.scene-shell .review .source-stand:has(.diagram-panel) { height: auto; max-height: none; overflow: visible; padding-bottom: 12px; }
 .scene-shell .review .source-stand .diagram-panel .diagram-frame .frame { display: block; width: 100%; height: auto; max-height: none; object-fit: contain; }
 .review .review-topics { flex: 0 0 auto; font-size: .85rem; margin-top: 8px; }
 .review .review-topics ul { list-style: none; padding-left: 0; }

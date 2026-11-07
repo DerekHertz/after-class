@@ -126,9 +126,9 @@ describe("the source panel reads in the page and leads back to the question", ()
     expect(aside).toContain(">Close source</button>");
   });
 
-  test("the HD source stand takes its natural height, so a cited passage never hides in a second scroll area", () => {
-    const hd = readFileSync(new URL("../src/app/hd-room.css", import.meta.url), "utf8");
-    const stand = /\.scene-shell\[data-detail="hd-pixel"\] \.review \.source-stand \{[^}]*\}/.exec(hd)![0];
+  test("the source panel takes its natural height, so a cited passage never hides in a second scroll area", () => {
+    const css = readFileSync(new URL("../src/app/front-row.css", import.meta.url), "utf8");
+    const stand = /\.scene-shell \.front-row \.front-row-panel \{[^}]*\}/.exec(css)![0];
     expect(stand).toContain("max-height: none");
     expect(stand).toContain("overflow: visible");
   });

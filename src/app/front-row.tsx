@@ -1,0 +1,218 @@
+import { useEffect, useRef, useState } from "react";
+import type { CSSProperties, ReactNode, Ref, RefObject } from "react";
+import type { Appearance, CompanionActivity, SceneId } from "./appearance";
+import { COMPANION_STATUS, Companion } from "./companion";
+import { clearCompanionReaction, reactToCompanion } from "./companion-reaction";
+
+declare module "react" {
+  interface CSSProperties { [variable: `--${string}`]: string | number | undefined }
+}
+
+type Hex = `#${string}`;
+
+/** A rectangle on a room's plate, in fractions of the plate's width and height, measured from the art. */
+export type PlateBox = { readonly left: number; readonly top: number; readonly right: number; readonly bottom: number };
+
+/**
+ * Which way a surface's text runs. A dark board or mat carries light ink, a light one dark ink. The canal film club is the
+ * one room with a light screen and a dark mat, so the board and the mat each carry their own tone.
+ */
+export type SurfaceTone = "dark" | "light";
+
+/** A surface in the art that holds real text: where to put it, and the flat colour that stands in for it on a phone. */
+export type Surface = { readonly box: PlateBox; readonly tone: SurfaceTone; readonly fill: Hex; readonly ink: Hex; readonly inkSoft: Hex };
+
+export type RoomPalette = {
+  /** The response field on the mat. */
+  readonly field: Hex;
+  readonly fieldInk: Hex;
+  readonly fieldBorder: Hex;
+  /** Share my thinking. */
+  readonly accent: Hex;
+  readonly accentInk: Hex;
+  /** Hint, I don't know and the other secondary buttons. */
+  readonly quiet: Hex;
+  readonly quietInk: Hex;
+  readonly focus: Hex;
+  /** The review bar above the scene, and the wall colour that fills around the plate. */
+  readonly bar: Hex;
+  readonly barInk: Hex;
+  readonly wall: Hex;
+  /** The board's frame and the desk's wood, drawn in flat colour where a phone recomposes the room. */
+  readonly frame: Hex;
+  readonly desk: Hex;
+};
+
+export type FrontRowRoom = {
+  /** The blank plate's own top bar, cut off because the review bar sits above the scene. A fraction of the plate's height. */
+  readonly cropTop: number;
+  readonly surfaceName: string;
+  /** The board or screen the question is written on, and how each approved design sets the question on it. */
+  readonly board: Surface & { readonly align: "start" | "center" };
+  /** The mat on the near desk that holds Your thinking. `actions` follows each approved design. */
+  readonly mat: Surface & { readonly actions: "below" | "beside" };
+  readonly companion: PlateBox;
+  /** The notebook drawn on the desk, which opens My notebook. */
+  readonly notebook: PlateBox;
+  /** The part of the plate a phone shows as a strip of scenery, as a CSS background position. */
+  readonly phoneScenery: string;
+  readonly palette: RoomPalette;
+};
+
+export const PLATE = { width: 1585, height: 992 } as const;
+
+/**
+ * The three selected skins. Scene IDs predate the skins and are kept, so a saved preference still finds its room:
+ * last-desk is the Rail-side Classroom, study-bench the Harbor Study Terrace and projection-booth the Lantern Canal Film Club.
+ * Boxes are the safe insets inside each plate's board and mat, measured on the 1585x992 plates.
+ */
+export const FRONT_ROW_ROOMS = {
+  "last-desk": {
+    cropTop: 0.056,
+    surfaceName: "Chalkboard",
+    board: { align: "start", box: { left: 0.115, top: 0.15, right: 0.765, bottom: 0.52 }, tone: "dark", fill: "#18564b", ink: "#f6efd9", inkSoft: "#c9e6cf" },
+    mat: { box: { left: 0.205, top: 0.68, right: 0.8, bottom: 0.955 }, tone: "light", fill: "#fef0e2", ink: "#1e2b45", inkSoft: "#4b5468", actions: "below" },
+    companion: { left: 0.015, top: 0.68, right: 0.165, bottom: 0.93 },
+    notebook: { left: 0.835, top: 0.755, right: 0.99, bottom: 0.945 },
+    phoneScenery: "92% 40%",
+    palette: {
+      field: "#fffaf3", fieldInk: "#1e2b45", fieldBorder: "#2f4f86", accent: "#2d5aa8", accentInk: "#ffffff",
+      quiet: "#f4e8d2", quietInk: "#2a2620", focus: "#c2410c", bar: "#1a2b3b", barInk: "#f6ecd8", wall: "#6d90a4", frame: "#b8875a", desk: "#9f6650",
+    },
+  },
+  "study-bench": {
+    cropTop: 0,
+    surfaceName: "Learning board",
+    board: { align: "center", box: { left: 0.205, top: 0.255, right: 0.795, bottom: 0.565 }, tone: "dark", fill: "#0f725e", ink: "#fbf6e6", inkSoft: "#dff3e6" },
+    mat: { box: { left: 0.2, top: 0.735, right: 0.83, bottom: 0.955 }, tone: "light", fill: "#feebcd", ink: "#22252e", inkSoft: "#4f4a40", actions: "beside" },
+    companion: { left: 0.015, top: 0.68, right: 0.16, bottom: 0.915 },
+    notebook: { left: 0.855, top: 0.795, right: 0.99, bottom: 0.965 },
+    phoneScenery: "96% 48%",
+    palette: {
+      field: "#fffaf0", fieldInk: "#22252e", fieldBorder: "#5b5240", accent: "#0f6b5d", accentInk: "#ffffff",
+      quiet: "#fbefd8", quietInk: "#2a2620", focus: "#1d4ed8", bar: "#1d3f7a", barInk: "#fdf6e4", wall: "#5597fb", frame: "#a98a62", desk: "#c27d4d",
+    },
+  },
+  "projection-booth": {
+    cropTop: 0.066,
+    surfaceName: "Projection screen",
+    board: { align: "start", box: { left: 0.305, top: 0.18, right: 0.915, bottom: 0.575 }, tone: "light", fill: "#fbe1c5", ink: "#191d42", inkSoft: "#3b3f63" },
+    mat: { box: { left: 0.2, top: 0.75, right: 0.82, bottom: 0.95 }, tone: "dark", fill: "#2c3a61", ink: "#f8ead0", inkSoft: "#d9cdb5", actions: "beside" },
+    companion: { left: 0.01, top: 0.72, right: 0.145, bottom: 0.95 },
+    notebook: { left: 0.865, top: 0.775, right: 0.99, bottom: 0.965 },
+    phoneScenery: "10% 45%",
+    palette: {
+      field: "#1f2a4b", fieldInk: "#f8ead0", fieldBorder: "#d9cdb5", accent: "#f2b648", accentInk: "#24180a",
+      quiet: "#2c3a61", quietInk: "#f8ead0", focus: "#f2b648", bar: "#1f2340", barInk: "#f3e3c3", wall: "#353f67", frame: "#8f8597", desk: "#81494a",
+    },
+  },
+} as const satisfies Record<SceneId, FrontRowRoom>;
+
+/** A plate box moved into the scene, whose top edge is the plate's `cropTop`, as CSS percentages. */
+export function stageBox(box: PlateBox, cropTop: number): { readonly left: number; readonly top: number; readonly width: number; readonly height: number } {
+  const span = 1 - cropTop;
+  return { left: box.left * 100, top: ((box.top - cropTop) / span) * 100, width: (box.right - box.left) * 100, height: ((box.bottom - box.top) / span) * 100 };
+}
+
+/** The room as the custom properties front-row.css reads: geometry in scene percentages, then the palette. */
+export function roomStyle(scene: SceneId): CSSProperties {
+  const room: FrontRowRoom = FRONT_ROW_ROOMS[scene];
+  const style: CSSProperties = {
+    "--fr-aspect": `${PLATE.width} / ${PLATE.height * (1 - room.cropTop)}`,
+    "--fr-ratio": PLATE.width / (PLATE.height * (1 - room.cropTop)),
+    "--fr-plate-height": `${100 / (1 - room.cropTop)}%`,
+    "--fr-phone-scenery": room.phoneScenery,
+    "--fr-board-fill": room.board.fill, "--fr-board-ink": room.board.ink, "--fr-board-ink-soft": room.board.inkSoft,
+    "--fr-mat-fill": room.mat.fill, "--fr-mat-ink": room.mat.ink, "--fr-mat-ink-soft": room.mat.inkSoft,
+  };
+  for (const [area, box] of [["board", room.board.box], ["mat", room.mat.box], ["buddy", room.companion], ["book", room.notebook]] as const) {
+    const b = stageBox(box, room.cropTop);
+    Object.assign(style, { [`--fr-${area}-left`]: `${b.left}%`, [`--fr-${area}-top`]: `${b.top}%`, [`--fr-${area}-width`]: `${b.width}%`, [`--fr-${area}-height`]: `${b.height}%` });
+  }
+  for (const [name, value] of Object.entries(room.palette)) style[`--fr-${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`] = value;
+  return style;
+}
+
+/**
+ * Before the first turn the scene holds the starting-point form, whose topic choices sit on the board and whose note and
+ * Start sit on the desk. Once the review runs, the board holds the question and the desk holds the response field.
+ */
+export type FrontRowLayout =
+  | { readonly kind: "setup"; readonly form: ReactNode }
+  | { readonly kind: "review"; readonly board: ReactNode; readonly desk: ReactNode };
+
+/**
+ * The review seen from the front-row desk. Every room renders this same tree; a room only changes data attributes and
+ * custom properties, so switching rooms or companions never remounts the response field and its draft.
+ */
+export function FrontRowScene({ scene, layout, appearance, activity, onNotebook, boardRef }: {
+  readonly scene: SceneId;
+  readonly layout: FrontRowLayout;
+  readonly appearance: Pick<Appearance, "companion" | "visible" | "motion">;
+  readonly activity: CompanionActivity;
+  readonly onNotebook: () => void;
+  readonly boardRef?: Ref<HTMLElement>;
+}) {
+  const room = FRONT_ROW_ROOMS[scene];
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    clearCompanionReaction();
+    return () => clearTimeout(timer.current);
+  }, [scene, appearance.companion, appearance.visible]);
+  /** The companion glances at the notebook first, unless motion is reduced or the companion is hidden. */
+  function openNotebook() {
+    clearTimeout(timer.current);
+    reactToCompanion("read");
+    const reduced = appearance.motion === "reduced" || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced || !appearance.visible) onNotebook();
+    else timer.current = setTimeout(onNotebook, 500);
+  }
+  return (
+    <div className="front-row-scene" data-room={scene} data-board-tone={room.board.tone} data-mat-tone={room.mat.tone} data-mat-actions={room.mat.actions} data-board-align={room.board.align} data-phase={layout.kind}>
+      {layout.kind === "setup" ? layout.form : <>
+        <ScrollArea area="board" label={room.surfaceName} areaRef={boardRef}>{layout.board}</ScrollArea>
+        <ScrollArea area="desk" label="Your desk">{layout.desk}</ScrollArea>
+      </>}
+      <div className="front-row-buddy">
+        {appearance.visible ? <Companion id={appearance.companion} activity={activity} /> : <span className="quiet-status" role="status">{COMPANION_STATUS[activity]}</span>}
+      </div>
+      <button type="button" className="front-row-notebook" onClick={openNotebook}><span>My notebook</span></button>
+    </div>
+  );
+}
+
+/** A board or desk that scrolls its own long content. It joins the tab order only while it has something to scroll. */
+function ScrollArea({ area, label, areaRef, children }: { readonly area: "board" | "desk"; readonly label: string; readonly areaRef?: Ref<HTMLElement> | undefined; readonly children: ReactNode }) {
+  const own = useRef<HTMLElement>(null);
+  const scrolls = useOverflow(own);
+  return (
+    <section
+      ref={(node) => {
+        own.current = node;
+        if (typeof areaRef === "function") areaRef(node);
+        else if (areaRef) areaRef.current = node;
+      }}
+      className="front-row-area" data-area={area} aria-label={label} {...(scrolls ? { tabIndex: 0 } : {})}
+    >{children}</section>
+  );
+}
+
+function useOverflow(ref: RefObject<HTMLElement | null>): boolean {
+  const [overflows, setOverflows] = useState(false);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const measure = () => setOverflows(node.scrollHeight > node.clientHeight + 1);
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    for (const child of node.children) observer.observe(child);
+    const mutations = new MutationObserver(() => {
+      for (const child of node.children) observer.observe(child);
+      measure();
+    });
+    mutations.observe(node, { childList: true, subtree: true, characterData: true });
+    measure();
+    return () => { observer.disconnect(); mutations.disconnect(); };
+  }, [ref]);
+  return overflows;
+}

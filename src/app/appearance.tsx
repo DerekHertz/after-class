@@ -1,10 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 
+/** Scene IDs are what browsers have saved, so they stay; each now names one of the three front-row skins. */
 export const SCENES = {
-  "last-desk": { name: "The Last Desk", detail: "Honey wood, warm paper, mint chalkboard" },
-  "projection-booth": { name: "The Projection Booth", detail: "Evening indigo, amber lamplight, cream paper" },
-  "study-bench": { name: "The Study Bench", detail: "Mint enamel, paper feed, cobalt controls" },
+  "last-desk": { name: "Rail-side Classroom", detail: "A chalkboard by the window, trains passing over the bridge" },
+  "study-bench": { name: "Harbor Study Terrace", detail: "An open-air board above the sea, cream paper on the desk" },
+  "projection-booth": { name: "Lantern Canal Film Club", detail: "A cream screen, rain on the canal, a navy desk mat" },
 } as const;
 export const COMPANIONS = {
   pip: { name: "Pip", detail: "The eraser friend" },

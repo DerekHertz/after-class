@@ -28,7 +28,7 @@ describe("the conversation is never hidden", () => {
   });
 
   test("no stylesheet hides the conversation or turns it into an overlay", () => {
-    for (const file of ["hd-room.css", "reference.css", "review.css", "styles.css", "scene.css"]) {
+    for (const file of ["front-row.css", "hd-room.css", "reference.css", "review.css", "styles.css", "scene.css"]) {
       const css = readFileSync(new URL(`../src/app/${file}`, import.meta.url), "utf8");
       expect(css).not.toMatch(/conversation-notebook[^{]*\{[^}]*(visibility:\s*hidden|display:\s*none)/);
       expect(css).not.toContain('data-view="room"');
@@ -69,17 +69,15 @@ describe("the current question stays with the composer", () => {
     expect(tsx.match(/<Composer\b/g)).toHaveLength(1);
   });
 
-  test("the HD room is a compact scene beside the conversation on wide screens, not a banner above it", () => {
-    const hd = readFileSync(new URL("../src/app/hd-room.css", import.meta.url), "utf8");
-    expect(hd).toContain('grid-template-areas: "conv room" "conv src"');
-    expect(hd).not.toContain('"room room"');
-    expect(hd).not.toMatch(/\.review \.review-header \{[^}]*position:\s*absolute/);
+  test("on wide screens an opened panel takes its own column beside the room, and the review bar is never an overlay", () => {
+    const css = readFileSync(new URL("../src/app/front-row.css", import.meta.url), "utf8");
+    expect(css).toMatch(/\.front-row\[data-panels="open"\] \.front-row-layout \{ grid-template-columns: minmax\(0, 1fr\) minmax\(320px, 30rem\); \}/);
+    expect(css).not.toMatch(/front-row-bar[^{]*\{[^}]*position:\s*absolute/);
   });
 
-  test("on narrow screens the desk band follows the conversation, so it never pushes the response field down", () => {
-    const hd = readFileSync(new URL("../src/app/hd-room.css", import.meta.url), "utf8");
-    expect(hd).toContain('grid-template-areas: "conv" "room" "src"');
-    expect(hd).not.toMatch(/grid-template-areas:\s*"room"\s*"conv"/);
+  test("on narrow screens the board comes first and the desk with the response field follows it", () => {
+    const css = readFileSync(new URL("../src/app/front-row.css", import.meta.url), "utf8");
+    expect(css).toContain('grid-template-areas: "scenery scenery" "board board" "desk desk" "buddy book"');
   });
 });
 
@@ -126,7 +124,7 @@ describe("what the composer says while a turn is under way", () => {
       live: live({ stored: true }), send: async () => true,
     }));
     expect(html).toContain("Tutor is thinking…");
-    expect(html).toContain("Your response");
+    expect(html).toContain("Your thinking");
   });
 });
 

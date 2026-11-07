@@ -87,9 +87,9 @@ describe("the diagram panel", () => {
     expect(css).not.toContain("!important");
     expect(css).not.toMatch(/review-source-column[^{]*\{[^}]*aspect-ratio/);
     expect(css).not.toMatch(/source-stage-art|room-tools/);
-    const tools = readFileSync(new URL("../src/app/room-tools.css", import.meta.url), "utf8");
-    expect(tools).toMatch(/\.review-source-column \{[^}]*aspect-ratio: 2 \/ 3/);
-    expect(tools).toMatch(/\.source-stage-art \{[^}]*inset: 0[^}]*background-size: 100% 100%/);
+    const room = readFileSync(new URL("../src/app/front-row.css", import.meta.url), "utf8");
+    expect(room).toMatch(/\.front-row-scene \{[^}]*aspect-ratio: var\(--fr-aspect\)[^}]*background: var\(--fr-plate\) 0 100% \/ 100% var\(--fr-plate-height\)/);
+    expect(room).not.toContain("!important");
     expect(panel(topic())).not.toMatch(/max-height|overflow/);
   });
 

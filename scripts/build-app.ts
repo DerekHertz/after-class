@@ -24,6 +24,7 @@ export async function buildApp(outDir: string): Promise<void> {
     ["Feather icons", "src/app/assets/icons-v2/LICENSE"],
     ["Young Serif", "src/app/assets/fonts-v2/young-serif-OFL.txt"],
     ["DM Sans", "src/app/assets/fonts-v2/dm-sans-OFL.txt"],
+    ["Pixelify Sans", "src/app/assets/fonts-v2/OFL-PixelifySans.txt"],
   ];
   const notices = licenses.map(([name, path]) => `${name}\n\n${readFileSync(join(ROOT, path), "utf8")}`).join("\n\n");
   writeFileSync(join(out, "asset-notices.txt"), notices);

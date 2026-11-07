@@ -18,18 +18,12 @@
 .appearance-options button[aria-pressed="true"] { border: 2px solid #31558e; background: #e8efed; padding: 9px; }
 .appearance-options button span:not(.room-raster):not(.companion-raster) { font-size: .85rem; font-weight: 650; }
 .appearance-options small { font-size: .74rem; color: #625b50; }
-.room-raster { display: block; width: 100%; height: 112px; background-repeat: no-repeat; background-position: center; background-size: contain; }
-.room-raster[data-room="last-desk"] { background-image: url('./assets/scenes-v2/last-desk-stage.png'); }
-.room-raster[data-room="projection-booth"] { background-image: url('./assets/scenes-v2/projection-booth-stage.png'); }
-.room-raster[data-room="study-bench"] { background-image: url('./assets/scenes-v2/study-bench-stage.png'); }
-.companion-raster { display: block; background-position: center bottom; background-size: contain; background-repeat: no-repeat; }
-.companion-raster[data-companion="mote"] { background-image: url('./assets/companions-v2/mote.png'); }
-.companion-raster[data-companion="pip"] { background-image: url('./assets/companions-v2/pip.png'); }
-.companion-raster[data-companion="lumi"] { background-image: url('./assets/companions-v2/lumi.png'); }
-.companion-raster[data-companion="mote-moonlit"] { background-image: url('./assets/companions-v2/mote-moonlit.png'); }
-.companion-raster[data-companion="mote-pagewing"] { background-image: url('./assets/companions-v2/mote-pagewing.png'); }
-.companion-raster[data-companion="yun"] { background-image: url('./assets/companions-v2/yun.png'); }
-.companion-choice .companion-raster { width: 112px; height: 118px; }
+/* Thumbnails are the rooms' own blank plates, so a preview shows the skin it selects. */
+.room-raster { display: block; width: 100%; aspect-ratio: 1585 / 992; background-repeat: no-repeat; background-position: center; background-size: cover; }
+.room-raster[data-room="last-desk"] { background-image: url('./assets/front-row/last-desk.png'); }
+.room-raster[data-room="projection-booth"] { background-image: url('./assets/front-row/projection-booth.png'); }
+.room-raster[data-room="study-bench"] { background-image: url('./assets/front-row/study-bench.png'); }
+.companion-choice .companion-raster { height: 112px; max-width: 100%; }
 .appearance-preferences { display: flex; flex-wrap: wrap; gap: 20px; padding-top: 12px; border-top: 1px solid #cbbc9e; }
 .appearance-preferences label { display: inline-flex; align-items: center; gap: 8px; }
 .appearance-preferences input { width: 18px; height: 18px; accent-color: #31558e; }
@@ -43,7 +37,7 @@
 .scene-footer > p { color: var(--muted); font: italic 1rem/1.5 Georgia, serif; }
 .scene-shell:has(.review) .scene-footer { display: none; }
 .study-companion { display: flex; align-items: center; gap: 8px; }
-.study-companion > .companion-raster { width: 100px; height: 120px; flex: 0 0 100px; transform-origin: 50% 90%; }
+.study-companion > .companion-raster { height: 120px; flex: 0 0 auto; transform-origin: 50% 90%; }
 .companion-name, .companion-status { display: block; font-size: .75rem; }
 .companion-name { font-weight: 650; }
 .companion-status, .quiet-status { color: var(--muted); }
@@ -57,7 +51,7 @@
   .appearance-options { right: 16px; padding: 16px; }
   .room-choices { grid-template-columns: 1fr; }
   .room-choice { display: grid !important; grid-template-columns: 84px 1fr; text-align: left !important; }
-  .room-choice .room-raster { grid-row: span 2; height: 82px; }
+  .room-choice .room-raster { grid-row: span 2; width: 84px; }
   .companion-choices { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .scene-footer { padding: 16px 20px; flex-wrap: wrap; }
 }

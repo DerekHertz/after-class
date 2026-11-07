@@ -1182,7 +1182,7 @@ describe("review composer", () => {
 
   test("the answer field has a visible label and empty answers cannot be sent", () => {
     const out = composer(["answer", "hint", "end"]);
-    const label = out.match(/<label for="([^"]+)">Your response<\/label>/);
+    const label = out.match(/<label for="([^"]+)">Your thinking<\/label>/);
     expect(label).not.toBeNull();
     expect(out).toContain(`id="${label![1]}"`);
     expect(out).toMatch(/<button[^>]*disabled=""[^>]*>Share my thinking<\/button>/);

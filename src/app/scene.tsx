@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { COMPANIONS, SCENES, useAppearance } from "./appearance";
 import type { CompanionId, SceneId } from "./appearance";
-import { Companion, CompanionDrawing } from "./companion";
+import { COMPANION_STATUS, Companion, CompanionDrawing } from "./companion";
+import { roomStyle } from "./front-row";
 import { Link } from "./ui";
 
 export function RoomDrawing({ id }: { readonly id: SceneId }) {
@@ -35,14 +36,14 @@ function AppearancePicker() {
 }
 export function SceneShell({ children }: { readonly children: ReactNode }) {
   const { appearance, activity } = useAppearance();
-  return <div className="scene-shell" data-scene={appearance.scene} data-motion={appearance.motion} data-detail={appearance.detail}>
+  return <div className="scene-shell" data-scene={appearance.scene} data-motion={appearance.motion} data-detail={appearance.detail} style={roomStyle(appearance.scene)}>
     <header className="scene-masthead">
       <Link to={{ page: "home" }}><span className="bell-mark" aria-hidden="true" /><span>After Class</span></Link>
       <span className="room-name">{SCENES[appearance.scene].name}</span><AppearancePicker />
     </header>
     <div className="scene-content">{children}</div>
     <footer className="scene-footer">
-      {appearance.visible ? <Companion id={appearance.companion} activity={activity} /> : <span className="quiet-status">{activity === "idle" ? "Ready when you are" : activity === "waiting" ? "Waiting for a response" : activity === "listening" ? "Listening" : activity === "saving" ? "Saving your record" : "Review paused"}</span>}
+      {appearance.visible ? <Companion id={appearance.companion} activity={activity} /> : <span className="quiet-status">{COMPANION_STATUS[activity]}</span>}
       <p>A little space to make sense of what you watched.</p>
     </footer>
   </div>;
