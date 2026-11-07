@@ -7,3 +7,4 @@ Local app: a Chrome MV3 extension captures YouTube lectures, a Bun backend in WS
 - Dependencies: exact pins only, `minimumReleaseAge` 7 days, no `trustedDependencies`. Propose any new package (name, version, why) before adding it.
 - Claude calls go through `claude -p` with `--restricted --tools Read --strict-mcp-config --disable-slash-commands --no-session-persistence` (subscription; `--bare` never reads OAuth). Jev uses `TYPESAFE_API_KEY`. Paid or subscription experiments outside the five listed in the flow doc need Derek's OK.
 - Checks: `bun run typecheck`, `bun test`.
+- PR descriptions and commit messages follow `docs/pr-writing.md` (pstack `technical-writing` and `unslop`).

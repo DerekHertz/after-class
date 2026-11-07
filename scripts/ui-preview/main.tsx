@@ -7,8 +7,10 @@ import { CaptureScreen } from "../../src/app/capture";
 import { RecordScreen, UsageScreen } from "../../src/app/record";
 import { Link, usePathname } from "../../src/app/ui";
 import { createMemoryUnsent } from "../../src/app/unsent";
-import { api, speech, ids, scenario, scenarios, continueFixture, dictateFixture, requestLedger } from "./fixtures";
+import { createFixture, ids, scenarioFrom, scenarios } from "./fixtures";
 
+const scenario = scenarioFrom(location.search);
+const { api, speech, recordReviewId, continueFixture, dictateFixture, requestLedger } = createFixture(scenario);
 const unsent = createMemoryUnsent();
 const speaker = { beginTurn() {}, speak() {}, stop() {} };
 const clean = new URLSearchParams(location.search).get("clean") === "1";
@@ -28,7 +30,7 @@ function Preview() {
       <details><summary>Request ledger</summary><pre>{calls || "No requests"}</pre></details>
     </aside>
     <AppearanceProvider><SceneShell>
-      {page === "capture" ? <CaptureScreen api={api} captureId={ids.capture} /> : page === "record" ? <RecordScreen api={api} reviewId={null} /> : page === "usage" ? <UsageScreen api={api} /> : <ReviewScreen api={api} reviewId={ids.review} speaker={speaker} speech={speech} unsent={unsent} />}
+      {page === "capture" ? <CaptureScreen api={api} captureId={ids.capture} /> : page === "record" ? <RecordScreen api={api} reviewId={recordReviewId} /> : page === "usage" ? <UsageScreen api={api} /> : <ReviewScreen api={api} reviewId={ids.review} speaker={speaker} speech={speech} unsent={unsent} />}
     </SceneShell></AppearanceProvider>
   </>;
 }
