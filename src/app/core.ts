@@ -590,7 +590,7 @@ export function observationRow(o: Observation): ObservationRow {
           : "the record rules";
     note = `The tutor proposed "${STATUS_LABEL[o.clampedFrom]}"; recorded as "${STATUS_LABEL[o.status]}" because ${reason}.`;
   } else if (o.dispute.kind === "resolved_by_learner") {
-    note = o.dispute.outcome === "it_was_my_gap" ? "You resolved the dispute as your own gap." : "You resolved the dispute: the tutor was wrong.";
+    note = o.dispute.outcome === "it_was_my_gap" ? "You chose to revisit this topic, so it counts as a learning gap." : "You marked your explanation as supported, so this is not counted as a learning gap.";
   }
   return { id: o.id, status: STATUS_LABEL[o.status], note, disputeOpen };
 }

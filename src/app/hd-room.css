@@ -124,10 +124,6 @@
 .room-notebook-dialog > button:first-child {position:sticky; top:0; z-index:3; background:#fff1ce; color:#392c1c; box-shadow:0 2px 4px #47311c36}
 .room-notebook-dialog .record-page {background:transparent; padding-left:clamp(22px,4vw,48px); border-left:4px double #c68776}
 .room-notebook-dialog::before {content:""; position:absolute; top:18px; left:3px; bottom:0; width:18px; pointer-events:none; background:repeating-linear-gradient(172deg,transparent 0 21px,#514638 22px,#d9cfba 24px,#736453 26px,transparent 28px 34px)}
-.room-notebook-dialog [aria-label="Notebook index"] li {padding:.35rem}
-.room-notebook-dialog [data-notebook-page] {animation:paper-turn .24s ease-out;transform-origin:left center}
-@keyframes paper-turn {from{transform:perspective(900px) rotateY(-9deg);opacity:.6}}
-[data-notebook-page="note"] .record-section:not(:first-child),[data-notebook-page="observations"] .record-section:not(:nth-child(2)),[data-notebook-page="links"] .record-section:not(:nth-child(3)){display:none}
 .scene-shell .hd-room-friend .study-companion[data-activity] > .companion-raster {opacity:1}
 .hd-room-friend .study-companion:is([data-activity="listening"],[data-activity="paused"])::after {position:absolute;top:0;right:8%;border-radius:1em;background:#392f24;color:#fff1bc;padding:4px 10px;font:700 19px sans-serif;content:"Ⅱ"}
 .hd-room-friend .study-companion[data-activity="listening"]::after {content:"Listening"}

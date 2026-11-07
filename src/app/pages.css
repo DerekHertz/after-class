@@ -34,8 +34,38 @@
 .record-list { padding-left: 20px; }
 .record-list > li { padding: 16px 0; border-bottom: 1px solid var(--border); }
 .record-list > li:last-child { border-bottom: 0; }
-.notebook-empty { padding: 24px 0; max-width: 60ch; }
-.notebook-empty h3 { font-size: 1.5rem; }
+.record-observation h3 { margin: 0 0 8px; }
+.observation-context { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 12px 0; }
+.observation-context dt { font-weight: 600; }
+.observation-context dd { margin: 0; white-space: pre-wrap; }
+.observation-context dd p { margin: 0; }
+.observation-context :is(.author-learner, .author-tutor) { padding-left: 12px; border-left: 3px solid var(--accent); }
+.observation-context .author-tutor { border-color: #b27d55; }
+.dispute-decision { border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; margin: 12px 0 0; min-width: 0; }
+.dispute-decision legend { font-weight: 600; padding: 0 4px; }
+.dispute-choice { display: flex; gap: 8px; align-items: baseline; margin: 8px 0; }
+.notebook-empty p { max-width: 60ch; }
+.notebook-views { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 16px; }
+.notebook-views button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.notebook-contents ol { margin: 4px 0; padding-left: 20px; }
+.notebook-contents > ol > li > span { font-weight: 600; }
+.notebook-contents-topic { background: none; border: 0; padding: 4px 0; min-height: 44px; color: var(--accent); text-decoration: underline; text-align: left; cursor: pointer; }
+.notebook-reviews { list-style: none; padding: 0; margin: 0; }
+.notebook-lecture h2 { margin: 0; }
+.notebook-topic { padding: 24px 0; border-top: 1px solid var(--border); }
+.notebook-topic h3 { margin: 0 0 8px; font-size: 1.5rem; }
+.notebook-topic h4 { margin: 20px 0 8px; font-size: .8rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.topic-status { margin: 0 0 8px; }
+.topic-part > .record-note { padding: 0 0 12px; border-bottom: 0; }
+.topic-part :is(.author-learner, .author-tutor, .author-source) { padding-left: 16px; border-left: 3px solid var(--border); white-space: pre-wrap; }
+.topic-part .author-learner { border-color: var(--accent); }
+.topic-part .author-tutor { border-color: #b27d55; }
+.topic-part .author-source { border-color: #63816d; }
+.topic-frame { margin: 12px 0; }
+.topic-frame .frame { display: block; width: 100%; max-width: 14rem; height: auto; }
+.topic-frame[data-expanded="true"] .frame { max-width: 100%; }
+.topic-frame figcaption { margin-block: 4px 8px; }
+.record-observation h5 { margin: 0 0 8px; font-size: 1.1rem; }
 .usage-table-scroll { max-width: 100%; overflow-x: auto; }
 .usage-table-scroll table { width: 100%; }
 .usage-table-scroll caption { text-align: left; color: var(--muted); padding: 12px 0; }
@@ -47,5 +77,7 @@
   .invitation-offer { max-width: none; }
   .record-evidence { padding: 12px; }
   .record-note-heading { align-items: flex-start; }
+  .observation-context { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .observation-context dd { margin-bottom: 8px; }
   .notebook-page .actions > label, .notebook-page .actions > select { max-width: 100%; }
 }

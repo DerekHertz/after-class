@@ -1,22 +1,35 @@
-import { useId, useRef, useState } from "react";
-import type { EvidenceId, ReviewId } from "../shared/ids";
-import type { EvidenceBundle, LinkDecision, LinkType, Note, ObservationStatus, RecordView, UsageSummary } from "../shared/domain";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import type { ConceptId, EvidenceId, ReviewId } from "../shared/ids";
+import type { DiagramFrame, EvidenceBundle, LinkDecision, LinkType, Note, Observation, ObservationStatus, RecordView, TopicDiagram, UsageSummary } from "../shared/domain";
+import type { LecturesResponse } from "../shared/wire";
 import type { AppApi } from "./api";
 import { formatClock, formatInterval, noteView, observationRow, STATUS_LABEL, usageRows } from "./core";
 import type { SourceTitles } from "./core";
-import { ErrorNote, EvidencePane, Link, useAsync } from "./ui";
-import { IllustratedReview } from "./diagram";
+import { canChangeObservation, changeObservation, DISPUTE_CHOICES, loadReviewContext, observationContext } from "./observation-view";
+import type { DisputeChoice, ObservationContext, ReviewContext } from "./observation-view";
+import { focusLectures, notebookLectures, NOTEBOOK_VIEWS, TOPIC_SECTIONS, topicName, viewCounts } from "./notebook-view";
+import type { NotebookLecture, NotebookTopic, NotebookViewName } from "./notebook-view";
+import { ErrorNote, EvidencePane, FrameImage, Link, useAsync } from "./ui";
+import { DiagramSummaryView, POLL_MS } from "./diagram";
+import { frameLink, NO_FRAME_NOTE, shouldPollDiagrams } from "./diagram-view";
 
 
 const LINK_TYPES: readonly LinkType[] = ["prerequisite_of", "part_of", "example_of", "contrasts_with", "related_to"];
 const OVERRIDES: readonly ObservationStatus[] = ["independent", "partial", "after_help", "unresolved", "not_assessed"];
 const noTitles: SourceTitles = new Map();
 type CitationDetails = Pick<EvidenceBundle, "frames" | "passages">;
+type Citations = ReturnType<typeof useAsync<CitationDetails | null>>;
+type Run = (a: () => Promise<void>) => Promise<void>;
+type Lectures = LecturesResponse["lectures"];
 
 const decisionText = (d: LinkDecision): string => (typeof d === "string" ? d : `corrected to ${d.corrected.replaceAll("_", " ")}`);
+const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-export function RecordScreen({ api, reviewId, indexed = false }: { readonly indexed?: boolean; readonly api: AppApi; readonly reviewId: ReviewId | null }) {
+/** The full-page notebook and the room's notebook dialog. Both show the same lectures, topics, labels and order. */
+export function RecordScreen({ api, reviewId }: { readonly api: AppApi; readonly reviewId: ReviewId | null }) {
   const record = useAsync(() => api.record(reviewId === null ? {} : { reviewId }), [api, reviewId]);
+  const lectures = useAsync(() => api.lectures(), [api]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const pending = useRef(false);
@@ -30,58 +43,42 @@ export function RecordScreen({ api, reviewId, indexed = false }: { readonly inde
       await action();
       record.reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(message(e));
     } finally {
       pending.current = false;
       setSaving(false);
     }
   }
 
-  const [page, setPage] = useState("index");
-  const data = record.data;
-  // Only a saved review has notes, so only a saved review gets illustrated pages. One review's record shows that review alone.
-  const illustratedReviews = data ? [...new Set(data.notes.map((n) => n.reviewId))].filter((id) => reviewId === null || id === reviewId) : [];
-  const pages = data ? [
-    ...data.notes.map((note, index) => {
-      const view = noteView(note);
-      const title = view.userEdit?.trim() || view.segments.find(segment => segment.author === "learner")?.text || view.segments[0]?.text;
-      return { id: String(note.id), title: title?.slice(0, 100) || `Review note ${index + 1}` };
-    }),
-    ...(illustratedReviews.length > 0 ? [{ id: "illustrated", title: "Illustrated pages" }] : []),
-    { id: "observations", title: "Tutor observations" },
-    { id: "links", title: "Concept connections" },
-  ] : [];
-  function turnPage(id: string) {
-    setPage(id);
-    document.querySelector("dialog.room-notebook-dialog")?.scrollTo(0, 0);
-  }
+  // Lectures are grouped once the lecture list has answered, so a topic's drafts are not remounted when titles arrive.
+  const grouped = lectures.data !== null || lectures.error !== null;
   return (
     <main className="notebook-page record-page">
       <header className="page-heading">
         <div><p className="page-kicker">Kept in your own words</p><h1 tabIndex={-1}>My notebook</h1></div>
         <nav aria-label="Notebook navigation"><Link to={{ page: "home" }}>Your lectures</Link> <Link to={{ page: "usage" }}>Usage</Link></nav>
       </header>
-      <p className="muted">{reviewId === null ? "Notes from all your saved reviews." : "Notes from this review."} Learner, tutor, and source contributions stay separate.</p>
-      {reviewId !== null && <p><Link to={{ page: "review", id: reviewId }}>Return to review</Link> · <Link to={{ page: "record", reviewId: null }}>All notes</Link></p>}
+      <p className="muted">{reviewId === null ? "Every lecture you saved a review of, topic by topic." : "The topics from this review."} Your words, the tutor's help and the lecture's source stay labelled.</p>
+      {reviewId !== null && <p><Link to={{ page: "review", id: reviewId }}>Return to review</Link> · <Link to={{ page: "record", reviewId: null }}>All lectures</Link></p>}
       <ErrorNote error={record.error} retry={record.reload} />
+      {lectures.error !== null && <ErrorNote error={`Lecture titles could not be loaded: ${lectures.error}`} retry={lectures.reload} />}
       <ErrorNote error={error} />
-      {record.data === null && record.error === null && <p className="page-loading" role="status">Opening your notebook...</p>}
+      {(record.data === null || !grouped) && record.error === null && <p className="page-loading" role="status">Opening your notebook...</p>}
       {saving && <p className="page-loading" role="status">Saving your change...</p>}
-      {indexed && page === "index" && data && <nav aria-label="Notebook index"><h2>Index</h2><ol>{pages.map(entry => <li key={entry.id}><button onClick={() => turnPage(entry.id)}>{entry.title}</button></li>)}</ol></nav>}
-      {indexed && page !== "index" && <button onClick={() => turnPage("index")}>Return to index</button>}
-      {data && (!indexed || page === "illustrated") && illustratedReviews.length > 0 && (
-        <section className="record-section illustrated-pages" aria-labelledby="record-illustrated-heading" data-notebook-page={indexed ? "illustrated" : undefined}>
-          <h2 id="record-illustrated-heading">Illustrated pages</h2>
-          <p className="muted">One page per topic you were asked about: the question, the lecturer's frame, what changes, your answer, and its status.</p>
-          {illustratedReviews.map((id) => <IllustratedReview key={id} api={api} reviewId={id} auto={reviewId !== null} />)}
-        </section>
+      {record.data && grouped && (
+        <fieldset className="record-content" disabled={saving} aria-label="Saved learning record">
+          <RecordBody api={api} data={record.data} lectures={lectures.data?.lectures ?? null} run={run} />
+        </fieldset>
       )}
-      {data && (!indexed || (page !== "index" && page !== "illustrated")) && <fieldset key={page} data-notebook-page={indexed ? (["links", "observations"].includes(page) ? page : "note") : undefined} className="record-content" disabled={saving} aria-label="Saved learning record"><RecordBody api={api} data={indexed ? { ...data, notes: data.notes.filter(note => note.id === page) } : data} run={run} /></fieldset>}
     </main>
   );
 }
 
-export function RecordBody({ api, data, run }: { readonly api: AppApi; readonly data: RecordView; readonly run: (a: () => Promise<void>) => Promise<void> }) {
+/**
+ * The notebook's contents: a focused-view switch, a contents list, then each lecture with its topics. `lectures` is the
+ * lecture list, or null when it could not be read; each review then stands as its own lecture without a title.
+ */
+export function RecordBody({ api, data, lectures, run }: { readonly api: AppApi; readonly data: RecordView; readonly lectures: Lectures | null; readonly run: Run }) {
   const deleted = new Set<string>(data.unavailableEvidence.map((d) => d.id));
   const cited = [...new Set(data.notes.flatMap((note) => [...note.evidence, ...note.generated.flatMap((segment) => segment.evidence)]))].filter((id) => !deleted.has(id)).sort();
   const citationKey = cited.join(",");
@@ -92,102 +89,218 @@ export function RecordBody({ api, data, run }: { readonly api: AppApi; readonly 
     const bundles = await Promise.all(batches.map((ids) => api.evidence({ ids })));
     return { frames: bundles.flatMap((bundle) => bundle.frames), passages: bundles.flatMap((bundle) => bundle.passages) };
   }, [api, citationKey]);
+  const reviewIds = [...new Set([...data.notes.map((n) => n.reviewId), ...data.observations.map((o) => o.reviewId)])];
+  const reviews = useReviewContexts(api, reviewIds);
+  const diagrams = useReviewDiagrams(api, reviewIds);
+  const [chosen, setChosen] = useState<NotebookViewName>("all");
+  const prefix = useId();
+  const all = notebookLectures(data, lectures, reviews.contexts);
+  const counts = viewCounts(all);
+  const view = counts[chosen] === 0 ? "all" : chosen;
+  const shown = focusLectures(all, view);
+  const topicKey = (lecture: NotebookLecture, topic: NotebookTopic) => `${lecture.key}-${topic.conceptId ?? "none"}`;
+  const headingId = (lecture: NotebookLecture, topic: NotebookTopic) => `${prefix}-${topicKey(lecture, topic)}`;
+  // A topic keeps the name its place in the whole lecture gives it, whichever view is showing.
+  const names = new Map(all.flatMap((lecture) => {
+    const loading = lecture.reviews.some((r) => (reviews.contexts.get(r.reviewId)?.state ?? "loading") === "loading");
+    return lecture.topics.map((topic, index) => [topicKey(lecture, topic), topicName(topic, index, loading)] as const);
+  }));
+  const nameOf = (lecture: NotebookLecture, topic: NotebookTopic) => names.get(topicKey(lecture, topic)) ?? "Topic";
+
+  if (all.length === 0 && data.links.length === 0) return <EmptyNotebook />;
   return (
     <>
-      <section className="record-section" aria-labelledby="record-notes-heading">
-      <h2 id="record-notes-heading">Your notes</h2>
-      {data.notes.length === 0 && <div className="notebook-empty"><h3>No saved notes yet</h3><p>Your explanations and the help you used will appear here after you save a review.</p><Link to={{ page: "home" }}>Open a lecture capture</Link></div>}
-      {data.notes.map((n) => <NoteCard key={n.id} api={api} note={n} deleted={deleted} citations={citations} run={run} />)}
-      </section>
-
-      <section className="record-section" aria-labelledby="record-observations-heading">
-      <h2 id="record-observations-heading">What the tutor observed</h2>
-      <p className="muted">These observations describe the review. You can correct them or settle an open dispute.</p>
-      {data.observations.length === 0 && <p className="muted">No observations.</p>}
-      <ul className="record-list">
-        {data.observations.map((o) => {
-          const row = observationRow(o);
-          return (
-            <li key={o.id}>
-              <strong>{row.status}</strong>
-              {row.note && <span className="muted"> {row.note}</span>}
-              <div className="actions">
-                <label>
-                  Correct status{" "}
-                  <select value="" onChange={(e) => e.target.value && void run(() => api.overrideObservation(o.id, e.target.value as ObservationStatus))}>
-                    <option value="">Choose...</option>
-                    {OVERRIDES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+      {(counts.revisit > 0 || counts.disputed > 0) && (
+        <div className="notebook-views" role="group" aria-label="Show topics">
+          {NOTEBOOK_VIEWS.filter((v) => counts[v.value] > 0).map((v) => (
+            <button key={v.value} type="button" aria-pressed={view === v.value} onClick={() => setChosen(v.value)}>{v.label} ({counts[v.value]})</button>
+          ))}
+        </div>
+      )}
+      {shown.length > 0 && (
+        <nav className="notebook-contents" aria-label="Notebook contents">
+          <ol>
+            {shown.map((lecture) => (
+              <li key={lecture.key}>
+                <span>{lecture.title ?? "Lecture title unavailable"}</span>
+                <ol>
+                  {lecture.topics.map((topic) => (
+                    <li key={topic.conceptId ?? "none"}>
+                      <button type="button" className="notebook-contents-topic" onClick={() => focusHeading(headingId(lecture, topic))}>{nameOf(lecture, topic)}</button>
+                    </li>
+                  ))}
+                </ol>
+              </li>
+            ))}
+          </ol>
+        </nav>
+      )}
+      {shown.map((lecture) => (
+          <LectureSection key={lecture.key} lecture={lecture}>
+            {lecture.topics.map((topic) => (
+              <TopicSection
+                key={topic.conceptId ?? "none"}
+                api={api}
+                topic={topic}
+                name={nameOf(lecture, topic)}
+                headingId={headingId(lecture, topic)}
+                contexts={reviews.contexts}
+                retry={reviews.retry}
+                diagram={topicDiagram(lecture, topic, diagrams)}
+                deleted={deleted}
+                citations={citations}
+                run={run}
+              />
+            ))}
+          </LectureSection>
+      ))}
+      {data.links.length > 0 && (
+        <section className="record-section" aria-labelledby={`${prefix}-links`}>
+          <h2 id={`${prefix}-links`}>Suggested links between concepts</h2>
+          <p className="muted">Accept, reject, or correct each connection. A suggestion is not a decision.</p>
+          <ul className="record-list">
+            {data.links.map((l, index) => (
+              <li key={l.id}>
+                <p>{l.rationale}</p><p className="muted">Connection: {l.type.replaceAll("_", " ")} · {decisionText(l.decision)}</p>
+                <div className="actions">
+                  <button type="button" onClick={() => void run(() => api.decideLink(l.id, "accepted"))}>Accept</button>
+                  <button type="button" onClick={() => void run(() => api.decideLink(l.id, "rejected"))}>Reject</button>
+                  <select aria-label={`Correct connection ${index + 1}: ${l.rationale}`} value="" onChange={(e) => e.target.value && void run(() => api.decideLink(l.id, { corrected: e.target.value as LinkType }))}>
+                    <option value="">Correct to...</option>
+                    {LINK_TYPES.map((t) => <option key={t} value={t}>{t.replaceAll("_", " ")}</option>)}
                   </select>
-                </label>
-                {row.disputeOpen && (
-                  <>
-                    <button type="button" onClick={() => void run(() => api.resolveDispute(o.id, "learner_was_right"))}>The tutor was wrong</button>
-                    <button type="button" onClick={() => void run(() => api.resolveDispute(o.id, "it_was_my_gap"))}>It was my gap</button>
-                  </>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-
-      </section>
-      <section className="record-section" aria-labelledby="record-links-heading">
-      <h2 id="record-links-heading">Suggested links between concepts</h2>
-      <p className="muted">Accept, reject, or correct each connection. A suggestion is not a decision.</p>
-      {data.links.length === 0 && <p className="muted">No suggested links.</p>}
-      <ul className="record-list">
-        {data.links.map((l, index) => (
-          <li key={l.id}>
-            <p>{l.rationale}</p><p className="muted">Connection: {l.type.replaceAll("_", " ")} · {decisionText(l.decision)}</p>
-            <div className="actions">
-              <button type="button" onClick={() => void run(() => api.decideLink(l.id, "accepted"))}>Accept</button>
-              <button type="button" onClick={() => void run(() => api.decideLink(l.id, "rejected"))}>Reject</button>
-              <select aria-label={`Correct connection ${index + 1}: ${l.rationale}`} value="" onChange={(e) => e.target.value && void run(() => api.decideLink(l.id, { corrected: e.target.value as LinkType }))}>
-                <option value="">Correct to...</option>
-                {LINK_TYPES.map((t) => <option key={t} value={t}>{t.replaceAll("_", " ")}</option>)}
-              </select>
-            </div>
-          </li>
-        ))}
-      </ul>
-      </section>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </>
   );
 }
 
-function NoteCard({ api, note, deleted, citations, run }: { readonly api: AppApi; readonly note: Note; readonly deleted: ReadonlySet<string>; readonly citations: ReturnType<typeof useAsync<CitationDetails | null>>; readonly run: (a: () => Promise<void>) => Promise<void> }) {
-  const editId = useId();
-  const sourceButtons = useRef(new Map<EvidenceId, HTMLButtonElement>());
-  const view = noteView(note);
-  const wording = view.userEdit?.trim() || view.segments.find((segment) => segment.author === "learner")?.text.trim() || view.segments[0]?.text.trim() || "Review note";
-  const heading = wording.length > 120 ? `${wording.slice(0, 120)}…` : wording;
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(view.userEdit ?? "");
-  const [open, setOpen] = useState<EvidenceId | null>(null);
-  const cited = [...new Set([...note.evidence, ...view.segments.flatMap((s) => s.evidence)])];
-  const missingDetails = cited.some((id) => !deleted.has(id) && !citations.data?.frames.some((frame) => frame.id === id) && !citations.data?.passages.some((passage) => passage.id === id));
+function focusHeading(id: string) {
+  const heading = document.getElementById(id);
+  heading?.scrollIntoView({ block: "start" });
+  heading?.focus({ preventScroll: true });
+}
 
-  function closeSource() {
-    if (open !== null) sourceButtons.current.get(open)?.focus();
-    setOpen(null);
-  }
-
+/** A first visit: one explanation and one way forward, with no empty sections. */
+export function EmptyNotebook() {
   return (
-    <article className="record-note">
-      <header className="record-note-heading"><h3>{heading}</h3><Link to={{ page: "review", id: note.reviewId }}>Revisit review</Link></header>
-      {view.segments.map((s, i) => (
-        <p key={i} className={`author-${s.author}`}>
-          <strong>{s.label}: </strong>
-          {s.text}
-        </p>
-      ))}
-      {view.userEdit !== null && !editing && (
-        <p className="author-learner">
-          <strong>Your edit: </strong>
-          {view.userEdit}
+    <section className="record-section notebook-empty" aria-labelledby="notebook-empty-heading">
+      <h2 id="notebook-empty-heading">Your notebook is empty</h2>
+      <p>When you save a review, each lecture appears here with its topics: your explanation, the help you used, the status and the lecture source.</p>
+      <Link to={{ page: "home" }}>Choose a lecture to review</Link>
+    </section>
+  );
+}
+
+const startedAt = (ms: number): string => new Date(ms).toLocaleString();
+
+function LectureSection({ lecture, children }: { readonly lecture: NotebookLecture; readonly children: ReactNode }) {
+  const headingId = useId();
+  return (
+    <section className="record-section notebook-lecture" aria-labelledby={headingId}>
+      <header className="record-note-heading">
+        <div>
+          <p className="page-kicker">Lecture</p>
+          <h2 id={headingId}>{lecture.title ?? "Lecture title unavailable"}</h2>
+          {lecture.detail !== null && <p className="muted">{lecture.detail}</p>}
+        </div>
+        <ul className="notebook-reviews">
+          {lecture.reviews.map((r) => (
+            <li key={r.reviewId}><Link to={{ page: "review", id: r.reviewId }}>{lecture.reviews.length > 1 && r.startedMs !== null ? `Revisit review from ${startedAt(r.startedMs)}` : "Revisit review"}</Link></li>
+          ))}
+        </ul>
+      </header>
+      {children}
+    </section>
+  );
+}
+
+type TopicDiagramState =
+  | { readonly kind: "none" }
+  | { readonly kind: "failed"; readonly error: string; readonly retry: () => void }
+  | { readonly kind: "ready"; readonly topic: TopicDiagram; readonly error: string | null; readonly request: () => void };
+
+function topicDiagram(lecture: NotebookLecture, topic: NotebookTopic, diagrams: ReviewDiagrams): TopicDiagramState {
+  if (topic.conceptId === null) return { kind: "none" };
+  const conceptId = topic.conceptId;
+  for (const { reviewId } of lecture.reviews) {
+    const d = diagrams.values.get(reviewId);
+    const found = d?.state === "ready" ? d.topics.find((t) => t.topicId === conceptId) : undefined;
+    if (d?.state === "ready" && found !== undefined) return { kind: "ready", topic: found, error: d.error, request: () => void diagrams.request(reviewId, conceptId) };
+  }
+  const failed = lecture.reviews.find((r) => diagrams.values.get(r.reviewId)?.state === "failed");
+  const d = failed === undefined ? undefined : diagrams.values.get(failed.reviewId);
+  return failed !== undefined && d?.state === "failed" ? { kind: "failed", error: d.error, retry: () => diagrams.load(failed.reviewId) } : { kind: "none" };
+}
+
+/** One topic: the learner's explanation, the help they used, its status, then its source, under one heading. */
+export function TopicSection({ api, topic, name, headingId, contexts, retry, diagram, deleted, citations, run }: {
+  readonly api: AppApi;
+  readonly topic: NotebookTopic;
+  readonly name: string;
+  readonly headingId: string;
+  readonly contexts: ReadonlyMap<ReviewId, ReviewContext>;
+  readonly retry: (reviewId: ReviewId) => void;
+  readonly diagram: TopicDiagramState;
+  readonly deleted: ReadonlySet<string>;
+  readonly citations: Citations;
+  readonly run: Run;
+}) {
+  const help = topic.notes.flatMap((n) => noteView(n).segments.filter((s) => s.author === "tutor"));
+  const statuses = [...new Set(topic.observations.map((o) => STATUS_LABEL[o.status]))];
+  return (
+    <article className="notebook-topic" aria-labelledby={headingId}>
+      <h3 id={headingId} tabIndex={-1}>{name}</h3>
+      {statuses.length > 0 && (
+        <p className="topic-status">
+          <strong>Status: </strong>{statuses.join(", ")}
+          {topic.revisit && <span className="topic-flag"> · To revisit</span>}
+          {topic.disputed && <span className="topic-flag"> · Disputed, not counted as a gap</span>}
         </p>
       )}
+      {topic.notes.length > 0 && (
+        <section className="topic-part" aria-label={`${TOPIC_SECTIONS.explanation}: ${name}`}>
+          <h4>{TOPIC_SECTIONS.explanation}</h4>
+          {topic.notes.map((note) => <NoteExplanation key={note.id} api={api} note={note} topic={name} run={run} />)}
+        </section>
+      )}
+      {help.length > 0 && (
+        <section className="topic-part" aria-label={`${TOPIC_SECTIONS.help}: ${name}`}>
+          <h4>{TOPIC_SECTIONS.help}</h4>
+          {help.map((s, i) => <p key={i} className="author-tutor"><strong>{s.label}: </strong>{s.text}</p>)}
+        </section>
+      )}
+      {topic.observations.length > 0 && (
+        <section className="topic-part" aria-label={`${TOPIC_SECTIONS.status}: ${name}`}>
+          <h4>{TOPIC_SECTIONS.status}</h4>
+          <ul className="record-list">
+            {topic.observations.map((o, index) => (
+              <ObservationItem key={o.id} api={api} observation={o} number={index + 1} context={observationContext(o, contexts.get(o.reviewId))} deleted={deleted} retry={() => retry(o.reviewId)} run={run} />
+            ))}
+          </ul>
+        </section>
+      )}
+      <TopicSource api={api} notes={topic.notes} name={name} diagram={diagram} deleted={deleted} citations={citations} run={run} />
+    </article>
+  );
+}
+
+/** The learner's own words for one note, with their edit beside the original and never replacing it. */
+function NoteExplanation({ api, note, topic, run }: { readonly api: AppApi; readonly note: Note; readonly topic: string; readonly run: Run }) {
+  const editId = useId();
+  const view = noteView(note);
+  const mine = view.segments.filter((s) => s.author === "learner");
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(view.userEdit ?? "");
+  return (
+    <div className="record-note">
+      {mine.map((s, i) => <p key={i} className="author-learner"><strong>{s.label}: </strong>{s.text}</p>)}
+      {mine.length === 0 && view.userEdit === null && <p className="muted">No explanation of yours was saved for this topic.</p>}
+      {view.userEdit !== null && !editing && <p className="author-learner"><strong>Your edit: </strong>{view.userEdit}</p>}
       {editing ? (
         <div>
           <label htmlFor={editId}>Your edit</label>
@@ -200,10 +313,42 @@ function NoteCard({ api, note, deleted, citations, run }: { readonly api: AppApi
         </div>
       ) : (
         <div className="actions">
-          <button type="button" onClick={() => setEditing(true)}>Edit</button>
-          <button type="button" onClick={() => window.confirm("Delete this note?") && void run(() => api.deleteNote(note.id))}>Delete</button>
+          <button type="button" aria-label={`Edit your note on ${topic}`} onClick={() => setEditing(true)}>Edit</button>
+          <button type="button" aria-label={`Delete your note on ${topic}`} onClick={() => window.confirm("Delete this note? Its help and source lines go with it.") && void run(() => api.deleteNote(note.id))}>Delete</button>
         </div>
       )}
+    </div>
+  );
+}
+
+type OpenSource = { readonly ids: readonly EvidenceId[]; readonly origin: HTMLElement | null };
+
+/** The lecture's words, the cited evidence, then a compact frame and its summary. Nothing here asks for a summary until the learner does. */
+function TopicSource({ api, notes, name, diagram, deleted, citations, run }: {
+  readonly api: AppApi;
+  readonly notes: readonly Note[];
+  readonly name: string;
+  readonly diagram: TopicDiagramState;
+  readonly deleted: ReadonlySet<string>;
+  readonly citations: Citations;
+  readonly run: Run;
+}) {
+  const [open, setOpen] = useState<OpenSource | null>(null);
+  const lecture = notes.flatMap((n) => noteView(n).segments.filter((s) => s.author === "source"));
+  const cited = [...new Set(notes.flatMap((n) => [...n.evidence, ...n.generated.flatMap((s) => s.evidence)]))];
+  const missingDetails = cited.some((id) => !deleted.has(id) && !citations.data?.frames.some((frame) => frame.id === id) && !citations.data?.passages.some((passage) => passage.id === id));
+  if (lecture.length === 0 && cited.length === 0 && diagram.kind === "none") return null;
+
+  function close() {
+    open?.origin?.focus();
+    setOpen(null);
+  }
+  const isOpen = (id: EvidenceId) => open !== null && open.ids.length === 1 && open.ids[0] === id;
+
+  return (
+    <section className="topic-part" aria-label={`${TOPIC_SECTIONS.source}: ${name}`}>
+      <h4>{TOPIC_SECTIONS.source}</h4>
+      {lecture.map((s, i) => <p key={i} className="author-source"><strong>{s.label}: </strong>{s.text}</p>)}
       {cited.length > 0 && (
         <p>
           Evidence:{" "}
@@ -212,26 +357,190 @@ function NoteCard({ api, note, deleted, citations, run }: { readonly api: AppApi
             const frame = citations.data?.frames.find((frame) => frame.id === id);
             const passage = citations.data?.passages.find((passage) => passage.id === id);
             const label = frame ? `Captured frame ${formatClock(frame.mediaS)}` : passage ? `Transcript ${formatInterval(passage.interval)}` : citations.loading ? "Loading evidence details…" : "Evidence details unavailable";
-            return <button key={id} type="button" ref={(element) => { if (element) sourceButtons.current.set(id, element); else sourceButtons.current.delete(id); }} aria-label={frame || passage ? `Open ${label.toLowerCase()}` : "Open cited evidence"} aria-pressed={open === id} onClick={() => setOpen(open === id ? null : id)}>{label}</button>;
+            return <button key={id} type="button" aria-label={frame || passage ? `Open ${label.toLowerCase()}` : "Open cited evidence"} aria-pressed={isOpen(id)} onClick={(e) => (isOpen(id) ? setOpen(null) : setOpen({ ids: [id], origin: e.currentTarget }))}>{label}</button>;
           })}
         </p>
       )}
       {cited.some((id) => !deleted.has(id)) && !citations.loading && (citations.error !== null || missingDetails) && <p className="muted">Some evidence details could not be loaded. <button type="button" onClick={citations.reload}>Retry evidence details</button></p>}
+      {diagram.kind === "failed" && <ErrorNote error={`The frame and summary could not be loaded: ${diagram.error}`} retry={diagram.retry} />}
+      {diagram.kind === "ready" && (
+        <div className="topic-diagram">
+          <FramePreview api={api} frame={diagram.topic.frame} deleted={deleted} />
+          <ErrorNote error={diagram.error} />
+          {diagram.topic.summary.state === "ready" && <p className="topic-summary-title"><strong>{diagram.topic.summary.title}</strong></p>}
+          <DiagramSummaryView topic={diagram.topic} onRequest={diagram.request} onCite={(ids, _label, origin) => setOpen({ ids, origin })} />
+        </div>
+      )}
       {open !== null && (
-        <>
-          <section className="record-evidence" aria-label="Cited lecture evidence">
-          <div className="record-note-heading"><h4>Lecture evidence</h4><button type="button" onClick={closeSource}>Close source</button></div>
-          <EvidencePane api={api} ids={[open]} titles={noTitles} />
+        <section className="record-evidence" aria-label={`Lecture evidence for ${name}`}>
+          <div className="record-note-heading"><h5>Lecture evidence</h5><button type="button" onClick={close}>Close source</button></div>
+          <EvidencePane api={api} ids={open.ids} titles={noTitles} />
           <button
             type="button"
-            onClick={() => window.confirm("Delete this evidence everywhere? Notes citing it will show it as deleted.") && void run(async () => { await api.deleteEvidence([open]); setOpen(null); })}
+            onClick={() => window.confirm("Delete this evidence everywhere? Notes citing it will show it as deleted.") && void run(async () => { await api.deleteEvidence(open.ids); setOpen(null); })}
           >
             Delete this evidence
           </button>
-          </section>
-        </>
+        </section>
       )}
-    </article>
+    </section>
+  );
+}
+
+/** A small frame first; the learner expands it to full width. */
+export function FramePreview({ api, frame, deleted }: { readonly api: AppApi; readonly frame: DiagramFrame | null; readonly deleted: ReadonlySet<string> }) {
+  const [expanded, setExpanded] = useState(false);
+  if (frame === null) return <p className="muted">{NO_FRAME_NOTE}</p>;
+  if (deleted.has(frame.id)) return <p className="muted">You deleted the frame captured for this topic.</p>;
+  const link = frameLink(frame);
+  return (
+    <figure className="topic-frame" data-expanded={expanded}>
+      <FrameImage api={api} id={frame.id} />
+      <figcaption className="muted">
+        Captured frame · {frame.title ?? "Lecture"} at {formatClock(frame.mediaS)}
+        {link !== null && <> · <a href={link} target="_blank" rel="noreferrer">Open in YouTube at that moment ↗</a></>}
+      </figcaption>
+      <button type="button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? "Show smaller frame" : "Expand frame"}</button>
+    </figure>
+  );
+}
+
+/**
+ * One value per saved review, each read on its own, so one failed review shows its own retry while the others keep
+ * theirs. `read` must not reject. A newer read for a review replaces an older one that answers late.
+ */
+function usePerReview<T>(reviewIds: readonly ReviewId[], read: (id: ReviewId) => Promise<T>, loading: T) {
+  const [values, setValues] = useState<ReadonlyMap<ReviewId, T>>(new Map());
+  const requests = useRef(new Map<ReviewId, number>());
+  const mounted = useRef(true);
+  const reader = useRef(read);
+  reader.current = read;
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const load = useCallback((id: ReviewId, quiet = false) => {
+    const request = (requests.current.get(id) ?? 0) + 1;
+    requests.current.set(id, request);
+    if (!quiet) setValues((m) => new Map(m).set(id, loading));
+    void reader.current(id).then((value) => {
+      if (mounted.current && requests.current.get(id) === request) setValues((m) => new Map(m).set(id, value));
+    });
+  }, [loading]);
+  const update = useCallback((id: ReviewId, next: (prev: T | undefined) => T) => {
+    requests.current.set(id, (requests.current.get(id) ?? 0) + 1);
+    setValues((m) => new Map(m).set(id, next(m.get(id))));
+  }, []);
+  const key = reviewIds.join(",");
+  useEffect(() => {
+    for (const id of reviewIds) if (!requests.current.has(id)) load(id);
+  }, [load, key]);
+  return { values, load, update };
+}
+
+const LOADING_CONTEXT: ReviewContext = { state: "loading" };
+
+function useReviewContexts(api: AppApi, reviewIds: readonly ReviewId[]) {
+  const { values, load } = usePerReview(reviewIds, (id) => loadReviewContext(api, id), LOADING_CONTEXT);
+  return { contexts: values, retry: load };
+}
+
+type LoadedDiagrams =
+  | { readonly state: "loading" }
+  | { readonly state: "failed"; readonly error: string }
+  | { readonly state: "ready"; readonly topics: readonly TopicDiagram[]; readonly error: string | null };
+type ReviewDiagrams = ReturnType<typeof useReviewDiagrams>;
+
+const LOADING_DIAGRAMS: LoadedDiagrams = { state: "loading" };
+
+/** Each review's topic diagrams, read only. A summary is written only when `request` is called from its button. */
+function useReviewDiagrams(api: AppApi, reviewIds: readonly ReviewId[]) {
+  const read = (id: ReviewId): Promise<LoadedDiagrams> => api.diagrams(id).then((topics) => ({ state: "ready", topics, error: null }), (e: unknown) => ({ state: "failed", error: message(e) }));
+  const { values, load, update } = usePerReview(reviewIds, read, LOADING_DIAGRAMS);
+  const preparing = [...values].filter(([, d]) => d.state === "ready" && shouldPollDiagrams(d.topics)).map(([id]) => id);
+  useEffect(() => {
+    if (preparing.length === 0) return;
+    const timer = setTimeout(() => { for (const id of preparing) load(id, true); }, POLL_MS);
+    return () => clearTimeout(timer);
+  }, [preparing.join(","), values, load]);
+  const request = useCallback(async (reviewId: ReviewId, topicId: ConceptId): Promise<void> => {
+    try {
+      const next = await api.requestDiagram(reviewId, topicId);
+      update(reviewId, (prev) => (prev?.state === "ready" ? { ...prev, topics: prev.topics.map((t) => (t.topicId === topicId ? next : t)), error: null } : prev ?? LOADING_DIAGRAMS));
+    } catch (e) {
+      update(reviewId, (prev) => (prev?.state === "ready" ? { ...prev, error: message(e) } : prev ?? LOADING_DIAGRAMS));
+    }
+  }, [api, update]);
+  return { values, load, request };
+}
+
+export function ObservationItem({ api, observation: o, number, context, deleted, retry, run }: {
+  readonly api: AppApi;
+  readonly observation: Observation;
+  readonly number: number;
+  readonly context: ObservationContext;
+  readonly deleted: ReadonlySet<string>;
+  readonly retry: () => void;
+  readonly run: Run;
+}) {
+  const headingId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [choice, setChoice] = useState<DisputeChoice>("keep");
+  const [showEvidence, setShowEvidence] = useState(false);
+  const row = observationRow(o);
+  const ready = canChangeObservation(context);
+  const details = ready ? context.details : null;
+  const name = details?.topic ?? `Observation ${number}`;
+  const evidence = details?.evidence.filter((id) => !deleted.has(id)) ?? [];
+
+  async function change(action: () => Promise<void>) {
+    if (await changeObservation(context, run, action)) heading.current?.focus();
+  }
+
+  return (
+    <li className="record-observation" aria-labelledby={headingId}>
+      <h5 id={headingId} ref={heading} tabIndex={-1}>{name}</h5>
+      <p><strong>Status: {row.status}</strong>{row.note && <span className="muted"> {row.note}</span>}</p>
+      {context.kind === "loading" && <p className="muted" role="status">Loading the topic, question and your answer...</p>}
+      {context.kind === "failed" && <ErrorNote error={`The topic, question and your answer could not be loaded: ${context.error}`} retry={retry} />}
+      {context.kind === "incomplete" && <p className="muted">The saved review no longer shows the {context.missing.join(" or ")} for this observation, so it can't be changed here. <Link to={{ page: "review", id: o.reviewId }}>Revisit review</Link></p>}
+      {details && (
+        <dl className="observation-context">
+          <dt>{details.kind}</dt><dd>{details.question}</dd>
+          <dt>Your answer</dt><dd className="author-learner">{details.answers.length > 0 ? details.answers.map((a, i) => <p key={i}>{a}</p>) : "No answer recorded."}</dd>
+          {details.dispute !== null && <><dt>Your dispute</dt><dd className="author-learner">{details.dispute}</dd></>}
+          <dt>Tutor's judgment</dt><dd className="author-tutor">Proposed "{details.proposed}".{details.reasoning !== null && <> {details.reasoning}</>}</dd>
+        </dl>
+      )}
+      {details && (evidence.length > 0 ? (
+        <>
+          <button type="button" aria-expanded={showEvidence} onClick={() => setShowEvidence(!showEvidence)}>{showEvidence ? "Hide lecture evidence" : `Show lecture evidence (${evidence.length})`}</button>
+          {showEvidence && <section className="record-evidence" aria-label={`Lecture evidence for ${details.topic}`}><EvidencePane api={api} ids={evidence} titles={noTitles} /></section>}
+        </>
+      ) : <p className="muted">{details.evidence.length > 0 ? "You deleted the evidence the tutor cited here." : "The tutor cited no lecture evidence on this question."}</p>)}
+      {!ready && <p className="muted">You can change this observation once its topic, question and answer are shown.</p>}
+      <div className="actions">
+        <label>
+          Correct status{" "}
+          <select aria-label={`Correct status for ${name}`} value="" disabled={!ready} onChange={(e) => { const status = e.target.value as ObservationStatus | ""; if (status) void change(() => api.overrideObservation(o.id, status)); }}>
+            <option value="">Choose...</option>
+            {OVERRIDES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+          </select>
+        </label>
+      </div>
+      {row.disputeOpen && (
+        <fieldset className="dispute-decision" disabled={!ready}>
+          <legend>Settle the dispute about {name}</legend>
+          {DISPUTE_CHOICES.map((c) => (
+            <label key={c.value} className="dispute-choice">
+              <input type="radio" name={`${headingId}-dispute`} value={c.value} checked={choice === c.value} onChange={() => setChoice(c.value)} />
+              <span><strong>{c.label}</strong> <span className="muted">{c.meaning}</span></span>
+            </label>
+          ))}
+          <button type="button" disabled={choice === "keep"} onClick={() => { if (choice !== "keep") { const outcome = choice; void change(() => api.resolveDispute(o.id, outcome)); } }}>Save decision</button>
+        </fieldset>
+      )}
+    </li>
   );
 }
 

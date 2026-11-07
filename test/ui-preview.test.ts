@@ -7,8 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createReviewController, needsChecklist } from "../src/app/controller";
-import { IllustratedPageView } from "../src/app/diagram";
-import { illustratedPages } from "../src/app/diagram-view";
+import { observationContext } from "../src/app/observation-view";
 import { RecordBody } from "../src/app/record";
 import { TopicChecklist } from "../src/app/review";
 import { createMemoryUnsent } from "../src/app/unsent";
@@ -69,17 +68,15 @@ describe("UI preview fixtures", () => {
       const record = await settle(() => api.record(fixture.recordReviewId === null ? {} : { reviewId: fixture.recordReviewId }));
       const diagrams = await api.diagrams(ids.review);
       expect(diagrams.length).toBe(2);
-      renderToStaticMarkup(createElement(RecordBody, { api, data: record, run: async () => {} }));
-      // Every review in the notebook has complete illustrated pages, so an empty page means a product failure, not a fixture gap.
-      for (const reviewId of new Set(record.notes.map((n) => n.reviewId))) {
-        const saved = await api.review(reviewId);
+      const { lectures } = await api.lectures();
+      renderToStaticMarkup(createElement(RecordBody, { api, data: record, lectures, run: async () => {} }));
+      // Every saved review in the notebook names its lecture, topics and questions, so an unnamed topic in the preview means a product failure, not a fixture gap.
+      const listed = new Set(lectures.flatMap((l) => l.reviews.map((r) => r.reviewId)));
+      for (const reviewId of new Set([...record.notes, ...record.observations].map((n) => n.reviewId))) {
+        expect(listed.has(reviewId)).toBe(true);
+        const saved = await settle(() => api.review(reviewId));
         expect(saved.saved).toBe("saved");
-        const pages = illustratedPages(saved, diagrams);
-        expect(pages.map((p) => p.topic.label)).toEqual(["Circular wait", "Resource ordering"]);
-        for (const page of pages) {
-          const html = renderToStaticMarkup(createElement(IllustratedPageView, { api, page, onRequest: noop }));
-          expect(html).not.toContain("No answer recorded.");
-        }
+        for (const o of saved.observations) expect(observationContext(o, { state: "ready", view: saved }).kind).toBe("ready");
       }
     });
   }
