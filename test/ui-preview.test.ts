@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createReviewController, needsChecklist } from "../src/app/controller";
+import { HomeBody, loadResumeTopic } from "../src/app/home";
 import { observationContext } from "../src/app/observation-view";
 import { RecordBody } from "../src/app/record";
 import { TopicChecklist } from "../src/app/review";
@@ -62,11 +63,11 @@ describe("UI preview fixtures", () => {
       const { api } = fixture;
       await api.captureView(ids.capture);
       await api.reviewOptions(ids.capture);
-      await api.lectures();
+      await settle(() => api.lectures());
       await api.usage();
       await settle(() => api.evidence({ captureId: ids.capture }));
       const record = await settle(() => api.record(fixture.recordReviewId === null ? {} : { reviewId: fixture.recordReviewId }));
-      const diagrams = await api.diagrams(ids.review);
+      const diagrams = await settle(() => api.diagrams(ids.review));
       expect(diagrams.length).toBe(2);
       const { lectures } = await api.lectures();
       renderToStaticMarkup(createElement(RecordBody, { api, data: record, lectures, run: async () => {} }));
@@ -94,6 +95,31 @@ describe("UI preview fixtures", () => {
     expect(after.view?.state.fuzzy).toEqual([ids.ordering]);
     expect(after.view?.turns.at(-1)?.actor).toBe("tutor");
     expect(needsChecklist(after)).toBe(false);
+  });
+
+  test("home scenarios: the open review leads to the review page the preview loads, and the empty home shows the first steps", async () => {
+    for (const [scenario, kicker] of [["home", "Review in progress"], ["home-paused", "Paused review"], ["home-setup", "Review in progress"]] as const) {
+      const { api } = createFixture(scenario);
+      const html = renderToStaticMarkup(createElement(HomeBody, { api, data: await api.lectures() }));
+      expect(html).toContain(kicker);
+      expect(html.indexOf(`href="/app/review/${ids.review}"`)).toBeLessThan(html.indexOf("Your lectures"));
+      expect(html).toContain(`href="/app/record/${ids.earlierReview}"`);
+    }
+    const { api } = createFixture("home-empty");
+    const empty = renderToStaticMarkup(createElement(HomeBody, { api, data: await api.lectures() }));
+    expect(empty).toContain("Capture your first lecture");
+  });
+
+  test("home scenarios: each resume card's topic comes from the reads the review page makes, and none starts a summary", async () => {
+    const cases = [["home", { kind: "topic", label: "Circular wait" }], ["home-paused", { kind: "topic", label: "Circular wait" }], ["home-setup", { kind: "no_question" }]] as const;
+    for (const [scenario, topic] of cases) {
+      const fixture = createFixture(scenario);
+      expect((await fixture.api.review(ids.review)).state.phase).toBe(scenario === "home-paused" ? "paused" : "active");
+      expect(await loadResumeTopic(fixture.api, ids.review)).toEqual(topic);
+      expect(fixture.requestLedger.snapshot()).not.toContain("diagram.request");
+    }
+    const failing = createFixture("home-topic-error");
+    await expect(loadResumeTopic(failing.api, ids.review)).rejects.toThrow("Retry is available");
   });
 
   test("record-illustrated: the record is filtered to the saved review shown on the page", async () => {
@@ -140,9 +166,9 @@ describe("UI preview fixtures", () => {
     expect((await save.api.save(ids.review)).kind).toBe("save_failed");
     expect((await save.api.save(ids.review)).kind).toBe("saved");
 
-    for (const scenario of ["record-error", "evidence-error"] as const) {
+    for (const scenario of ["record-error", "evidence-error", "home-error"] as const) {
       const f = createFixture(scenario);
-      const read = scenario === "record-error" ? () => f.api.record({}) : () => f.api.evidence({ captureId: ids.capture });
+      const read = scenario === "record-error" ? () => f.api.record({}) : scenario === "home-error" ? () => f.api.lectures() : () => f.api.evidence({ captureId: ids.capture });
       await expect(read()).rejects.toThrow("Retry is available");
       await read();
     }

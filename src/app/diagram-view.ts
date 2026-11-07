@@ -12,7 +12,7 @@ export function frameLink(frame: DiagramFrame): string | null {
   return frame.videoId === null ? null : watchUrl(frame.videoId, frame.mediaS);
 }
 
-const isQuestion = (t: Turn): t is Extract<Turn, { actor: "tutor" }> & { move: { kind: "ask_main" | "quick_check" } } =>
+export const isQuestion = (t: Turn): t is Extract<Turn, { actor: "tutor" }> & { move: { kind: "ask_main" | "quick_check" } } =>
   t.actor === "tutor" && (t.move.kind === "ask_main" || t.move.kind === "quick_check");
 
 /** The topic whose claims the current question asks about: the open thread's question, else the latest one asked. */
