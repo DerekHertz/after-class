@@ -35,7 +35,7 @@ describe("local appearance preferences", () => {
       const html = renderToStaticMarkup(<CompanionDrawing id={id} />);
       expect(html).toContain(`data-companion="${id}"`);
       expect(html).not.toContain('<svg');
-      const png = readFileSync(new URL(`../src/app/assets/companions-v2/${id}.png`, import.meta.url));
+      const png = readFileSync(new URL(`../src/app/assets/companions-v3/${id}.png`, import.meta.url));
       expect(png.subarray(1, 4).toString()).toBe("PNG");
       expect(png[25]).toBe(6);
     }

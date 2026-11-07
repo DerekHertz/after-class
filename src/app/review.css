@@ -1,6 +1,3 @@
-.review .source-stand[hidden] { display: none; }
-.review-workspace.source-closed { grid-template-columns: minmax(0, 1fr); max-width: 60rem; margin-inline: auto; }
-.source-closed .conversation-notebook { grid-column: 1; }
 .source-selection-label, .composer-shortcut { font-size: .85rem; color: var(--muted); }
 .review .citation { color: var(--accent); background: transparent; border: 0; text-decoration: underline; padding-inline: 0; text-align: left; }
 .scope-source-list { display: flex; flex-direction: column; gap: 8px; margin-block: 16px; }
@@ -14,9 +11,6 @@
 .review .evidence-kind { margin: 12px 0 4px; color: var(--muted); font: bold .75rem/1.3 'After Class Sans', system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
 .review .diagram-provenance { margin: 0 0 4px; font-size: .85rem; }
 .review .tutor-diagram:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
-.review .source-return { display: block; margin-top: 16px; }
-/* Where the source stacks under the conversation, the way back stays at the bottom of the screen while the source is in view. */
-@media (max-width: 999px) { .review .source-stand .source-return { position: sticky; bottom: 8px; z-index: 1; width: 100%; min-height: 44px; } }
 .review .review-help summary { font-style: italic; }
 .source-heading button { margin: 4px 8px 4px 0; }
 .review .notebook-heading button { font-size: .85rem; }
@@ -38,13 +32,10 @@
 .diagram-lines li { margin: 6px 0; }
 .diagram-lines .citation { font-size: .8rem; margin-left: 8px; }
 .diagram-sources-toggle { font-size: .85rem; margin: 4px 0; }
-/* The diagram takes its natural height (the page scrolls); the frame is never cropped or height-capped. The HD source
-   stand always takes its natural height (hd-room.css); the painted stand grows only while a diagram is open. */
-.scene-shell:not([data-detail="hd-pixel"]) .review .review-workspace .source-stand:has(.diagram-panel) { height: auto; max-height: none; overflow: visible; z-index: 4; background: var(--surface); padding-bottom: 12px; }
-.scene-shell .review .source-stand .diagram-panel .diagram-frame .frame { display: block; width: 100%; height: auto; max-height: none; object-fit: contain; }
+/* The diagram's frame is never cropped or height-capped; the folio's page scrolls to it (front-row.css). */
+.scene-shell .review .room-object .diagram-panel .diagram-frame .frame { display: block; width: 100%; height: auto; max-height: none; object-fit: contain; }
 .review .review-topics { flex: 0 0 auto; font-size: .85rem; margin-top: 8px; }
 .review .review-topics ul { list-style: none; padding-left: 0; }
-.review .current-topic { flex: 0 0 auto; font-size: .9rem; margin: 8px 0 0; }
 /* The question being worked on is the strongest thing in the notebook; earlier lines read quieter in their own history. */
 .review .conversation-notebook .current-exchange { flex: 0 0 auto; padding: 2px 14px 0; background: #fff8e6; border: 1px solid var(--border); border-left: 6px solid #c57d56; border-radius: 6px; }
 .review .conversation-notebook .current-exchange:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }

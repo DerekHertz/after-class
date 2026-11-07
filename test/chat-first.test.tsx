@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { VOICE_KEY, persistVoice, readVoice } from "../src/app/appearance";
 import { shouldAutoSendSpeech, shouldStopListening } from "../src/app/core";
 import { Composer } from "../src/app/review";
-import { RoomTools } from "../src/app/room-tools";
+import { FrontRowScene } from "../src/app/front-row";
 import { SceneShell } from "../src/app/scene";
 import type { Speaker, SpeechInput } from "../src/app/speech";
 import { gateSpeaker } from "../src/app/voice";
@@ -87,10 +87,13 @@ describe("Speak controls", () => {
     expect(composer({ showSpeak: false })).not.toContain("Speech input is not available");
     expect(composer({ showSpeak: true })).toContain("Speak");
   });
-  test("room tools omit every recorder control when voice is off", () => {
-    const html = (showSpeak: boolean) => renderToStaticMarkup(createElement(RoomTools, { scene: "last-desk", onSource() {}, sourceOpen: false, showSpeak, speechAvailable: true }));
+  test("the room adds no Speak control of its own, so voice off leaves no Speak anywhere in the scene", () => {
+    const html = (showSpeak: boolean) => renderToStaticMarkup(createElement(FrontRowScene, {
+      scene: "last-desk", appearance: { companion: "mote", visible: true, motion: "system" }, activity: "idle",
+      layout: { kind: "review", board: "Why?", desk: createElement(Composer, { actions: ["answer"], disabled: false, sendError: null, speech: quiet, onSpeaking() {}, send: async () => true, showSpeak }), objects: { cited: 0, open() {} } },
+    }));
     expect(html(false)).not.toContain("Speak");
-    expect(html(true)).toContain("Speak");
+    expect(html(true).match(/>Speak</g)).toHaveLength(1);
   });
   test("the voice setting lives with Room & companion, off by default", () => {
     const html = renderToStaticMarkup(createElement(SceneShell, null));

@@ -119,15 +119,13 @@ th, td { border-bottom: 1px solid var(--border); padding: var(--space-1) var(--s
 .review button { min-height: 42px; padding: 8px 14px; }
 .review .composer .primary-action { background: var(--accent); border-color: var(--accent); color: #fff; }
 .review :is(button, textarea, summary, a, .conversation-history):focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
-.source-stand { grid-column: 1; grid-row: 1; min-width: 0; background: var(--surface); border: 8px solid #c69b55; outline: 1px solid #69513a; border-radius: 18px; padding: clamp(16px, 2vw, 28px); box-shadow: 6px 8px 0 #263b4626; overflow-wrap: anywhere; }
 .source-heading { border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 20px; }
 .eyebrow { color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-size: .75rem; margin: 0 0 8px; }
 .review summary { cursor: pointer; padding: 12px 0; color: var(--accent); }
-.review .source-stand > details { margin-top: 24px; border-top: 1px solid var(--border); }
 .review-observations { margin-top: 16px; border-top: 1px solid var(--border); }
 @media (max-width: 800px) {
   .review-workspace { grid-template-columns: minmax(0, 1fr); }
-  .conversation-notebook, .source-stand { grid-column: auto; grid-row: auto; }
+  .conversation-notebook { grid-column: auto; grid-row: auto; }
   .conversation-history { max-height: 40dvh; }
   .review-navigation { gap: 16px; }
 }

@@ -1,17 +1,17 @@
 import { RecordScreen } from "./record";
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { MutableRefObject, Ref } from "react";
+import type { Ref } from "react";
 import { Material } from "../shared/time";
 import type { ConceptId, EvidenceId, ReviewId } from "../shared/ids";
 import type { Concept } from "../shared/domain";
 import type { AppApi } from "./api";
 import { useAppearance, useSceneActivity } from "./appearance";
-import { RoomTools } from "./room-tools";
+import { FrontRowScene, reserveNavSpace } from "./front-row";
 import { reactToCompanion } from "./companion-reaction";
 import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
 import {
-  ACTION_LABEL, END_CONFIRM_TEXT, composerActions, INITIAL_SOURCE_OPEN, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
+  ACTION_LABEL, END_CONFIRM_TEXT, composerActions, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
   softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer,
 } from "./core";
 import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, StartHandoff, TurnStatus } from "./core";
@@ -21,25 +21,29 @@ import { BundleInspector, ErrorNote, EvidencePane, useAsync } from "./ui";
 import { CompletionPanel } from "./completion";
 import { DiagramPanel, ShowDiagramButton, useDiagrams } from "./diagram";
 import { currentQuestionTopic } from "./diagram-view";
+import { RoomInspector, returnTarget } from "./room-object";
+import type { Inspecting, PutDown, RoomObject } from "./room-object";
 
 export type ReviewDeps = { readonly api: AppApi; readonly speaker: Speaker; readonly speech: SpeechInput; readonly unsent: UnsentStore };
 
+/**
+ * The review is a front-row seat in the learner's room: the current question is written on the board and the response
+ * field lies on the desk. The lecture folio and the review notebook are picked up over the room, one at a time, only
+ * when the learner asks; the response field stays mounted underneath, so a draft survives.
+ */
 export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewDeps & { readonly reviewId: ReviewId }) {
-  const { appearance, voice } = useAppearance();
-  const speechToggle = useRef<(() => void) | null>(null);
-  const history = useRef<HTMLDivElement>(null);
+  const { appearance, voice, activity } = useAppearance();
+  const board = useRef<HTMLElement>(null);
   const currentQuestion = useRef<HTMLElement>(null);
-  const sourceHeading = useRef<HTMLHeadingElement>(null);
-  const sourceSurface = useRef<HTMLElement>(null);
-  const sourceColumn = useRef<HTMLDivElement>(null);
-  const sourceToggle = useRef<HTMLButtonElement>(null);
-  const sourceOrigin = useRef<HTMLButtonElement | null>(null);
-  const conversation = useRef<HTMLElement>(null);
+  const objectHeading = useRef<HTMLHeadingElement>(null);
+  const objectPage = useRef<HTMLDivElement>(null);
+  const pickedUpFrom = useRef<HTMLElement | null>(null);
   const diagramSection = useRef<HTMLDivElement>(null);
   const followHistory = useRef(true);
   const [selection, setSelection] = useState<SourceSelection>({ kind: "automatic" });
-  const [sourceOpen, setSourceOpen] = useState(INITIAL_SOURCE_OPEN);
+  const [inspecting, setInspecting] = useState<Inspecting>(null);
   const [notebookOpen, setNotebookOpen] = useState(false);
+  const savedNotes = useRef<HTMLButtonElement>(null);
   const [diagramTopic, setDiagramTopic] = useState<ConceptId | null>(null);
   const diagrams = useDiagrams(api, reviewId);
   const [listening, setListening] = useState(false);
@@ -48,22 +52,6 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const questionLine = useRef<HTMLLIElement>(null);
   const controller = useMemo(() => createReviewController({ api, reviewId, speaker, unsent }), [api, reviewId, speaker, unsent]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
-  const loaded = state.view !== null;
-  useEffect(() => {
-    const surface = sourceSurface.current;
-    const column = sourceColumn.current;
-    if (!loaded || appearance.scene !== "study-bench" || !surface || !column) return;
-    let frame: number | null = null;
-    const paint = () => {
-      column.style.setProperty("--paper-feed", `${surface.scrollTop}px`);
-      column.dataset.paperScrolled = String(surface.scrollTop > 0);
-      frame = null;
-    };
-    const scroll = () => { if (frame === null) frame = requestAnimationFrame(paint); };
-    paint();
-    surface.addEventListener("scroll", scroll, { passive: true });
-    return () => { surface.removeEventListener("scroll", scroll); if (frame !== null) cancelAnimationFrame(frame); };
-  }, [loaded, appearance.scene, sourceOpen]);
   useEffect(() => {
     void controller.load();
   }, [controller]);
@@ -85,53 +73,62 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const titles = sourceTitles(capture.data?.capture ?? null);
 
   const automaticIds = currentEvidenceIds(state.view?.turns ?? [], state.live);
-  const automaticKey = automaticIds.join(",");
   useEffect(() => {
-    if (automaticKey !== "") setSourceOpen(true);
-  }, [automaticKey]);
-  useEffect(() => {
-    if (followHistory.current && history.current) history.current.scrollTop = history.current.scrollHeight;
-  }, [state.view?.turns.length, state.live?.deltaText, state.live?.sentences.length]);
+    const page = objectPage.current;
+    if (inspecting === "history" && followHistory.current && page) page.scrollTop = page.scrollHeight;
+  }, [inspecting, state.view?.turns.length]);
   useSceneActivity(state.saving ? "saving" : listening ? "listening" : state.view?.state.phase === "paused" ? "paused" : state.live?.status === "streaming" ? "waiting" : "idle");
 
+  /** Picks up an object. Switching from one object to the other keeps the control that picked up the first. */
+  function inspect(object: RoomObject, origin: HTMLElement | null) {
+    if (inspecting === null) pickedUpFrom.current = origin;
+    if (object === "source" && inspecting !== "source") reactToCompanion("draw");
+    if (object === "history") followHistory.current = true;
+    setInspecting(object);
+  }
+
   function openSource(ids: readonly EvidenceId[], label: string, origin: HTMLButtonElement) {
-    sourceOrigin.current = origin;
     setSelection({ kind: "pinned", ids, label });
-    if (!sourceOpen) reactToCompanion("draw");
-    setSourceOpen(true);
-    requestAnimationFrame(() => sourceHeading.current?.focus());
+    if (inspecting === "source") {
+      objectPage.current?.scrollTo({ top: 0 });
+      objectHeading.current?.focus({ preventScroll: true });
+    }
+    inspect("source", origin);
   }
 
   /** Flow D: Ask "show me the diagram" on a topic, any time in the review. The conversation stays where it is. */
-  function showDiagram(topicId: ConceptId) {
+  function showDiagram(topicId: ConceptId, origin: HTMLElement) {
     setDiagramTopic(topicId);
-    if (!sourceOpen) reactToCompanion("draw");
-    setSourceOpen(true);
+    inspect("source", origin);
     requestAnimationFrame(() => diagramSection.current?.focus());
     const known = diagrams.topics?.find((t) => t.topicId === topicId);
     if (known === undefined || known.summary.state === "not_requested") void diagrams.request(topicId);
     else diagrams.reload();
   }
 
-  function closeSource() {
-    setSelection({ kind: "automatic" });
-    setSourceOpen(false);
-    const origin = sourceOrigin.current;
-    if (origin?.closest(".source-stand")) sourceToggle.current?.focus();
-    else (origin?.isConnected ? origin : sourceToggle.current)?.focus();
+  /** The saved-notes dialog unmounts on close, so focus is put back on the control that opened it. */
+  function closeNotebook() {
+    setNotebookOpen(false);
+    requestAnimationFrame(() => savedNotes.current?.focus());
   }
 
-  /** On a phone the source sits below the conversation; this brings the question and the composer back without closing it. */
-  function returnToQuestion() {
-    const target = currentQuestion.current ?? conversation.current;
-    target?.scrollIntoView({ block: "start" });
-    target?.focus({ preventScroll: true });
+  /** Puts the object down. The source follows the current reply again next time it is picked up. */
+  function putDown(to: PutDown) {
+    const question = currentQuestion.current ?? board.current;
+    const target = to === "origin" ? returnTarget(pickedUpFrom.current, question) : question;
+    pickedUpFrom.current = null;
+    setSelection({ kind: "automatic" });
+    setInspecting(null);
+    requestAnimationFrame(() => {
+      target?.focus({ preventScroll: true });
+      if (to === "question") target?.scrollIntoView({ block: "nearest" });
+    });
   }
 
   const view = state.view;
   if (view === null) {
     return (
-      <main>
+      <main className="review review-loading">
         <h1>Review</h1>
         <ErrorNote error={state.loadError} retry={() => void controller.load()} />
         {state.loadError === null && <p className="muted">Loading...</p>}
@@ -154,101 +151,107 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const scopeSeconds = Material.sources(view.scope.material).reduce((sum, id) => sum + Material.get(view.scope.material, id).intervals().reduce((s, i) => s + (i.end - i.start), 0), 0);
   const canRetry = !streaming && (state.unsent.length > 0 || unanswered !== null || owedLearnerTurn(view) !== null || state.live?.status === "failed");
 
+  const questionMarker = view.state.mainQuestions > 0 ? `Question ${view.state.mainQuestions}` : null;
+
+  const boardContent = <>
+    {(lines.current.length > 0 || live !== null) && (
+      <section ref={currentQuestion} className="current-exchange" aria-labelledby="current-exchange-heading" tabIndex={-1}>
+        <div className="front-row-heading">
+          <h2 id="current-exchange-heading" className="front-row-eyebrow"><span className="visually-hidden">Current question: </span>{questionTopic?.label ?? questionMarker ?? "Current question"}</h2>
+          {questionTopic !== null && <ShowDiagramButton topic={{ id: questionTopic.topicId, label: questionTopic.label }} onShow={showDiagram} />}
+        </div>
+        <ol className="lines">
+          {lines.current.map((l) => <LineItem key={l.key} line={l} onSource={openSource} {...(l.key === questionKey ? { focusRef: questionLine } : {})} />)}
+          {live !== null && (
+            <li className="line tutor" data-question="">
+              <strong>{live.move ? MOVE_LABEL[live.move.kind] : "Tutor"}</strong>
+              <p>{liveText(live) || "..."}</p>
+              {live.status === "failed" && <p className="note note-error">{live.error}</p>}
+            </li>
+          )}
+        </ol>
+      </section>
+    )}
+    {handoff !== "none" && <p ref={startStatus} className="note" role="status" tabIndex={-1}>{canRetry ? "Your review has started, but the tutor's first question has not arrived." : "Your review has started. Waiting for the tutor's first question."}</p>}
+    {canRetry && (
+      <UndeliveredNote
+        unsent={state.unsent.length}
+        failed={state.live?.status === "failed"}
+        onRetry={() => void controller.retryTurn()}
+        onDiscard={() => void controller.discardUnsent()}
+      />
+    )}
+    {soft && (
+      <div className="note">
+        <p>You have been at this a while. Keep going, or wrap up and save?</p>
+        <Actions ids={actions.filter((a) => a === "continue" || a === "wrap_up")} disabled={streaming} send={(id) => void controller.send(toAct(id, "", "text"))} />
+      </div>
+    )}
+  </>;
+
+  const deskContent = <Composer
+    actions={actions.filter((a) => !["continue", "wrap_up", "pause", "resume", "end"].includes(a))}
+    disabled={streaming || state.unsent.length > 0}
+    sendError={state.sendError}
+    speech={speech}
+    showSpeak={voice}
+    onSpeaking={controller.learnerSpeaking}
+    onListeningChange={setListening}
+    live={state.live}
+    send={(id, text, modality) => controller.send(toAct(id, text, modality))}
+  />;
+
+  const setupForm = <TopicChecklist topics={view.topics} disabled={streaming} onStart={(fuzzy, note) => {
+    setHandoff("submitted");
+    void controller.send({ kind: "begin", fuzzy, ...(note === "" ? {} : { note }) }).then((sent) => { if (!sent) setHandoff("none"); });
+  }} />;
+
   return (
-    <main className="review">
-      {notebookOpen && <dialog className="room-notebook-dialog" ref={node => { if (node && !node.open) node.showModal(); }} onClose={() => setNotebookOpen(false)}><button onClick={() => setNotebookOpen(false)}>Close notebook</button><RecordScreen api={api} reviewId={null} /></dialog>}
-      <header className="review-header">
-        <div>
+    <main className="review front-row">
+      {notebookOpen && <dialog className="room-notebook-dialog" ref={node => { if (node && !node.open) node.showModal(); }} onClose={closeNotebook}><button type="button" onClick={closeNotebook}>Close notebook</button><RecordScreen api={api} reviewId={null} /></dialog>}
+      <header ref={reserveNavSpace} className="review-header front-row-bar">
+        <div className="front-row-title">
           <h1>{heading.title}</h1>
           <p className="review-scope-line">Reviewing {heading.detail ?? "this lecture"} · {formatClock(scopeSeconds)} of lecture</p>
         </div>
         <div className="review-navigation">
-          <span className="review-phase">{view.state.phase}</span>
-          <button type="button" onClick={() => setNotebookOpen(true)}>My notebook</button>
+          <span className="review-phase">{questionMarker === null ? view.state.phase : `${questionMarker} · ${view.state.phase}`}</span>
+          <button ref={savedNotes} type="button" aria-haspopup="dialog" onClick={() => setNotebookOpen(true)}>Saved notes</button>
           <Actions ids={actions.filter(id => id === "pause" || id === "resume" || id === "end")} disabled={streaming || state.unsent.length > 0} send={id => void controller.send(toAct(id, "", "text"))} />
         </div>
       </header>
-      <SaveBanner state={state} onRetry={() => void controller.save()} reviewId={reviewId} onSource={openSource} />
-      <ErrorNote error={state.loadError} retry={() => void controller.load()} />
-      <div className={`review-workspace${sourceOpen ? "" : " source-closed"}`}>
-        <section ref={conversation} className="conversation-notebook" aria-labelledby={checklist ? STARTING_POINT_HEADING : "conversation-heading"}>
-          {/* Before the first turn this is a setup choice, not a conversation: no heading, question number or empty history. */}
-          {!checklist && <div className="notebook-heading">
-            <h2 id="conversation-heading">Conversation</h2>
-            {view.state.mainQuestions > 0 && <span className="question-marker">Question {view.state.mainQuestions}</span>}
-            <button type="button" onClick={() => {
-              followHistory.current = true;
-              if (history.current) history.current.scrollTop = history.current.scrollHeight;
-              currentQuestion.current?.scrollIntoView({ block: "nearest" });
-              currentQuestion.current?.focus({ preventScroll: true });
-            }}>Current question</button>
-            <button ref={sourceToggle} type="button" aria-expanded={sourceOpen} aria-controls="review-source" onClick={(e) => {
-              if (sourceOpen) closeSource();
-              else { sourceOrigin.current = e.currentTarget; reactToCompanion("draw"); setSourceOpen(true); }
-            }}>{sourceOpen ? "Close source" : "Open source"}</button>
-          </div>}
-          {/* The question being worked on stays next to the composer; earlier lines scroll on their own below. */}
-          {!checklist && (lines.current.length > 0 || live !== null) && (
-            <section ref={currentQuestion}className="current-exchange" aria-labelledby="current-exchange-heading" tabIndex={-1}>
-              <h3 id="current-exchange-heading" className="eyebrow">Current question</h3>
-              <ol className="lines">
-                {lines.current.map((l) => <LineItem key={l.key} line={l} onSource={openSource} {...(l.key === questionKey ? { focusRef: questionLine } : {})} />)}
-                {live !== null && (
-                  <li className="line tutor">
-                    <strong>{live.move ? MOVE_LABEL[live.move.kind] : "Tutor"}</strong>
-                    <p>{liveText(live) || "..."}</p>
-                    {live.status === "failed" && <p className="note note-error">{live.error}</p>}
-                  </li>
-                )}
-              </ol>
-            </section>
-          )}
-          {handoff !== "none" && !checklist && <p ref={startStatus} className="note" role="status" tabIndex={-1}>{canRetry ? "Your review has started, but the tutor's first question has not arrived." : "Your review has started. Waiting for the tutor's first question."}</p>}
-          {canRetry && (
-            <UndeliveredNote
-              unsent={state.unsent.length}
-              failed={state.live?.status === "failed"}
-              onRetry={() => void controller.retryTurn()}
-              onDiscard={() => void controller.discardUnsent()}
-            />
-          )}
-          {soft && (
-            <div className="note">
-              <p>You have been at this a while. Keep going, or wrap up and save?</p>
-              <Actions ids={actions.filter((a) => a === "continue" || a === "wrap_up")} disabled={streaming} send={(id) => void controller.send(toAct(id, "", "text"))} />
-            </div>
-          )}
-          {!checklist && questionTopic !== null && (
-            <p className="current-topic">Topic: <strong>{questionTopic.label}</strong> <ShowDiagramButton topic={{ id: questionTopic.topicId, label: questionTopic.label }} onShow={showDiagram} /></p>
-          )}
-          {checklist && <TopicChecklist topics={view.topics} disabled={streaming} onStart={(fuzzy, note) => {
-            setHandoff("submitted");
-            void controller.send({ kind: "begin", fuzzy, ...(note === "" ? {} : { note }) }).then((sent) => { if (!sent) setHandoff("none"); });
-          }} />}
-          {!checklist && <Composer
-            actions={actions.filter((a) => !["continue", "wrap_up", "pause", "resume", "end"].includes(a))}
-            disabled={streaming || state.unsent.length > 0}
-            sendError={state.sendError}
-            speech={speech}
-            showSpeak={voice}
-            onSpeaking={controller.learnerSpeaking}
-            onListeningChange={setListening}
-            speechToggle={speechToggle}
-            live={state.live}
-            send={(id, text, modality) => controller.send(toAct(id, text, modality))}
-          />}
-          {lines.earlier.length > 0 && <>
-            <h3 id="conversation-history-heading" className="conversation-history-heading">Earlier in this review</h3>
-            <div ref={history} onScroll={() => {
-              const el = history.current;
-              if (el) followHistory.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-            }} className="conversation-history" role="region" aria-labelledby="conversation-history-heading" tabIndex={0}>
-              <ol className="lines">
-                {lines.earlier.map((l) => <LineItem key={l.key} line={l} onSource={openSource} />)}
-              </ol>
-            </div>
-          </>}
-          {!checklist && view.topics.length > 0 && (
+      <div className="front-row-notices">
+        <SaveBanner state={state} onRetry={() => void controller.save()} reviewId={reviewId} onSource={openSource} />
+        <ErrorNote error={state.loadError} retry={() => void controller.load()} />
+      </div>
+      <div className="front-row-layout">
+        <FrontRowScene
+          scene={appearance.scene}
+          appearance={appearance}
+          activity={activity}
+          boardRef={board}
+          layout={checklist ? { kind: "setup", form: setupForm } : { kind: "review", board: boardContent, desk: deskContent, objects: { cited: automaticIds.length, open: inspect } }}
+        />
+      </div>
+      <RoomInspector
+        object={inspecting}
+        headingRef={objectHeading}
+        pageRef={objectPage}
+        onPutDown={putDown}
+        onPageScroll={() => {
+          const page = objectPage.current;
+          if (inspecting === "history" && page) followHistory.current = page.scrollHeight - page.scrollTop - page.clientHeight < 40;
+        }}
+        detail={inspecting === "source" && <p className="source-selection-label">{selection.kind === "pinned" ? selection.label : "From the current tutor explanation or check"}</p>}
+        tools={inspecting === "source" && selection.kind === "pinned" && <button type="button" onClick={() => setSelection({ kind: "automatic" })}>Follow current reply</button>}
+      >
+        {inspecting === "history" && <>
+          {lines.earlier.length > 0
+            ? <ol className="lines">
+              {lines.earlier.map((l) => <LineItem key={l.key} line={l} onSource={openSource} />)}
+            </ol>
+            : <p className="muted">Nothing earlier yet. The current question is on the board.</p>}
+          {view.topics.length > 0 && (
             <details className="review-topics">
               <summary>Topics in this review</summary>
               <ul>
@@ -272,30 +275,15 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
               </ul>
             </details>
           )}
-        </section>
-        <div ref={sourceColumn} className="review-source-column" data-source-open={sourceOpen}>
-        <RoomTools onNotebook={() => setNotebookOpen(true)} scene={appearance.scene} sourceOpen={sourceOpen} listening={listening} showSpeak={voice} speechAvailable={speech.supported && actions.includes("answer")} onSpeak={() => { speechToggle.current?.(); }} onSource={(origin) => {
-          sourceOrigin.current = origin ?? sourceToggle.current;
-          if (sourceOpen) closeSource();
-          else setSourceOpen(true);
-        }} />
-        <aside ref={sourceSurface} id="review-source" className="source-stand" aria-labelledby="source-heading" hidden={!sourceOpen}>
-          <div className="source-heading">
-            <p className="eyebrow">From the lecture</p>
-            <h2 ref={sourceHeading} tabIndex={-1} id="source-heading">Lecture evidence</h2>
-            <p className="source-selection-label">{selection.kind === "pinned" ? selection.label : "From the current tutor explanation or check"}</p>
-            <button type="button" onClick={closeSource}>Close source</button>
-            {selection.kind === "pinned" && <button type="button" onClick={() => setSelection({ kind: "automatic" })}>Follow current reply</button>}
-          </div>
+        </>}
+        {inspecting === "source" && <>
           <EvidencePane key={evidenceIds.join(",")} api={api} ids={evidenceIds} titles={titles} videos={videos} grouped shownFrame={shownDiagram?.frame ?? null} />
           {diagramTopic !== null && <div ref={diagramSection} tabIndex={-1} className="tutor-diagram">{shownDiagram
             ? <DiagramPanel key={shownDiagram.topicId} api={api} topic={shownDiagram} error={diagrams.error} onRequest={() => void diagrams.request(diagramTopic)} onCite={openSource} onClose={() => setDiagramTopic(null)} />
             : <div className="diagram-panel">{diagrams.error !== null ? <ErrorNote error={diagrams.error} retry={diagrams.reload} /> : <p className="muted" role="status">Loading the diagram...</p>}<button type="button" onClick={() => setDiagramTopic(null)}>Close diagram</button></div>}</div>}
           <ScopeEvidence api={api} view={view} titles={titles} onSource={openSource} />
-          <button type="button" className="source-return" onClick={returnToQuestion}>Back to the question</button>
-        </aside>
-        </div>
-      </div>
+        </>}
+      </RoomInspector>
     </main>
   );
 }
@@ -314,28 +302,32 @@ export function TopicChecklist({ topics, disabled, onStart }: { readonly topics:
   const noteId = useId();
   const toggle = (id: ConceptId) => setMarked((m) => { const next = new Set(m); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   return (
-    <form className="note topic-checklist" onSubmit={(e) => { e.preventDefault(); onStart(topics.filter((t) => marked.has(t.id)).map((t) => t.id), note.trim()); }}>
-      <h2 id={STARTING_POINT_HEADING}>Choose a starting point</h2>
-      <p className="muted">Mark any topic that feels fuzzy and the tutor starts there, then does a quick check on up to 3 of the others. Mark none and the tutor starts with open recall questions.</p>
-      <fieldset disabled={disabled}>
-        <legend>Topics that feel fuzzy (optional)</legend>
-        {topics.length === 0 && <p className="muted">No topics to list for this review.</p>}
-        <ul className="topic-list">
-          {topics.map((t) => (
-            <li key={t.id}>
-              <label>
-                <input type="checkbox" checked={marked.has(t.id)} onChange={() => toggle(t.id)} /> <strong>{t.label}</strong>
-                {t.summary !== "" && <span className="muted"> {t.summary}</span>}
-              </label>
-            </li>
-          ))}
-        </ul>
+    <form className="topic-checklist" aria-labelledby={STARTING_POINT_HEADING} onSubmit={(e) => { e.preventDefault(); onStart(topics.filter((t) => marked.has(t.id)).map((t) => t.id), note.trim()); }}>
+      <div className="setup-choices">
+        <h2 id={STARTING_POINT_HEADING}>Choose a starting point</h2>
+        <p className="muted">Mark any topic that feels fuzzy and the tutor starts there, then does a quick check on up to 3 of the others. Mark none and the tutor starts with open recall questions.</p>
+        <fieldset disabled={disabled}>
+          <legend>Topics that feel fuzzy (optional)</legend>
+          {topics.length === 0 && <p className="muted">No topics to list for this review.</p>}
+          <ul className="topic-list">
+            {topics.map((t) => (
+              <li key={t.id}>
+                <label>
+                  <input type="checkbox" checked={marked.has(t.id)} onChange={() => toggle(t.id)} /> <strong>{t.label}</strong>
+                  {t.summary !== "" && <span className="muted"> {t.summary}</span>}
+                </label>
+              </li>
+            ))}
+          </ul>
+        </fieldset>
+      </div>
+      <div className="setup-start">
         <label htmlFor={noteId}>Anything in particular that feels fuzzy? (optional)</label>
-        <textarea id={noteId} value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} />
+        <textarea id={noteId} value={note} maxLength={2000} disabled={disabled} onChange={(e) => setNote(e.target.value)} />
         <p className="actions">
-          <button type="submit" className="primary-action">{marked.size === 0 ? "Start review" : `Start with ${marked.size} marked topic${marked.size === 1 ? "" : "s"}`}</button>
+          <button type="submit" className="primary-action" disabled={disabled}>{marked.size === 0 ? "Start review" : `Start with ${marked.size} marked topic${marked.size === 1 ? "" : "s"}`}</button>
         </p>
-      </fieldset>
+      </div>
     </form>
   );
 }
@@ -358,7 +350,7 @@ export function UndeliveredNote({ unsent, failed, onRetry, onDiscard }: { readon
 
 function LineItem({ line, onSource, focusRef }: { readonly line: Line; readonly onSource: (ids: readonly EvidenceId[], label: string, origin: HTMLButtonElement) => void; readonly focusRef?: Ref<HTMLLIElement> }) {
   return (
-    <li className={`line ${line.speaker}`} {...(focusRef === undefined ? {} : { ref: focusRef, tabIndex: -1 })}>
+    <li className={`line ${line.speaker}`} {...(focusRef === undefined ? {} : { ref: focusRef, tabIndex: -1, "data-question": "" })}>
       <strong>{line.label}</strong>
       <p>{line.text}</p>
       {line.evidenceIds.length > 0 && <button type="button" className="citation" onClick={(e) => onSource(line.evidenceIds, `Source cited by this ${line.label.toLowerCase()}`, e.currentTarget)}>Lecture source · {line.evidenceIds.length} item{line.evidenceIds.length === 1 ? "" : "s"}</button>}
@@ -451,7 +443,7 @@ export function TurnStatusNote({ status }: { readonly status: TurnStatus }) {
 }
 
 export function Composer({
-  actions, disabled, sendError, speech, showSpeak = true, onSpeaking, onListeningChange, speechToggle, live, send,
+  actions, disabled, sendError, speech, showSpeak = true, onSpeaking, onListeningChange, live, send,
 }: {
   readonly actions: readonly ActionId[];
   readonly disabled: boolean;
@@ -461,7 +453,6 @@ export function Composer({
   readonly showSpeak?: boolean;
   readonly onSpeaking: () => void;
   readonly onListeningChange?: (listening: boolean) => void;
-  readonly speechToggle?: MutableRefObject<(() => void) | null>;
   /** The tutor turn in flight, for the status line. */
   readonly live?: Live | null;
   readonly send: (id: ActionId, text: string, modality: "speech" | "text") => Promise<boolean>;
@@ -517,11 +508,6 @@ export function Composer({
     });
   }
 
-  useEffect(() => {
-    if (speechToggle) speechToggle.current = toggleListening;
-    return () => { if (speechToggle) speechToggle.current = null; };
-  }, [speechToggle, listening, speech, onSpeaking]);
-
   async function submit(id: ActionId, text: string, how: "speech" | "text") {
     if (submitting.current) return;
     submitting.current = true;
@@ -551,12 +537,14 @@ export function Composer({
   const button = (id: ActionId) => <button key={id} type="button" disabled={disabled || (NEEDS_TEXT.has(id) && empty)} onClick={() => void fire(id)}>{ACTION_LABEL[id]}</button>;
   return (
     <div className="composer">
-      {sendError !== null && <p className="note note-error" role="alert">{sendError}</p>}
-      {speechError && <p className="note note-error" role="alert">Speech input: {speechError}</p>}
-      <TurnStatusNote status={status} />
+      <div className="composer-status">
+        {sendError !== null && <p className="note note-error" role="alert">{sendError}</p>}
+        {speechError && <p className="note note-error" role="alert">Speech input: {speechError}</p>}
+        <TurnStatusNote status={status} />
+      </div>
       {hasText && (
         <>
-          <label htmlFor={responseId}>Your response</label>
+          <label htmlFor={responseId}>Your thinking</label>
           <textarea
             id={responseId}
             value={draft}
