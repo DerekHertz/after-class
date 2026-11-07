@@ -17,7 +17,8 @@ import {
 import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, TurnStatus } from "./core";
 import type { Speaker, SpeechInput } from "./speech";
 import type { UnsentStore } from "./unsent";
-import { BundleInspector, ErrorNote, EvidencePane, Link, useAsync } from "./ui";
+import { BundleInspector, ErrorNote, EvidencePane, useAsync } from "./ui";
+import { CompletionPanel } from "./completion";
 import { DiagramPanel, ShowDiagramButton, useDiagrams } from "./diagram";
 import { currentQuestionTopic } from "./diagram-view";
 
@@ -143,7 +144,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           <Actions ids={actions.filter(id => id === "pause" || id === "resume" || id === "end")} disabled={streaming || state.unsent.length > 0} send={id => void controller.send(toAct(id, "", "text"))} />
         </div>
       </header>
-      <SaveBanner state={state} onRetry={() => void controller.save()} reviewId={reviewId} />
+      <SaveBanner state={state} onRetry={() => void controller.save()} reviewId={reviewId} onSource={openSource} />
       <ErrorNote error={state.loadError} retry={() => void controller.load()} />
       <div className={`review-workspace${sourceOpen ? "" : " source-closed"}`}>
         <section className="conversation-notebook" aria-labelledby="conversation-heading">
@@ -317,7 +318,8 @@ function LineItem({ line, onSource }: { readonly line: Line; readonly onSource: 
   );
 }
 
-export function SaveBanner({ state, onRetry, reviewId }: { readonly state: SessionState; readonly onRetry: () => void; readonly reviewId: ReviewId }) {
+/** The completion summary shows only when the backend reports the review saved; a pending or failed save shows Retry instead. */
+export function SaveBanner({ state, onRetry, reviewId, onSource }: { readonly state: SessionState; readonly onRetry: () => void; readonly reviewId: ReviewId; readonly onSource?: (ids: readonly EvidenceId[], label: string, origin: HTMLButtonElement) => void }) {
   const pending = state.saveError !== null || state.view?.saved === "save_pending";
   return (
     <>
@@ -331,12 +333,10 @@ export function SaveBanner({ state, onRetry, reviewId }: { readonly state: Sessi
           This review is not saved yet{state.saveError ? `: ${state.saveError}` : ""}. Retrying never makes a duplicate.{" "}
           <button type="button" disabled={state.saving} onClick={onRetry}>{state.saving ? "Saving..." : "Retry save"}</button>
         </p>
+      ) : state.view?.saved === "saved" ? (
+        <CompletionPanel view={state.view} reviewId={reviewId} savedSummary={state.savedSummary} justSaved={state.savedSummary !== null} onSource={onSource} />
       ) : (
-        state.view?.saved === "saved" && (
-          <p className="note">
-            Saved. <Link to={{ page: "record", reviewId }}>Open the record</Link>
-          </p>
-        )
+        state.saving && <p className="note" role="status">Saving this review to your notebook...</p>
       )}
     </>
   );
@@ -367,7 +367,7 @@ function ScopeBundle({ api, view, titles, onSource }: { readonly api: AppApi; re
 
 export function EndConfirm({ disabled, onConfirm, onCancel }: { readonly disabled: boolean; readonly onConfirm: () => void; readonly onCancel: () => void }) {
   return (
-    <span className="actions end-confirm" role="alertdialog" aria-label="End this review?">
+    <span className="actions end-confirm" role="alertdialog" aria-label="Finish and save this review?">
       <span>{END_CONFIRM_TEXT}</span>
       <button type="button" data-action="end-confirm" disabled={disabled} onClick={onConfirm}>{ACTION_LABEL.end}</button>
       <button type="button" data-action="end-cancel" onClick={onCancel}>Keep reviewing</button>

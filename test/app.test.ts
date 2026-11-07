@@ -829,9 +829,11 @@ describe("save banner", () => {
   const banner = (o: Partial<SessionState>) => renderToStaticMarkup(createElement(SaveBanner, { state: session(o), onRetry: () => {}, reviewId }));
 
   test("it says Saved only when the backend reports the review saved", () => {
-    expect(banner({ view: parsedReview({ saved: "saved" }) })).toContain("Saved.");
-    expect(banner({ view: parsedReview({ saved: "unsaved" }) })).not.toContain("Saved");
-    expect(banner({ view: parsedReview({ saved: "save_pending" }) })).not.toContain("Saved.");
+    expect(banner({ view: parsedReview({ saved: "saved" }) })).toContain("Review saved");
+    expect(banner({ view: parsedReview({ saved: "unsaved" }) })).not.toContain("saved<");
+    expect(banner({ view: parsedReview({ saved: "save_pending" }) })).not.toContain("Review saved");
+    expect(banner({ view: parsedReview({ saved: "unsaved" }), saving: true })).toContain("Saving this review to your notebook...");
+    expect(banner({ view: parsedReview({ saved: "unsaved" }), saving: true })).not.toContain("Review saved");
     expect(banner({ saveError: "offline" })).toContain("not saved yet: offline");
   });
 
@@ -1134,7 +1136,7 @@ describe("review composer", () => {
     expect(out).toContain(`id="${label![1]}"`);
     expect(out).toMatch(/<button[^>]*disabled=""[^>]*>Share my thinking<\/button>/);
     expect(out).toContain("Speech input is not available in this browser.");
-    expect(out).toContain(">End review</button>");
+    expect(out).toContain(">Finish &amp; save</button>");
   });
 
   test("a pending turn disables every action and a phase without answering has no answer field", () => {
@@ -1145,7 +1147,7 @@ describe("review composer", () => {
     const paused = composer(["resume", "end"]);
     expect(paused).not.toContain("<textarea");
     expect(paused).toContain(">Resume</button>");
-    expect(paused).toContain(">End review</button>");
+    expect(paused).toContain(">Finish &amp; save</button>");
   });
 });
 

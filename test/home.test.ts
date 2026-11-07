@@ -74,9 +74,11 @@ describe("ending a review asks first", () => {
 
   test("the confirm step reads as the spec says and offers both buttons", () => {
     const html = renderToStaticMarkup(createElement(EndConfirm, { disabled: false, onConfirm() {}, onCancel() {} }));
-    expect(END_CONFIRM_TEXT).toBe("End this review? You can't reopen it.");
-    expect(html).toContain("End this review? You can&#x27;t reopen it.");
-    expect(html).toContain(">End review<");
+    // #116: the learner sees what stops (the conversation) and what stays (the notebook record and a read-only review).
+    expect(END_CONFIRM_TEXT).toBe("Finish and save this review? The conversation ends and can't be continued. Your notes and results stay in your notebook, and you can reread this review.");
+    expect(html).toContain("The conversation ends and can&#x27;t be continued.");
+    expect(html).toContain('aria-label="Finish and save this review?"');
+    expect(html).toContain(">Finish &amp; save<");
     expect(html).toContain(">Keep reviewing<");
   });
 });
