@@ -157,8 +157,9 @@
 
 /* Full scene: the art fills the window edge to edge. The stage is the plate below its painted top bar, at the size that
    covers the window within CROP_LIMIT, anchored to the bottom so the desk stays whole. Every control sits in stage
-   percentages, so it stays on its surface whatever the window's shape. Past the crop limits a blurred copy of the plate
-   fills the rest of the window. */
+   percentages, so it stays on its surface whatever the window's shape. Past the crop limits a dimmed, unblurred copy of the plate
+   fills the rest of the window. The scene clips overflow rather than hiding it, so it is never a scroll container that
+   focus or a resize could offset; only the board and desk scroll. */
 @media (min-width: 900px) and (min-height: 560px) {
   .scene-shell:has(.front-row) .scene-masthead { position: absolute; inset: 0 0 auto; pointer-events: none; }
   .scene-shell:has(.front-row) .scene-masthead > * { pointer-events: auto; }
@@ -170,9 +171,9 @@
     --fr-stage-h: calc(var(--fr-stage-w) / var(--fr-ratio));
     --fr-inset-x: max(0px, (var(--fr-stage-w) - 100cqw) / 2);
     --fr-inset-top: max(0px, var(--fr-stage-h) - 100cqh);
-    height: 100dvh; overflow: hidden; container-type: size;
+    height: 100dvh; overflow: clip; container-type: size;
   }
-  .front-row-scene::before { content: ""; position: absolute; inset: -32px; background: var(--fr-plate) 50% 100% / cover no-repeat; filter: blur(16px) brightness(.8); }
+  .front-row-scene::before { content: ""; position: absolute; inset: 0; background: var(--fr-plate) 50% 100% / cover no-repeat; filter: brightness(.8); }
   .front-row-stage { position: absolute; bottom: 0; left: 50%; translate: -50% 0; width: var(--fr-stage-w); height: var(--fr-stage-h); background: var(--fr-plate) 0 100% / 100% var(--fr-plate-height) no-repeat; }
   /* Where a wide window crops the top of the art, the board's text starts below the navigation. */
   .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { position: absolute; left: var(--fr-board-left); width: var(--fr-board-width); top: max(var(--fr-board-top), calc(var(--fr-inset-top) + var(--fr-nav-reserve))); bottom: calc(100% - var(--fr-board-top) - var(--fr-board-height)); overflow: auto; overscroll-behavior: contain; }

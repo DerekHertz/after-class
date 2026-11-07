@@ -46,6 +46,8 @@ For a guided capture check, see the [capture probe](docs/experiments/01-capture-
 
 Run `bun run typecheck` and `bun test` for the TypeScript checks and test suite. Capture reliability, model quality, and learning effectiveness remain open evaluation questions. The [review flow and evaluation criteria](docs/flows/after-class.md) describe how the project tests those assumptions.
 
+For the front-row room (#129), the last layout fix (the desktop scene clips rather than hides overflow, so it can no longer be scrolled out of place, and the backdrop art is no longer blurred) was checked with `bun run typecheck`, `bun test` (1650 tests, 0 failures), `bun run build:app` and `bun run scripts/preview-ui.ts --build-only`. Browser verification is done separately.
+
 - [Product requirements](docs/After%20Class%20-%20MVP%20PRD.md)
 - [Architecture and module boundaries](src/MODULES.md)
 - [Lifecycle models in TLA+](docs/flows/model/)
