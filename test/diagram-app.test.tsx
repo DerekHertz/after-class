@@ -217,7 +217,7 @@ describe("a notebook topic: its question, answer and status before its frame and
   const contexts = new Map([[REVIEW, { state: "ready", view } as const]]);
   const citations = { data: null, error: null, loading: false, reload: noop };
   const section = (o: Observation, diagram: TopicDiagram, label: string) => renderToStaticMarkup(createElement(TopicSection, {
-    api, name: label, headingId: "h", contexts, retry: noop, deleted: new Set<string>(), citations, run: async () => {},
+    api, name: label, headingId: "h", contexts, retry: noop, deleted: new Set<string>(), citations, drafts: new Map(), setDraft: noop, run: async () => {},
     topic: { conceptId: o.conceptIds[0]!, label, notes: [], observations: [o], revisit: false, disputed: false },
     diagram: { kind: "ready", topic: diagram, error: null, request: noop },
   }));

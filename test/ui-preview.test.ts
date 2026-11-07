@@ -69,7 +69,7 @@ describe("UI preview fixtures", () => {
       const diagrams = await api.diagrams(ids.review);
       expect(diagrams.length).toBe(2);
       const { lectures } = await api.lectures();
-      renderToStaticMarkup(createElement(RecordBody, { api, data: record, lectures, run: async () => {} }));
+      renderToStaticMarkup(createElement(RecordBody, { api, data: record, lectures, run: async () => {}, drafts: new Map(), setDraft: () => {} }));
       // Every saved review in the notebook names its lecture, topics and questions, so an unnamed topic in the preview means a product failure, not a fixture gap.
       const listed = new Set(lectures.flatMap((l) => l.reviews.map((r) => r.reviewId)));
       for (const reviewId of new Set([...record.notes, ...record.observations].map((n) => n.reviewId))) {

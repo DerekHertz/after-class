@@ -34,7 +34,7 @@ describe("notebook pages", () => {
   });
 
   test("record keeps learner, tutor, source and edits distinct and deleted evidence explicit", () => {
-    const html = renderToStaticMarkup(createElement(RecordBody, { api, data, lectures: null, run: async () => {} }));
+    const html = renderToStaticMarkup(createElement(RecordBody, { api, data, lectures: null, run: async () => {}, drafts: new Map(), setDraft: () => {} }));
     expect(html).toContain("My first explanation.");
     expect(html).toContain('class="author-learner"');
     expect(html).toContain('class="author-tutor"');
@@ -48,7 +48,7 @@ describe("notebook pages", () => {
   });
 
   test("an empty notebook explains where notes come from and offers one next step, with no empty sections", () => {
-    const html = renderToStaticMarkup(createElement(RecordBody, { api, data: { notes: [], observations: [], links: [], unavailableEvidence: [] }, lectures: [], run: async () => {} }));
+    const html = renderToStaticMarkup(createElement(RecordBody, { api, data: { notes: [], observations: [], links: [], unavailableEvidence: [] }, lectures: [], run: async () => {}, drafts: new Map(), setDraft: () => {} }));
     expect(html).toContain("Your notebook is empty");
     expect(html).toContain("When you save a review");
     expect(html.match(/<a /g)).toHaveLength(1);

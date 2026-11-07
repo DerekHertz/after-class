@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { ConceptId, EvidenceId, ReviewId } from "../shared/ids";
+import type { ConceptId, EvidenceId, NoteId, ReviewId } from "../shared/ids";
 import type { DiagramFrame, EvidenceBundle, LinkDecision, LinkType, Note, Observation, ObservationStatus, RecordView, TopicDiagram, UsageSummary } from "../shared/domain";
 import type { LecturesResponse } from "../shared/wire";
 import type { AppApi } from "./api";
@@ -8,8 +8,8 @@ import { formatClock, formatInterval, noteView, observationRow, STATUS_LABEL, us
 import type { SourceTitles } from "./core";
 import { canChangeObservation, changeObservation, DISPUTE_CHOICES, loadReviewContext, observationContext } from "./observation-view";
 import type { DisputeChoice, ObservationContext, ReviewContext } from "./observation-view";
-import { focusLectures, notebookLectures, NOTEBOOK_VIEWS, TOPIC_SECTIONS, topicName, viewCounts } from "./notebook-view";
-import type { NotebookLecture, NotebookTopic, NotebookViewName } from "./notebook-view";
+import { focusLectures, notebookLectures, NOTEBOOK_VIEWS, TOPIC_SECTIONS, topicName, viewCounts, withDraft } from "./notebook-view";
+import type { NoteDrafts, NotebookLecture, NotebookTopic, NotebookViewName } from "./notebook-view";
 import { ErrorNote, EvidencePane, FrameImage, Link, useAsync } from "./ui";
 import { DiagramSummaryView, POLL_MS } from "./diagram";
 import { frameLink, NO_FRAME_NOTE, shouldPollDiagrams } from "./diagram-view";
@@ -22,6 +22,7 @@ type CitationDetails = Pick<EvidenceBundle, "frames" | "passages">;
 type Citations = ReturnType<typeof useAsync<CitationDetails | null>>;
 type Run = (a: () => Promise<void>) => Promise<void>;
 type Lectures = LecturesResponse["lectures"];
+type SetDraft = (id: NoteId, text: string | null) => void;
 
 const decisionText = (d: LinkDecision): string => (typeof d === "string" ? d : `corrected to ${d.corrected.replaceAll("_", " ")}`);
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -33,6 +34,8 @@ export function RecordScreen({ api, reviewId }: { readonly api: AppApi; readonly
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const pending = useRef(false);
+  const [drafts, setDrafts] = useState<NoteDrafts>(new Map());
+  const setDraft = useCallback<SetDraft>((id, text) => setDrafts((d) => withDraft(d, id, text)), []);
 
   async function run(action: () => Promise<void>) {
     if (pending.current) return;
@@ -67,7 +70,7 @@ export function RecordScreen({ api, reviewId }: { readonly api: AppApi; readonly
       {saving && <p className="page-loading" role="status">Saving your change...</p>}
       {record.data && grouped && (
         <fieldset className="record-content" disabled={saving} aria-label="Saved learning record">
-          <RecordBody api={api} data={record.data} lectures={lectures.data?.lectures ?? null} run={run} />
+          <RecordBody api={api} data={record.data} lectures={lectures.data?.lectures ?? null} run={run} drafts={drafts} setDraft={setDraft} />
         </fieldset>
       )}
     </main>
@@ -76,9 +79,17 @@ export function RecordScreen({ api, reviewId }: { readonly api: AppApi; readonly
 
 /**
  * The notebook's contents: a focused-view switch, a contents list, then each lecture with its topics. `lectures` is the
- * lecture list, or null when it could not be read; each review then stands as its own lecture without a title.
+ * lecture list, or null when it could not be read; each review then stands as its own lecture without a title. `drafts`
+ * are the learner's unsaved edits, held by the caller so a view or a regrouping that remounts a topic keeps them.
  */
-export function RecordBody({ api, data, lectures, run }: { readonly api: AppApi; readonly data: RecordView; readonly lectures: Lectures | null; readonly run: Run }) {
+export function RecordBody({ api, data, lectures, run, drafts, setDraft }: {
+  readonly api: AppApi;
+  readonly data: RecordView;
+  readonly lectures: Lectures | null;
+  readonly run: Run;
+  readonly drafts: NoteDrafts;
+  readonly setDraft: SetDraft;
+}) {
   const deleted = new Set<string>(data.unavailableEvidence.map((d) => d.id));
   const cited = [...new Set(data.notes.flatMap((note) => [...note.evidence, ...note.generated.flatMap((segment) => segment.evidence)]))].filter((id) => !deleted.has(id)).sort();
   const citationKey = cited.join(",");
@@ -149,6 +160,8 @@ export function RecordBody({ api, data, lectures, run }: { readonly api: AppApi;
                 diagram={topicDiagram(lecture, topic, diagrams)}
                 deleted={deleted}
                 citations={citations}
+                drafts={drafts}
+                setDraft={setDraft}
                 run={run}
               />
             ))}
@@ -238,7 +251,7 @@ function topicDiagram(lecture: NotebookLecture, topic: NotebookTopic, diagrams: 
 }
 
 /** One topic: the learner's explanation, the help they used, its status, then its source, under one heading. */
-export function TopicSection({ api, topic, name, headingId, contexts, retry, diagram, deleted, citations, run }: {
+export function TopicSection({ api, topic, name, headingId, contexts, retry, diagram, deleted, citations, drafts, setDraft, run }: {
   readonly api: AppApi;
   readonly topic: NotebookTopic;
   readonly name: string;
@@ -248,6 +261,8 @@ export function TopicSection({ api, topic, name, headingId, contexts, retry, dia
   readonly diagram: TopicDiagramState;
   readonly deleted: ReadonlySet<string>;
   readonly citations: Citations;
+  readonly drafts: NoteDrafts;
+  readonly setDraft: SetDraft;
   readonly run: Run;
 }) {
   const help = topic.notes.flatMap((n) => noteView(n).segments.filter((s) => s.author === "tutor"));
@@ -265,7 +280,7 @@ export function TopicSection({ api, topic, name, headingId, contexts, retry, dia
       {topic.notes.length > 0 && (
         <section className="topic-part" aria-label={`${TOPIC_SECTIONS.explanation}: ${name}`}>
           <h4>{TOPIC_SECTIONS.explanation}</h4>
-          {topic.notes.map((note) => <NoteExplanation key={note.id} api={api} note={note} topic={name} run={run} />)}
+          {topic.notes.map((note) => <NoteExplanation key={note.id} api={api} note={note} topic={name} draft={drafts.get(note.id) ?? null} setDraft={setDraft} run={run} />)}
         </section>
       )}
       {help.length > 0 && (
@@ -290,30 +305,35 @@ export function TopicSection({ api, topic, name, headingId, contexts, retry, dia
 }
 
 /** The learner's own words for one note, with their edit beside the original and never replacing it. */
-function NoteExplanation({ api, note, topic, run }: { readonly api: AppApi; readonly note: Note; readonly topic: string; readonly run: Run }) {
+function NoteExplanation({ api, note, topic, draft, setDraft, run }: {
+  readonly api: AppApi;
+  readonly note: Note;
+  readonly topic: string;
+  readonly draft: string | null;
+  readonly setDraft: SetDraft;
+  readonly run: Run;
+}) {
   const editId = useId();
   const view = noteView(note);
   const mine = view.segments.filter((s) => s.author === "learner");
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(view.userEdit ?? "");
   return (
     <div className="record-note">
       {mine.map((s, i) => <p key={i} className="author-learner"><strong>{s.label}: </strong>{s.text}</p>)}
       {mine.length === 0 && view.userEdit === null && <p className="muted">No explanation of yours was saved for this topic.</p>}
-      {view.userEdit !== null && !editing && <p className="author-learner"><strong>Your edit: </strong>{view.userEdit}</p>}
-      {editing ? (
+      {view.userEdit !== null && draft === null && <p className="author-learner"><strong>Your edit: </strong>{view.userEdit}</p>}
+      {draft !== null ? (
         <div>
           <label htmlFor={editId}>Your edit</label>
           <p className="muted">Your wording is kept alongside the original contributions.</p>
-          <textarea id={editId} value={draft} rows={4} onChange={(e) => setDraft(e.target.value)} />
+          <textarea id={editId} value={draft} rows={4} onChange={(e) => setDraft(note.id, e.target.value)} />
           <div className="actions">
-            <button type="button" onClick={() => void run(async () => { await api.editNote(note.id, draft); setEditing(false); })}>Save edit</button>
-            <button type="button" onClick={() => { setDraft(view.userEdit ?? ""); setEditing(false); }}>Cancel</button>
+            <button type="button" onClick={() => void run(async () => { await api.editNote(note.id, draft); setDraft(note.id, null); })}>Save edit</button>
+            <button type="button" onClick={() => setDraft(note.id, null)}>Cancel</button>
           </div>
         </div>
       ) : (
         <div className="actions">
-          <button type="button" aria-label={`Edit your note on ${topic}`} onClick={() => setEditing(true)}>Edit</button>
+          <button type="button" aria-label={`Edit your note on ${topic}`} onClick={() => setDraft(note.id, view.userEdit ?? "")}>Edit</button>
           <button type="button" aria-label={`Delete your note on ${topic}`} onClick={() => window.confirm("Delete this note? Its help and source lines go with it.") && void run(() => api.deleteNote(note.id))}>Delete</button>
         </div>
       )}
