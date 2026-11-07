@@ -1,6 +1,43 @@
-# Front-row pixel skins review
+# Source folio and history notebook review
 
 final result: passed
+
+Implementation QA of product-code commit `431e66d437c9cfd7ce26fef4971be647cc2dbb81`, limited to the fixture states below. This supersedes the earlier below-room source/history panels described in the retained stage review. It is not merge authorization or Derek's visual sign-off.
+
+## Result and visual evidence
+
+Source now opens as a wood-and-brass lecture folio, and history as a navy ring-bound notebook. Both are bounded objects over the selected room, with real pixel-font text and controls on the parchment. A single page scrolls between fixed heading and return controls. The selected room remains visible around the object. Cited replies no longer automatically open source.
+
+| Object | Generated raster | Desktop rendering | Phone rendering |
+| --- | --- | --- | --- |
+| Source | [Folio](src/app/assets/room-objects/source-folio.png) | [Harbor 1280x720](docs/design/front-row/review/room-objects/source-desktop.jpg) | [390x844](docs/design/front-row/review/room-objects/source-phone.jpg) |
+| History | [Notebook](src/app/assets/room-objects/review-notebook.png) | [Harbor 1280x720](docs/design/front-row/review/room-objects/history-desktop.jpg) | [390x844](docs/design/front-row/review/room-objects/history-phone.jpg) |
+
+The 1448x1086 original rasters and their desktop captures were inspected together in the same comparison input. Nine-slice rendering preserves clips, corners and the notebook ribbon; the ring edge repeats on a tall phone. The phone intentionally uses a taller page to retain readable text. No visible alpha fringe, stretched corner, generic white card or unwanted nested history scroll was observed. Text stays inside the paper, and source links and provenance remain legible. [Asset prompts and provenance](docs/design/front-row/room-object-art.md).
+
+Additional checks: [classroom folio at 1440x900](docs/design/front-row/review/room-objects/source-classroom.jpg), [canal notebook at 1440x900](docs/design/front-row/review/room-objects/history-canal.jpg), and [notebook at 844x390](docs/design/front-row/review/room-objects/history-landscape.jpg). Source also passed the 844x390 visual check. Close and Back remained visible at every tested size. Captures use the matching CSS viewport dimensions; all are viewport screenshots, with no full-page fixed-background artifact.
+
+## Behavior and code review
+
+- Initial cited review kept the room unobstructed and exposed Open source · 2 cited.
+- Draft text survived source, history, diagram and room changes. Close/Escape restored the opening control; Back to the question focused the current exchange.
+- Long history scrolled inside the notebook. The document remained 720px high at the 720px desktop viewport. In the long-content phone fixture the existing page was 972px both open and closed; opening the object did not add page height. The source page had no horizontal overflow.
+- Scope browsing switched to the selected passage, updated provenance, and focused the folio heading. Closing reset the source selection to follow the current reply.
+- History → Topics → Show diagram switched the same dialog to source and focused the diagram. Escape returned to the original history control, even though the intermediate topic control was unmounted.
+- All three room choices worked with the objects. The six independent companion choices remain in the unchanged menu; the previous stage review exercised them.
+- No browser console errors or warnings were observed in these flows. A separate read-only reviewer found no actionable P0/P1/P2 issues in the new diff, including focus, selection and modal lifecycle.
+
+Local Claude ran typecheck, app build, fixture build and the full suite: 1650 pass, 4 todo, 0 fail. Its completed run is included in the [token report](docs/design/front-row/token-report.md). The coordinator rebuilt the isolated preview and performed the browser checks above against that code.
+
+## Limits
+
+This used deterministic fixtures at http://127.0.0.1:8820/, not live provider calls, voice or physical mobile devices. Exhaustive localization, browser zoom and every failure combination remain untested. The separate saved-record My notebook dialog was not redesigned; the older focus limitation below refers to that dialog, not the new history notebook. No project verification skill was found, so no formal pstack shipping verdict is claimed. PR #130 remains a draft stacked on #128.
+
+---
+
+# Front-row pixel skins review
+
+Previous room-stage result: passed
 
 This is an implementation QA result for the tested fixture states, not a merge authorization or Derek's visual sign-off. The reviewed product-code commit is `494faae7c492f7741171eb56d6687b2084c5d363`. This report and its screenshots are a documentation-only follow-up.
 
