@@ -1,9 +1,11 @@
-import { useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { EvidenceId, ReviewId } from "../shared/ids";
-import type { EvidenceBundle, LinkDecision, LinkType, Note, ObservationStatus, RecordView, UsageSummary } from "../shared/domain";
+import type { EvidenceBundle, LinkDecision, LinkType, Note, Observation, ObservationStatus, RecordView, UsageSummary } from "../shared/domain";
 import type { AppApi } from "./api";
 import { formatClock, formatInterval, noteView, observationRow, STATUS_LABEL, usageRows } from "./core";
 import type { SourceTitles } from "./core";
+import { canChangeObservation, changeObservation, DISPUTE_CHOICES, loadReviewContext, observationContext } from "./observation-view";
+import type { DisputeChoice, ObservationContext, ReviewContext } from "./observation-view";
 import { ErrorNote, EvidencePane, Link, useAsync } from "./ui";
 import { IllustratedReview } from "./diagram";
 
@@ -92,6 +94,7 @@ export function RecordBody({ api, data, run }: { readonly api: AppApi; readonly 
     const bundles = await Promise.all(batches.map((ids) => api.evidence({ ids })));
     return { frames: bundles.flatMap((bundle) => bundle.frames), passages: bundles.flatMap((bundle) => bundle.passages) };
   }, [api, citationKey]);
+  const reviews = useReviewContexts(api, [...new Set(data.observations.map((o) => o.reviewId))]);
   return (
     <>
       <section className="record-section" aria-labelledby="record-notes-heading">
@@ -102,33 +105,12 @@ export function RecordBody({ api, data, run }: { readonly api: AppApi; readonly 
 
       <section className="record-section" aria-labelledby="record-observations-heading">
       <h2 id="record-observations-heading">What the tutor observed</h2>
-      <p className="muted">These observations describe the review. You can correct them or settle an open dispute.</p>
+      <p className="muted">These observations describe the review. Each one shows its topic, your answer and the tutor's reasoning, so you can correct it or settle an open dispute.</p>
       {data.observations.length === 0 && <p className="muted">No observations.</p>}
       <ul className="record-list">
-        {data.observations.map((o) => {
-          const row = observationRow(o);
-          return (
-            <li key={o.id}>
-              <strong>{row.status}</strong>
-              {row.note && <span className="muted"> {row.note}</span>}
-              <div className="actions">
-                <label>
-                  Correct status{" "}
-                  <select value="" onChange={(e) => e.target.value && void run(() => api.overrideObservation(o.id, e.target.value as ObservationStatus))}>
-                    <option value="">Choose...</option>
-                    {OVERRIDES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-                  </select>
-                </label>
-                {row.disputeOpen && (
-                  <>
-                    <button type="button" onClick={() => void run(() => api.resolveDispute(o.id, "learner_was_right"))}>The tutor was wrong</button>
-                    <button type="button" onClick={() => void run(() => api.resolveDispute(o.id, "it_was_my_gap"))}>It was my gap</button>
-                  </>
-                )}
-              </div>
-            </li>
-          );
-        })}
+        {data.observations.map((o, index) => (
+          <ObservationItem key={o.id} api={api} observation={o} number={index + 1} context={observationContext(o, reviews.contexts.get(o.reviewId))} deleted={deleted} retry={() => reviews.retry(o.reviewId)} run={run} />
+        ))}
       </ul>
 
       </section>
@@ -153,6 +135,100 @@ export function RecordBody({ api, data, run }: { readonly api: AppApi; readonly 
       </ul>
       </section>
     </>
+  );
+}
+
+/** Loads each review's view on its own, so a failed review shows its own retry while the others keep their context. */
+function useReviewContexts(api: AppApi, reviewIds: readonly ReviewId[]) {
+  const [contexts, setContexts] = useState<ReadonlyMap<ReviewId, ReviewContext>>(new Map());
+  const requests = useRef(new Map<ReviewId, number>());
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const load = useCallback((id: ReviewId) => {
+    const request = (requests.current.get(id) ?? 0) + 1;
+    requests.current.set(id, request);
+    setContexts((m) => new Map(m).set(id, { state: "loading" }));
+    void loadReviewContext(api, id).then((context) => {
+      if (mounted.current && requests.current.get(id) === request) setContexts((m) => new Map(m).set(id, context));
+    });
+  }, [api]);
+  const key = reviewIds.join(",");
+  useEffect(() => {
+    for (const id of reviewIds) if (!requests.current.has(id)) load(id);
+  }, [load, key]);
+  return { contexts, retry: load };
+}
+
+export function ObservationItem({ api, observation: o, number, context, deleted, retry, run }: {
+  readonly api: AppApi;
+  readonly observation: Observation;
+  readonly number: number;
+  readonly context: ObservationContext;
+  readonly deleted: ReadonlySet<string>;
+  readonly retry: () => void;
+  readonly run: (a: () => Promise<void>) => Promise<void>;
+}) {
+  const headingId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [choice, setChoice] = useState<DisputeChoice>("keep");
+  const [showEvidence, setShowEvidence] = useState(false);
+  const row = observationRow(o);
+  const ready = canChangeObservation(context);
+  const details = ready ? context.details : null;
+  const name = details?.topic ?? `Observation ${number}`;
+  const evidence = details?.evidence.filter((id) => !deleted.has(id)) ?? [];
+
+  async function change(action: () => Promise<void>) {
+    if (await changeObservation(context, run, action)) heading.current?.focus();
+  }
+
+  return (
+    <li className="record-observation" aria-labelledby={headingId}>
+      <h3 id={headingId} ref={heading} tabIndex={-1}>{name}</h3>
+      <p><strong>Status: {row.status}</strong>{row.note && <span className="muted"> {row.note}</span>}</p>
+      {context.kind === "loading" && <p className="muted" role="status">Loading the topic, question and your answer...</p>}
+      {context.kind === "failed" && <ErrorNote error={`The topic, question and your answer could not be loaded: ${context.error}`} retry={retry} />}
+      {context.kind === "incomplete" && <p className="muted">The saved review no longer shows the {context.missing.join(" or ")} for this observation, so it can't be changed here. <Link to={{ page: "review", id: o.reviewId }}>Revisit review</Link></p>}
+      {details && (
+        <dl className="observation-context">
+          <dt>{details.kind}</dt><dd>{details.question}</dd>
+          <dt>Your answer</dt><dd className="author-learner">{details.answers.length > 0 ? details.answers.map((a, i) => <p key={i}>{a}</p>) : "No answer recorded."}</dd>
+          {details.dispute !== null && <><dt>Your dispute</dt><dd className="author-learner">{details.dispute}</dd></>}
+          <dt>Tutor's judgment</dt><dd className="author-tutor">Proposed "{details.proposed}".{details.reasoning !== null && <> {details.reasoning}</>}</dd>
+        </dl>
+      )}
+      {details && (evidence.length > 0 ? (
+        <>
+          <button type="button" aria-expanded={showEvidence} onClick={() => setShowEvidence(!showEvidence)}>{showEvidence ? "Hide lecture evidence" : `Show lecture evidence (${evidence.length})`}</button>
+          {showEvidence && <section className="record-evidence" aria-label={`Lecture evidence for ${details.topic}`}><EvidencePane api={api} ids={evidence} titles={noTitles} /></section>}
+        </>
+      ) : <p className="muted">{details.evidence.length > 0 ? "You deleted the evidence the tutor cited here." : "The tutor cited no lecture evidence on this question."}</p>)}
+      {!ready && <p className="muted">You can change this observation once its topic, question and answer are shown.</p>}
+      <div className="actions">
+        <label>
+          Correct status{" "}
+          <select aria-label={`Correct status for ${name}`} value="" disabled={!ready} onChange={(e) => { const status = e.target.value as ObservationStatus | ""; if (status) void change(() => api.overrideObservation(o.id, status)); }}>
+            <option value="">Choose...</option>
+            {OVERRIDES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+          </select>
+        </label>
+      </div>
+      {row.disputeOpen && (
+        <fieldset className="dispute-decision" disabled={!ready}>
+          <legend>Settle the dispute about {name}</legend>
+          {DISPUTE_CHOICES.map((c) => (
+            <label key={c.value} className="dispute-choice">
+              <input type="radio" name={`${headingId}-dispute`} value={c.value} checked={choice === c.value} onChange={() => setChoice(c.value)} />
+              <span><strong>{c.label}</strong> <span className="muted">{c.meaning}</span></span>
+            </label>
+          ))}
+          <button type="button" disabled={choice === "keep"} onClick={() => { if (choice !== "keep") { const outcome = choice; void change(() => api.resolveDispute(o.id, outcome)); } }}>Save decision</button>
+        </fieldset>
+      )}
+    </li>
   );
 }
 
