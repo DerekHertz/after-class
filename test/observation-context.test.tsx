@@ -8,7 +8,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { canChangeObservation, changeObservation, loadReviewContext, observationContext } from "../src/app/observation-view";
 import type { ObservationContext, ReviewContext } from "../src/app/observation-view";
 import { ObservationItem } from "../src/app/record";
-import type { Observation } from "../src/shared/domain";
+import type { Observation, Turn } from "../src/shared/domain";
+import { stableId } from "../src/shared/ids";
 import { createFixture, ids } from "../scripts/ui-preview/fixtures";
 import type { Fixture } from "../scripts/ui-preview/fixtures";
 
@@ -48,6 +49,21 @@ describe("observation context", () => {
       reasoning: "The order is right, but the answer did not say that it removes the circular wait.",
       evidence: [ids.laterPassage],
     } });
+  });
+
+  test("the reasoning is the tutor's recorded diagnosis, not its spoken text or a later explanation", async () => {
+    const fixture = createFixture("record");
+    const [o] = (await fixture.api.record({})).observations;
+    const review = await loadReviewContext(fixture.api, ids.review);
+    if (review.state !== "ready" || o === undefined) throw new Error("fixture review should load");
+    expect(observationContext(o, review)).toMatchObject({ kind: "ready", details: { reasoning: null } });
+    const help = review.view.turns.findIndex((t) => t.actor === "tutor" && t.move.kind === "explain");
+    const explain = review.view.turns[help]!;
+    if (explain.actor !== "tutor") throw new Error("fixture thread should have an explanation");
+    const hypothesis = "Treats each thread waiting as enough for deadlock, without either one holding what the other needs.";
+    const diagnosis: Turn = { ...explain, id: stableId("turn", "diagnosis"), move: { kind: "diagnose", threadId: ids.thread, hypothesis, evidence: [ids.passage] }, say: "Nearly." };
+    const turns = [...review.view.turns.slice(0, help), diagnosis, ...review.view.turns.slice(help)];
+    expect(observationContext(o, { state: "ready", view: { ...review.view, turns } })).toMatchObject({ kind: "ready", details: { reasoning: hypothesis } });
   });
 
   test("pending, failed and incomplete reviews give a row no usable context", async () => {
