@@ -1,6 +1,17 @@
 import { resolve, join, extname } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
 
+import { createFixture, scenarios } from "./ui-preview/fixtures";
+
+// Startup check: every scenario's fixtures must parse against the current wire schemas before anything is served.
+for (const scenario of scenarios) {
+  try {
+    createFixture(scenario);
+  } catch (e) {
+    throw new Error(`UI preview fixture "${scenario}" no longer matches the wire schemas:\n${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 const root = resolve(import.meta.dir, "..");
 const out = join(root, "dist/ui-preview");
 mkdirSync(out, { recursive: true });
