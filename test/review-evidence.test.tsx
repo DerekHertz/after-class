@@ -120,7 +120,7 @@ describe("the folio and the notebook open over the room, one at a time, only whe
     expect(html).toBe('<dialog class="room-object"></dialog>');
   });
 
-  test("the source button says how much the current reply cites, without opening anything", () => {
+  test("the folio on the desk is named for how much the current reply cites, without opening anything", () => {
     expect(sourceButtonLabel(0)).toBe("Open source");
     expect(sourceButtonLabel(1)).toBe("Open source · 1 cited");
     expect(sourceButtonLabel(3)).toBe("Open source · 3 cited");

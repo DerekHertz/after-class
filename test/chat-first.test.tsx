@@ -89,8 +89,8 @@ describe("Speak controls", () => {
   });
   test("the room adds no Speak control of its own, so voice off leaves no Speak anywhere in the scene", () => {
     const html = (showSpeak: boolean) => renderToStaticMarkup(createElement(FrontRowScene, {
-      scene: "last-desk", appearance: { companion: "mote", visible: true, motion: "system" }, activity: "idle", onNotebook() {},
-      layout: { kind: "review", board: "Why?", desk: createElement(Composer, { actions: ["answer"], disabled: false, sendError: null, speech: quiet, onSpeaking() {}, send: async () => true, showSpeak }) },
+      scene: "last-desk", appearance: { companion: "mote", visible: true, motion: "system" }, activity: "idle",
+      layout: { kind: "review", board: "Why?", desk: createElement(Composer, { actions: ["answer"], disabled: false, sendError: null, speech: quiet, onSpeaking() {}, send: async () => true, showSpeak }), objects: { cited: 0, open() {} } },
     }));
     expect(html(false)).not.toContain("Speak");
     expect(html(true).match(/>Speak</g)).toHaveLength(1);

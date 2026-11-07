@@ -21,7 +21,7 @@ import { BundleInspector, ErrorNote, EvidencePane, useAsync } from "./ui";
 import { CompletionPanel } from "./completion";
 import { DiagramPanel, ShowDiagramButton, useDiagrams } from "./diagram";
 import { currentQuestionTopic } from "./diagram-view";
-import { RoomInspector, returnTarget, sourceButtonLabel } from "./room-object";
+import { RoomInspector, returnTarget } from "./room-object";
 import type { Inspecting, PutDown, RoomObject } from "./room-object";
 
 export type ReviewDeps = { readonly api: AppApi; readonly speaker: Speaker; readonly speech: SpeechInput; readonly unsent: UnsentStore };
@@ -43,6 +43,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const [selection, setSelection] = useState<SourceSelection>({ kind: "automatic" });
   const [inspecting, setInspecting] = useState<Inspecting>(null);
   const [notebookOpen, setNotebookOpen] = useState(false);
+  const savedNotes = useRef<HTMLButtonElement>(null);
   const [diagramTopic, setDiagramTopic] = useState<ConceptId | null>(null);
   const diagrams = useDiagrams(api, reviewId);
   const [listening, setListening] = useState(false);
@@ -105,6 +106,12 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     else diagrams.reload();
   }
 
+  /** The saved-notes dialog unmounts on close, so focus is put back on the control that opened it. */
+  function closeNotebook() {
+    setNotebookOpen(false);
+    requestAnimationFrame(() => savedNotes.current?.focus());
+  }
+
   /** Puts the object down. The source follows the current reply again next time it is picked up. */
   function putDown(to: PutDown) {
     const question = currentQuestion.current ?? board.current;
@@ -145,7 +152,6 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const canRetry = !streaming && (state.unsent.length > 0 || unanswered !== null || owedLearnerTurn(view) !== null || state.live?.status === "failed");
 
   const questionMarker = view.state.mainQuestions > 0 ? `Question ${view.state.mainQuestions}` : null;
-  const hasHistory = lines.earlier.length > 0 || view.topics.length > 0 || view.observations.length > 0;
 
   const boardContent = <>
     {(lines.current.length > 0 || live !== null) && (
@@ -202,7 +208,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
 
   return (
     <main className="review front-row">
-      {notebookOpen && <dialog className="room-notebook-dialog" ref={node => { if (node && !node.open) node.showModal(); }} onClose={() => setNotebookOpen(false)}><button onClick={() => setNotebookOpen(false)}>Close notebook</button><RecordScreen api={api} reviewId={null} /></dialog>}
+      {notebookOpen && <dialog className="room-notebook-dialog" ref={node => { if (node && !node.open) node.showModal(); }} onClose={closeNotebook}><button type="button" onClick={closeNotebook}>Close notebook</button><RecordScreen api={api} reviewId={null} /></dialog>}
       <header ref={reserveNavSpace} className="review-header front-row-bar">
         <div className="front-row-title">
           <h1>{heading.title}</h1>
@@ -210,8 +216,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
         </div>
         <div className="review-navigation">
           <span className="review-phase">{questionMarker === null ? view.state.phase : `${questionMarker} · ${view.state.phase}`}</span>
-          {!checklist && hasHistory && <button type="button" aria-haspopup="dialog" onClick={(e) => inspect("history", e.currentTarget)}>Earlier in this review</button>}
-          {!checklist && <button type="button" aria-haspopup="dialog" onClick={(e) => inspect("source", e.currentTarget)}>{sourceButtonLabel(automaticIds.length)}</button>}
+          <button ref={savedNotes} type="button" aria-haspopup="dialog" onClick={() => setNotebookOpen(true)}>Saved notes</button>
           <Actions ids={actions.filter(id => id === "pause" || id === "resume" || id === "end")} disabled={streaming || state.unsent.length > 0} send={id => void controller.send(toAct(id, "", "text"))} />
         </div>
       </header>
@@ -224,9 +229,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           scene={appearance.scene}
           appearance={appearance}
           activity={activity}
-          onNotebook={() => setNotebookOpen(true)}
           boardRef={board}
-          layout={checklist ? { kind: "setup", form: setupForm } : { kind: "review", board: boardContent, desk: deskContent }}
+          layout={checklist ? { kind: "setup", form: setupForm } : { kind: "review", board: boardContent, desk: deskContent, objects: { cited: automaticIds.length, open: inspect } }}
         />
       </div>
       <RoomInspector

@@ -103,9 +103,9 @@ describe("room geometry", () => {
 });
 
 describe("switching room or companion keeps one tree", () => {
-  const layout: FrontRowLayout = { kind: "review", board: "Two threads each hold a lock the other needs.", desk: <textarea aria-label="Your thinking" defaultValue="A draft in progress" /> };
+  const layout: FrontRowLayout = { kind: "review", board: "Two threads each hold a lock the other needs.", desk: <textarea aria-label="Your thinking" defaultValue="A draft in progress" />, objects: { cited: 0, open: () => {} } };
   const scene = (room: SceneId, companion: CompanionId, visible = true) => renderToStaticMarkup(
-    <FrontRowScene scene={room} layout={layout} appearance={{ companion, visible, motion: "system" }} activity="idle" onNotebook={() => {}} />,
+    <FrontRowScene scene={room} layout={layout} appearance={{ companion, visible, motion: "system" }} activity="idle" />,
   );
   const skeleton = (html: string) => html.replace(/ (data-[a-z-]+|style|aria-label)="[^"]*"/g, "").replace(/>[^<]+</g, "><");
 
@@ -127,7 +127,28 @@ describe("switching room or companion keeps one tree", () => {
     const html = scene("projection-booth", "yun", false);
     expect(html).not.toContain("data-companion");
     expect(html).toContain('<span class="quiet-status" role="status">Ready when you are</span>');
-    expect(html).toContain(">My notebook</span></button>");
+    expect(html).toContain('aria-label="Earlier in this review"');
+  });
+});
+
+describe("the folio and the notebook on the desk open the source and history", () => {
+  const render = (layout: FrontRowLayout) => renderToStaticMarkup(
+    <FrontRowScene scene="last-desk" layout={layout} appearance={{ companion: "mote", visible: true, motion: "system" }} activity="idle" />,
+  );
+  const review = (cited: number): FrontRowLayout => ({ kind: "review", board: "Why?", desk: "Draft", objects: { cited, open: () => {} } });
+
+  test("each object is one dialog-opening button named for what it opens, with the citation count on the folio", () => {
+    const html = render(review(2));
+    expect(html).toMatch(/<button type="button" class="front-row-object" data-object="source" aria-label="Open source · 2 cited" aria-haspopup="dialog">.*?>Source · 2<\/span><\/button>/);
+    expect(html).toMatch(/<button type="button" class="front-row-object" data-object="history" aria-label="Earlier in this review" aria-haspopup="dialog">.*?>Earlier<\/span><\/button>/);
+    expect(render(review(0))).toContain('aria-label="Open source" aria-haspopup="dialog"');
+  });
+
+  test("before the review starts, the desk offers neither the source nor the history", () => {
+    const html = render({ kind: "setup", form: "Choose a starting point" });
+    expect(html).not.toContain("front-row-object");
+    expect(html).not.toContain("Open source");
+    expect(html).not.toContain("Earlier in this review");
   });
 });
 

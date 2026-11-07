@@ -134,10 +134,16 @@
 .front-row-buddy .companion-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .front-row-buddy .study-companion[data-activity="idle"] > div { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); padding: 0; border: 0; }
 .front-row-buddy .quiet-status { align-self: flex-end; padding: 4px 8px; background: var(--fr-bar); color: var(--fr-bar-ink); font: 500 .95rem/1.2 'After Class Pixel', var(--font); }
-.scene-shell .front-row-scene .front-row-notebook { display: flex; align-items: flex-end; justify-content: center; padding: 0 0 4px; border: 0; border-radius: 0; background: transparent; cursor: pointer; }
-.front-row-scene .front-row-notebook span { padding: 3px 8px; background: var(--fr-bar); color: var(--fr-bar-ink); border: 2px solid var(--fr-bar-ink); font: 500 .95rem/1.2 'After Class Pixel', var(--font); }
-.front-row-scene .front-row-notebook:hover span { background: var(--fr-bar-ink); color: var(--fr-bar); }
-.scene-shell .front-row-scene .front-row-notebook:focus-visible { outline: 3px solid var(--fr-bar-ink); outline-offset: 2px; }
+/* The folio and the notebook on the desk. The whole object is the button; it lifts when pointed at or focused. */
+.scene-shell .front-row-scene .front-row-object { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 44px; min-height: 44px; margin: 0; padding: 0 0 4px; border: 0; border-radius: 0; background: transparent; box-shadow: none; cursor: pointer; }
+.front-row-object .front-row-object-art { position: absolute; inset: 0; background: var(--fr-object-art) 50% 100% / contain no-repeat; filter: drop-shadow(0 4px 0 #00000052); transition: translate 120ms ease-out, filter 120ms ease-out; }
+.front-row-object[data-object="source"] { --fr-object-art: url('./assets/room-objects/source-folio.png'); }
+.front-row-object[data-object="history"] { --fr-object-art: url('./assets/room-objects/review-notebook.png'); }
+.front-row-object .front-row-object-tag { position: relative; padding: 3px 8px; background: var(--fr-bar); color: var(--fr-bar-ink); border: 2px solid var(--fr-bar-ink); font: 500 .95rem/1.2 'After Class Pixel', var(--font); white-space: nowrap; }
+.front-row-object:is(:hover, :focus-visible) .front-row-object-art { translate: 0 -4px; filter: drop-shadow(0 8px 0 #00000052) brightness(1.08); }
+.front-row-object:is(:hover, :focus-visible) .front-row-object-tag { background: var(--fr-bar-ink); color: var(--fr-bar); }
+.scene-shell .front-row-scene .front-row-object:focus-visible { outline: 3px solid var(--fr-bar-ink); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .front-row-object .front-row-object-art { transition: none; } }
 
 /* The lecture folio and the review notebook, picked up over the room. The supplied raster is the frame, cut nine ways by
    ROOM_OBJECTS so its ornaments stay whole at any shape, and the live text sits on its blank page. --u is one pixel of the
@@ -241,7 +247,12 @@
   /* The harbor mat is drawn in perspective and is narrower at the top than its box, so the top row's last control is inset. */
   .front-row-scene[data-mat-actions="beside"] .composer .review-help { margin-right: 2cqw; }
   .front-row-scene .front-row-buddy { position: absolute; left: max(var(--fr-buddy-left), var(--fr-inset-x)); top: var(--fr-buddy-top); width: var(--fr-buddy-width); height: var(--fr-buddy-height); }
-  .front-row-scene .front-row-notebook { position: absolute; left: min(var(--fr-book-left), calc(100% - var(--fr-inset-x) - var(--fr-book-width))); top: var(--fr-book-top); width: var(--fr-book-width); height: var(--fr-book-height); }
+  /* The notebook button covers the painted book, so it draws no art of its own. The folio sits on the desk just above the
+     book in the same margin, at most 80% of its width, clear of the mat and the board in every room. */
+  .front-row-scene .front-row-object { --fr-book-x: min(var(--fr-book-left), calc(100% - var(--fr-inset-x) - var(--fr-book-width))); position: absolute; }
+  .front-row-scene .front-row-object[data-object="history"] { left: var(--fr-book-x); top: var(--fr-book-top); width: var(--fr-book-width); height: var(--fr-book-height); }
+  .front-row-scene .front-row-object[data-object="history"] .front-row-object-art { display: none; }
+  .front-row-scene .front-row-object[data-object="source"] { left: calc(var(--fr-book-x) + var(--fr-book-width) * .1); bottom: calc(100% - var(--fr-book-top)); width: calc(var(--fr-book-width) * .8); aspect-ratio: 1448 / 1086; }
 }
 
 /* Mid-width windows: the review's navigation takes a second row under the masthead chips. */
@@ -267,7 +278,7 @@
   .front-row .front-row-bar .review-navigation { justify-content: flex-start; gap: 6px; }
   .scene-shell .front-row .front-row-bar button { padding: 6px 10px; font-size: .95rem; }
   .scene-shell .front-row .front-row-notices { margin: 8px 8px 0; }
-  .front-row-scene { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "board board" "desk desk" "buddy book"; gap: 8px; padding: 8px 8px 0; }
+  .front-row-scene { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "board board board" "desk desk desk" "buddy source history"; gap: 8px; padding: 8px 8px 0; }
   .front-row-stage { display: contents; }
   .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { grid-area: board; padding: 12px 14px 14px; background: var(--fr-board-fill); border: 5px solid var(--fr-frame); box-shadow: inset 0 0 0 2px #00000033, 0 4px 0 #00000040; }
   .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { grid-area: desk; padding: 12px; background: var(--fr-mat-fill); border: 4px solid var(--fr-desk); box-shadow: 0 4px 0 #00000040; }
@@ -283,8 +294,12 @@
   .front-row-scene .front-row-buddy { grid-area: buddy; justify-content: flex-start; height: 84px; padding: 6px 4px; }
   .front-row-buddy .study-companion { justify-content: flex-start; gap: 10px; width: auto; }
   .front-row-buddy .study-companion > div { position: static; transform: none; margin: 0 0 6px; }
-  .scene-shell .front-row-scene .front-row-notebook { grid-area: book; align-self: center; margin: 0 4px; padding: 0; min-height: 44px; }
-  .front-row-scene .front-row-notebook span { display: flex; align-items: center; min-height: 44px; padding: 6px 12px; }
+  /* Each object is a small thumbnail of its own raster with its tag below, side by side at the end of the companion's row. */
+  .scene-shell .front-row-scene .front-row-object { align-self: end; width: 84px; height: 84px; padding: 0; }
+  .front-row-scene .front-row-object[data-object="source"] { grid-area: source; }
+  .front-row-scene .front-row-object[data-object="history"] { grid-area: history; }
+  .front-row-object .front-row-object-art { bottom: 22px; }
+  .front-row-object .front-row-object-tag { padding: 1px 6px; font-size: .9rem; }
   /* The object takes most of a phone's width and height with a margin of room around it. Its frame is drawn at a fixed
      scale, so the page keeps nearly all the width and the text keeps its size. */
   .scene-shell .review .room-object { --u: .22px; width: calc(100vw - 20px); height: calc(100dvh - 28px); max-width: calc((100dvh - 28px) * 1.6); }

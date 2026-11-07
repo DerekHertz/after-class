@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode, Ref, RefObject } from "react";
 import type { Appearance, CompanionActivity, SceneId } from "./appearance";
 import { COMPANION_STATUS, Companion } from "./companion";
-import { clearCompanionReaction, reactToCompanion } from "./companion-reaction";
+import { clearCompanionReaction } from "./companion-reaction";
+import { sourceButtonLabel } from "./room-object";
+import type { RoomObject } from "./room-object";
 
 declare module "react" {
   interface CSSProperties { [variable: `--${string}`]: string | number | undefined }
@@ -52,7 +54,7 @@ export type FrontRowRoom = {
   /** The mat on the near desk that holds Your thinking. `actions` follows each approved design. */
   readonly mat: Surface & { readonly actions: "below" | "beside" };
   readonly companion: PlateBox;
-  /** The notebook drawn on the desk, which opens My notebook. */
+  /** The notebook drawn on the desk, which opens Earlier in this review. The lecture folio sits on the desk above it. */
   readonly notebook: PlateBox;
   /** Which part of the plate shows behind the phone layout, as a horizontal background position. */
   readonly phoneArtX: `${number}%`;
@@ -166,36 +168,26 @@ export function reserveNavSpace(bar: HTMLElement): () => void {
 
 const NAV_GAP = 12;
 
+/** The folio and notebook on the desk during a review: how much the current reply cites, and how to pick either up. */
+export type DeskObjects = { readonly cited: number; readonly open: (object: RoomObject, origin: HTMLButtonElement) => void };
+
 export type FrontRowLayout =
   | { readonly kind: "setup"; readonly form: ReactNode }
-  | { readonly kind: "review"; readonly board: ReactNode; readonly desk: ReactNode };
+  | { readonly kind: "review"; readonly board: ReactNode; readonly desk: ReactNode; readonly objects: DeskObjects };
 
 /**
  * The review seen from the front-row desk. Every room renders this same tree; a room only changes data attributes and
  * custom properties, so switching rooms or companions never remounts the response field and its draft.
  */
-export function FrontRowScene({ scene, layout, appearance, activity, onNotebook, boardRef }: {
+export function FrontRowScene({ scene, layout, appearance, activity, boardRef }: {
   readonly scene: SceneId;
   readonly layout: FrontRowLayout;
   readonly appearance: Pick<Appearance, "companion" | "visible" | "motion">;
   readonly activity: CompanionActivity;
-  readonly onNotebook: () => void;
   readonly boardRef?: Ref<HTMLElement>;
 }) {
   const room = FRONT_ROW_ROOMS[scene];
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => {
-    clearCompanionReaction();
-    return () => clearTimeout(timer.current);
-  }, [scene, appearance.companion, appearance.visible]);
-  /** The companion glances at the notebook first, unless motion is reduced or the companion is hidden. */
-  function openNotebook() {
-    clearTimeout(timer.current);
-    reactToCompanion("read");
-    const reduced = appearance.motion === "reduced" || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduced || !appearance.visible) onNotebook();
-    else timer.current = setTimeout(onNotebook, 500);
-  }
+  useEffect(() => { clearCompanionReaction(); }, [scene, appearance.companion, appearance.visible]);
   return (
     <div className="front-row-scene" data-room={scene} data-board-tone={room.board.tone} data-mat-tone={room.mat.tone} data-mat-actions={room.mat.actions} data-board-align={room.board.align} data-phase={layout.kind}>
       {/* The plate at the size that fills the window; every control is placed in its coordinates. */}
@@ -207,9 +199,25 @@ export function FrontRowScene({ scene, layout, appearance, activity, onNotebook,
         <div className="front-row-buddy">
           {appearance.visible ? <Companion id={appearance.companion} activity={activity} /> : <span className="quiet-status" role="status">{COMPANION_STATUS[activity]}</span>}
         </div>
-        <button type="button" className="front-row-notebook" onClick={openNotebook}><span>My notebook</span></button>
+        {layout.kind === "review" && <>
+          <DeskObject object="source" label={sourceButtonLabel(layout.objects.cited)} tag={layout.objects.cited === 0 ? "Source" : `Source · ${layout.objects.cited}`} open={layout.objects.open} />
+          <DeskObject object="history" label="Earlier in this review" tag="Earlier" open={layout.objects.open} />
+        </>}
       </div>
     </div>
+  );
+}
+
+/**
+ * The folio or the notebook lying on the desk, and the whole object is the button. On a desktop the notebook is the one
+ * painted in the room, so only its tag shows over it; the folio, and on a phone both objects, show their own raster.
+ */
+function DeskObject({ object, label, tag, open }: { readonly object: RoomObject; readonly label: string; readonly tag: string; readonly open: DeskObjects["open"] }) {
+  return (
+    <button type="button" className="front-row-object" data-object={object} aria-label={label} aria-haspopup="dialog" onClick={(e) => open(object, e.currentTarget)}>
+      <span className="front-row-object-art" />
+      <span className="front-row-object-tag">{tag}</span>
+    </button>
   );
 }
 
