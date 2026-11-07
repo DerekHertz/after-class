@@ -27,7 +27,7 @@ describe("notebook pages", () => {
       ] }, busy: true, onStart() {}, onRetry() {}, api, titles: new Map(),
     }));
     expect(html).toContain("No reliable time estimate yet.");
-    expect(html).toContain("What this review cannot cover");
+    expect(html).toContain("Limits of this review");
     expect(html).toContain("Frame capture stalled.");
     expect(html).toContain("Review now");
     expect(html).toContain("Stop early");

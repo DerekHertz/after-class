@@ -20,7 +20,7 @@ import { learnerAct } from "../src/shared/wire";
 import type { SessionState } from "../src/app/controller";
 import {
   availableActions, conversationLines, currentEvidenceIds, estimateText, formatClock, inspectBundle, liveText, noteView, observationRow,
-  coveredLines, groupGaps, lectureHeading, optionsScreen,parseRoute, reduceLive, routePath, softTargetPrompt, startLive, toAct, unansweredLearnerTurn, owedLearnerTurn, usageRows,
+  coveredLines, groupGaps, partialLines,lectureHeading, optionsScreen,parseRoute, reduceLive, routePath, softTargetPrompt, startLive, stepStartHandoff, toAct, unansweredLearnerTurn, owedLearnerTurn, usageRows,
 } from "../src/app/core";
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { StreamError, ndjson, tutorEvents } from "../src/app/ndjson";
@@ -290,7 +290,7 @@ describe("review options screens", () => {
     expect(screen.scope.topics).toEqual(["Logical clocks", "Happened-before"]);
     expect(screen.scope.covered).toEqual(["Lamport clocks, 0:00 to 10:00"]);
     expect(screen.scope.limits[0]).toBe("2 claims were not confirmed by the source and will not be used to assess you.");
-    expect(screen.scope.limits[1]).toBe("Tab was hidden, so frames stalled in Lamport clocks, 2:00 to 3:00. Anything shown only on screen there cannot be asked about or checked.");
+    expect(screen.scope.limits[1]).toBe("Tab was hidden, so frames stalled in Lamport clocks, 2:00 to 3:00. No frames from this stretch are in the evidence. Its transcript text, if captured, still is.");
   });
 
   test("covered time names one stretch exactly and sums several", () => {
@@ -308,20 +308,28 @@ describe("review options screens", () => {
   });
 
   test("many capture gaps of one kind in one video become one line, in the place the first held", () => {
-    const gap = (start: number, end: number, reason: "partially_watched_segment" | "hidden_tab" = "partially_watched_segment") =>
-      ({ kind: "capture_gap", gap: { sourceId: src, interval: interval(start, end), channel: "transcript", reason } }) as const;
+    const gap = (start: number, end: number, reason: "partially_watched_segment" | "hidden_tab" = "partially_watched_segment", channel: "transcript" | "frames" = "transcript") =>
+      ({ kind: "capture_gap", gap: { sourceId: src, interval: interval(start, end), channel, reason } }) as const;
     const screen = optionsScreen(
-      { kind: "ready", scope: scopeOf({ partial: [gap(0, 2), { kind: "unverified_claims", count: 1 }, gap(10, 13), gap(20, 25), gap(30, 90, "hidden_tab")] }) },
+      { kind: "ready", scope: scopeOf({ partial: [gap(0, 2), { kind: "unverified_claims", count: 1 }, gap(10, 13), gap(20, 25), gap(30, 90, "hidden_tab", "frames")] }) },
       titles,
     );
     if (screen.kind !== "ready") throw new Error("unreachable");
-    const said = "What was said there is not in this review, so it cannot be asked about or checked.";
     expect(screen.scope.limits).toEqual([
-      `Caption line only partly watched, so not used in Lamport clocks, 3 places, 0:10 in all. ${said}`,
-      `Tab was hidden, so frames stalled in Lamport clocks, 0:30 to 1:30. ${said}`,
+      "Caption line only partly watched, so not used in Lamport clocks, 3 places, 0:10 in all. No transcript text from this stretch is in the evidence. Any frames saved from it still are.",
+      "Tab was hidden, so frames stalled in Lamport clocks, 0:30 to 1:30. No frames from this stretch are in the evidence. Its transcript text, if captured, still is.",
       "1 claim was not confirmed by the source and will not be used to assess you.",
     ]);
     expect(groupGaps([gap(0, 2).gap, gap(5, 6).gap], titles)).toEqual([{ where: "Lamport clocks, 2 places, 0:03 in all", reason: "Caption line only partly watched, so not used", count: 2, channel: "transcript" }]);
+  });
+
+  test("a channel failure names only the channel that failed, so a failed transcript never claims the frames are gone", () => {
+    const failed = (start: number, end: number, channel: "transcript" | "frames") => ({ sourceId: src, interval: interval(start, end), channel, reason: "channel_failed" }) as const;
+    const lines = partialLines([failed(0, 10, "transcript"), failed(20, 30, "frames"), failed(40, 50, "transcript")].map((g) => ({ kind: "capture_gap", gap: g }) as const), titles);
+    expect(lines).toEqual([
+      "A capture channel failed in Lamport clocks, 2 places, 0:20 in all. No transcript text from this stretch is in the evidence. Any frames saved from it still are.",
+      "A capture channel failed in Lamport clocks, 0:20 to 0:30. No frames from this stretch are in the evidence. Its transcript text, if captured, still is.",
+    ]);
   });
 
   test("a lecture heading names the shared course instead of every video title", () => {
@@ -1274,6 +1282,38 @@ describe("opening the review (flow D: topic checklist, then the learner starts i
   test("a quick check is labelled Quick check", () => {
     const qc = turnJson(2, "tutor", { move: { kind: "quick_check", threadId: stableId("thr", "thread-2"), claimIds: [clm] }, say: "In a sentence, what is a vector clock?" });
     expect(conversationLines(parsedReview({ turns: [tutorAsk, qc] }).turns).map((l) => l.label)).toEqual(["Question", "Quick check"]);
+  });
+});
+
+describe("focus after the starting-point form (stepStartHandoff)", () => {
+  const at = (checklist: boolean, question: boolean, focusFree = true) => ({ checklist, question, focusFree });
+
+  test("without the learner's own start, a later reply never moves focus", () => {
+    expect(stepStartHandoff("none", at(false, true))).toEqual({ step: "none", focus: null });
+    expect(stepStartHandoff("none", at(false, false))).toEqual({ step: "none", focus: null });
+  });
+
+  test("while the form is still shown nothing moves", () => {
+    expect(stepStartHandoff("submitted", at(true, false))).toEqual({ step: "submitted", focus: null });
+  });
+
+  test("the form gives way before the reply: focus goes to the start status, then to the question while it still rests there", () => {
+    const sent = stepStartHandoff("submitted", at(false, false));
+    expect(sent).toEqual({ step: "waiting", focus: "status" });
+    expect(stepStartHandoff(sent.step, at(false, false))).toEqual({ step: "waiting", focus: null });
+    expect(stepStartHandoff(sent.step, at(false, true))).toEqual({ step: "none", focus: "question" });
+  });
+
+  test("a question already there when the form goes takes focus directly", () => {
+    expect(stepStartHandoff("submitted", at(false, true))).toEqual({ step: "none", focus: "question" });
+  });
+
+  test("if the learner moved focus while waiting, the question does not take it and the handoff ends", () => {
+    expect(stepStartHandoff("waiting", at(false, true, false))).toEqual({ step: "none", focus: null });
+  });
+
+  test("the form coming back (the unsent start was discarded) ends the handoff", () => {
+    expect(stepStartHandoff("waiting", at(true, false))).toEqual({ step: "none", focus: null });
   });
 });
 

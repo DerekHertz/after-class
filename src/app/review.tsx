@@ -1,6 +1,6 @@
 import { RecordScreen } from "./record";
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { MutableRefObject } from "react";
+import type { MutableRefObject, Ref } from "react";
 import { Material } from "../shared/time";
 import type { ConceptId, EvidenceId, ReviewId } from "../shared/ids";
 import type { Concept } from "../shared/domain";
@@ -11,10 +11,10 @@ import { reactToCompanion } from "./companion-reaction";
 import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
 import {
-  ACTION_LABEL, END_CONFIRM_TEXT, INITIAL_SOURCE_OPEN, endFlow, shouldAutoSendSpeech, shouldStopListening, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
+  ACTION_LABEL, END_CONFIRM_TEXT, INITIAL_SOURCE_OPEN, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
   softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer,
 } from "./core";
-import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, TurnStatus } from "./core";
+import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, StartHandoff, TurnStatus } from "./core";
 import type { Speaker, SpeechInput } from "./speech";
 import type { UnsentStore } from "./unsent";
 import { BundleInspector, ErrorNote, EvidencePane, Link, useAsync } from "./ui";
@@ -39,6 +39,9 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const [diagramTopic, setDiagramTopic] = useState<ConceptId | null>(null);
   const diagrams = useDiagrams(api, reviewId);
   const [listening, setListening] = useState(false);
+  const [handoff, setHandoff] = useState<StartHandoff>("none");
+  const startStatus = useRef<HTMLParagraphElement>(null);
+  const questionLine = useRef<HTMLLIElement>(null);
   const controller = useMemo(() => createReviewController({ api, reviewId, speaker, unsent }), [api, reviewId, speaker, unsent]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
   const loaded = state.view !== null;
@@ -63,6 +66,15 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   // Flow D: the learner starts the review from the topic checklist; nothing begins by itself.
   const resume = useMemo(() => resumeOnce(controller), [controller]);
   useEffect(() => { resume(state); }, [resume, state]);
+  const checklist = needsChecklist(state);
+  const question = state.live === null && (state.view?.turns.some((t) => t.actor === "tutor" && t.say.trim() !== "") ?? false);
+  useEffect(() => {
+    const active = document.activeElement;
+    const next = stepStartHandoff(handoff, { checklist, question, focusFree: active === null || active === document.body || active === startStatus.current });
+    if (next.focus === "status") startStatus.current?.focus();
+    else if (next.focus === "question") questionLine.current?.focus();
+    if (next.step !== handoff) setHandoff(next.step);
+  }, [handoff, checklist, question]);
 
   const captureId = state.view?.captureId ?? null;
   const capture = useAsync(() => (captureId === null ? Promise.resolve(null) : api.captureView(captureId)), [api, captureId]);
@@ -116,9 +128,9 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   }
 
   const lines = conversationLines(view.turns, view.topics);
+  const questionKey = lines.findLast((l) => l.speaker === "tutor")?.key;
   const questionTopic = currentQuestionTopic(view, diagrams.topics ?? []);
   const shownDiagram = diagrams.topics?.find((t) => t.topicId === diagramTopic) ?? null;
-  const checklist = needsChecklist(state);
   const soft = softTargetPrompt(view.turns);
   const actions = availableActions(view.state, soft !== null);
   const streaming = state.live?.status === "streaming";
@@ -165,7 +177,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             if (el) followHistory.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
           }} className="conversation-history" role="region" aria-label="Conversation history" tabIndex={0}>
           <ol className="lines">
-            {lines.map((l) => <LineItem key={l.key} line={l} onSource={openSource} />)}
+            {lines.map((l) => <LineItem key={l.key} line={l} onSource={openSource} {...(l.key === questionKey ? { focusRef: questionLine } : {})} />)}
             {state.live && state.live.status !== "complete" && (
               <li className="line tutor">
                 <strong>{state.live.move ? MOVE_LABEL[state.live.move.kind] : "Tutor"}</strong>
@@ -175,6 +187,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             )}
           </ol>
           </div>}
+          {handoff !== "none" && !checklist && <p ref={startStatus} className="note" role="status" tabIndex={-1}>{canRetry ? "Your review has started, but the tutor's first question has not arrived." : "Your review has started. Waiting for the tutor's first question."}</p>}
           {canRetry && (
             <UndeliveredNote
               unsent={state.unsent.length}
@@ -192,7 +205,10 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           {!checklist && questionTopic !== null && (
             <p className="current-topic">Topic: <strong>{questionTopic.label}</strong> <ShowDiagramButton topic={{ id: questionTopic.topicId, label: questionTopic.label }} onShow={showDiagram} /></p>
           )}
-          {checklist && <TopicChecklist topics={view.topics} disabled={streaming} onStart={(fuzzy, note) => void controller.send({ kind: "begin", fuzzy, ...(note === "" ? {} : { note }) })} />}
+          {checklist && <TopicChecklist topics={view.topics} disabled={streaming} onStart={(fuzzy, note) => {
+            setHandoff("submitted");
+            void controller.send({ kind: "begin", fuzzy, ...(note === "" ? {} : { note }) }).then((sent) => { if (!sent) setHandoff("none"); });
+          }} />}
           {!checklist && <Composer
             actions={actions.filter((a) => !["continue", "wrap_up", "pause", "resume", "end"].includes(a))}
             disabled={streaming || state.unsent.length > 0}
@@ -312,9 +328,9 @@ export function UndeliveredNote({ unsent, failed, onRetry, onDiscard }: { readon
   );
 }
 
-function LineItem({ line, onSource }: { readonly line: Line; readonly onSource: (ids: readonly EvidenceId[], label: string, origin: HTMLButtonElement) => void }) {
+function LineItem({ line, onSource, focusRef }: { readonly line: Line; readonly onSource: (ids: readonly EvidenceId[], label: string, origin: HTMLButtonElement) => void; readonly focusRef?: Ref<HTMLLIElement> }) {
   return (
-    <li className={`line ${line.speaker}`}>
+    <li className={`line ${line.speaker}`} {...(focusRef === undefined ? {} : { ref: focusRef, tabIndex: -1 })}>
       <strong>{line.label}</strong>
       <p>{line.text}</p>
       {line.evidenceIds.length > 0 && <button type="button" className="citation" onClick={(e) => onSource(line.evidenceIds, `Source cited by this ${line.label.toLowerCase()}`, e.currentTarget)}>Lecture source · {line.evidenceIds.length} item{line.evidenceIds.length === 1 ? "" : "s"}</button>}

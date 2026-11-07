@@ -62,11 +62,11 @@ export const GAP_LABEL: Readonly<Record<GapReason, string>> = {
   implausible_span: "Watched time did not add up, so it was set aside",
 };
 
-/** What a capture gap means for a review: which part of that stretch cannot be asked about or checked. */
+/** What a capture gap means for a review. Each line names only the channel that is missing; the other channels from that stretch stay in the evidence. */
 export const GAP_CONSEQUENCE: Readonly<Record<Gap["channel"], string>> = {
-  transcript: "What was said there is not in this review, so it cannot be asked about or checked.",
-  frames: "Anything shown only on screen there cannot be asked about or checked.",
-  playback: "Nothing from that stretch is in this review.",
+  transcript: "No transcript text from this stretch is in the evidence. Any frames saved from it still are.",
+  frames: "No frames from this stretch are in the evidence. Its transcript text, if captured, still is.",
+  playback: "Playback was not fully recorded near here, so some watched time may be missing from the evidence.",
 };
 
 export function partialText(reason: PartialReason, titles: SourceTitles = new Map()): string {
@@ -83,13 +83,14 @@ export function partialText(reason: PartialReason, titles: SourceTitles = new Ma
 }
 
 /**
- * Capture gaps grouped per video and reason, so a long capture shows one line per
+ * Capture gaps grouped per video, reason and channel, so a long capture shows one line per
  * kind of gap instead of one per stretch. A group of one keeps its exact interval.
+ * The channel is in the key because `channel_failed` happens on any channel, and each line says which one is missing.
  */
 export function groupGaps(gaps: readonly Gap[], titles: SourceTitles = new Map()): readonly { readonly where: string; readonly reason: string; readonly count: number; readonly channel: Gap["channel"] }[] {
   const groups = new Map<string, Gap[]>();
   for (const g of gaps) {
-    const key = `${g.reason}\u0000${g.sourceId}`;
+    const key = `${g.reason}\u0000${g.channel}\u0000${g.sourceId}`;
     groups.set(key, [...(groups.get(key) ?? []), g]);
   }
   return [...groups.values()].map((group) => {
@@ -136,8 +137,8 @@ export function lectureHeading(titles: readonly string[]): { readonly title: str
 export type StartOffer = { readonly choice: StartChoice; readonly label: string; readonly note: string };
 
 /**
- * What a review started now would cover, in the learner's terms: the named topics, the watched stretches, and what it
- * cannot cover. `supportedClaims` is only for the case with no topic names; a claim count is never shown as a topic count.
+ * What a review started now would cover, in the learner's terms: the named topics, the watched stretches, and its
+ * limits. `supportedClaims` is only for the case with no topic names; a claim count is never shown as a topic count.
  */
 export type ScopeSummary = {
   readonly topics: readonly string[];
@@ -455,6 +456,19 @@ export function turnStatus(input: { readonly listening: boolean; readonly transc
     return liveText(live) === "" ? { kind: "thinking", text: "Tutor is thinking…" } : { kind: "replying", text: "Tutor is replying…" };
   }
   return { kind: "idle", text: null };
+}
+
+/**
+ * Where keyboard focus goes when the starting-point form gives way to the conversation. Only the learner's own start moves
+ * focus, once: to the start status while the first reply is pending, then to the first question if focus is still on that
+ * status or nowhere. A reloaded review and every later reply leave focus where the learner put it.
+ */
+export type StartHandoff = "none" | "submitted" | "waiting";
+export function stepStartHandoff(step: StartHandoff, now: { readonly checklist: boolean; readonly question: boolean; readonly focusFree: boolean }): { readonly step: StartHandoff; readonly focus: "status" | "question" | null } {
+  if (step === "none" || (step === "submitted" && now.checklist)) return { step, focus: null };
+  if (now.checklist) return { step: "none", focus: null };
+  if (!now.question) return step === "submitted" ? { step: "waiting", focus: "status" } : { step, focus: null };
+  return { step: "none", focus: step === "submitted" || now.focusFree ? "question" : null };
 }
 
 // ───────────────────────────── Actions ──────────────────────────────────────

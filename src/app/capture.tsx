@@ -92,7 +92,7 @@ export function OptionsView({ screen, busy, onStart, onRetry, api, titles }: Opt
   }
 }
 
-/** The named topics, the watched stretches they come from, and what this review cannot cover. A claim count stands in only when no topic has a name. */
+/** The named topics, the watched stretches they come from, and the limits of this review. A claim count stands in only when no topic has a name. */
 function ScopeDetails({ scope }: { readonly scope: ScopeSummary }) {
   return (
     <>
@@ -103,7 +103,7 @@ function ScopeDetails({ scope }: { readonly scope: ScopeSummary }) {
       {scope.covered.length > 0 && <p className="muted">From {scope.covered.join("; ")}.</p>}
       {scope.limits.length > 0 && (
         <div className="note partial-notice">
-          <strong>What this review cannot cover</strong>
+          <strong>Limits of this review</strong>
           <ul>{scope.limits.map((t, i) => <li key={i}>{t}</li>)}</ul>
         </div>
       )}
