@@ -3,7 +3,7 @@
  * notebook. A lecture is a capture; its saved reviews' notes and observations are grouped under the topic they are
  * about, so a topic's explanation, help, status and source read in one place.
  */
-import type { ConceptId, ReviewId } from "../shared/ids";
+import type { ConceptId, NoteId, ReviewId } from "../shared/ids";
 import type { Note, Observation, RecordView } from "../shared/domain";
 import type { LecturesResponse } from "../shared/wire";
 import { lectureHeading } from "./core";
@@ -119,6 +119,20 @@ export const viewCounts = (lectures: readonly NotebookLecture[]): Readonly<Recor
   const topics = lectures.flatMap((l) => l.topics);
   return { all: topics.length, revisit: topics.filter((t) => t.revisit).length, disputed: topics.filter((t) => t.disputed).length };
 };
+
+/**
+ * The notes the learner is editing, each with its unsaved text. A note with no entry is not being edited. Held above the
+ * views and the lecture grouping, so a topic that leaves a view or moves to another lecture keeps its edit.
+ */
+export type NoteDrafts = ReadonlyMap<NoteId, string>;
+
+/** Opens or updates one note's draft with `text`, or closes it with null. Every other note's draft is unchanged. */
+export function withDraft(drafts: NoteDrafts, id: NoteId, text: string | null): NoteDrafts {
+  const next = new Map(drafts);
+  if (text === null) next.delete(id);
+  else next.set(id, text);
+  return next;
+}
 
 /** The name a topic is shown by. Until a review names it, its place in the lecture says which one it is. */
 export function topicName(topic: NotebookTopic, index: number, loading: boolean): string {
