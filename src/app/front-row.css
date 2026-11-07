@@ -2,39 +2,45 @@
    roomStyle(); this file owns only layout rules, so all three rooms share one set of rules and one React tree. */
 @font-face { font-family: 'After Class Pixel'; src: url('./assets/fonts-v2/pixelify-sans.ttf') format('truetype'); font-weight: 400 700; font-display: swap; }
 
-.front-row-scene[data-room="last-desk"] { --fr-plate: url('./assets/front-row/last-desk.png'); }
-.front-row-scene[data-room="study-bench"] { --fr-plate: url('./assets/front-row/study-bench.png'); }
-.front-row-scene[data-room="projection-booth"] { --fr-plate: url('./assets/front-row/projection-booth.png'); }
+:is(.scene-shell[data-scene="last-desk"], .front-row-scene[data-room="last-desk"]) { --fr-plate: url('./assets/front-row/last-desk.png'); }
+:is(.scene-shell[data-scene="study-bench"], .front-row-scene[data-room="study-bench"]) { --fr-plate: url('./assets/front-row/study-bench.png'); }
+:is(.scene-shell[data-scene="projection-booth"], .front-row-scene[data-room="projection-booth"]) { --fr-plate: url('./assets/front-row/projection-booth.png'); }
 
-/* Pixel type for the room's chrome and the appearance picker. */
-.scene-shell:has(.front-row) { --fr-chrome: 106px; background: var(--fr-wall); }
-.scene-shell:has(.front-row) .scene-masthead { height: 52px; max-width: none; padding: 0 24px; background: var(--fr-bar); color: var(--fr-bar-ink); border-bottom: 2px solid #00000055; }
-.scene-shell:has(.front-row) .scene-masthead > a { font: 600 1.5rem/1 'After Class Pixel', var(--font); color: inherit; }
+/* Navigation sits over the art as small chips, each with its own backing for legibility. There is no bar behind them. */
+.scene-shell:has(.front-row) { --fr-chip: color-mix(in srgb, var(--fr-bar) 86%, transparent); --fr-chip-line: color-mix(in srgb, var(--fr-bar-ink) 45%, transparent); background: var(--fr-wall); }
+.scene-shell:has(.front-row) .scene-masthead { height: auto; max-width: none; margin: 0; padding: 8px 12px; gap: 8px; background: none; border: 0; color: var(--fr-bar-ink); }
+.scene-shell:has(.front-row) .room-name { display: none; }
+.scene-shell:has(.front-row) :is(.scene-masthead > a, .appearance-picker > summary) { display: flex; align-items: center; min-height: 44px; padding: 0 12px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); color: var(--fr-bar-ink); box-shadow: 0 3px 0 #00000040; }
+.scene-shell:has(.front-row) .scene-masthead > a { gap: 8px; font: 600 1.3rem/1 'After Class Pixel', var(--font); }
+.scene-shell:has(.front-row) .scene-masthead .bell-mark { width: 22px; height: 28px; }
 .scene-shell:has(.front-row) .appearance-picker { margin-left: auto; }
-.scene-shell:has(.front-row) .appearance-picker > summary { display: flex; align-items: center; min-height: 44px; padding: 0 4px; font: 500 1.05rem/1 'After Class Pixel', var(--font); color: var(--fr-bar-ink); }
+.scene-shell:has(.front-row) .appearance-picker > summary { font: 500 1.05rem/1 'After Class Pixel', var(--font); }
 .scene-shell:has(.front-row) :is(.scene-masthead a, .appearance-picker > summary):focus-visible { outline: 3px solid var(--fr-bar-ink); outline-offset: 2px; }
 .appearance-options { font-family: 'After Class Pixel', var(--font); border-radius: 0; border: 3px solid #302c25; box-shadow: 6px 6px 0 #302c2540; }
 .appearance-options button { border-radius: 0; border-width: 2px; }
 .appearance-options small { font-family: var(--font); }
 
-/* The review page itself: a bar, then the room. */
-.scene-shell .review.front-row { max-width: none; min-height: 0; margin: 0; padding: 0; border: 0; background: transparent; color: var(--fr-bar-ink); font-family: var(--font); }
-.scene-shell .front-row .front-row-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 20px; min-height: 54px; margin: 0; padding: 6px 24px; background: color-mix(in srgb, var(--fr-bar) 86%, #000); color: var(--fr-bar-ink); border-bottom: 3px solid #00000066; font-family: 'After Class Pixel', var(--font); }
-.front-row .front-row-title { display: flex; align-items: baseline; gap: 2px 14px; min-width: 0; flex: 1 1 22rem; }
-.scene-shell .front-row .front-row-bar h1 { min-width: 0; margin: 0; overflow: hidden; color: inherit; font: 600 1.3rem/1.25 'After Class Pixel', var(--font); white-space: nowrap; text-overflow: ellipsis; }
-.front-row .front-row-bar .review-scope-line { flex: 0 1 auto; margin: 0; overflow: hidden; color: color-mix(in srgb, var(--fr-bar-ink) 82%, var(--fr-bar)); font-size: .95rem; white-space: nowrap; text-overflow: ellipsis; }
-.front-row .front-row-bar .review-navigation { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; }
-.front-row .front-row-bar .review-phase { color: inherit; font-size: .95rem; }
+.scene-shell .review.front-row { --fr-nav-reserve: 64px; position: relative; max-width: none; min-height: 0; margin: 0; padding: 0; border: 0; background: transparent; color: var(--fr-bar-ink); font-family: var(--font); }
+.scene-shell .front-row .front-row-bar { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; background: none; border: 0; color: var(--fr-bar-ink); font-family: 'After Class Pixel', var(--font); }
+.front-row .front-row-title { display: flex; flex-direction: column; justify-content: center; min-width: 0; max-width: 100%; min-height: 44px; padding: 3px 12px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); box-shadow: 0 3px 0 #00000040; }
+.scene-shell .front-row .front-row-bar h1 { min-width: 0; margin: 0; overflow: hidden; color: inherit; font: 600 1.15rem/1.2 'After Class Pixel', var(--font); white-space: nowrap; text-overflow: ellipsis; }
+.front-row .front-row-bar .review-scope-line { margin: 0; overflow: hidden; color: color-mix(in srgb, var(--fr-bar-ink) 85%, var(--fr-bar)); font-size: .85rem; line-height: 1.25; white-space: nowrap; text-overflow: ellipsis; }
+.front-row .front-row-bar .review-navigation { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin: 0; }
+.front-row .front-row-bar :is(.review-phase, .end-confirm > span:first-child) { display: flex; align-items: center; min-height: 44px; padding: 0 10px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); color: inherit; font-size: .95rem; }
 .front-row .front-row-bar .actions { margin: 0; gap: 8px; }
-.scene-shell .front-row .front-row-bar button { min-height: 40px; padding: 6px 12px; border: 2px solid color-mix(in srgb, var(--fr-bar-ink) 60%, transparent); border-radius: 0; background: transparent; color: var(--fr-bar-ink); font: 500 1rem/1.1 'After Class Pixel', var(--font); box-shadow: inset 0 -3px 0 #00000040; }
-.scene-shell .front-row .front-row-bar button:hover:not(:disabled) { background: color-mix(in srgb, var(--fr-bar-ink) 14%, transparent); }
+.scene-shell .front-row .front-row-bar button { min-height: 44px; padding: 6px 12px; border: 2px solid var(--fr-chip-line); border-radius: 0; background: var(--fr-chip); color: var(--fr-bar-ink); font: 500 1rem/1.1 'After Class Pixel', var(--font); box-shadow: 0 3px 0 #00000040; }
+.scene-shell .front-row .front-row-bar button:hover:not(:disabled) { background: var(--fr-bar); }
 .scene-shell .front-row .front-row-bar button[aria-expanded="true"] { background: var(--fr-bar-ink); color: var(--fr-bar); }
 .scene-shell .front-row .front-row-bar :is(button, a):focus-visible { outline: 3px solid var(--fr-bar-ink); outline-offset: 2px; }
 .front-row .end-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.scene-shell .front-row > .note { max-width: none; margin: 12px 24px; }
 
-/* The room and the panels beside it. */
-.front-row .front-row-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+/* Save state, errors and the finished-review summary, on paper. */
+.scene-shell .front-row .front-row-notices { --fg: #2c2620; --muted: #5e5446; --border: #c9b896; --accent: #244c9c; --danger: #a52f28; --note-bg: #fbf3e2; display: grid; gap: 8px; color: var(--fg); }
+.front-row .front-row-notices:empty { display: none; }
+.scene-shell .front-row .front-row-notices .note { margin: 0; border: 3px solid #2c2620; border-radius: 0; box-shadow: 4px 4px 0 #00000040; }
+
+/* The room, then the panels below it. */
+.front-row .front-row-layout { display: grid; grid-template-columns: minmax(0, 1fr); }
 .front-row[data-panels="closed"] .front-row-panels { display: none; }
 .front-row-scene { position: relative; min-width: 0; color: var(--fr-mat-ink); }
 .front-row-scene ::selection { background: var(--fr-accent); color: var(--fr-accent-ink); }
@@ -87,8 +93,9 @@
 
 /* Your thinking. */
 .front-row-scene .composer { display: grid; gap: 8px 12px; margin: 0; padding: 0; border: 0; }
-.front-row-scene[data-mat-actions="below"] .composer { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "status status status" "label label more" "field field field" "share assist assist" "short short speak"; }
-.front-row-scene[data-mat-actions="beside"] .composer { grid-template-columns: minmax(0, 1fr) minmax(13rem, 36%); grid-template-areas: "status status" "label more" "field share" "field assist" "short speak"; }
+.front-row-scene[data-mat-actions="below"] .composer { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "status status status" "label short more" "field field field" "share assist speak"; }
+.front-row-scene[data-mat-actions="beside"] .composer { grid-template-columns: auto minmax(0, 1fr) minmax(13rem, 36%); grid-template-areas: "status status status" "label short more" "field field share" "field field assist" "speak speak speak"; }
+.front-row-scene .composer > .actions:not(.primary-actions):empty { display: none; }
 .front-row-scene .composer-status { grid-area: status; display: grid; gap: 6px; }
 .front-row-scene .composer-status:empty { display: none; }
 .front-row-scene .composer-status .note { margin: 0; padding: 6px 10px; border-radius: 0; font-size: 1rem; }
@@ -103,7 +110,7 @@
 .front-row-scene[data-mat-actions="beside"] .composer :is(.primary-actions, .assist-actions) { align-self: start; }
 .front-row-scene[data-mat-actions="beside"] .composer .primary-actions > * { flex: 1 1 auto; }
 .front-row-scene[data-mat-actions="beside"] .composer .assist-actions > * { flex: 1 1 0; }
-.front-row-scene .composer-shortcut { grid-area: short; align-self: center; margin: 0; color: var(--fr-mat-ink-soft); font: 400 .9rem/1.3 'After Class Pixel', var(--font); }
+.front-row-scene .composer-shortcut { grid-area: short; align-self: center; justify-self: start; margin: 0; color: var(--fr-mat-ink-soft); font: 400 .9rem/1.3 'After Class Pixel', var(--font); }
 .front-row-scene .composer .review-help { grid-area: more; justify-self: end; margin: 0; border: 0; }
 .scene-shell .front-row-scene .composer .review-help summary { min-height: 32px; padding: 4px 0; color: var(--fr-mat-ink-soft); font: 400 .95rem/1.4 'After Class Pixel', var(--font); font-style: normal; text-decoration: underline; }
 .front-row-scene .composer .review-help[open] .actions { justify-content: flex-end; margin: 6px 0 0; }
@@ -126,8 +133,9 @@
 .front-row-scene .front-row-notebook:hover span { background: var(--fr-bar-ink); color: var(--fr-bar); }
 .scene-shell .front-row-scene .front-row-notebook:focus-visible { outline: 3px solid var(--fr-bar-ink); outline-offset: 2px; }
 
-/* Panels: earlier conversation and the lecture source, on paper. Each takes its natural height; the page scrolls. */
-.front-row .front-row-panels { display: grid; gap: 16px; align-content: start; min-width: 0; padding: 0 16px 16px; }
+/* Panels: earlier conversation and the lecture source, on paper below the room. Each takes its natural height and the page
+   scrolls to it, so opening one never shrinks or covers the room. */
+.front-row .front-row-panels { display: grid; gap: 16px; align-content: start; justify-self: center; width: min(100%, 64rem); min-width: 0; padding: 16px; }
 .scene-shell .front-row .front-row-panel { --fg: #2c2620; --muted: #5e5446; --border: #c9b896; --surface: #fff8ea; --accent: #244c9c; --note-bg: #f1e5cc; position: static; width: auto; height: auto; max-height: none; overflow: visible; margin: 0; padding: 16px 18px; background: #fbf3e2; color: #2c2620; border: 3px solid #2c2620; border-radius: 0; box-shadow: 6px 6px 0 #00000040; }
 .front-row .front-row-panel[hidden] { display: none; }
 .front-row .front-row-panel :is(h2, summary, button) { font-family: 'After Class Pixel', var(--font); }
@@ -139,44 +147,73 @@
 .front-row .front-row-panel button { border-radius: 0; }
 .front-row .source-return { display: block; min-height: 44px; margin-top: 16px; }
 
-/* Full scene: the plate fills the space under the bar and the safe boxes hold the real controls. */
+/* Full scene: the art fills the window edge to edge. The stage is the plate below its painted top bar, at the size that
+   covers the window within CROP_LIMIT, anchored to the bottom so the desk stays whole. Every control sits in stage
+   percentages, so it stays on its surface whatever the window's shape. Past the crop limits a blurred copy of the plate
+   fills the rest of the window. */
 @media (min-width: 900px) and (min-height: 560px) {
-  .front-row-scene { position: sticky; top: 0; align-self: start; justify-self: center; width: min(100%, calc((100dvh - var(--fr-chrome)) * var(--fr-ratio))); aspect-ratio: var(--fr-aspect); container-type: inline-size; background: var(--fr-plate) 0 100% / 100% var(--fr-plate-height) no-repeat; }
-  .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { position: absolute; left: var(--fr-board-left); top: var(--fr-board-top); width: var(--fr-board-width); height: var(--fr-board-height); overflow: auto; overscroll-behavior: contain; }
+  .scene-shell:has(.front-row) .scene-masthead { position: absolute; inset: 0 0 auto; pointer-events: none; }
+  .scene-shell:has(.front-row) .scene-masthead > * { pointer-events: auto; }
+  .scene-shell .front-row .front-row-bar { position: absolute; z-index: 9; top: 8px; left: calc(12px + 13rem); right: calc(12px + 14rem); pointer-events: none; }
+  .front-row .front-row-bar > * { pointer-events: auto; }
+  .scene-shell .front-row .front-row-notices { position: absolute; z-index: 8; top: var(--fr-nav-reserve); left: 50%; translate: -50% 0; width: min(46rem, calc(100% - 32px)); max-height: calc(100dvh - var(--fr-nav-reserve) - 16px); overflow: auto; overscroll-behavior: contain; }
+  .front-row-scene {
+    --fr-stage-w: min(max(100cqw, 100cqh * var(--fr-ratio)), 100cqw / (1 - var(--fr-max-crop-x)), 100cqh * var(--fr-ratio) / (1 - var(--fr-max-crop-top)));
+    --fr-stage-h: calc(var(--fr-stage-w) / var(--fr-ratio));
+    --fr-inset-x: max(0px, (var(--fr-stage-w) - 100cqw) / 2);
+    --fr-inset-top: max(0px, var(--fr-stage-h) - 100cqh);
+    height: 100dvh; overflow: hidden; container-type: size;
+  }
+  .front-row-scene::before { content: ""; position: absolute; inset: -32px; background: var(--fr-plate) 50% 100% / cover no-repeat; filter: blur(16px) brightness(.8); }
+  .front-row-stage { position: absolute; bottom: 0; left: 50%; translate: -50% 0; width: var(--fr-stage-w); height: var(--fr-stage-h); background: var(--fr-plate) 0 100% / 100% var(--fr-plate-height) no-repeat; }
+  /* Where a wide window crops the top of the art, the board's text starts below the navigation. */
+  .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { position: absolute; left: var(--fr-board-left); width: var(--fr-board-width); top: max(var(--fr-board-top), calc(var(--fr-inset-top) + var(--fr-nav-reserve))); bottom: calc(100% - var(--fr-board-top) - var(--fr-board-height)); overflow: auto; overscroll-behavior: contain; }
   .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { position: absolute; left: var(--fr-mat-left); top: var(--fr-mat-top); width: var(--fr-mat-width); height: var(--fr-mat-height); overflow: auto; overscroll-behavior: contain; }
   .front-row-scene[data-board-align="center"] .front-row-area[data-area="board"] { display: flex; flex-direction: column; justify-content: safe center; }
-  .front-row-scene .front-row-buddy { position: absolute; left: var(--fr-buddy-left); top: var(--fr-buddy-top); width: var(--fr-buddy-width); height: var(--fr-buddy-height); }
-  .front-row-scene .front-row-notebook { position: absolute; left: var(--fr-book-left); top: var(--fr-book-top); width: var(--fr-book-width); height: var(--fr-book-height); }
-  .front-row[data-panels="open"] .front-row-layout { grid-template-columns: minmax(0, 1fr) minmax(320px, 30rem); }
-  .front-row[data-panels="open"] .front-row-panels { padding: 16px 16px 16px 0; }
+  .front-row-scene .front-row-buddy { position: absolute; left: max(var(--fr-buddy-left), var(--fr-inset-x)); top: var(--fr-buddy-top); width: var(--fr-buddy-width); height: var(--fr-buddy-height); }
+  .front-row-scene .front-row-notebook { position: absolute; left: min(var(--fr-book-left), calc(100% - var(--fr-inset-x) - var(--fr-book-width))); top: var(--fr-book-top); width: var(--fr-book-width); height: var(--fr-book-height); }
 }
 
-/* Phone and small windows: the room is recomposed, not shrunk. A strip of the plate's scenery, then the board, the desk
-   with Your thinking, and the companion with the notebook. Every text keeps a readable size. */
+/* Mid-width windows: the review's navigation takes a second row under the masthead chips. */
+@media (min-width: 900px) and (max-width: 1359px) and (min-height: 560px) {
+  .scene-shell .review.front-row { --fr-nav-reserve: 120px; }
+  .scene-shell .front-row .front-row-bar { top: 60px; left: 12px; right: 12px; }
+}
+
+/* Phone and small windows: the room is recomposed, not shrunk. The plate fills the page behind everything, and the board,
+   the desk with Your thinking, and the companion with the notebook stack over it. Every text keeps a readable size. */
 @media (max-width: 899px), (max-height: 559px) {
-  .scene-shell:has(.front-row) .scene-masthead { height: auto; min-height: 52px; padding: 4px 14px; }
-  .scene-shell:has(.front-row) .scene-masthead > a { font-size: 1.3rem; }
-  .scene-shell .front-row .front-row-bar { padding: 6px 14px; gap: 4px 10px; }
-  .front-row .front-row-title { flex-wrap: wrap; flex-basis: 100%; }
-  .scene-shell .front-row .front-row-bar h1 { font-size: 1.15rem; white-space: normal; }
-  .front-row .front-row-bar .review-scope-line { font-size: .9rem; white-space: normal; }
-  .scene-shell .front-row .front-row-bar button { min-height: 44px; }
-  .front-row-scene { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "scenery scenery" "board board" "desk desk" "buddy book"; background: var(--fr-wall); }
-  .front-row-scene::before { content: ""; grid-area: scenery; height: 56px; background: var(--fr-plate) var(--fr-phone-scenery) / 260% auto no-repeat; border-bottom: 3px solid #00000040; }
-  .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { grid-area: board; margin: 10px 10px 0; padding: 14px 16px 16px; background: var(--fr-board-fill); border: 6px solid var(--fr-frame); box-shadow: inset 0 0 0 2px #00000033, 0 4px 0 #00000040; }
-  .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { grid-area: desk; margin: 12px 0 0; padding: 12px; background: var(--fr-mat-fill); border-top: 10px solid var(--fr-desk); border-bottom: 10px solid var(--fr-desk); }
+  .scene-shell:has(.front-row) {
+    --fr-phone-art-w: max(100vw, 100lvh * var(--fr-ratio));
+    background: var(--fr-plate) var(--fr-phone-x) calc(var(--fr-phone-art-w) * var(--fr-plate-tall) * var(--fr-crop-top) * -1) / var(--fr-phone-art-w) auto no-repeat, var(--fr-wall);
+  }
+  .scene-shell:has(.front-row) .scene-masthead { min-height: 0; padding: 8px 8px 6px; flex-wrap: nowrap; }
+  .scene-shell:has(.front-row) :is(.scene-masthead > a, .appearance-picker > summary) { padding: 0 10px; }
+  .scene-shell:has(.front-row) .scene-masthead > a { font-size: 1.15rem; }
+  .scene-shell:has(.front-row) .appearance-picker > summary { font-size: .95rem; }
+  .scene-shell .front-row .front-row-bar { padding: 0 8px; gap: 6px; }
+  .front-row .front-row-title { flex: 1 1 100%; }
+  .front-row .front-row-bar .review-navigation { justify-content: flex-start; gap: 6px; }
+  .scene-shell .front-row .front-row-bar button { padding: 6px 10px; font-size: .95rem; }
+  .scene-shell .front-row .front-row-notices { margin: 8px 8px 0; }
+  .front-row-scene { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "board board" "desk desk" "buddy book"; gap: 8px; padding: 8px 8px 0; }
+  .front-row-stage { display: contents; }
+  .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { grid-area: board; padding: 12px 14px 14px; background: var(--fr-board-fill); border: 5px solid var(--fr-frame); box-shadow: inset 0 0 0 2px #00000033, 0 4px 0 #00000040; }
+  .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { grid-area: desk; padding: 12px; background: var(--fr-mat-fill); border: 4px solid var(--fr-desk); box-shadow: 0 4px 0 #00000040; }
   .scene-shell .front-row-scene .current-exchange .line[data-question] p { font-size: 1.3rem; line-height: 1.3; }
   .scene-shell .front-row-scene .current-exchange .line p { font-size: 1.05rem; }
-  .front-row-scene .composer, .front-row-scene[data-mat-actions] .composer { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "status status" "label more" "field field" "share share" "assist assist" "speak speak" "short short"; }
-  .scene-shell .front-row-scene :is(.composer, .setup-start) textarea { height: 6.5rem; font-size: 1rem; }
+  .front-row-scene .composer, .front-row-scene[data-mat-actions] .composer { grid-template-columns: minmax(0, 1fr); grid-template-areas: "status" "label" "field" "share" "assist" "more" "speak" "short"; }
+  .front-row-scene .composer .review-help { justify-self: start; }
+  .scene-shell .front-row-scene :is(.composer, .setup-start) textarea { height: 5rem; min-height: 5rem; font-size: 1rem; }
   .front-row-scene .composer .primary-actions > * { flex: 1 1 100%; }
   .front-row-scene .composer .assist-actions > * { flex: 1 1 0; }
   .front-row-scene .composer > .actions:not(.primary-actions) { justify-self: start; }
   .front-row-scene .setup-start { grid-template-areas: "label label" "field field" "start start"; }
-  .front-row-scene .front-row-buddy { grid-area: buddy; justify-content: flex-start; height: 84px; padding: 6px 12px; }
+  .front-row-scene .front-row-buddy { grid-area: buddy; justify-content: flex-start; height: 84px; padding: 6px 4px; }
   .front-row-buddy .study-companion { justify-content: flex-start; gap: 10px; width: auto; }
   .front-row-buddy .study-companion > div { position: static; transform: none; margin: 0 0 6px; }
-  .scene-shell .front-row-scene .front-row-notebook { grid-area: book; align-self: center; margin: 0 12px; padding: 0; min-height: 44px; }
+  .scene-shell .front-row-scene .front-row-notebook { grid-area: book; align-self: center; margin: 0 4px; padding: 0; min-height: 44px; }
   .front-row-scene .front-row-notebook span { display: flex; align-items: center; min-height: 44px; padding: 6px 12px; }
+  .front-row .front-row-panels { padding: 8px; }
   .scene-shell .review .front-row-panels .source-stand .source-return { position: sticky; bottom: 8px; z-index: 1; width: 100%; }
 }

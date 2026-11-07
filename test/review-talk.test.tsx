@@ -68,17 +68,6 @@ describe("the current question stays with the composer", () => {
     expect(at("<Composer")).toBeLessThan(at('className="conversation-history"'));
     expect(tsx.match(/<Composer\b/g)).toHaveLength(1);
   });
-
-  test("on wide screens an opened panel takes its own column beside the room, and the review bar is never an overlay", () => {
-    const css = readFileSync(new URL("../src/app/front-row.css", import.meta.url), "utf8");
-    expect(css).toMatch(/\.front-row\[data-panels="open"\] \.front-row-layout \{ grid-template-columns: minmax\(0, 1fr\) minmax\(320px, 30rem\); \}/);
-    expect(css).not.toMatch(/front-row-bar[^{]*\{[^}]*position:\s*absolute/);
-  });
-
-  test("on narrow screens the board comes first and the desk with the response field follows it", () => {
-    const css = readFileSync(new URL("../src/app/front-row.css", import.meta.url), "utf8");
-    expect(css).toContain('grid-template-areas: "scenery scenery" "board board" "desk desk" "buddy book"');
-  });
 });
 
 describe("a spoken answer sends itself", () => {

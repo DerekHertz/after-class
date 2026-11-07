@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { COMPANIONS, SCENES, parseAppearance } from "../src/app/appearance";
 import type { CompanionId, SceneId } from "../src/app/appearance";
-import { FRONT_ROW_ROOMS, FrontRowScene, PLATE, roomStyle, stageBox } from "../src/app/front-row";
+import { CROP_LIMIT, FRONT_ROW_ROOMS, FrontRowScene, PLATE, roomStyle, stageBox, topCropLimit } from "../src/app/front-row";
 import type { FrontRowLayout, PlateBox } from "../src/app/front-row";
 import { contrast, medianColor, readPng } from "./png";
 
@@ -74,6 +74,22 @@ describe("room geometry", () => {
         expect(overlaps(side, room.mat.box)).toBe(false);
         expect(overlaps(side, room.board.box)).toBe(false);
       }
+    }
+  });
+
+  test("at the full-bleed crop limits the board stays mostly in view and the notebook and companion stay over their art", () => {
+    const perSide = CROP_LIMIT.sides / 2;
+    for (const scene of rooms) {
+      const room = FRONT_ROW_ROOMS[scene];
+      const board = stageBox(room.board.box, room.cropTop);
+      const kept = (board.top + board.height - topCropLimit(scene) * 100) / board.height;
+      expect({ scene, kept: kept >= 0.75 }).toEqual({ scene, kept: true });
+      expect(roomStyle(scene)["--fr-max-crop-top"]).toBe(topCropLimit(scene));
+      for (const [name, box] of [["notebook", room.notebook], ["companion", room.companion]] as const) {
+        const slide = Math.max(0, perSide - Math.min(box.left, 1 - box.right));
+        expect({ scene, name, overArt: slide <= (box.right - box.left) / 2 }).toEqual({ scene, name, overArt: true });
+      }
+      expect({ scene, matWhole: perSide < room.mat.box.left && perSide < 1 - room.mat.box.right }).toEqual({ scene, matWhole: true });
     }
   });
 

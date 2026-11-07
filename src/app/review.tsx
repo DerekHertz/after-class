@@ -26,7 +26,7 @@ export type ReviewDeps = { readonly api: AppApi; readonly speaker: Speaker; read
 
 /**
  * The review is a front-row seat in the learner's room: the current question is written on the board, the response
- * field lies on the desk, and the lecture source and earlier conversation open beside them on demand.
+ * field lies on the desk, and the lecture source and earlier conversation open below the room on demand.
  */
 export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewDeps & { readonly reviewId: ReviewId }) {
   const { appearance, voice, activity } = useAppearance();
@@ -224,13 +224,20 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           {!checklist && hasHistory && <button ref={historyToggle} type="button" aria-expanded={historyOpen} aria-controls="review-history" onClick={toggleHistory}>{historyOpen ? "Hide earlier" : "Earlier in this review"}</button>}
           {!checklist && <button ref={sourceToggle} type="button" aria-expanded={sourceOpen} aria-controls="review-source" onClick={(e) => {
             if (sourceOpen) closeSource();
-            else { sourceOrigin.current = e.currentTarget; reactToCompanion("draw"); setSourceOpen(true); }
+            else {
+              sourceOrigin.current = e.currentTarget;
+              reactToCompanion("draw");
+              setSourceOpen(true);
+              requestAnimationFrame(() => sourceHeading.current?.focus());
+            }
           }}>{sourceOpen ? "Close source" : "Open source"}</button>}
           <Actions ids={actions.filter(id => id === "pause" || id === "resume" || id === "end")} disabled={streaming || state.unsent.length > 0} send={id => void controller.send(toAct(id, "", "text"))} />
         </div>
       </header>
-      <SaveBanner state={state} onRetry={() => void controller.save()} reviewId={reviewId} onSource={openSource} />
-      <ErrorNote error={state.loadError} retry={() => void controller.load()} />
+      <div className="front-row-notices">
+        <SaveBanner state={state} onRetry={() => void controller.save()} reviewId={reviewId} onSource={openSource} />
+        <ErrorNote error={state.loadError} retry={() => void controller.load()} />
+      </div>
       <div className="front-row-layout">
         <FrontRowScene
           scene={appearance.scene}
