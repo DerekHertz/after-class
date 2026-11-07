@@ -518,11 +518,11 @@ export const ACTION_LABEL: Readonly<Record<ActionId, string>> = {
   wrap_up: "Wrap up",
   pause: "Pause",
   resume: "Resume",
-  end: "End review",
+  end: "Finish & save",
 };
 
 /**
- * Ending a review cannot be undone, so the End button only asks; the act is sent by the confirm step alone.
+ * Finishing a review cannot be undone, so the Finish & save button only asks; the act is sent by the confirm step alone.
  * Pause and every other action stay one click.
  */
 export type EndStep = "idle" | "confirming";
@@ -534,7 +534,8 @@ export function endFlow(step: EndStep, event: EndEvent): { readonly step: EndSte
   return { step: "idle", send: false };
 }
 
-export const END_CONFIRM_TEXT = "End this review? You can't reopen it.";
+/** Says what finishing stops for good and what stays: the saved record, and this review to reread. */
+export const END_CONFIRM_TEXT = "Finish and save this review? The conversation ends and can't be continued. Your notes and results stay in your notebook, and you can reread this review.";
 
 /**
  * Where the composer offers each act. Help a stuck learner needs sits beside Share my thinking; the less frequent acts

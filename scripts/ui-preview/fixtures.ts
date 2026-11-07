@@ -236,7 +236,9 @@ export function createFixture(scenario: Scenario): Fixture {
       log("review.save");
       if (scenario === "saving") await gate();
       if (scenario === "save-failure" && attempts++ === 0) return saveResultz.parse({ kind: "save_failed", error: "Fixture disk write failed. Your review is still here.", retryable: true });
-      view = { ...view, saved: "saved" }; return saveResultz.parse({ kind: "saved", notes: 1, observations: 0, links: 0 });
+      // As the backend does, the saved review carries its persisted observations: the main question, disputed. Resource ordering was never asked, so it has none.
+      const observations = reviewViewz.parse(reviewJson(ids.review, "record")).observations.filter(o => o.threadId === ids.thread);
+      view = { ...view, saved: "saved", observations }; return saveResultz.parse({ kind: "saved", notes: 1, observations: observations.length, links: 0 });
     },
     async record() { log("record.read"); if (scenario === "record-error" && attempts++ === 0) throw new ApiError("Fixture notebook could not load. Retry is available.", 503); return record; },
     async editNote(noteId, text) { log("note.edit"); record = { ...record, notes: record.notes.map(note => note.id === noteId ? { ...note, userEdit: text } : note) }; },

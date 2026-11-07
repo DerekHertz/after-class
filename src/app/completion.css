@@ -1,0 +1,8 @@
+/* Finished-review summary (src/app/completion.tsx). Kept apart from the room layout in review.css. */
+.review-complete { margin: var(--space-2) 0; }
+.review-complete h2 { margin-top: 0; }
+.review-complete h2:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+.review-complete h3 { font-size: 1rem; margin: var(--space-2) 0 var(--space-1); }
+.review-complete ul { margin: 0; padding-left: var(--space-4); }
+.review-complete li { margin: var(--space-1) 0; overflow-wrap: anywhere; }
+.review-complete-next { border-top: 1px solid var(--border); margin-top: var(--space-2); }
