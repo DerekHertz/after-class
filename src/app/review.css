@@ -20,6 +20,16 @@
 .review .review-help summary { font-style: italic; }
 .source-heading button { margin: 4px 8px 4px 0; }
 .review .notebook-heading button { font-size: .85rem; }
+/* The starting point is a compact setup form, shown in place of the conversation until the first turn. */
+.review .topic-checklist { display: grid; gap: 10px; max-width: 44rem; }
+.review .topic-checklist h2 { margin: 0; font-size: 1.35rem; }
+.review .topic-checklist > p { margin: 0; }
+.review .topic-checklist fieldset { display: grid; gap: 10px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.review .topic-checklist legend { padding: 0; margin-bottom: 4px; font-weight: bold; }
+.review .topic-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.review .topic-checklist textarea { width: 100%; min-height: 3.5em; box-sizing: border-box; }
+.review .topic-checklist .actions { margin: 0; }
+.review .topic-checklist .primary-action { min-height: 44px; padding: 8px 20px; color: #fff8e9; background: #284f9b; border-color: #284f9b; }
 .diagram-panel { border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 16px; }
 .diagram-panel h3 { margin: 4px 0; }
 .diagram-frame { margin: 8px 0; }

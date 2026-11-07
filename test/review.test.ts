@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { randomId, stableId } from "../src/shared/ids";
-import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, EvidenceId, ReviewId, ThreadId, TurnId } from "../src/shared/ids";
+import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, ConceptId, EvidenceId, ReviewId, ThreadId, TurnId } from "../src/shared/ids";
 import type {
   AssessableClaim, ChunkPrep, ChunkProvenance, ChunkRevision, Claim, ClaimStatus, EvidenceBundle, Gap, LearnerAct, Passage, ReviewState, Seq,
   StartResult, Turn, TurnEvent, TutorMove, TutorMoveKind,
@@ -492,10 +492,27 @@ describe("options", () => {
     const a = r.world.close(0, 0, 300);
     r.world.claim(1, 10, 20);
     r.world.claim(2, 30, 40, "unverified");
-    expect(r.reviews.options(r.capture)).toEqual({
+    const opts = r.reviews.options(r.capture);
+    expect(opts).toMatchObject({
       kind: "ready",
-      scope: { chunkRevisions: [a.id], supportedClaims: 1, partial: [{ kind: "unverified_claims", count: 1 }] },
+      scope: { chunkRevisions: [a.id], supportedClaims: 1, topics: [], partial: [{ kind: "unverified_claims", count: 1 }] },
     });
+    expect(opts.kind === "ready" && Material.equals(opts.scope.material, a.material)).toBe(true);
+  });
+
+  test("the preview names the topics of its supported claims, each once, not one per claim", () => {
+    const r = rig();
+    const asked: ConceptId[][] = [];
+    const reviews = createReviews(r.db, {
+      ...r.world.deps, runTutor: r.tutor.runTutor, clearFailures: r.tutor.clearFailures,
+      concepts: (ids) => { asked.push([...ids]); return ids.map((id) => ({ id, label: "Pivots", summary: "" })); },
+    }, { tutor: kit });
+    r.world.close(0, 0, 300);
+    r.world.claim(1, 10, 20);
+    r.world.claim(2, 30, 40);
+    const opts = reviews.options(r.capture);
+    expect(opts).toMatchObject({ kind: "ready", scope: { supportedClaims: 2, topics: [{ id: CONCEPT, label: "Pivots" }] } });
+    expect(asked).toEqual([[CONCEPT]]);
   });
 
   test("processing: pending chunks, what is ready now, and an estimate only when the scheduler has one", () => {

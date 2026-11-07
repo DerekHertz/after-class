@@ -160,7 +160,7 @@ const topicDiagramJson = {
   topicId: cpt, label: "Clocks", claimIds: [clm], frame: { id: ev2, mediaS: 12, sourceId: src, videoId: "QgWz_s7uugE", title: "Locks" },
   summary: { state: "ready", title: "What does a clock give you?", lines: [{ text: "Clock A reads 5, clock B reads 2.", evidence: [ev1, ev2] }] },
 };
-const readyScope = { chunkRevisions: [crv], supportedClaims: 4, partial: [] };
+const readyScope = { chunkRevisions: [crv], supportedClaims: 4, topics: [{ id: cpt, label: "Clocks", summary: "" }], material: [[src, [[0, 120]]]], partial: [] };
 
 type Fixture = {
   readonly params?: Record<string, string>;
