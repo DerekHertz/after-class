@@ -121,7 +121,7 @@ describe("observation rows", () => {
   test("a ready row names its topic and shows answer, judgment and evidence before the neutral decision", async () => {
     const { fixture, review, observations } = await disputes();
     const html = item(fixture, observations[1]!, observationContext(observations[1]!, review), 2);
-    expect(html).toContain(">Resource ordering</h3>");
+    expect(html).toContain(">Resource ordering</h5>");
     expect(html).toContain("Status: Disputed");
     expect(html).toContain("not counted as a learning gap");
     const order = ["How does taking locks in one global order prevent a deadlock?", "If every thread takes A before B", "That is the global order the lecture gave.", "Proposed &quot;Unresolved&quot;.", "Show lecture evidence (1)", "Correct status", "Settle the dispute about Resource ordering", "Keep unresolved", "My explanation was supported", "I want to revisit this", "Save decision"];
@@ -146,7 +146,7 @@ describe("observation rows", () => {
     test(`a ${name} row disables every change and says why`, async () => {
       const { fixture, observations } = await disputes();
       const html = item(fixture, observations[1]!, context, 2);
-      expect(html).toContain(">Observation 2</h3>");
+      expect(html).toContain(">Observation 2</h5>");
       expect(html).toContain('<select aria-label="Correct status for Observation 2" disabled=""');
       expect(html).toMatch(/<fieldset class="dispute-decision" disabled="">/);
       expect(html).toContain("You can change this observation once its topic, question and answer are shown.");

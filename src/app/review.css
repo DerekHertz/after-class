@@ -24,6 +24,3 @@
 .review .review-topics { flex: 0 0 auto; font-size: .85rem; margin-top: 8px; }
 .review .review-topics ul { list-style: none; padding-left: 0; }
 .review .current-topic { flex: 0 0 auto; font-size: .9rem; margin: 8px 0 0; }
-.illustrated-page { border: 1px solid var(--border); border-radius: 6px; padding: 16px; margin: 16px 0; }
-.illustrated-page h3 { margin: 0; }
-.illustrated-page .frame { max-width: 100%; height: auto; }

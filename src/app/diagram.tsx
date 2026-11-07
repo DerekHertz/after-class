@@ -1,12 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ConceptId, EvidenceId, ReviewId } from "../shared/ids";
 import type { TopicDiagram } from "../shared/domain";
 import type { AppApi } from "./api";
 import { formatClock } from "./core";
-import type { SourceTitles } from "./core";
-import { frameLink, lineSources, illustratedPages, needsSummary, NO_FRAME_NOTE, shouldPollDiagrams, SUMMARY_NOTE } from "./diagram-view";
-import type { IllustratedPage } from "./diagram-view";
-import { ErrorNote, EvidencePane, FrameImage, useAsync } from "./ui";
+import { frameLink, lineSources, NO_FRAME_NOTE, shouldPollDiagrams, SUMMARY_NOTE } from "./diagram-view";
+import { ErrorNote, FrameImage } from "./ui";
 
 export type Diagrams = {
   readonly topics: readonly TopicDiagram[] | null;
@@ -16,7 +14,7 @@ export type Diagrams = {
   readonly request: (topicId: ConceptId) => Promise<void>;
 };
 
-const POLL_MS = 2000;
+export const POLL_MS = 2000;
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /**
@@ -133,60 +131,6 @@ export function DiagramPanel({ api, topic, error, onRequest, onCite, onClose }: 
       <h3>{heading}</h3>
       <DiagramSummaryView topic={topic} onRequest={onRequest} onCite={onCite} />
     </section>
-  );
-}
-
-const noTitles: SourceTitles = new Map();
-
-/** One illustrated page: the tutor's question, the frame, the state-change summary, the learner's answer and its status. */
-export function IllustratedPageView({ api, page, onRequest }: { readonly api: AppApi; readonly page: IllustratedPage; readonly onRequest: () => void }) {
-  const [open, setOpen] = useState<readonly EvidenceId[] | null>(null);
-  const { topic, questions } = page;
-  return (
-    <article className="illustrated-page" aria-label={`Illustrated page: ${topic.label}`}>
-      <h3>{topic.summary.state === "ready" ? topic.summary.title : topic.label}</h3>
-      <p className="muted">{topic.label}</p>
-      {questions.map((q) => <p key={q.threadId} className="illustrated-question"><strong>{q.kind}: </strong>{q.question}</p>)}
-      <DiagramFrameView api={api} topic={topic} />
-      <DiagramSummaryView topic={topic} onRequest={onRequest} onCite={(ids) => setOpen(ids)} />
-      {open !== null && (
-        <section className="record-evidence" aria-label="Cited lecture evidence">
-          <div className="record-note-heading"><h4>Lecture evidence</h4><button type="button" onClick={() => setOpen(null)}>Close source</button></div>
-          <EvidencePane api={api} ids={open} titles={noTitles} />
-        </section>
-      )}
-      {questions.map((q) => (
-        <div key={q.threadId} className="illustrated-answer">
-          <p><strong>Your answer: </strong>{q.answers.length > 0 ? q.answers.join(" ") : "No answer recorded."}</p>
-          <p><strong>Status: </strong>{q.status}{q.note !== null && <span className="muted"> {q.note}</span>}</p>
-        </div>
-      ))}
-    </article>
-  );
-}
-
-/** The record's illustrated pages for one saved review, one per topic it covered. With `auto`, missing summaries are written on view; without, each waits for its button (the all-notes view must not spend a call per old review). */
-export function IllustratedReview({ api, reviewId, auto }: { readonly api: AppApi; readonly reviewId: ReviewId; readonly auto: boolean }) {
-  const review = useAsync(() => api.review(reviewId), [api, reviewId]);
-  const diagrams = useDiagrams(api, reviewId);
-  const asked = useRef(new Set<ConceptId>());
-  const pages = review.data === null || diagrams.topics === null ? [] : illustratedPages(review.data, diagrams.topics);
-  const missing = auto ? pages.filter((p) => needsSummary(p.topic)).map((p) => p.topic.topicId).join(",") : "";
-  useEffect(() => {
-    for (const id of missing === "" ? [] : (missing.split(",") as ConceptId[])) {
-      if (asked.current.has(id)) continue;
-      asked.current.add(id);
-      void diagrams.request(id);
-    }
-  }, [missing]);
-  return (
-    <>
-      <ErrorNote error={review.error} retry={review.reload} />
-      <ErrorNote error={diagrams.error} retry={diagrams.reload} />
-      {(review.loading || diagrams.topics === null) && review.error === null && diagrams.error === null && <p className="muted" role="status">Opening the illustrated pages...</p>}
-      {review.data !== null && diagrams.topics !== null && pages.length === 0 && <p className="muted">No topic was asked about in this review.</p>}
-      {pages.map((p) => <IllustratedPageView key={p.topic.topicId} api={api} page={p} onRequest={() => void diagrams.request(p.topic.topicId)} />)}
-    </>
   );
 }
 
