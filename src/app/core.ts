@@ -475,6 +475,39 @@ export function endFlow(step: EndStep, event: EndEvent): { readonly step: EndSte
 
 export const END_CONFIRM_TEXT = "End this review? You can't reopen it.";
 
+/**
+ * Where the composer offers each act. Help a stuck learner needs sits beside Share my thinking; the less frequent acts
+ * stay in the menu. Pause, resume and end live in the header and are never passed to the composer.
+ */
+const COMPOSER_PLACEMENT: Partial<Readonly<Record<ActionId, "assist" | "more">>> = {
+  hint: "assist", dont_know: "assist", skip: "more", explain: "more", dispute: "more",
+};
+
+export function composerActions(actions: readonly ActionId[]): { readonly primary: readonly ActionId[]; readonly assist: readonly ActionId[]; readonly more: readonly ActionId[] } {
+  const at = (place: "assist" | "more" | undefined) => actions.filter((id) => COMPOSER_PLACEMENT[id] === place);
+  return { primary: at(undefined), assist: at("assist"), more: at("more") };
+}
+
+type ShownFrame = { readonly id: EvidenceId; readonly sourceId: SourceId; readonly mediaS: number };
+const frameKey = (f: ShownFrame) => `${f.sourceId}@${formatClock(f.mediaS)}`;
+
+/**
+ * The frames worth drawing, in order. Two frames of one source at the same displayed time look the same, so only the
+ * first is kept, and a frame already drawn elsewhere on the panel (the topic diagram's) is not drawn again.
+ */
+export function distinctFrames<F extends ShownFrame>(frames: readonly F[], shownElsewhere: ShownFrame | null): { readonly frames: readonly F[]; readonly alreadyShown: boolean } {
+  const seen = new Set<string>(shownElsewhere === null ? [] : [shownElsewhere.id, frameKey(shownElsewhere)]);
+  let alreadyShown = false;
+  const kept = frames.filter((f) => {
+    const duplicate = seen.has(f.id) || seen.has(frameKey(f));
+    if (duplicate && shownElsewhere !== null && (f.id === shownElsewhere.id || frameKey(f) === frameKey(shownElsewhere))) alreadyShown = true;
+    seen.add(f.id);
+    seen.add(frameKey(f));
+    return !duplicate;
+  });
+  return { frames: kept, alreadyShown };
+}
+
 /** Acts that carry text. */
 export const NEEDS_TEXT: ReadonlySet<ActionId> = new Set(["answer", "dispute"]);
 

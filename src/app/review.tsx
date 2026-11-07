@@ -11,7 +11,7 @@ import { reactToCompanion } from "./companion-reaction";
 import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
 import {
-  ACTION_LABEL, END_CONFIRM_TEXT, INITIAL_SOURCE_OPEN, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
+  ACTION_LABEL, END_CONFIRM_TEXT, composerActions, INITIAL_SOURCE_OPEN, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
   softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer,
 } from "./core";
 import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, TurnStatus } from "./core";
@@ -33,6 +33,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const sourceColumn = useRef<HTMLDivElement>(null);
   const sourceToggle = useRef<HTMLButtonElement>(null);
   const sourceOrigin = useRef<HTMLButtonElement | null>(null);
+  const conversation = useRef<HTMLElement>(null);
+  const diagramSection = useRef<HTMLDivElement>(null);
   const followHistory = useRef(true);
   const [selection, setSelection] = useState<SourceSelection>({ kind: "automatic" });
   const [sourceOpen, setSourceOpen] = useState(INITIAL_SOURCE_OPEN);
@@ -92,6 +94,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     setDiagramTopic(topicId);
     if (!sourceOpen) reactToCompanion("draw");
     setSourceOpen(true);
+    requestAnimationFrame(() => diagramSection.current?.focus());
     const known = diagrams.topics?.find((t) => t.topicId === topicId);
     if (known === undefined || known.summary.state === "not_requested") void diagrams.request(topicId);
     else diagrams.reload();
@@ -103,6 +106,13 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     const origin = sourceOrigin.current;
     if (origin?.closest(".source-stand")) sourceToggle.current?.focus();
     else (origin?.isConnected ? origin : sourceToggle.current)?.focus();
+  }
+
+  /** On a phone the source sits below the conversation; this brings the question and the composer back without closing it. */
+  function returnToQuestion() {
+    const target = currentQuestion.current ?? conversation.current;
+    target?.scrollIntoView({ block: "start" });
+    target?.focus({ preventScroll: true });
   }
 
   const view = state.view;
@@ -148,7 +158,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
       <SaveBanner state={state} onRetry={() => void controller.save()} reviewId={reviewId} />
       <ErrorNote error={state.loadError} retry={() => void controller.load()} />
       <div className={`review-workspace${sourceOpen ? "" : " source-closed"}`}>
-        <section className="conversation-notebook" aria-labelledby="conversation-heading">
+        <section ref={conversation} className="conversation-notebook" aria-labelledby="conversation-heading">
           <div className="notebook-heading">
             <h2 id="conversation-heading">Conversation</h2>
             <span className="question-marker">Question {view.state.mainQuestions}</span>
@@ -256,14 +266,15 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             <p className="eyebrow">From the lecture</p>
             <h2 ref={sourceHeading} tabIndex={-1} id="source-heading">Lecture evidence</h2>
             <p className="source-selection-label">{selection.kind === "pinned" ? selection.label : "From the current tutor explanation or check"}</p>
-            <button type="button" onClick={closeSource}>Close evidence</button>
+            <button type="button" onClick={closeSource}>Close source</button>
             {selection.kind === "pinned" && <button type="button" onClick={() => setSelection({ kind: "automatic" })}>Follow current reply</button>}
           </div>
-          {diagramTopic !== null && (shownDiagram
+          <EvidencePane key={evidenceIds.join(",")} api={api} ids={evidenceIds} titles={titles} videos={videos} grouped shownFrame={shownDiagram?.frame ?? null} />
+          {diagramTopic !== null && <div ref={diagramSection} tabIndex={-1} className="tutor-diagram">{shownDiagram
             ? <DiagramPanel key={shownDiagram.topicId} api={api} topic={shownDiagram} error={diagrams.error} onRequest={() => void diagrams.request(diagramTopic)} onCite={openSource} onClose={() => setDiagramTopic(null)} />
-            : <div className="diagram-panel">{diagrams.error !== null ? <ErrorNote error={diagrams.error} retry={diagrams.reload} /> : <p className="muted" role="status">Loading the diagram...</p>}<button type="button" onClick={() => setDiagramTopic(null)}>Close diagram</button></div>)}
-          <EvidencePane key={evidenceIds.join(",")} api={api} ids={evidenceIds} titles={titles} videos={videos} />
+            : <div className="diagram-panel">{diagrams.error !== null ? <ErrorNote error={diagrams.error} retry={diagrams.reload} /> : <p className="muted" role="status">Loading the diagram...</p>}<button type="button" onClick={() => setDiagramTopic(null)}>Close diagram</button></div>}</div>}
           <ScopeEvidence api={api} view={view} titles={titles} onSource={openSource} />
+          <button type="button" className="source-return" onClick={returnToQuestion}>Back to the question</button>
         </aside>
         </div>
       </div>
@@ -515,6 +526,8 @@ export function Composer({
   const status = turnStatus({ listening, transcript, submitting: sending, live: live ?? null });
 
   const empty = draft.trim() === "";
+  const placed = composerActions(actions);
+  const button = (id: ActionId) => <button key={id} type="button" disabled={disabled || (NEEDS_TEXT.has(id) && empty)} onClick={() => void fire(id)}>{ACTION_LABEL[id]}</button>;
   return (
     <div className="composer">
       {sendError !== null && <p className="note note-error" role="alert">{sendError}</p>}
@@ -550,15 +563,16 @@ export function Composer({
       )}
       {hasText && <p className="composer-shortcut">Ctrl / ⌘ + Enter to share your thinking</p>}
       <div className="actions primary-actions">
-        {actions.filter((id) => !["skip", "dont_know", "hint", "explain", "dispute"].includes(id)).map((id) => (
+        {placed.primary.map((id) => (
           <button key={id} type="button" className={id === "answer" ? "primary-action" : undefined} disabled={disabled || (NEEDS_TEXT.has(id) && empty)} onClick={() => void fire(id)}>
             {id === "answer" ? "Share my thinking" : ACTION_LABEL[id]}
           </button>
         ))}
       </div>
-      {actions.some((id) => ["skip", "dont_know", "hint", "explain", "dispute"].includes(id)) && <details className="review-help">
+      {placed.assist.length > 0 && <div className="assist-actions" role="group" aria-label="Help with this question">{placed.assist.map(button)}</div>}
+      {placed.more.length > 0 && <details className="review-help">
         <summary>More ways to work through it</summary>
-        <div className="actions">{actions.filter((id) => ["skip", "dont_know", "hint", "explain", "dispute"].includes(id)).map((id) => <button key={id} type="button" disabled={disabled || (NEEDS_TEXT.has(id) && empty)} onClick={() => void fire(id)}>{ACTION_LABEL[id]}</button>)}</div>
+        <div className="actions">{placed.more.map(button)}</div>
       </details>}
     </div>
   );

@@ -125,7 +125,7 @@ export function DiagramPanel({ api, topic, error, onRequest, onCite, onClose }: 
   return (
     <section className="diagram-panel" aria-label={`Diagram: ${topic.label}`}>
       <div className="source-heading">
-        <p className="eyebrow">Diagram · {topic.label}</p>
+        <p className="diagram-provenance"><strong>Tutor diagram · {topic.label}</strong> Written by the tutor, not captured from the lecture.</p>
         <button type="button" onClick={onClose}>Close diagram</button>
       </div>
       <ErrorNote error={error} />

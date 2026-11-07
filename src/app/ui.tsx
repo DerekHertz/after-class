@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import type { EvidenceId } from "../shared/ids";
-import type { TranscriptOrigin } from "../shared/domain";
+import type { DiagramFrame, EvidenceBundle, Frame, Passage, TranscriptOrigin } from "../shared/domain";
 import type { AppApi } from "./api";
-import { formatClock, formatInterval, routePath, watchUrl } from "./core";
+import { distinctFrames, formatClock, formatInterval, routePath, watchUrl } from "./core";
 import type { BundleReport, Route, SourceTitles, SourceVideos } from "./core";
 
 // ───────────────────────────── Navigation ───────────────────────────────────
@@ -137,41 +137,92 @@ const TRANSCRIPT_ORIGIN: Readonly<Record<TranscriptOrigin, string>> = {
   asr: "Opt-in transcription",
 };
 
-type EvidenceProps = { readonly api: AppApi; readonly ids: readonly EvidenceId[]; readonly titles: SourceTitles; readonly videos?: SourceVideos };
+type EvidenceProps = {
+  readonly api: AppApi;
+  readonly ids: readonly EvidenceId[];
+  readonly titles: SourceTitles;
+  readonly videos?: SourceVideos;
+  /** The review's source panel groups and labels the evidence; the notebook and capture pages keep the plain list. */
+  readonly grouped?: boolean;
+  /** A frame the panel already draws elsewhere (the topic diagram's), so it is not drawn a second time. */
+  readonly shownFrame?: DiagramFrame | null;
+};
+
+type Loaded = EvidenceProps & { readonly bundle: Pick<EvidenceBundle, "passages" | "frames"> };
 
 export function EvidencePane(props: EvidenceProps) {
   return <EvidenceContents key={props.ids.join(",")} {...props} />;
 }
 
-function EvidenceContents({ api, ids, titles, videos }: EvidenceProps) {
+function EvidenceContents(props: EvidenceProps) {
+  const { api, ids } = props;
   const key = ids.join(",");
   const bundle = useAsync(() => (ids.length === 0 ? Promise.resolve(null) : api.evidence({ ids })), [api, key]);
   if (ids.length === 0) return <p className="muted">Source evidence appears here when the tutor explains or checks something.</p>;
   if (bundle.error !== null) return <ErrorNote error={bundle.error} retry={bundle.reload} />;
   if (bundle.data === null) return <p className="muted">Loading evidence...</p>;
-  const { passages, frames } = bundle.data;
-  const found = new Set<string>([...passages.map((p) => p.id), ...frames.map((f) => f.id)]);
-  const missing = ids.filter((id) => !found.has(id));
+  return props.grouped === true ? <EvidenceGroups {...props} bundle={bundle.data} /> : <EvidenceList {...props} bundle={bundle.data} />;
+}
+
+const missingNote = ({ ids, bundle }: Loaded) => {
+  const found = new Set<string>([...bundle.passages.map((p) => p.id), ...bundle.frames.map((f) => f.id)]);
+  const missing = ids.filter((id) => !found.has(id)).length;
+  return missing > 0 && <p className="muted">{missing} evidence item{missing === 1 ? " is" : "s are"} no longer available.</p>;
+};
+
+function EvidenceList(props: Loaded) {
   return (
     <div className="evidence">
-      {frames.map((f) => (
-        <figure key={f.id}>
-          <FrameImage api={api} id={f.id} />
-          <figcaption className="muted">Captured frame · {titles.get(f.sourceId) ?? "Lecture"} at {formatClock(f.mediaS)}
-            {videos?.has(f.sourceId) && <> · <a href={watchUrl(videos.get(f.sourceId)!, f.mediaS)} target="_blank" rel="noreferrer">Open in YouTube ↗</a></>}
-          </figcaption>
-        </figure>
-      ))}
-      {passages.map((p) => (
-        <blockquote key={p.id}>
-          <p>{p.text}</p>
-          <footer className="muted">{TRANSCRIPT_ORIGIN[p.origin]} · {titles.get(p.sourceId) ?? "Lecture"}, {formatInterval(p.interval)}
-            {videos?.has(p.sourceId) && <> · <a href={watchUrl(videos.get(p.sourceId)!, p.interval.start)} target="_blank" rel="noreferrer">Open in YouTube ↗</a></>}
-          </footer>
-        </blockquote>
-      ))}
-      {missing.length > 0 && <p className="muted">{missing.length} evidence item{missing.length === 1 ? " is" : "s are"} no longer available.</p>}
+      {props.bundle.frames.map((f) => <FrameFigure key={f.id} frame={f} {...props} />)}
+      {props.bundle.passages.map((p) => <PassageQuote key={p.id} passage={p} {...props} />)}
+      {missingNote(props)}
     </div>
+  );
+}
+
+/** Captured lecture evidence in two labelled groups, the transcript first, each item with its source and time. */
+export function EvidenceGroups(props: Loaded) {
+  const { bundle: { passages }, shownFrame = null } = props;
+  const { frames, alreadyShown } = distinctFrames(props.bundle.frames, shownFrame);
+  return (
+    <div className="evidence">
+      {passages.length > 0 && (
+        <section className="evidence-group" aria-label="Transcript">
+          <p className="evidence-kind">Transcript</p>
+          {passages.map((p) => <PassageQuote key={p.id} passage={p} {...props} />)}
+        </section>
+      )}
+      {(frames.length > 0 || alreadyShown) && (
+        <section className="evidence-group" aria-label="Lecture frame">
+          <p className="evidence-kind">Lecture frame</p>
+          {frames.map((f) => <FrameFigure key={f.id} frame={f} {...props} />)}
+          {alreadyShown && shownFrame !== null && <p className="muted">The frame at {formatClock(shownFrame.mediaS)} is shown with the tutor diagram.</p>}
+        </section>
+      )}
+      {missingNote(props)}
+    </div>
+  );
+}
+
+function FrameFigure({ api, frame: f, titles, videos }: Loaded & { readonly frame: Frame }) {
+  return (
+    <figure>
+      <FrameImage api={api} id={f.id} />
+      <figcaption className="muted">Captured frame · {titles.get(f.sourceId) ?? "Lecture"} at {formatClock(f.mediaS)}
+        {videos?.has(f.sourceId) && <> · <a href={watchUrl(videos.get(f.sourceId)!, f.mediaS)} target="_blank" rel="noreferrer">Open in YouTube ↗</a></>}
+      </figcaption>
+    </figure>
+  );
+}
+
+function PassageQuote({ passage: p, titles, videos }: Loaded & { readonly passage: Passage }) {
+  return (
+    <blockquote>
+      <p>{p.text}</p>
+      <footer className="muted">{TRANSCRIPT_ORIGIN[p.origin]} · {titles.get(p.sourceId) ?? "Lecture"}, {formatInterval(p.interval)}
+        {videos?.has(p.sourceId) && <> · <a href={watchUrl(videos.get(p.sourceId)!, p.interval.start)} target="_blank" rel="noreferrer">Open in YouTube ↗</a></>}
+      </footer>
+    </blockquote>
   );
 }
 

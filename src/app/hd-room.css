@@ -20,7 +20,7 @@
 /* Give the registered landscape room its own space above the readable source. */
 .scene-shell[data-detail="hd-pixel"] .review-source-column { aspect-ratio: auto; margin-top: 95px; }
 .scene-shell[data-detail="hd-pixel"] .review .room-tools { position: relative; inset: auto; perspective: none; }
-.scene-shell[data-detail="hd-pixel"] .review .source-stand { position: relative; left: auto; top: auto; width: calc(100% - 32px); height: auto; max-height: 340px; margin: 18px 16px; padding: 18px; color: #30271f; --fg: #30271f; --muted: #706352; --accent: #244c9c; --border: #cbb99b; background: #f9edda; border: 1px solid #cbb99b; border-radius: 6px; }
+.scene-shell[data-detail="hd-pixel"] .review .source-stand { position: relative; left: auto; top: auto; width: calc(100% - 32px); height: auto; max-height: none; overflow: visible; margin: 18px 16px; padding: 18px; color: #30271f; --fg: #30271f; --muted: #706352; --accent: #244c9c; --border: #cbb99b; background: #f9edda; border: 1px solid #cbb99b; border-radius: 6px; }
 @media (max-width: 800px) { .scene-shell[data-detail="hd-pixel"] .review-source-column { margin: 0; width: 100%; } }
 
 .hd-room[data-scene="study-bench"] .hd-room-base { background-image: url('./assets/hd-pixel/study-bench.webp'); }

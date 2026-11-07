@@ -6,6 +6,17 @@
 .scope-source-list { display: flex; flex-direction: column; gap: 8px; margin-block: 16px; }
 .scope-source-list button { text-align: left; }
 .review .review-help { border-top: 1px solid var(--border); margin-top: 12px; }
+/* Hint and I don't know sit beside Share my thinking, quieter than it, so a stuck learner never has to open a menu. They
+   are their own flex item, so the Share row keeps its size; they wrap under Share where the two do not fit. */
+.review .composer .assist-actions { order: 3; flex: 0 1 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0; }
+.review .composer .assist-actions button { min-height: 40px; padding: 6px 14px; font: .95rem/1.2 'After Class Sans', system-ui, sans-serif; }
+/* One source panel: captured transcript and frames, then the tutor-written diagram, each labelled with where it came from. */
+.review .evidence-kind { margin: 12px 0 4px; color: var(--muted); font: bold .75rem/1.3 'After Class Sans', system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+.review .diagram-provenance { margin: 0 0 4px; font-size: .85rem; }
+.review .tutor-diagram:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.review .source-return { display: block; margin-top: 16px; }
+/* Where the source stacks under the conversation, the way back stays at the bottom of the screen while the source is in view. */
+@media (max-width: 999px) { .review .source-stand .source-return { position: sticky; bottom: 8px; z-index: 1; width: 100%; min-height: 44px; } }
 .review .review-help summary { font-style: italic; }
 .source-heading button { margin: 4px 8px 4px 0; }
 .review .notebook-heading button { font-size: .85rem; }
@@ -17,8 +28,8 @@
 .diagram-lines li { margin: 6px 0; }
 .diagram-lines .citation { font-size: .8rem; margin-left: 8px; }
 .diagram-sources-toggle { font-size: .85rem; margin: 4px 0; }
-/* The diagram takes its natural height (the page scrolls); the frame is never cropped or height-capped. The stage column and its art keep their own box. */
-.scene-shell[data-detail="hd-pixel"] .review .review-workspace .source-stand:has(.diagram-panel) { height: auto; max-height: none; overflow: visible; }
+/* The diagram takes its natural height (the page scrolls); the frame is never cropped or height-capped. The HD source
+   stand always takes its natural height (hd-room.css); the painted stand grows only while a diagram is open. */
 .scene-shell:not([data-detail="hd-pixel"]) .review .review-workspace .source-stand:has(.diagram-panel) { height: auto; max-height: none; overflow: visible; z-index: 4; background: var(--surface); padding-bottom: 12px; }
 .scene-shell .review .source-stand .diagram-panel .diagram-frame .frame { display: block; width: 100%; height: auto; max-height: none; object-fit: contain; }
 .review .review-topics { flex: 0 0 auto; font-size: .85rem; margin-top: 8px; }
