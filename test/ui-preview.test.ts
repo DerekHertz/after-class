@@ -8,6 +8,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createReviewController, needsChecklist } from "../src/app/controller";
 import { IllustratedPageView } from "../src/app/diagram";
+import { HomeBody } from "../src/app/home";
 import { illustratedPages } from "../src/app/diagram-view";
 import { RecordBody } from "../src/app/record";
 import { TopicChecklist } from "../src/app/review";
@@ -63,7 +64,7 @@ describe("UI preview fixtures", () => {
       const { api } = fixture;
       await api.captureView(ids.capture);
       await api.reviewOptions(ids.capture);
-      await api.lectures();
+      await settle(() => api.lectures());
       await api.usage();
       await settle(() => api.evidence({ captureId: ids.capture }));
       const record = await settle(() => api.record(fixture.recordReviewId === null ? {} : { reviewId: fixture.recordReviewId }));
@@ -97,6 +98,17 @@ describe("UI preview fixtures", () => {
     expect(after.view?.state.fuzzy).toEqual([ids.ordering]);
     expect(after.view?.turns.at(-1)?.actor).toBe("tutor");
     expect(needsChecklist(after)).toBe(false);
+  });
+
+  test("home scenarios: the open review leads to the review page the preview loads, and the empty home shows the first steps", async () => {
+    for (const [scenario, kicker] of [["home", "Review in progress"], ["home-paused", "Paused review"]] as const) {
+      const html = renderToStaticMarkup(createElement(HomeBody, { data: await createFixture(scenario).api.lectures() }));
+      expect(html).toContain(kicker);
+      expect(html.indexOf(`href="/app/review/${ids.review}"`)).toBeLessThan(html.indexOf("Your lectures"));
+      expect(html).toContain(`href="/app/record/${ids.earlierReview}"`);
+    }
+    const empty = renderToStaticMarkup(createElement(HomeBody, { data: await createFixture("home-empty").api.lectures() }));
+    expect(empty).toContain("Capture your first lecture");
   });
 
   test("record-illustrated: the record is filtered to the saved review shown on the page", async () => {
@@ -143,9 +155,9 @@ describe("UI preview fixtures", () => {
     expect((await save.api.save(ids.review)).kind).toBe("save_failed");
     expect((await save.api.save(ids.review)).kind).toBe("saved");
 
-    for (const scenario of ["record-error", "evidence-error"] as const) {
+    for (const scenario of ["record-error", "evidence-error", "home-error"] as const) {
       const f = createFixture(scenario);
-      const read = scenario === "record-error" ? () => f.api.record({}) : () => f.api.evidence({ captureId: ids.capture });
+      const read = scenario === "record-error" ? () => f.api.record({}) : scenario === "home-error" ? () => f.api.lectures() : () => f.api.evidence({ captureId: ids.capture });
       await expect(read()).rejects.toThrow("Retry is available");
       await read();
     }

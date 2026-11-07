@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EMPTY_HOME, HomeBody, reviewTarget } from "../src/app/home";
+import { EMPTY_HOME, FIRST_CAPTURE_STEPS, HomeBody, OpenById, resumable, reviewAction, reviewTarget } from "../src/app/home";
 import { EndConfirm } from "../src/app/review";
 import { END_CONFIRM_TEXT, endFlow } from "../src/app/core";
 import type { EndStep } from "../src/app/core";
@@ -38,9 +38,41 @@ describe("the home page", () => {
     expect(html).toContain("1 video");
     expect(html).toContain("Capturing");
     expect(html.indexOf("Operating Systems")).toBeLessThan(html.indexOf("Semaphores"));
-    expect(html).toContain("In progress");
-    expect(html).toContain("Ended, not saved · 0 questions");
-    expect(html).toContain("Ended, saved · 3 questions");
+    expect(html).toContain("In progress · 1 question");
+    expect(html).toContain("Ended, not saved <span class=\"muted\">0 questions");
+    expect(html).toContain(">Open saved notes</a> <span class=\"muted\">3 questions");
+  });
+
+  test("an open review gets a Continue review action named with its lecture, above the lecture list", () => {
+    const html = renderToStaticMarkup(createElement(HomeBody, { data }));
+    const cont = html.indexOf("Pick up where you left off");
+    expect(cont).toBeGreaterThanOrEqual(0);
+    expect(cont).toBeLessThan(html.indexOf("Your lectures"));
+    const card = html.slice(cont, html.indexOf("Your lectures"));
+    expect(card).toContain("Review in progress");
+    expect(card).toContain("Operating Systems");
+    expect(card).toContain(`href="/app/review/${rActive}">Continue review<span class="visually-hidden">: Operating Systems</span></a>`);
+    expect(card).not.toContain(rSaved);
+    expect(card).not.toContain(rEnded);
+  });
+
+  test("a paused review is offered as Continue review too, newest open review first, and ended ones never are", () => {
+    const [p1, p2] = [stableId("rvw", "p1"), stableId("rvw", "p2")];
+    const two: LecturesResponse = { lectures: [
+      { ...data.lectures[1]!, reviews: [{ reviewId: p1, startedMs: 5, phase: "paused", saved: "unsaved", mainQuestions: 2 }] },
+      { ...data.lectures[0]!, reviews: [{ reviewId: p2, startedMs: 9, phase: "active", saved: "unsaved", mainQuestions: 0 }, data.lectures[0]!.reviews[2]!] },
+    ] };
+    expect(resumable(two).map((x) => x.review.reviewId)).toEqual([p2, p1]);
+    const html = renderToStaticMarkup(createElement(HomeBody, { data: two }));
+    expect(html).toContain("Paused review");
+    expect(html.indexOf(`href="/app/review/${p2}"`)).toBeLessThan(html.indexOf(`href="/app/review/${p1}"`));
+    expect(resumable({ lectures: [{ ...data.lectures[0]!, reviews: [data.lectures[0]!.reviews[1]!, data.lectures[0]!.reviews[2]!] }] })).toEqual([]);
+  });
+
+  test("with no open review there is no Continue section", () => {
+    const html = renderToStaticMarkup(createElement(HomeBody, { data: { lectures: [data.lectures[1]!] } }));
+    expect(html).not.toContain("Pick up where you left off");
+    expect(html).not.toContain("Continue review");
   });
 
   test("an active review links to the review, a saved ended one to its record, an unsaved ended one is plain text", () => {
@@ -53,10 +85,37 @@ describe("the home page", () => {
     expect(reviewTarget({ reviewId: rActive, phase: "paused", saved: "unsaved" })).toEqual({ page: "review", id: rActive });
   });
 
-  test("with no captures it says how to start one", () => {
+  test("each row is named for what it opens, and its link always goes where reviewTarget says", () => {
+    const states = [
+      { phase: "active", saved: "unsaved", label: "Continue review" },
+      { phase: "paused", saved: "unsaved", label: "Continue review" },
+      { phase: "ended", saved: "saved", label: "Open saved notes" },
+      { phase: "ended", saved: "save_pending", label: "Notes not saved yet" },
+      { phase: "ended", saved: "unsaved", label: "Ended, not saved" },
+    ] as const;
+    for (const { phase, saved, label } of states) {
+      const r = { reviewId: rActive, phase, saved };
+      expect(reviewAction(r)).toEqual({ label, target: reviewTarget(r) });
+    }
+  });
+
+  test("with no captures it lists the first capture steps and says only what it knows about the connection", () => {
     const html = renderToStaticMarkup(createElement(HomeBody, { data: { lectures: [] } }));
     expect(html).toContain("No lectures captured yet. Start capture from the extension while watching a lecture.");
     expect(EMPTY_HOME).toBe("No lectures captured yet. Start capture from the extension while watching a lecture.");
+    for (const step of FIRST_CAPTURE_STEPS) expect(html).toContain(step);
+    expect(html).toContain("Start capture");
+    expect(html).toContain("can&#x27;t tell whether the extension is connected");
+    expect(html).toContain("Save and test");
+    expect(html).not.toContain("Continue review");
+  });
+
+  test("opening a capture by ID sits in a closed troubleshooting disclosure", () => {
+    const html = renderToStaticMarkup(createElement(OpenById));
+    expect(html.startsWith("<details")).toBe(true);
+    expect(html).not.toContain("open=");
+    expect(html).toContain("<summary>Troubleshooting: open a capture by ID</summary>");
+    expect(html).toContain("disabled");
   });
 });
 

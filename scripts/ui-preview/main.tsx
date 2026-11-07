@@ -5,6 +5,7 @@ import { SceneShell } from "../../src/app/scene";
 import { ReviewScreen } from "../../src/app/review";
 import { CaptureScreen } from "../../src/app/capture";
 import { RecordScreen, UsageScreen } from "../../src/app/record";
+import { HomeScreen } from "../../src/app/home";
 import { Link, usePathname } from "../../src/app/ui";
 import { createMemoryUnsent } from "../../src/app/unsent";
 import { createFixture, ids, scenarioFrom, scenarios } from "./fixtures";
@@ -17,20 +18,22 @@ const clean = new URLSearchParams(location.search).get("clean") === "1";
 function Preview() {
   const path = usePathname();
   const calls = useSyncExternalStore(requestLedger.subscribe, requestLedger.snapshot);
-  const page = path.includes("/record") || scenario.startsWith("record") ? "record" : path.includes("/capture") || scenario.startsWith("capture") ? "capture" : path.includes("/usage") || scenario === "usage" ? "usage" : "review";
+  const home = path === "/app/" || path === "/app" || (path === "/" && scenario.startsWith("home"));
+  const page = home ? "home" : path.includes("/record") || scenario.startsWith("record") ? "record" : path.includes("/capture") || scenario.startsWith("capture") ? "capture" : path.includes("/usage") || scenario === "usage" ? "usage" : "review";
   return <>
     <aside className="fixture-toolbar" aria-label="Preview fixtures" hidden={clean}>
       <strong>Deterministic UI fixture</strong><span>No live lecture or model calls.</span>
       <label>Scenario <select value={scenario} onChange={event => { location.href = `/?scenario=${event.target.value}`; }}>{scenarios.map(value => <option key={value}>{value}</option>)}</select></label>
       <button type="button" onClick={continueFixture}>Finish pending fixture operation</button>
       <button type="button" onClick={dictateFixture}>Simulate speech transcript</button>
+      <Link to={{ page: "home" }}>Home</Link>
       <Link to={{ page: "review", id: ids.review }}>Review</Link>
       <Link to={{ page: "capture", id: ids.capture }}>Capture</Link>
       <Link to={{ page: "record", reviewId: null }}>Notebook</Link>
       <details><summary>Request ledger</summary><pre>{calls || "No requests"}</pre></details>
     </aside>
     <AppearanceProvider><SceneShell>
-      {page === "capture" ? <CaptureScreen api={api} captureId={ids.capture} /> : page === "record" ? <RecordScreen api={api} reviewId={recordReviewId} /> : page === "usage" ? <UsageScreen api={api} /> : <ReviewScreen api={api} reviewId={ids.review} speaker={speaker} speech={speech} unsent={unsent} />}
+      {page === "home" ? <HomeScreen api={api} /> : page === "capture" ? <CaptureScreen api={api} captureId={ids.capture} /> : page === "record" ? <RecordScreen api={api} reviewId={recordReviewId} /> : page === "usage" ? <UsageScreen api={api} /> : <ReviewScreen api={api} reviewId={ids.review} speaker={speaker} speech={speech} unsent={unsent} />}
     </SceneShell></AppearanceProvider>
   </>;
 }

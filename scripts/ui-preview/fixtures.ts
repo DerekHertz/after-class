@@ -24,8 +24,9 @@ export const ids = {
   capture: id("cap", "capture"), review: id("rvw", "review"), earlierReview: id("rvw", "earlier-review"), source: id("src", "lecture"), thread: id("thr", "main"), quickThread: id("thr", "quick-check"),
   claim: id("clm", "main"), orderingClaim: id("clm", "ordering"), passage: id("ev", "passage"), laterPassage: id("ev", "later-passage"), frame: id("ev", "frame"),
   chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait"), ordering: id("cpt", "ordering"),
+  otherCapture: id("cap", "other-capture"), pendingReview: id("rvw", "pending-review"), unsavedReview: id("rvw", "unsaved-review"),
 };
-export const scenarios = ["review", "long-history", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "capture-ready", "capture-processing", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "usage"] as const;
+export const scenarios = ["review", "long-history", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "capture-ready", "capture-processing", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "usage", "home", "home-paused", "home-empty", "home-error"] as const;
 export type Scenario = typeof scenarios[number];
 export const scenarioFrom = (search: string): Scenario => scenarios.find(s => s === new URLSearchParams(search).get("scenario")) ?? "review";
 
@@ -122,13 +123,28 @@ export function createFixture(scenario: Scenario): Fixture {
     start(callbacks) { speechCallbacks = callbacks; log("speech.start"); callbacks.onSpeechStart(); },
     stop() { speechCallbacks?.onEnd(); speechCallbacks = null; log("speech.stop"); },
   };
+  // Home lists this lecture's open review with three ended ones: saved, save not finished, and ended without notes.
+  const at = (hour: number) => Date.UTC(2026, 10, 6, hour, 4);
+  const lectures = lecturesResponse.parse({ lectures: scenario === "home-empty" ? [] : [
+    { captureId: ids.capture, sourceTitles: ["Locks & deadlocks"], videos: 1, watchedSeconds: 760, status: { state: "stopped" }, reviews: [
+      { reviewId: ids.review, startedMs: at(15), phase: scenario === "home-paused" ? "paused" : "active", saved: "unsaved", mainQuestions: 1 },
+      { reviewId: ids.pendingReview, startedMs: at(13), phase: "ended", saved: "save_pending", mainQuestions: 2 },
+      { reviewId: ids.earlierReview, startedMs: at(11), phase: "ended", saved: "saved", mainQuestions: 1 },
+      { reviewId: ids.unsavedReview, startedMs: at(10), phase: "ended", saved: "unsaved", mainQuestions: 0 },
+    ] },
+    { captureId: ids.otherCapture, sourceTitles: ["Semaphores - Operating Systems"], videos: 1, watchedSeconds: 240, status: { state: "capturing" }, reviews: [] },
+  ] });
   let attempts = 0;
   let evidenceAttempts = 0;
   let diagramAttempts = 0;
   const api: AppApi = {
     async review(reviewId) { log("review.read"); return reviewId === view.reviewId ? view : savedView; },
     async captureView() { log("capture.read"); return capture; },
-    async lectures() { log("lectures.read"); return lecturesResponse.parse({ lectures: [] }); },
+    async lectures() {
+      log("lectures.read");
+      if (scenario === "home-error" && attempts++ === 0) throw new ApiError("Fixture lecture list could not load. Retry is available.", 503);
+      return lectures;
+    },
     async reviewOptions() {
       log("review.options");
       const scope = { chunkRevisions: [ids.chunk], supportedClaims: 3, partial: [{ kind: "capture_gap", gap }] };
