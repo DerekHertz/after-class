@@ -11,7 +11,7 @@ import { reactToCompanion } from "./companion-reaction";
 import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
 import {
-  ACTION_LABEL, END_CONFIRM_TEXT, INITIAL_SOURCE_OPEN, endFlow, shouldAutoSendSpeech, shouldStopListening, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
+  ACTION_LABEL, END_CONFIRM_TEXT, INITIAL_SOURCE_OPEN, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
   softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer,
 } from "./core";
 import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, TurnStatus } from "./core";
@@ -27,6 +27,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const { appearance, voice } = useAppearance();
   const speechToggle = useRef<(() => void) | null>(null);
   const history = useRef<HTMLDivElement>(null);
+  const currentQuestion = useRef<HTMLElement>(null);
   const sourceHeading = useRef<HTMLHeadingElement>(null);
   const sourceSurface = useRef<HTMLElement>(null);
   const sourceColumn = useRef<HTMLDivElement>(null);
@@ -115,7 +116,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     );
   }
 
-  const lines = conversationLines(view.turns, view.topics);
+  const lines = currentExchange(conversationLines(view.turns, view.topics));
+  const live = state.live && state.live.status !== "complete" ? state.live : null;
   const questionTopic = currentQuestionTopic(view, diagrams.topics ?? []);
   const shownDiagram = diagrams.topics?.find((t) => t.topicId === diagramTopic) ?? null;
   const checklist = needsChecklist(state);
@@ -153,27 +155,30 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             <button type="button" onClick={() => {
               followHistory.current = true;
               if (history.current) history.current.scrollTop = history.current.scrollHeight;
-            }}>Latest exchange</button>
+              currentQuestion.current?.scrollIntoView({ block: "nearest" });
+              currentQuestion.current?.focus({ preventScroll: true });
+            }}>Current question</button>
             <button ref={sourceToggle} type="button" aria-expanded={sourceOpen} aria-controls="review-source" onClick={(e) => {
               if (sourceOpen) closeSource();
               else { sourceOrigin.current = e.currentTarget; reactToCompanion("draw"); setSourceOpen(true); }
             }}>{sourceOpen ? "Close source" : "Open source"}</button>
           </div>
-          <div ref={history} onScroll={() => {
-            const el = history.current;
-            if (el) followHistory.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-          }} className="conversation-history" role="region" aria-label="Conversation history" tabIndex={0}>
-          <ol className="lines">
-            {lines.map((l) => <LineItem key={l.key} line={l} onSource={openSource} />)}
-            {state.live && state.live.status !== "complete" && (
-              <li className="line tutor">
-                <strong>{state.live.move ? MOVE_LABEL[state.live.move.kind] : "Tutor"}</strong>
-                <p>{liveText(state.live) || "..."}</p>
-                {state.live.status === "failed" && <p className="note note-error">{state.live.error}</p>}
-              </li>
-            )}
-          </ol>
-          </div>
+          {/* The question being worked on stays next to the composer; earlier lines scroll on their own below. */}
+          {(lines.current.length > 0 || live !== null) && (
+            <section ref={currentQuestion}className="current-exchange" aria-labelledby="current-exchange-heading" tabIndex={-1}>
+              <h3 id="current-exchange-heading" className="eyebrow">Current question</h3>
+              <ol className="lines">
+                {lines.current.map((l) => <LineItem key={l.key} line={l} onSource={openSource} />)}
+                {live !== null && (
+                  <li className="line tutor">
+                    <strong>{live.move ? MOVE_LABEL[live.move.kind] : "Tutor"}</strong>
+                    <p>{liveText(live) || "..."}</p>
+                    {live.status === "failed" && <p className="note note-error">{live.error}</p>}
+                  </li>
+                )}
+              </ol>
+            </section>
+          )}
           {canRetry && (
             <UndeliveredNote
               unsent={state.unsent.length}
@@ -204,6 +209,17 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             live={state.live}
             send={(id, text, modality) => controller.send(toAct(id, text, modality))}
           />}
+          {lines.earlier.length > 0 && <>
+            <h3 id="conversation-history-heading" className="conversation-history-heading">Earlier in this review</h3>
+            <div ref={history} onScroll={() => {
+              const el = history.current;
+              if (el) followHistory.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+            }} className="conversation-history" role="region" aria-labelledby="conversation-history-heading" tabIndex={0}>
+              <ol className="lines">
+                {lines.earlier.map((l) => <LineItem key={l.key} line={l} onSource={openSource} />)}
+              </ol>
+            </div>
+          </>}
           {!checklist && view.topics.length > 0 && (
             <details className="review-topics">
               <summary>Topics in this review</summary>

@@ -300,6 +300,18 @@ export function conversationLines(turns: readonly Turn[], topics: readonly Conce
   return lines;
 }
 
+/**
+ * Splits the conversation into earlier lines and the current exchange: the tutor's latest run of lines (the question
+ * being worked on) and anything after it, such as the learner's answer awaiting a reply. The review keeps the current
+ * exchange beside the composer and the earlier lines in their own scrollable history.
+ */
+export function currentExchange(lines: readonly Line[]): { readonly earlier: readonly Line[]; readonly current: readonly Line[] } {
+  let start = lines.length;
+  for (let i = lines.length - 1; i >= 0; i--) if (lines[i]!.speaker === "tutor") { start = i; break; }
+  while (start > 0 && start < lines.length && lines[start - 1]!.speaker === "tutor") start--;
+  return { earlier: lines.slice(0, start), current: lines.slice(start) };
+}
+
 /** Acts that expect a tutor reply. Pause, resume and end do not. */
 const EXPECTS_REPLY = (act: LearnerAct): boolean => act.kind !== "pause" && act.kind !== "resume" && act.kind !== "end";
 

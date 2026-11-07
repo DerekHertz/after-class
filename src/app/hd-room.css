@@ -45,19 +45,31 @@
 .scene-shell[data-detail="hd-pixel"] .room-raster { aspect-ratio: 1672 / 941; background-size: cover; background-position: center; }
 
 .scene-shell[data-detail="hd-pixel"] .review { padding: 0; position: relative; }
-/* The scene is art at the top; the conversation sits directly under it in normal flow and is never hidden or overlaid.
-   The source panel opens beside the conversation on wide screens, below it on narrow ones. */
+/* The current question and the composer come first and are never hidden or overlaid. The room stays as a compact scene:
+   a column beside the conversation on wide screens, with an opened source under it, and a short desk band above the
+   conversation on narrow ones, where the source follows the conversation. */
 .scene-shell[data-detail="hd-pixel"] .review .review-workspace { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "room" "conv" "src"; gap: 16px; padding: 0; }
 .scene-shell[data-detail="hd-pixel"] .review .review-source-column { display: contents; }
-.scene-shell[data-detail="hd-pixel"] .review .hd-room-tools { grid-area: room; }
+.scene-shell[data-detail="hd-pixel"] .review .hd-room-tools { grid-area: room; min-width: 0; }
 .scene-shell[data-detail="hd-pixel"] .review .conversation-notebook { grid-area: conv; height: auto; min-height: 0; max-height: none; margin: 0 16px; }
-.scene-shell[data-detail="hd-pixel"] .review .conversation-history { max-height: 55dvh; }
+.scene-shell[data-detail="hd-pixel"] .review .conversation-history { min-height: 0; max-height: min(36dvh, 24rem); }
 .scene-shell[data-detail="hd-pixel"] .review .source-stand { grid-area: src; }
+/* The room's tools keep visible text labels at every width; the art's own hotspots are too small to label in a compact room. */
+.scene-shell[data-detail="hd-pixel"] .review .hd-mobile-tools { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; }
+.scene-shell[data-detail="hd-pixel"] .review .hd-mobile-tools button { min-height: 40px; padding: 6px 10px; font-size: .85rem; }
 @media (min-width: 1000px) {
-  .scene-shell[data-detail="hd-pixel"] .review .review-workspace:has(.source-stand:not([hidden])) { grid-template-columns: minmax(0, 1fr) minmax(320px, 36%); grid-template-areas: "room room" "conv src"; align-items: start; }
-  .scene-shell[data-detail="hd-pixel"] .review .source-stand { margin-left: 0; }
+  .scene-shell[data-detail="hd-pixel"] .review .review-workspace { grid-template-columns: minmax(0, 1fr) minmax(320px, 36%); grid-template-rows: auto 1fr; grid-template-areas: "conv room" "conv src"; align-items: start; }
+  .scene-shell[data-detail="hd-pixel"] .review .conversation-notebook { margin: 0 0 16px 16px; }
+  .scene-shell[data-detail="hd-pixel"] .review .hd-room-tools { margin-right: 16px; }
+  .scene-shell[data-detail="hd-pixel"] .review .hd-mobile-tools { padding: 8px 0; }
+  .scene-shell[data-detail="hd-pixel"] .review .source-stand { width: auto; margin: 0 16px 16px 0; }
 }
-.scene-shell[data-detail="hd-pixel"] .review .review-header { position: absolute; top: 8px; left: 22px; right: 22px; z-index: 2; margin: 0; padding: 8px 12px; color: #fff7e1; background: #29231dba; border-radius: 4px; }
+@media (max-width: 999px) {
+  /* Only the desk half of the room: the companion, source card, notebook and recorder. */
+  .scene-shell[data-detail="hd-pixel"] .review .hd-room { aspect-ratio: 1672 / 520; }
+  .scene-shell[data-detail="hd-pixel"] .review .hd-room-stage { top: auto; bottom: 0; transform-origin: 0 100%; }
+}
+.scene-shell[data-detail="hd-pixel"] .review .review-header { position: static; margin: 12px 16px; padding: 8px 12px; color: #fff7e1; background: #29231dba; border-radius: 4px; }
 .scene-shell[data-detail="hd-pixel"] .review .review-header h1 { font-size: 22px; color: inherit; }
 .scene-shell[data-detail="hd-pixel"] .review .review-scope-line { color: #f2e5c9; margin-bottom: 0; }
 .scene-shell[data-detail="hd-pixel"] .review .review-navigation { position: static; color: inherit; }

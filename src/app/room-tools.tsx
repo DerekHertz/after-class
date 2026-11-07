@@ -52,7 +52,7 @@ export function RoomTools({ scene, onNotebook, onSource, sourceOpen, onSpeak, sh
       {appearance.visible && <div className="hd-room-friend"><Companion id={appearance.companion} activity={activity} /></div>}
       {!appearance.visible && <span className="hd-quiet-status" role="status">{activity === "idle" ? "Ready when you are" : activity === "waiting" ? "Waiting for a response" : activity === "listening" ? "Listening" : activity === "saving" ? "Saving your record" : "Review paused"}</span>}
     </HDRoomStage>
-      <div className="hd-mobile-tools" aria-label="Study desk tools">
+      <div className="hd-mobile-tools" role="group" aria-label="Study desk tools">
         <button type="button" aria-expanded={sourceOpen} aria-controls="review-source" onClick={event => { if (!sourceOpen) reactToCompanion("draw"); onSource(event.currentTarget); }}>{sourceOpen ? "Close source" : "Draw source card"}</button>
         <button type="button" onClick={openNotebook}>My notebook</button>
         {showSpeak && <button type="button" disabled={!speechAvailable} aria-pressed={listening} onClick={onSpeak}>{listening ? "Stop listening" : "Speak"}</button>}

@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { INITIAL_SOURCE_OPEN, reduceLive, reviewLayout, shouldAutoSendSpeech, startLive, turnStatus } from "../src/app/core";
-import type { Live } from "../src/app/core";
+import { INITIAL_SOURCE_OPEN, currentExchange, reduceLive, reviewLayout, shouldAutoSendSpeech, startLive, turnStatus } from "../src/app/core";
+import type { Line, Live } from "../src/app/core";
 import { Composer, TurnStatusNote } from "../src/app/review";
 import type { SpeechInput } from "../src/app/speech";
 import type { TutorMove } from "../src/shared/domain";
@@ -36,6 +36,44 @@ describe("the conversation is never hidden", () => {
     }
     const hd = readFileSync(new URL("../src/app/hd-room.css", import.meta.url), "utf8");
     expect(hd).not.toMatch(/conversation-notebook[^{]*\{[^}]*position:\s*absolute/);
+  });
+});
+
+describe("the current question stays with the composer", () => {
+  const line = (key: string, speaker: Line["speaker"]): Line => ({ key, speaker, label: speaker, text: key, evidenceIds: [] });
+  const keys = (ls: readonly Line[]) => ls.map((l) => l.key);
+
+  test("the tutor's latest run of lines is current; everything before it is earlier history", () => {
+    const { earlier, current } = currentExchange([line("begin", "system"), line("q1", "tutor"), line("a1", "you"), line("fix", "tutor"), line("q2", "tutor")]);
+    expect(keys(earlier)).toEqual(["begin", "q1", "a1"]);
+    expect(keys(current)).toEqual(["fix", "q2"]);
+  });
+
+  test("an answer awaiting a reply stays beside the question it answers", () => {
+    const { earlier, current } = currentExchange([line("q1", "tutor"), line("a1", "you"), line("q2", "tutor"), line("a2", "you"), line("note", "system")]);
+    expect(keys(earlier)).toEqual(["q1", "a1"]);
+    expect(keys(current)).toEqual(["q2", "a2", "note"]);
+  });
+
+  test("before the tutor speaks there is no current question, and nothing is dropped", () => {
+    expect(currentExchange([])).toEqual({ earlier: [], current: [] });
+    const begin = [line("begin", "system")];
+    expect(currentExchange(begin)).toEqual({ earlier: begin, current: [] });
+  });
+
+  test("the current question and composer come before the earlier history, and the composer keeps one place", () => {
+    const tsx = readFileSync(new URL("../src/app/review.tsx", import.meta.url), "utf8");
+    const at = (needle: string) => { const i = tsx.indexOf(needle); expect(i).toBeGreaterThan(-1); return i; };
+    expect(at('className="current-exchange"')).toBeLessThan(at("<Composer"));
+    expect(at("<Composer")).toBeLessThan(at('className="conversation-history"'));
+    expect(tsx.match(/<Composer\b/g)).toHaveLength(1);
+  });
+
+  test("the HD room is a compact scene beside the conversation on wide screens, not a banner above it", () => {
+    const hd = readFileSync(new URL("../src/app/hd-room.css", import.meta.url), "utf8");
+    expect(hd).toContain('grid-template-areas: "conv room" "conv src"');
+    expect(hd).not.toContain('"room room"');
+    expect(hd).not.toMatch(/\.review \.review-header \{[^}]*position:\s*absolute/);
   });
 });
 
