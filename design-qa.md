@@ -1,6 +1,31 @@
-# Source folio and history notebook review
+# Clickable desk folio and notebook
+
+Product-code commit: a69354ca7d1aada2860223dc1dcda62d3c2219d9.
 
 final result: passed
+
+The source folio and painted notebook are now the review's primary entry points for source and history. Both former top buttons are removed. Small Source/count and Earlier tags identify the objects. The full artwork hit areas are semantic buttons with keyboard activation and visible focus. Saved notes remains a separate top control and is available during setup, where current-review desk objects are absent.
+
+Verified in the isolated fixture browser:
+- All three desktop skins at1440x900 keep the folio and notebook beside the response mat without covering the input or board content. Coordinate clicks on the folio paper and the painted notebook cover (away from their tags) opened source and history.
+- Phone artwork buttons opened the same views with click, Enter and Space. Close/Escape returned focus to the originating object, and the typed response survived. Saved notes still opens the existing learning record and now restores focus to its entry on close.
+- Setup exposes Saved notes and no current-review objects. Starting a review adds both objects, including the uncited Open source label.
+- In-app reduced motion produced0s transition and no translation on the focused folio. System reduced-motion CSS disables the same movement.
+- The initial desktop cascade defect placed the source above the viewport. Matching base/desktop selector specificity fixed it; computed desktop positioning is now absolute. The first narrow-phone active companion status overlapped the new objects; the correction gives its contents space to wrap and stack.
+
+Final screenshots: [harbor](docs/design/front-row/review/desk-openers/harbor-desktop.jpg), [rail](docs/design/front-row/review/desk-openers/rail-desktop.jpg), [canal](docs/design/front-row/review/desk-openers/canal-desktop.jpg) at1440x900; [phone](docs/design/front-row/review/desk-openers/phone.jpg) at390x844; [streaming](docs/design/front-row/review/desk-openers/streaming-320.jpg) at320x844. Each is a viewport screenshot at its stated CSS size. Generated source folio artwork is reused unchanged; mobile history uses the existing notebook raster, and desktop history targets the book already painted in each room.
+
+Validation: typecheck and full suite1652pass/4todo/0fail on the interaction commit; app/fixture builds and29 targeted front-row/review tests repeated for the CSS corrections. Read-only independent code review found no additional P0/P1/P2 issues beyond the browser findings that were fixed. Live provider/voice and physical devices remain untested. No formal pstack shipping verdict or merge authorization.
+
+The first narrow fix allowed wrapping but left a30px text column; the final one-line coordinator correction stacks the status below the sprite. In the320px fixture its text area is112px wide and document width remains320px, with the complete message visible. Hidden-companion status also remained readable. No console errors or warnings were observed.
+
+The previous saved-notes close-focus limitation below is now fixed and was verified by Escape returning to Saved notes. All skills needed by the implementation were supplied directly from the installed user pstack files after the first restricted run could not read them. The Claude plugin adapter was not installed; actual CLI capabilities and independent coordinator review were used.
+
+---
+
+# Source folio and history notebook review
+
+Earlier iteration result: passed
 
 Implementation QA of product-code commit `431e66d437c9cfd7ce26fef4971be647cc2dbb81`, limited to the fixture states below. This supersedes the earlier below-room source/history panels described in the retained stage review. It is not merge authorization or Derek's visual sign-off.
 
