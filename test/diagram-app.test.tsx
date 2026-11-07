@@ -1,11 +1,12 @@
-/** The review app's diagram pieces: panel states, citations (R19), links, the illustrated record page. */
+/** The review app's diagram pieces: panel states, citations (R19), links, a notebook topic's frame and summary. */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { AppApi } from "../src/app/api";
-import { DiagramPanel, DiagramSummaryView, IllustratedPageView, ShowDiagramButton } from "../src/app/diagram";
-import { currentQuestionTopic, frameLink, lineSources, illustratedPages, NO_FRAME_NOTE, shouldPollDiagrams, SUMMARY_NOTE } from "../src/app/diagram-view";
+import { DiagramPanel, DiagramSummaryView, ShowDiagramButton } from "../src/app/diagram";
+import { currentQuestionTopic, frameLink, lineSources, NO_FRAME_NOTE, shouldPollDiagrams, SUMMARY_NOTE } from "../src/app/diagram-view";
+import { FramePreview, TopicSection } from "../src/app/record";
 import type { Observation, ReviewView, TopicDiagram, Turn } from "../src/shared/domain";
 import { stableId } from "../src/shared/ids";
 import type { ClaimId, ConceptId, EvidenceId, ObservationId, ReviewId, SourceId, ThreadId, TurnId } from "../src/shared/ids";
@@ -199,7 +200,7 @@ describe("the topic of the current question", () => {
   });
 });
 
-// ───────────────────────────── the record's illustrated pages ─────────────────────────────
+// ───────────────────────────── the notebook's topic pages ─────────────────────────────
 
 const A1 = id<TurnId>("turn", "answer-1");
 const obs = (threadId: ThreadId, conceptId: ConceptId, claimId: ClaimId, status: Observation["status"], learnerTurns: TurnId[]): Observation => ({
@@ -208,58 +209,51 @@ const obs = (threadId: ThreadId, conceptId: ConceptId, claimId: ClaimId, status:
   facts: { threadId, firstSubstantiveAnswerSeq: null, firstHelpSeq: null, endedBySkip: false, saidDontKnowOnly: false, learnerTurns, helpTurns: [] },
 }) as unknown as Observation;
 
-describe("illustrated pages", () => {
+describe("a notebook topic: its question, answer and status before its frame and summary", () => {
   const q1 = tutorQ("ask_main", TH1, C1, "What do clocks give you?");
   const q2 = tutorQ("quick_check", TH2, C2, "Quick: what is a lock?");
   const turns = [q1, learner({ kind: "hint_request" }, TH1), learner({ kind: "answer", text: "An ordering of events.", modality: "text" }, TH1, A1), q2, learner({ kind: "skip" }, TH2)];
-  const view = {
-    turns,
-    observations: [obs(TH1, T1, C1, "partial", [A1, turns[1]!.id]), obs(TH2, T2, C2, "looks_fine", [turns[4]!.id])],
-  };
+  const view = { topics: [{ id: T1, label: "Lamport clocks" }, { id: T2, label: "Locks" }], turns } as unknown as ReviewView;
+  const contexts = new Map([[REVIEW, { state: "ready", view } as const]]);
+  const citations = { data: null, error: null, loading: false, reload: noop };
+  const section = (o: Observation, diagram: TopicDiagram, label: string) => renderToStaticMarkup(createElement(TopicSection, {
+    api, name: label, headingId: "h", contexts, retry: noop, deleted: new Set<string>(), citations, drafts: new Map(), setDraft: noop, run: async () => {},
+    topic: { conceptId: o.conceptIds[0]!, label, notes: [], observations: [o], revisit: false, disputed: false },
+    diagram: { kind: "ready", topic: diagram, error: null, request: noop },
+  }));
 
-  test("one page per topic that was asked about, in scope order, none for a topic nobody asked about", () => {
-    const pages = illustratedPages(view, topics);
-    expect(pages.map((p) => p.topic.label)).toEqual(["Lamport clocks", "Locks"]);
-  });
-
-  test("a page holds the tutor's question, the learner's answer and the status", () => {
-    const [first, second] = illustratedPages(view, topics);
-    expect(first!.questions).toEqual([expect.objectContaining({ kind: "Question", question: "What do clocks give you?", answers: ["An ordering of events."], status: "Partial" })]);
-    // a skip is shown as a skip; a quick check passed shows "Looks fine (quick check)"
-    expect(second!.questions[0]).toMatchObject({ kind: "Quick check", question: "Quick: what is a lock?", answers: ["(skipped this question)"], status: "Looks fine (quick check)" });
-  });
-
-  test("rendered: question, frame, summary with citations, answer, status, in that order", () => {
-    const html = renderToStaticMarkup(createElement(IllustratedPageView, { api, page: illustratedPages(view, topics)[0]!, onRequest: noop }));
+  test("rendered: question, answer and status come first, then the compact frame and the summary with sources hidden", () => {
+    const html = section(obs(TH1, T1, C1, "partial", [A1, turns[1]!.id]), topics[0]!, "Lamport clocks");
     const at = (s: string) => html.indexOf(s);
     expect(at("What do clocks give you?")).toBeGreaterThan(-1);
-    expect(at("Captured frame")).toBeGreaterThan(at("What do clocks give you?"));
+    expect(at("An ordering of events.")).toBeGreaterThan(at("What do clocks give you?"));
+    expect(at("Status: Partial")).toBeGreaterThan(-1);
+    expect(at("Captured frame")).toBeGreaterThan(at("An ordering of events."));
     expect(at("Node P: local +1, global -1.")).toBeGreaterThan(at("Captured frame"));
-    expect(at("Your answer: ")).toBeGreaterThan(at("Node P: local +1, global -1."));
-    expect(at("Status: ")).toBeGreaterThan(at("Your answer: "));
-    expect(html).toContain("An ordering of events.");
-    expect(html).toContain("Partial");
+    expect(html).toContain('class="topic-frame" data-expanded="false"');
+    expect(html).toContain('<button type="button" aria-expanded="false">Expand frame</button>');
     expect(html).toContain("Open in YouTube at that moment");
     expect(html).not.toContain('class="citation"');
     expect(html).toContain("Show sources");
   });
 
-  test("rendered quick check passed: Looks fine, never 'understood'; no frame and no summary yet are both said", () => {
-    const html = renderToStaticMarkup(createElement(IllustratedPageView, { api, page: illustratedPages(view, topics)[1]!, onRequest: noop }));
-    expect(html).toContain("Looks fine (quick check)");
-    expect(html).not.toContain("Independent");
+  test("rendered quick check skipped: Looks fine, never 'understood'; no frame and no summary yet are both said, and the summary waits for its button", () => {
+    const html = section(obs(TH2, T2, C2, "looks_fine", [turns[4]!.id]), topics[1]!, "Locks");
+    expect(html).toContain("<strong>Status: Looks fine (quick check)</strong>");
+    expect(html).not.toMatch(/Status: (<\/strong>)?Independent/);
     expect(html).toContain(NO_FRAME_NOTE);
     expect(html).toContain("Write the summary");
     expect(html).toContain("(skipped this question)");
   });
 
-  test("an observation whose question is gone yields no page", () => {
-    expect(illustratedPages({ turns: [], observations: [obs(TH1, T1, C1, "partial", [])] }, topics)).toEqual([]);
+  test("a topic with no usable claims says so", () => {
+    const html = section(obs(TH1, T1, C1, "partial", [A1]), { ...topics[0]!, summary: { state: "no_claims" }, frame: null }, "Lamport clocks");
+    expect(html).toContain(SUMMARY_NOTE.no_claims);
   });
 
-  test("a topic with no usable claims still gets its page, and says so", () => {
-    const empty = topics.map((t) => (t.topicId === T1 ? { ...t, summary: { state: "no_claims" } as const, frame: null } : t));
-    const html = renderToStaticMarkup(createElement(IllustratedPageView, { api, page: illustratedPages(view, empty)[0]!, onRequest: noop }));
-    expect(html).toContain(SUMMARY_NOTE.no_claims);
+  test("a frame the learner deleted is not fetched or shown", () => {
+    const html = renderToStaticMarkup(createElement(FramePreview, { api, frame: topics[0]!.frame, deleted: new Set<string>([FRAME]) }));
+    expect(html).toContain("You deleted the frame captured for this topic.");
+    expect(html).not.toContain("Loading frame...");
   });
 });

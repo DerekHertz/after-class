@@ -7,7 +7,7 @@ import { createElement, isValidElement } from "react";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "bun:test";
-import type { LearnerAct, ReviewView, TurnEvent, UsageSummary } from "../src/shared/domain";
+import type { LearnerAct, ReviewView, ScopePreview, TurnEvent, UsageSummary } from "../src/shared/domain";
 import { stableId, randomId } from "../src/shared/ids";
 import type { ReviewId, TurnId } from "../src/shared/ids";
 import { Material, interval } from "../src/shared/time";
@@ -20,7 +20,7 @@ import { learnerAct } from "../src/shared/wire";
 import type { SessionState } from "../src/app/controller";
 import {
   availableActions, conversationLines, currentEvidenceIds, estimateText, formatClock, inspectBundle, liveText, noteView, observationRow,
-  groupGaps, lectureHeading, optionsScreen, parseRoute, reduceLive, routePath, softTargetPrompt, startLive, toAct, unansweredLearnerTurn, owedLearnerTurn, usageRows,
+  coveredLines, groupGaps, partialLines,lectureHeading, optionsScreen,parseRoute, reduceLive, routePath, softTargetPrompt, startLive, stepStartHandoff, toAct, unansweredLearnerTurn, owedLearnerTurn, usageRows,
 } from "../src/app/core";
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { StreamError, ndjson, tutorEvents } from "../src/app/ndjson";
@@ -53,7 +53,7 @@ const claimJson = (status: string) => ({
   originalCheck: null, revision: null, revisionCheck: null, status,
 });
 
-const READY = { kind: "ready", scope: { chunkRevisions: [crv], supportedClaims: 4, partial: [] } };
+const READY = { kind: "ready", scope: { chunkRevisions: [crv], supportedClaims: 4, topics: [], material: [[src, [[0, 120]]]], partial: [] } };
 
 function turnJson(n: number, actor: "learner" | "tutor" | "code", rest: Record<string, unknown>) {
   return { id: actor === "learner" ? stableId("turn", `l${n}`) : stableId("turn", `${actor}${n}`), reviewId, seq: n, atMs: n * 1000, threadId: actor === "code" ? null : thr, actor, ...rest };
@@ -276,31 +276,60 @@ describe("createApi", () => {
 describe("review options screens", () => {
   const titles = new Map([[src, "Lamport clocks"]]);
 
-  test("ready offers one start and lists why the review is partial", () => {
+  const scopeOf = (over: Partial<ScopePreview> = {}): ScopePreview =>
+    ({ chunkRevisions: [crv], supportedClaims: 1, topics: [], material: Material.of([[src, [interval(0, 600)]]]), partial: [], ...over });
+  const topic = (label: string) => ({ id: stableId("cpt", label), label, summary: "" });
+
+  test("ready offers one start, names the topics and covered time, and says what each capture gap leaves out", () => {
     const screen = optionsScreen(
-      { kind: "ready", scope: { chunkRevisions: [crv], supportedClaims: 1, partial: [{ kind: "unverified_claims", count: 2 }, { kind: "capture_gap", gap: { sourceId: src, interval: interval(120, 180), channel: "frames", reason: "hidden_tab" } }] } },
+      { kind: "ready", scope: scopeOf({ supportedClaims: 5, topics: [topic("Logical clocks"), topic("Happened-before")], partial: [{ kind: "unverified_claims", count: 2 }, { kind: "capture_gap", gap: { sourceId: src, interval: interval(120, 180), channel: "frames", reason: "hidden_tab" } }] }) },
       titles,
     );
-    expect(screen).toMatchObject({ kind: "ready", supportedClaims: 1, offers: [{ choice: "prepared_only" }] });
+    expect(screen).toMatchObject({ kind: "ready", offers: [{ choice: "prepared_only", label: "Start review" }] });
     if (screen.kind !== "ready") throw new Error("unreachable");
-    expect(screen.partial[0]).toBe("2 claims were not confirmed by the source and will not be used to assess you.");
-    expect(screen.partial[1]).toBe("Tab was hidden, so frames stalled in Lamport clocks, 2:00 to 3:00.");
+    expect(screen.scope.topics).toEqual(["Logical clocks", "Happened-before"]);
+    expect(screen.scope.covered).toEqual(["Lamport clocks, 0:00 to 10:00"]);
+    expect(screen.scope.limits[0]).toBe("2 claims were not confirmed by the source and will not be used to assess you.");
+    expect(screen.scope.limits[1]).toBe("Tab was hidden, so frames stalled in Lamport clocks, 2:00 to 3:00. No frames from this stretch are in the evidence. Its transcript text, if captured, still is.");
+  });
+
+  test("covered time names one stretch exactly and sums several", () => {
+    expect(coveredLines(Material.of([[src, [interval(0, 60), interval(120, 300)]]]), titles)).toEqual(["Lamport clocks, 2 stretches, 4:00 in all"]);
+    expect(coveredLines(Material.empty, titles)).toEqual([]);
+  });
+
+  test("a scope with no topic names says so and falls back to its claim count, never calling claims topics", () => {
+    const out = html({ kind: "ready", scope: scopeOf({ supportedClaims: 3 }) });
+    expect(out).toContain("Topic names are not available for this material. It has 3 claims that passed the evidence check.");
+    expect(out).not.toMatch(/3 topics/);
+    const named = html({ kind: "ready", scope: scopeOf({ supportedClaims: 3, topics: [topic("Logical clocks")] }) });
+    expect(named).toContain("<li>Logical clocks</li>");
+    expect(named).not.toContain("claims that passed");
   });
 
   test("many capture gaps of one kind in one video become one line, in the place the first held", () => {
-    const gap = (start: number, end: number, reason: "partially_watched_segment" | "hidden_tab" = "partially_watched_segment") =>
-      ({ kind: "capture_gap", gap: { sourceId: src, interval: interval(start, end), channel: "transcript", reason } }) as const;
+    const gap = (start: number, end: number, reason: "partially_watched_segment" | "hidden_tab" = "partially_watched_segment", channel: "transcript" | "frames" = "transcript") =>
+      ({ kind: "capture_gap", gap: { sourceId: src, interval: interval(start, end), channel, reason } }) as const;
     const screen = optionsScreen(
-      { kind: "ready", scope: { chunkRevisions: [crv], supportedClaims: 1, partial: [gap(0, 2), { kind: "unverified_claims", count: 1 }, gap(10, 13), gap(20, 25), gap(30, 90, "hidden_tab")] } },
+      { kind: "ready", scope: scopeOf({ partial: [gap(0, 2), { kind: "unverified_claims", count: 1 }, gap(10, 13), gap(20, 25), gap(30, 90, "hidden_tab", "frames")] }) },
       titles,
     );
     if (screen.kind !== "ready") throw new Error("unreachable");
-    expect(screen.partial).toEqual([
-      "Caption line only partly watched, so not used in Lamport clocks, 3 places, 0:10 in all.",
-      "Tab was hidden, so frames stalled in Lamport clocks, 0:30 to 1:30.",
+    expect(screen.scope.limits).toEqual([
+      "Caption line only partly watched, so not used in Lamport clocks, 3 places, 0:10 in all. No transcript text from this stretch is in the evidence. Any frames saved from it still are.",
+      "Tab was hidden, so frames stalled in Lamport clocks, 0:30 to 1:30. No frames from this stretch are in the evidence. Its transcript text, if captured, still is.",
       "1 claim was not confirmed by the source and will not be used to assess you.",
     ]);
-    expect(groupGaps([gap(0, 2).gap, gap(5, 6).gap], titles)).toEqual([{ where: "Lamport clocks, 2 places, 0:03 in all", reason: "Caption line only partly watched, so not used", count: 2 }]);
+    expect(groupGaps([gap(0, 2).gap, gap(5, 6).gap], titles)).toEqual([{ where: "Lamport clocks, 2 places, 0:03 in all", reason: "Caption line only partly watched, so not used", count: 2, channel: "transcript" }]);
+  });
+
+  test("a channel failure names only the channel that failed, so a failed transcript never claims the frames are gone", () => {
+    const failed = (start: number, end: number, channel: "transcript" | "frames") => ({ sourceId: src, interval: interval(start, end), channel, reason: "channel_failed" }) as const;
+    const lines = partialLines([failed(0, 10, "transcript"), failed(20, 30, "frames"), failed(40, 50, "transcript")].map((g) => ({ kind: "capture_gap", gap: g }) as const), titles);
+    expect(lines).toEqual([
+      "A capture channel failed in Lamport clocks, 2 places, 0:20 in all. No transcript text from this stretch is in the evidence. Any frames saved from it still are.",
+      "A capture channel failed in Lamport clocks, 0:20 to 0:30. No frames from this stretch are in the evidence. Its transcript text, if captured, still is.",
+    ]);
   });
 
   test("a lecture heading names the shared course instead of every video title", () => {
@@ -323,8 +352,28 @@ describe("review options screens", () => {
   test("processing offers a start only when something is ready, and both ways of starting then", () => {
     const none = optionsScreen({ kind: "processing", readyNow: null, pendingChunks: 1, estimateS: null });
     expect(none.kind === "processing" && none.offers).toEqual([]);
-    const some = optionsScreen({ kind: "processing", readyNow: { chunkRevisions: [crv], supportedClaims: 3, partial: [{ kind: "chunks_still_preparing", count: 1 }] }, pendingChunks: 1, estimateS: 120 });
+    const some = optionsScreen({ kind: "processing", readyNow: scopeOf({ supportedClaims: 3, partial: [{ kind: "chunks_still_preparing", count: 1 }] }), pendingChunks: 1, estimateS: 120 });
     expect(some.kind === "processing" && some.offers.map((o) => o.choice)).toEqual(["prepared_only", "stop_early"]);
+    // The pending section has its own sentence on this screen, so it is not listed again as a limit.
+    expect(some.kind === "processing" && some.ready?.limits).toEqual([]);
+  });
+
+  test("processing makes starting with ready topics the usual path and puts stopping behind a disclosure that says what it cancels", () => {
+    const out = html({ kind: "processing", readyNow: scopeOf({ topics: [topic("Logical clocks")] }), pendingChunks: 2, estimateS: null });
+    expect(out).toContain("Some topics are ready");
+    expect(out).toContain("2 more sections are still being prepared. They are not in a review you start now.");
+    expect(out).toContain("<li>Logical clocks</li>");
+    expect(out).toMatch(/class="page-primary"[^>]*>Start with ready topics</);
+    expect(out).toContain("The other 2 sections keep preparing for a later review.");
+    const more = out.slice(out.indexOf("<details"));
+    expect(more).toContain("<summary>Other ways to start</summary>");
+    expect(more).toContain(">Stop preparing and start</button>");
+    expect(more).toContain("Cancels the preparation still running for 2 sections.");
+    expect(out.indexOf("Stop preparing and start")).toBeGreaterThan(out.indexOf("<details"));
+    const waiting = html({ kind: "processing", readyNow: null, pendingChunks: 1, estimateS: null });
+    expect(waiting).toContain("Preparing your lecture");
+    expect(waiting).toContain("1 section is still being prepared.");
+    expect(waiting).not.toContain("<button");
   });
 
   test("nothing to review lists gaps, unverified claims with their status, and a watch link per rewatch interval", () => {
@@ -345,7 +394,7 @@ describe("review options screens", () => {
   test("the rendered screens carry the content", () => {
     expect(html({ kind: "processing", readyNow: null, pendingChunks: 2, estimateS: null })).toContain("No reliable time estimate yet.");
     expect(html({ kind: "processing", readyNow: null, pendingChunks: 2, estimateS: 300 })).toContain("about 5 min");
-    expect(html({ kind: "ready", scope: { chunkRevisions: [crv], supportedClaims: 4, partial: [] } })).toContain("Review now");
+    expect(html({ kind: "ready", scope: scopeOf({ supportedClaims: 4 }) })).toContain("Start review");
     expect(html({ kind: "nothing_to_review", gaps: [], unverified: [], rewatch: [] })).toContain("Nothing to review yet");
   });
 
@@ -471,7 +520,9 @@ describe("record view logic", () => {
     expect(row).toMatchObject({ status: "Disputed", disputeOpen: true });
     expect(row.note).toContain("not counted as a learning gap");
     const resolved = observationRow(observation({ status: "unresolved", dispute: { kind: "resolved_by_learner", outcome: "it_was_my_gap" } }));
-    expect(resolved).toMatchObject({ disputeOpen: false, note: "You resolved the dispute as your own gap." });
+    expect(resolved).toMatchObject({ disputeOpen: false, note: "You chose to revisit this topic, so it counts as a learning gap." });
+    const supported = observationRow(observation({ status: "partial", dispute: { kind: "resolved_by_learner", outcome: "learner_was_right" } }));
+    expect(supported.note).toBe("You marked your explanation as supported, so this is not counted as a learning gap.");
   });
 
   test("a note keeps learner, tutor and source text apart, and your edit never replaces the generated text", () => {
@@ -829,9 +880,11 @@ describe("save banner", () => {
   const banner = (o: Partial<SessionState>) => renderToStaticMarkup(createElement(SaveBanner, { state: session(o), onRetry: () => {}, reviewId }));
 
   test("it says Saved only when the backend reports the review saved", () => {
-    expect(banner({ view: parsedReview({ saved: "saved" }) })).toContain("Saved.");
-    expect(banner({ view: parsedReview({ saved: "unsaved" }) })).not.toContain("Saved");
-    expect(banner({ view: parsedReview({ saved: "save_pending" }) })).not.toContain("Saved.");
+    expect(banner({ view: parsedReview({ saved: "saved" }) })).toContain("Review saved");
+    expect(banner({ view: parsedReview({ saved: "unsaved" }) })).not.toContain("saved<");
+    expect(banner({ view: parsedReview({ saved: "save_pending" }) })).not.toContain("Review saved");
+    expect(banner({ view: parsedReview({ saved: "unsaved" }), saving: true })).toContain("Saving this review to your notebook...");
+    expect(banner({ view: parsedReview({ saved: "unsaved" }), saving: true })).not.toContain("Review saved");
     expect(banner({ saveError: "offline" })).toContain("not saved yet: offline");
   });
 
@@ -1134,7 +1187,7 @@ describe("review composer", () => {
     expect(out).toContain(`id="${label![1]}"`);
     expect(out).toMatch(/<button[^>]*disabled=""[^>]*>Share my thinking<\/button>/);
     expect(out).toContain("Speech input is not available in this browser.");
-    expect(out).toContain(">End review</button>");
+    expect(out).toContain(">Finish &amp; save</button>");
   });
 
   test("a pending turn disables every action and a phase without answering has no answer field", () => {
@@ -1145,7 +1198,7 @@ describe("review composer", () => {
     const paused = composer(["resume", "end"]);
     expect(paused).not.toContain("<textarea");
     expect(paused).toContain(">Resume</button>");
-    expect(paused).toContain(">End review</button>");
+    expect(paused).toContain(">Finish &amp; save</button>");
   });
 });
 
@@ -1204,15 +1257,19 @@ describe("opening the review (flow D: topic checklist, then the learner starts i
     expect(h.sends[1]!.act).toEqual({ kind: "begin", fuzzy: [cpt], note: "ordering" });
   });
 
-  test("the checklist lists every topic with its summary, an optional note box, Start review and the None path", () => {
+  test("the checklist is a starting-point choice: every topic with its summary, an optional note box, and one start that works with nothing marked", () => {
     const html = renderToStaticMarkup(createElement(TopicChecklist, { topics, disabled: false, onStart: () => {} }));
+    expect(html).toContain('<h2 id="starting-point-heading">Choose a starting point</h2>');
+    expect(html).toContain("Mark none and the tutor starts with open recall questions.");
     expect(html).toContain("Logical clocks");
     expect(html).toContain("Order events without a shared clock.");
     expect(html).toContain("Vector clocks");
     expect(html.match(/type="checkbox"/g)).toHaveLength(2);
     expect(html).toContain("<textarea");
-    expect(html).toContain(">Start review</button>");
-    expect(html).toContain(">None, just quiz me</button>");
+    // The start is the default path: enabled with nothing marked, and it sends the None path.
+    expect(html).toMatch(/<button type="submit" class="primary-action">Start review<\/button>/);
+    expect(html).not.toContain("None, just quiz me");
+    expect(html).not.toContain("Question");
   });
 
   test("the begin act is a system line naming the learner's picks and note, never a learner line", () => {
@@ -1229,6 +1286,38 @@ describe("opening the review (flow D: topic checklist, then the learner starts i
   test("a quick check is labelled Quick check", () => {
     const qc = turnJson(2, "tutor", { move: { kind: "quick_check", threadId: stableId("thr", "thread-2"), claimIds: [clm] }, say: "In a sentence, what is a vector clock?" });
     expect(conversationLines(parsedReview({ turns: [tutorAsk, qc] }).turns).map((l) => l.label)).toEqual(["Question", "Quick check"]);
+  });
+});
+
+describe("focus after the starting-point form (stepStartHandoff)", () => {
+  const at = (checklist: boolean, question: boolean, focusFree = true) => ({ checklist, question, focusFree });
+
+  test("without the learner's own start, a later reply never moves focus", () => {
+    expect(stepStartHandoff("none", at(false, true))).toEqual({ step: "none", focus: null });
+    expect(stepStartHandoff("none", at(false, false))).toEqual({ step: "none", focus: null });
+  });
+
+  test("while the form is still shown nothing moves", () => {
+    expect(stepStartHandoff("submitted", at(true, false))).toEqual({ step: "submitted", focus: null });
+  });
+
+  test("the form gives way before the reply: focus goes to the start status, then to the question while it still rests there", () => {
+    const sent = stepStartHandoff("submitted", at(false, false));
+    expect(sent).toEqual({ step: "waiting", focus: "status" });
+    expect(stepStartHandoff(sent.step, at(false, false))).toEqual({ step: "waiting", focus: null });
+    expect(stepStartHandoff(sent.step, at(false, true))).toEqual({ step: "none", focus: "question" });
+  });
+
+  test("a question already there when the form goes takes focus directly", () => {
+    expect(stepStartHandoff("submitted", at(false, true))).toEqual({ step: "none", focus: "question" });
+  });
+
+  test("if the learner moved focus while waiting, the question does not take it and the handoff ends", () => {
+    expect(stepStartHandoff("waiting", at(false, true, false))).toEqual({ step: "none", focus: null });
+  });
+
+  test("the form coming back (the unsent start was discarded) ends the handoff", () => {
+    expect(stepStartHandoff("waiting", at(true, false))).toEqual({ step: "none", focus: null });
   });
 });
 

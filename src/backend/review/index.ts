@@ -15,7 +15,7 @@ import { stableId } from "../../shared/ids";
 import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, ConceptId, EvidenceId, ReviewId, ThreadId, TurnId } from "../../shared/ids";
 import type {
   AssessableClaim, ChunkPrep, ChunkRevision, Claim, CodeNotice, Concept, Correction, EvidenceBundle, FrozenScope, InviteAnswer, InviteState,
-  LearnerAct, ReviewOptions, ReviewState, ReviewView, Seq, StartChoice, StartResult, Turn, TurnEvent, TutorMove,
+  LearnerAct, ReviewOptions, ReviewState, ReviewView, ScopePreview, Seq, StartChoice, StartResult, Turn, TurnEvent, TutorMove,
 } from "../../shared/domain";
 import { Material } from "../../shared/time";
 import { asSeq } from "../db";
@@ -241,7 +241,19 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     };
   }
 
-  const preview = (s: FrozenScope) => ({ chunkRevisions: s.chunkRevisions, supportedClaims: s.claimsAtStart.length, partial: s.partial });
+  /**
+   * The topics of a scope: the concepts of its claims, in scope order, each once.
+   * Claims that have since lost their check still name the topic they were frozen with, so the list never changes under the learner.
+   */
+  function scopeTopics(captureId: CaptureId, scope: FrozenScope): readonly Concept[] {
+    const byClaim = new Map(deps.assessableIn(captureId, scope.material).map((c) => [c.id, c.conceptId] as const));
+    const ids = [...new Set(scope.claimsAtStart.flatMap((id) => byClaim.get(id) ?? []))];
+    return deps.concepts?.(ids) ?? [];
+  }
+
+  const preview = (captureId: CaptureId, s: FrozenScope): ScopePreview => ({
+    chunkRevisions: s.chunkRevisions, supportedClaims: s.claimsAtStart.length, topics: scopeTopics(captureId, s), material: s.material, partial: s.partial,
+  });
 
   /**
    * R6: "A pending resource search never blocks a review that is otherwise ready."
@@ -254,9 +266,9 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     const scope = asOf > 0 ? freezeScope(cands, (m) => deps.assessableIn(captureId, m), gapsOf, asSeq(asOf)) : null;
     const pending = cands.filter((c) => !c.prep.finished).length;
     if (pending > 0) {
-      return { kind: "processing", readyNow: scope && preview(scope), pendingChunks: pending, estimateS: config.estimateS?.(pending) ?? null };
+      return { kind: "processing", readyNow: scope && preview(captureId, scope), pendingChunks: pending, estimateS: config.estimateS?.(pending) ?? null };
     }
-    return scope ? { kind: "ready", scope: preview(scope) } : nothingToReview(cands, captureId);
+    return scope ? { kind: "ready", scope: preview(captureId, scope) } : nothingToReview(cands, captureId);
   }
 
   function start(captureId: CaptureId, choice: StartChoice, reviewId: ReviewId): StartResult {
@@ -312,14 +324,9 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     return { corrs, state: kit.reviewState(reviewId, turns, corrs, softTargetS, now()) };
   }
 
-  /**
-   * The topics of the frozen scope: the concepts of its claims, in scope order, each once.
-   * Claims that have since lost their check still name the topic they were frozen with, so the list never changes under the learner.
-   */
+  /** The topics of the frozen scope. */
   function topicsOf(review: Stored): readonly Concept[] {
-    const byClaim = new Map(deps.assessableIn(review.captureId, review.scope.material).map((c) => [c.id, c.conceptId] as const));
-    const ids = [...new Set(review.scope.claimsAtStart.flatMap((id) => byClaim.get(id) ?? []))];
-    return deps.concepts?.(ids) ?? [];
+    return scopeTopics(review.captureId, review.scope);
   }
 
   function view(reviewId: ReviewId): ReviewView {

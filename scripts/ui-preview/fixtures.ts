@@ -7,7 +7,7 @@ import type { AppApi } from "../../src/app/api";
 import { ApiError } from "../../src/app/api";
 import { parseId } from "../../src/shared/ids";
 import type { IdKind, Id, ReviewId } from "../../src/shared/ids";
-import type { LearnerAct, Seq, Turn, ReviewView, TopicDiagram } from "../../src/shared/domain";
+import type { LearnerAct, ObservationStatus, Seq,Turn, ReviewView, TopicDiagram } from "../../src/shared/domain";
 import type { SpeechInput } from "../../src/app/speech";
 import { captureResponsez, evidenceBundlez, recordViewz, reviewOptionsz, reviewViewz, saveResultz, usageSummaryz } from "../../src/app/decode";
 import { diagramsResponse, lecturesResponse, topicDiagramResponse } from "../../src/shared/wire";
@@ -23,9 +23,10 @@ function id<K extends IdKind>(kind: K, name: string): Id<K> {
 export const ids = {
   capture: id("cap", "capture"), review: id("rvw", "review"), earlierReview: id("rvw", "earlier-review"), source: id("src", "lecture"), thread: id("thr", "main"), quickThread: id("thr", "quick-check"),
   claim: id("clm", "main"), orderingClaim: id("clm", "ordering"), passage: id("ev", "passage"), laterPassage: id("ev", "later-passage"), frame: id("ev", "frame"),
-  chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait"), ordering: id("cpt", "ordering"),
+  chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait"), ordering: id("cpt", "ordering"), earlierCapture: id("cap", "earlier-capture"),
+  otherCapture: id("cap", "other-capture"), pendingReview: id("rvw", "pending-review"), unsavedReview: id("rvw", "unsaved-review"),
 };
-export const scenarios = ["review", "long-history", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "capture-ready", "capture-processing", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "usage"] as const;
+export const scenarios = ["review", "long-history", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "capture-ready", "capture-processing", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "usage", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
 export type Scenario = typeof scenarios[number];
 export const scenarioFrom = (search: string): Scenario => scenarios.find(s => s === new URLSearchParams(search).get("scenario")) ?? "review";
 
@@ -46,13 +47,19 @@ const illustration = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 4
 export function createFixture(scenario: Scenario): Fixture {
   const material = [[ids.source, [[0, 760]]]];
   const gap = { sourceId: ids.source, interval: { start: 600, end: 640 }, channel: "frames", reason: "hidden_tab" };
+  const topics = [
+    { id: ids.concept, label: "Circular wait", summary: "Each thread holds a resource while waiting for one another thread holds." },
+    { id: ids.ordering, label: "Resource ordering", summary: "Acquiring resources in one global order removes the circular wait." },
+  ];
   const firstQuestion = "Two threads are waiting on each other. How could that happen?";
   /**
    * A review view as the backend sends it. A saved review also has a quick check on a second topic and the observations
-   * for both threads, so each illustrated page has its question, answer and status.
+   * for both threads, so each illustrated page has its question, answer and status. In "record-disputes" the second topic
+   * is a main question too, and the learner disputed both assessments, so two disputed rows need telling apart.
    */
   function reviewJson(reviewId: ReviewId, s: Scenario) {
     const saved = s.startsWith("record");
+    const disputes = s === "record-disputes";
     const turn = (actor: string, n: number, rest: object) => ({ id: id("turn", `${reviewId}-${actor}-${n}`), reviewId, seq: n, atMs: n * 1000, actor, threadId: actor === "code" ? null : ids.thread, ...rest });
     const ask = (n: number, text: string) => turn("tutor", n, { move: { kind: "ask_main", threadId: ids.thread, claimIds: [ids.claim] }, say: text });
     const answer = (n: number, text: string, threadId = ids.thread) => turn("learner", n, { threadId, act: { kind: "answer", text, modality: "text" } });
@@ -63,14 +70,26 @@ export function createFixture(scenario: Scenario): Fixture {
     }
     // The fuzzy-topic checklist shows only before the first turn (flow D), so that scenario starts with none.
     let observations: object[] = [];
-    if (s !== "fuzzy-checklist") {
+    if (s !== "fuzzy-checklist" && s !== "home-setup") {
       turns.push(ask(turns.length + 1, firstQuestion));
       const mainAnswer = answer(turns.length + 1, "One holds lock A and wants B. The other holds B and wants A.");
       turns.push(mainAnswer);
       const help = turn("tutor", turns.length + 1, { move: { kind: "explain", threadId: ids.thread, evidence: [ids.frame, ids.passage] }, say: "The lecture calls this circular wait. Each thread is holding a resource while waiting for the other." });
       turns.push(help);
       turns.push(turn("tutor", turns.length + 1, { move: { kind: "ask_followup", threadId: ids.thread }, say: "What would have to change for either thread to continue?" }));
-      if (saved) {
+      if (disputes) {
+        turns.push(turn("learner", turns.length + 1, { act: { kind: "dispute", text: "I did name circular wait: each thread holds one lock and waits for the other." } }));
+        turns.push(turn("tutor", turns.length + 1, { move: { kind: "answer_dispute", threadId: ids.thread, evidence: [ids.passage], settled: false }, say: "Your answer described the waiting but not why neither thread can release its lock, which the lecture names as the condition." }));
+        turns.push(turn("tutor", turns.length + 1, { threadId: ids.quickThread, move: { kind: "ask_main", threadId: ids.quickThread, claimIds: [ids.orderingClaim] }, say: "How does taking locks in one global order prevent a deadlock?" }));
+        const orderingAnswer = answer(turns.length + 1, "If every thread takes A before B, nobody holds B while waiting for A.", ids.quickThread);
+        turns.push(orderingAnswer);
+        turns.push(turn("learner", turns.length + 1, { threadId: ids.quickThread, act: { kind: "dispute", text: "That is the global order the lecture gave." } }));
+        turns.push(turn("tutor", turns.length + 1, { threadId: ids.quickThread, move: { kind: "answer_dispute", threadId: ids.quickThread, evidence: [ids.laterPassage], settled: false }, say: "The order is right, but the answer did not say that it removes the circular wait." }));
+        observations = [
+          { id: id("obs", `${reviewId}-disputed`), reviewId, threadId: ids.thread, claimIds: [ids.claim], conceptIds: [ids.concept], proposed: "partial", status: "disputed", clampedFrom: null, dispute: { kind: "unsettled" }, corrections: [], facts: { threadId: ids.thread, firstSubstantiveAnswerSeq: mainAnswer.seq, firstHelpSeq: help.seq, endedBySkip: false, saidDontKnowOnly: false, learnerTurns: [mainAnswer.id], helpTurns: [help.id] } },
+          { id: id("obs", `${reviewId}-ordering-disputed`), reviewId, threadId: ids.quickThread, claimIds: [ids.orderingClaim], conceptIds: [ids.ordering], proposed: "unresolved", status: "disputed", clampedFrom: null, dispute: { kind: "unsettled" }, corrections: [], facts: { threadId: ids.quickThread, firstSubstantiveAnswerSeq: orderingAnswer.seq, firstHelpSeq: null, endedBySkip: false, saidDontKnowOnly: false, learnerTurns: [orderingAnswer.id], helpTurns: [] } },
+        ];
+      } else if (saved) {
         turns.push(turn("tutor", turns.length + 1, { threadId: ids.quickThread, move: { kind: "quick_check", threadId: ids.quickThread, claimIds: [ids.orderingClaim] }, say: "Quick check: what does taking locks in one global order prevent?" }));
         const quickAnswer = answer(turns.length + 1, "It prevents a circular wait.", ids.quickThread);
         turns.push(quickAnswer);
@@ -82,15 +101,12 @@ export function createFixture(scenario: Scenario): Fixture {
     }
     if (s === "soft-target") turns.push(turn("code", turns.length + 1, { notice: { kind: "soft_target_reached", elapsedS: 600 } }));
     if (s === "correction") turns.push(turn("code", turns.length + 1, { notice: { kind: "correction_pending", correctionId: "fixture-correction", affectedClaims: [ids.claim] } }));
-    const checklist = s === "fuzzy-checklist";
+    const checklist = s === "fuzzy-checklist" || s === "home-setup";
     return {
-      reviewId, captureId: ids.capture,
-      topics: [
-        { id: ids.concept, label: "Circular wait", summary: "Each thread holds a resource while waiting for one another thread holds." },
-        { id: ids.ordering, label: "Resource ordering", summary: "Acquiring resources in one global order removes the circular wait." },
-      ],
+      reviewId, captureId: reviewId === ids.earlierReview ? ids.earlierCapture : ids.capture,
+      topics,
       scope: { chunkRevisions: [ids.chunk], material, claimsAtStart: [ids.claim, ids.orderingClaim], partial: [{ kind: "capture_gap", gap }], frozenAtSeq: 7 },
-      state: { reviewId, phase: s === "paused" ? "paused" : s === "save-failure" || s === "saving" || saved ? "ended" : "active", mainQuestions: checklist ? 0 : 1, quickChecks: saved ? 1 : 0, fuzzy: saved ? [ids.concept] : [], openThread: checklist || saved ? null : ids.thread, lastLearnerAct: null,
+      state: { reviewId, phase: s === "paused" || s === "home-paused" ? "paused" : s === "save-failure" || s === "saving" || saved ? "ended" : "active", mainQuestions: checklist ? 0 : disputes ? 2 : 1, quickChecks: saved && !disputes ? 1 : 0, fuzzy: saved ? [ids.concept] : [], openThread: checklist || saved ? null : ids.thread, lastLearnerAct: null,
         detour: s === "detour" ? { kind: "proposed", turnId: id("turn", "detour"), topic: "Resource ordering", needsResource: null } : s === "resource-wait" ? { kind: "awaiting_resource", resourceId: id("res", "resource"), topic: "Resource ordering" } : { kind: "none" },
         openDispute: null, corrections: [], activeSeconds: 30, softTargetS: 600, softTargetOffered: false, wrapUpRequested: false },
       turns, owesMove: false, observations, saved: saved ? "saved" : s === "save-failure" || s === "saving" ? "save_pending" : "unsaved",
@@ -99,10 +115,16 @@ export function createFixture(scenario: Scenario): Fixture {
   let view: ReviewView = reviewViewz.parse(reviewJson(ids.review, scenario));
   // The notebook holds a saved review: this one in record scenarios, otherwise an earlier one, so its illustrated pages are complete.
   const savedView = view.saved === "saved" ? view : reviewViewz.parse(reviewJson(ids.earlierReview, "record"));
+  // "record-context-error" and "record-lectures": the notebook also holds an earlier lecture's review with two disputes. In "record-context-error" its first lookup fails while this review's loads.
+  const earlierView = scenario === "record-context-error" || scenario === "record-lectures" ? reviewViewz.parse(reviewJson(ids.earlierReview, "record-disputes")) : null;
   const capture = captureResponsez.parse({ capture: { captureId: ids.capture, status: { state: "stopped" }, sources: [{ id: ids.source, videoId: "fixture", title: "Locks & deadlocks", url: "", channelName: "Deterministic preview", durationS: 1200 }], currentSourceId: ids.source, transcript: "available", health: [], watchedSeconds: 760 }, invite: { state: "invited", atChunk: ids.chunk } });
   const evidence = evidenceBundlez.parse({ material, passages: [{ kind: "passage", id: ids.passage, sourceId: ids.source, transcriptRevId: id("trv", "captions"), interval: { start: 402, end: 423 }, text: "Each thread holds a lock while waiting for the other.", origin: "panel" }, { kind: "passage", id: ids.laterPassage, sourceId: ids.source, transcriptRevId: id("trv", "captions"), interval: { start: 480, end: 505 }, text: "Acquiring resources in the same order removes this circular wait.", origin: "panel" }], frames: [{ kind: "frame", id: ids.frame, sourceId: ids.source, mediaS: 402, width: 800, height: 450, teaching: "kept" }], gaps: [gap], ads: [] });
-  const empty = scenario === "record-empty";
-  let record = recordViewz.parse({ notes: empty ? [] : [{ id: id("note", "note"), reviewId: savedView.reviewId, conceptId: ids.concept, generated: [{ author: "learner", text: "Each thread holds something the other needs.", turnId: null, evidence: [] }, { author: "tutor", text: "Look at the order in which resources are acquired.", turnId: null, evidence: [ids.passage] }, { author: "source", text: "Circular wait is one condition for deadlock.", turnId: null, evidence: [ids.frame] }], userEdit: null, evidence: [ids.passage, ids.frame] }], observations: empty ? [] : savedView.observations, links: scenario === "record-empty" ? [] : [{ id: id("lnk", "link"), from: ids.concept, to: ids.ordering, type: "related_to", evidence: [ids.passage], rationale: "Resource ordering changes the circular-wait condition.", decision: "suggested" }], unavailableEvidence: [] });
+  // With no lectures captured ("home-empty"), the notebook has nothing in it either.
+  const empty = scenario === "record-empty" || scenario === "home-empty";
+  const lectures = scenario === "record-lectures";
+  // "record-lectures": the earlier lecture's note cites a passage the learner has since deleted.
+  const earlierNote = { id: id("note", "earlier-note"), reviewId: ids.earlierReview, conceptId: ids.ordering, generated: [{ author: "learner", text: "Taking locks in one order means nobody waits in a circle.", turnId: null, evidence: [] }, { author: "source", text: "Acquiring resources in the same order removes this circular wait.", turnId: null, evidence: [ids.laterPassage] }], userEdit: null, evidence: [ids.laterPassage] };
+  let record = recordViewz.parse({ notes: empty ? [] : [{ id: id("note", "note"), reviewId: savedView.reviewId, conceptId: ids.concept, generated: [{ author: "learner", text: "Each thread holds something the other needs.", turnId: null, evidence: [] }, { author: "tutor", text: "Look at the order in which resources are acquired.", turnId: null, evidence: [ids.passage] }, { author: "source", text: "Circular wait is one condition for deadlock.", turnId: null, evidence: [ids.frame] }], userEdit: null, evidence: [ids.passage, ids.frame] }, ...(lectures ? [earlierNote] : [])], observations: empty ? [] : [...(earlierView?.observations ?? []), ...savedView.observations], links: scenario === "record-empty" ? [] : [{ id: id("lnk", "link"), from: ids.concept, to: ids.ordering, type: "related_to", evidence: [ids.passage], rationale: "Resource ordering changes the circular-wait condition.", decision: "suggested" }], unavailableEvidence: lectures ? [{ kind: "deleted", id: ids.laterPassage, deletedAtMs: 1000 }] : [] });
   // One topic has a ready summary and a frame; the other has neither yet, so asking for it shows preparing until the gate is released.
   let diagrams: readonly TopicDiagram[] = diagramsResponse.parse({ topics: [
     { topicId: ids.concept, label: "Circular wait", claimIds: [ids.claim], frame: { id: ids.frame, mediaS: 402, sourceId: ids.source, videoId: null, title: "Locks & deadlocks" }, summary: { state: "ready", title: "How does a circular wait form?", lines: [{ text: "Thread 1 holds A and waits for B.", evidence: [ids.passage] }, { text: "Thread 2 holds B and waits for A.", evidence: [ids.passage, ids.frame] }, { text: "Neither can continue: a circular wait.", evidence: [ids.frame] }] } },
@@ -122,22 +144,53 @@ export function createFixture(scenario: Scenario): Fixture {
     start(callbacks) { speechCallbacks = callbacks; log("speech.start"); callbacks.onSpeechStart(); },
     stop() { speechCallbacks?.onEnd(); speechCallbacks = null; log("speech.stop"); },
   };
+  // Home lists this lecture's open review with two ended ones (save not finished, ended without notes), a lecture still
+  // capturing, and the earlier lecture whose saved review the notebook holds. Notebook and Home read this one list.
+  const at = (hour: number) => Date.UTC(2026, 10, 6, hour, 4);
+  const lectureList = lecturesResponse.parse({ lectures: scenario === "home-empty" ? [] : [
+    { captureId: ids.capture, sourceTitles: ["Locks & deadlocks"], videos: 1, watchedSeconds: 760, status: { state: "stopped" }, reviews: [
+      { reviewId: ids.review, startedMs: at(15), phase: view.state.phase, saved: view.saved, mainQuestions: view.state.mainQuestions },
+      { reviewId: ids.pendingReview, startedMs: at(13), phase: "ended", saved: "save_pending", mainQuestions: 2 },
+      { reviewId: ids.unsavedReview, startedMs: at(10), phase: "ended", saved: "unsaved", mainQuestions: 0 },
+    ] },
+    { captureId: ids.otherCapture, sourceTitles: ["Semaphores - Operating Systems"], videos: 1, watchedSeconds: 240, status: { state: "capturing" }, reviews: [] },
+    { captureId: ids.earlierCapture, sourceTitles: ["Deadlock prevention"], videos: 1, watchedSeconds: 900, status: { state: "stopped" }, reviews: [
+      { reviewId: ids.earlierReview, startedMs: at(11), phase: "ended", saved: "saved", mainQuestions: earlierView?.state.mainQuestions ?? 1 },
+    ] },
+  ] });
   let attempts = 0;
   let evidenceAttempts = 0;
   let diagramAttempts = 0;
+  let reviewAttempts = 0;
+  let topicReads = 0;
   const api: AppApi = {
-    async review(reviewId) { log("review.read"); return reviewId === view.reviewId ? view : savedView; },
+    async review(reviewId) {
+      log("review.read");
+      if (earlierView !== null && reviewId === earlierView.reviewId) {
+        if (scenario === "record-context-error" && reviewAttempts++ === 0) throw new ApiError("Fixture review lookup failed. Retry is available.", 503);
+        return earlierView;
+      }
+      return reviewId === view.reviewId ? view : savedView;
+    },
     async captureView() { log("capture.read"); return capture; },
-    async lectures() { log("lectures.read"); return lecturesResponse.parse({ lectures: [] }); },
+    async lectures() {
+      log("lectures.read");
+      if (scenario === "home-error" && attempts++ === 0) throw new ApiError("Fixture lecture list could not load. Retry is available.", 503);
+      return lectureList;
+    },
     async reviewOptions() {
       log("review.options");
-      const scope = { chunkRevisions: [ids.chunk], supportedClaims: 3, partial: [{ kind: "capture_gap", gap }] };
+      const scope = { chunkRevisions: [ids.chunk], supportedClaims: 3, topics, material, partial: [{ kind: "capture_gap", gap }] };
       return reviewOptionsz.parse(scenario === "capture-empty" ? { kind: "nothing_to_review", gaps: [gap], unverified: [], rewatch: [{ sourceId: ids.source, interval: { start: 600, end: 640 } }] } : scenario === "capture-processing" ? { kind: "processing", readyNow: scope, pendingChunks: 2, estimateS: null } : { kind: "ready", scope });
     },
     async startReview(_capture, _choice, reviewId) { log("review.start"); return { kind: "started", reviewId, scope: view.scope }; },
     async answerInvite(_id, answer) { log(`invite.${answer}`); },
     async retryPreparation() { log("preparation.retry"); },
-    async diagrams() { log("diagrams.read"); return diagrams; },
+    async diagrams() {
+      log("diagrams.read");
+      if (scenario === "home-topic-error" && topicReads++ === 0) throw new ApiError("Fixture topic list could not load. Retry is available.", 503);
+      return diagrams;
+    },
     async requestDiagram(_review, topicId) {
       log(`diagram.request ${topicId}`);
       const topic = diagrams.find(t => t.topicId === topicId);
@@ -183,12 +236,20 @@ export function createFixture(scenario: Scenario): Fixture {
       log("review.save");
       if (scenario === "saving") await gate();
       if (scenario === "save-failure" && attempts++ === 0) return saveResultz.parse({ kind: "save_failed", error: "Fixture disk write failed. Your review is still here.", retryable: true });
-      view = { ...view, saved: "saved" }; return saveResultz.parse({ kind: "saved", notes: 1, observations: 0, links: 0 });
+      // As the backend does, the saved review carries its persisted observations: the main question, disputed. Resource ordering was never asked, so it has none.
+      const observations = reviewViewz.parse(reviewJson(ids.review, "record")).observations.filter(o => o.threadId === ids.thread);
+      view = { ...view, saved: "saved", observations }; return saveResultz.parse({ kind: "saved", notes: 1, observations: observations.length, links: 0 });
     },
     async record() { log("record.read"); if (scenario === "record-error" && attempts++ === 0) throw new ApiError("Fixture notebook could not load. Retry is available.", 503); return record; },
     async editNote(noteId, text) { log("note.edit"); record = { ...record, notes: record.notes.map(note => note.id === noteId ? { ...note, userEdit: text } : note) }; },
     async deleteNote(noteId) { log("note.delete"); record = { ...record, notes: record.notes.filter(note => note.id !== noteId) }; },
-    async decideLink(linkId, decision) { log("link.decide"); record = {...record, links:record.links.map(link=>link.id===linkId?{...link,decision}:link)}; }, async resolveDispute(obsId, outcome) { log("dispute.resolve"); record = {...record,observations:record.observations.map(obs=>obs.id===obsId?{...obs,dispute:{kind:"resolved_by_learner",outcome}}:obs)}; }, async overrideObservation(obsId,status) { log("observation.override"); record={...record,observations:record.observations.map(obs=>obs.id===obsId?{...obs,status}:obs)}; },
+    async decideLink(linkId, decision) { log("link.decide"); record = {...record, links:record.links.map(link=>link.id===linkId?{...link,decision}:link)}; }, async resolveDispute(obsId, outcome) {
+      log(`dispute.resolve ${obsId} ${outcome}`);
+      // As clampStatus saves these fixture threads (answered before any help): a gap outcome keeps a gap status or becomes unresolved; otherwise the proposal stands.
+      const resolved = (proposed: ObservationStatus): ObservationStatus => outcome === "it_was_my_gap" && proposed !== "partial" && proposed !== "unresolved" ? "unresolved" : proposed;
+      record = { ...record, observations: record.observations.map(obs => obs.id === obsId ? { ...obs, status: resolved(obs.proposed), dispute: { kind: "resolved_by_learner", outcome } } : obs) };
+    },
+    async overrideObservation(obsId,status) { log(`observation.override ${obsId} ${status}`); record={...record,observations:record.observations.map(obs=>obs.id===obsId?{...obs,status}:obs)}; },
     async deleteEvidence(evidenceIds) { log("evidence.delete"); record = { ...record, unavailableEvidence: evidenceIds.map(id => ({ kind: "deleted", id, deletedAtMs: 1000 })) }; },
     async usage() { return usageSummaryz.parse({ byKind: {}, byPurpose: {} }); },
   };

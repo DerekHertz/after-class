@@ -339,7 +339,13 @@ const partialReasonz = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("chunks_still_preparing"), count: z.number() }),
 ]);
 
-const scopePreviewz = z.object({ chunkRevisions: nonEmpty(idOf("crv")), supportedClaims: z.number(), partial: z.array(partialReasonz) });
+const scopePreviewz = z.object({
+  chunkRevisions: nonEmpty(idOf("crv")),
+  supportedClaims: z.number(),
+  topics: z.array(z.object({ id: idOf("cpt"), label: z.string(), summary: z.string() })),
+  material: materialWire,
+  partial: z.array(partialReasonz),
+});
 
 const nothingToReviewz = z.object({
   kind: z.literal("nothing_to_review"),

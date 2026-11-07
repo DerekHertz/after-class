@@ -27,7 +27,7 @@ import { join, sep } from "node:path";
 import { parseId } from "../shared/ids";
 import type { IdKind } from "../shared/ids";
 import type { CaptureId, ConceptId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, SourceId, TurnId } from "../shared/ids";
-import type { EvidenceBundle, Frame, FrozenScope, Passage, ReviewSaveState, ReviewView, StartResult, TurnEvent } from "../shared/domain";
+import type { EvidenceBundle, Frame, FrozenScope, Passage, ReviewOptions, ReviewSaveState, ReviewView, ScopePreview, StartResult, TurnEvent } from "../shared/domain";
 import { Material } from "../shared/time";
 import type { Interval } from "../shared/time";
 import {
@@ -256,6 +256,10 @@ const wireScope = (scope: FrozenScope) => ({ ...scope, material: Material.canoni
 
 const wireStart = (r: StartResult) => (r.kind === "started" ? { ...r, scope: wireScope(r.scope) } : r);
 
+const wirePreview = (p: ScopePreview) => ({ ...p, material: Material.canonical(p.material) });
+const wireOptions = (o: ReviewOptions) =>
+  o.kind === "ready" ? { ...o, scope: wirePreview(o.scope) } : o.kind === "processing" ? { ...o, readyNow: o.readyNow && wirePreview(o.readyNow) } : o;
+
 /** Validates a response already in wire form against its `ROUTES` schema, then sends it as it is (the schema's output would decode Material back into a Map). */
 function replyWire(name: keyof typeof ROUTES, wire: unknown, cors: Record<string, string>): Response {
   const r = ROUTES[name].reply;
@@ -427,7 +431,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
         return reply("answerInvite", reviews.answerInvite(captureId!, answer), cors);
       }
       case "reviewOptions":
-        return reply("reviewOptions", reviews.options(captureId!), cors);
+        return replyWire("reviewOptions", wireOptions(reviews.options(captureId!)), cors);
       case "startReview": {
         const body = parseStartReviewRequest(await readJson(req));
         const existing = reviewOf(reviews, body.reviewId);

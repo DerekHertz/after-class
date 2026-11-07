@@ -1,6 +1,6 @@
 import { RecordScreen } from "./record";
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { MutableRefObject } from "react";
+import type { MutableRefObject, Ref } from "react";
 import { Material } from "../shared/time";
 import type { ConceptId, EvidenceId, ReviewId } from "../shared/ids";
 import type { Concept } from "../shared/domain";
@@ -11,13 +11,14 @@ import { reactToCompanion } from "./companion-reaction";
 import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
 import {
-  ACTION_LABEL, END_CONFIRM_TEXT, INITIAL_SOURCE_OPEN, endFlow, shouldAutoSendSpeech, shouldStopListening, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
+  ACTION_LABEL, END_CONFIRM_TEXT, composerActions, INITIAL_SOURCE_OPEN, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
   softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer,
 } from "./core";
-import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, TurnStatus } from "./core";
+import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, StartHandoff, TurnStatus } from "./core";
 import type { Speaker, SpeechInput } from "./speech";
 import type { UnsentStore } from "./unsent";
-import { BundleInspector, ErrorNote, EvidencePane, Link, useAsync } from "./ui";
+import { BundleInspector, ErrorNote, EvidencePane, useAsync } from "./ui";
+import { CompletionPanel } from "./completion";
 import { DiagramPanel, ShowDiagramButton, useDiagrams } from "./diagram";
 import { currentQuestionTopic } from "./diagram-view";
 
@@ -27,11 +28,14 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const { appearance, voice } = useAppearance();
   const speechToggle = useRef<(() => void) | null>(null);
   const history = useRef<HTMLDivElement>(null);
+  const currentQuestion = useRef<HTMLElement>(null);
   const sourceHeading = useRef<HTMLHeadingElement>(null);
   const sourceSurface = useRef<HTMLElement>(null);
   const sourceColumn = useRef<HTMLDivElement>(null);
   const sourceToggle = useRef<HTMLButtonElement>(null);
   const sourceOrigin = useRef<HTMLButtonElement | null>(null);
+  const conversation = useRef<HTMLElement>(null);
+  const diagramSection = useRef<HTMLDivElement>(null);
   const followHistory = useRef(true);
   const [selection, setSelection] = useState<SourceSelection>({ kind: "automatic" });
   const [sourceOpen, setSourceOpen] = useState(INITIAL_SOURCE_OPEN);
@@ -39,6 +43,9 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const [diagramTopic, setDiagramTopic] = useState<ConceptId | null>(null);
   const diagrams = useDiagrams(api, reviewId);
   const [listening, setListening] = useState(false);
+  const [handoff, setHandoff] = useState<StartHandoff>("none");
+  const startStatus = useRef<HTMLParagraphElement>(null);
+  const questionLine = useRef<HTMLLIElement>(null);
   const controller = useMemo(() => createReviewController({ api, reviewId, speaker, unsent }), [api, reviewId, speaker, unsent]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
   const loaded = state.view !== null;
@@ -63,6 +70,15 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   // Flow D: the learner starts the review from the topic checklist; nothing begins by itself.
   const resume = useMemo(() => resumeOnce(controller), [controller]);
   useEffect(() => { resume(state); }, [resume, state]);
+  const checklist = needsChecklist(state);
+  const question = state.live === null && (state.view?.turns.some((t) => t.actor === "tutor" && t.say.trim() !== "") ?? false);
+  useEffect(() => {
+    const active = document.activeElement;
+    const next = stepStartHandoff(handoff, { checklist, question, focusFree: active === null || active === document.body || active === startStatus.current });
+    if (next.focus === "status") startStatus.current?.focus();
+    else if (next.focus === "question") questionLine.current?.focus();
+    if (next.step !== handoff) setHandoff(next.step);
+  }, [handoff, checklist, question]);
 
   const captureId = state.view?.captureId ?? null;
   const capture = useAsync(() => (captureId === null ? Promise.resolve(null) : api.captureView(captureId)), [api, captureId]);
@@ -91,6 +107,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     setDiagramTopic(topicId);
     if (!sourceOpen) reactToCompanion("draw");
     setSourceOpen(true);
+    requestAnimationFrame(() => diagramSection.current?.focus());
     const known = diagrams.topics?.find((t) => t.topicId === topicId);
     if (known === undefined || known.summary.state === "not_requested") void diagrams.request(topicId);
     else diagrams.reload();
@@ -104,6 +121,13 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     else (origin?.isConnected ? origin : sourceToggle.current)?.focus();
   }
 
+  /** On a phone the source sits below the conversation; this brings the question and the composer back without closing it. */
+  function returnToQuestion() {
+    const target = currentQuestion.current ?? conversation.current;
+    target?.scrollIntoView({ block: "start" });
+    target?.focus({ preventScroll: true });
+  }
+
   const view = state.view;
   if (view === null) {
     return (
@@ -115,10 +139,11 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     );
   }
 
-  const lines = conversationLines(view.turns, view.topics);
+  const lines = currentExchange(conversationLines(view.turns, view.topics));
+  const live = state.live && state.live.status !== "complete" ? state.live : null;
+  const questionKey = lines.current.findLast((l) => l.speaker === "tutor")?.key;
   const questionTopic = currentQuestionTopic(view, diagrams.topics ?? []);
   const shownDiagram = diagrams.topics?.find((t) => t.topicId === diagramTopic) ?? null;
-  const checklist = needsChecklist(state);
   const soft = softTargetPrompt(view.turns);
   const actions = availableActions(view.state, soft !== null);
   const streaming = state.live?.status === "streaming";
@@ -131,7 +156,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
 
   return (
     <main className="review">
-      {notebookOpen && <dialog className="room-notebook-dialog" ref={node => { if (node && !node.open) node.showModal(); }} onClose={() => setNotebookOpen(false)}><button onClick={() => setNotebookOpen(false)}>Close notebook</button><RecordScreen indexed api={api} reviewId={null} /></dialog>}
+      {notebookOpen && <dialog className="room-notebook-dialog" ref={node => { if (node && !node.open) node.showModal(); }} onClose={() => setNotebookOpen(false)}><button onClick={() => setNotebookOpen(false)}>Close notebook</button><RecordScreen api={api} reviewId={null} /></dialog>}
       <header className="review-header">
         <div>
           <h1>{heading.title}</h1>
@@ -143,37 +168,42 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           <Actions ids={actions.filter(id => id === "pause" || id === "resume" || id === "end")} disabled={streaming || state.unsent.length > 0} send={id => void controller.send(toAct(id, "", "text"))} />
         </div>
       </header>
-      <SaveBanner state={state} onRetry={() => void controller.save()} reviewId={reviewId} />
+      <SaveBanner state={state} onRetry={() => void controller.save()} reviewId={reviewId} onSource={openSource} />
       <ErrorNote error={state.loadError} retry={() => void controller.load()} />
       <div className={`review-workspace${sourceOpen ? "" : " source-closed"}`}>
-        <section className="conversation-notebook" aria-labelledby="conversation-heading">
-          <div className="notebook-heading">
+        <section ref={conversation} className="conversation-notebook" aria-labelledby={checklist ? STARTING_POINT_HEADING : "conversation-heading"}>
+          {/* Before the first turn this is a setup choice, not a conversation: no heading, question number or empty history. */}
+          {!checklist && <div className="notebook-heading">
             <h2 id="conversation-heading">Conversation</h2>
-            <span className="question-marker">Question {view.state.mainQuestions}</span>
+            {view.state.mainQuestions > 0 && <span className="question-marker">Question {view.state.mainQuestions}</span>}
             <button type="button" onClick={() => {
               followHistory.current = true;
               if (history.current) history.current.scrollTop = history.current.scrollHeight;
-            }}>Latest exchange</button>
+              currentQuestion.current?.scrollIntoView({ block: "nearest" });
+              currentQuestion.current?.focus({ preventScroll: true });
+            }}>Current question</button>
             <button ref={sourceToggle} type="button" aria-expanded={sourceOpen} aria-controls="review-source" onClick={(e) => {
               if (sourceOpen) closeSource();
               else { sourceOrigin.current = e.currentTarget; reactToCompanion("draw"); setSourceOpen(true); }
             }}>{sourceOpen ? "Close source" : "Open source"}</button>
-          </div>
-          <div ref={history} onScroll={() => {
-            const el = history.current;
-            if (el) followHistory.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-          }} className="conversation-history" role="region" aria-label="Conversation history" tabIndex={0}>
-          <ol className="lines">
-            {lines.map((l) => <LineItem key={l.key} line={l} onSource={openSource} />)}
-            {state.live && state.live.status !== "complete" && (
-              <li className="line tutor">
-                <strong>{state.live.move ? MOVE_LABEL[state.live.move.kind] : "Tutor"}</strong>
-                <p>{liveText(state.live) || "..."}</p>
-                {state.live.status === "failed" && <p className="note note-error">{state.live.error}</p>}
-              </li>
-            )}
-          </ol>
-          </div>
+          </div>}
+          {/* The question being worked on stays next to the composer; earlier lines scroll on their own below. */}
+          {!checklist && (lines.current.length > 0 || live !== null) && (
+            <section ref={currentQuestion}className="current-exchange" aria-labelledby="current-exchange-heading" tabIndex={-1}>
+              <h3 id="current-exchange-heading" className="eyebrow">Current question</h3>
+              <ol className="lines">
+                {lines.current.map((l) => <LineItem key={l.key} line={l} onSource={openSource} {...(l.key === questionKey ? { focusRef: questionLine } : {})} />)}
+                {live !== null && (
+                  <li className="line tutor">
+                    <strong>{live.move ? MOVE_LABEL[live.move.kind] : "Tutor"}</strong>
+                    <p>{liveText(live) || "..."}</p>
+                    {live.status === "failed" && <p className="note note-error">{live.error}</p>}
+                  </li>
+                )}
+              </ol>
+            </section>
+          )}
+          {handoff !== "none" && !checklist && <p ref={startStatus} className="note" role="status" tabIndex={-1}>{canRetry ? "Your review has started, but the tutor's first question has not arrived." : "Your review has started. Waiting for the tutor's first question."}</p>}
           {canRetry && (
             <UndeliveredNote
               unsent={state.unsent.length}
@@ -191,7 +221,10 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           {!checklist && questionTopic !== null && (
             <p className="current-topic">Topic: <strong>{questionTopic.label}</strong> <ShowDiagramButton topic={{ id: questionTopic.topicId, label: questionTopic.label }} onShow={showDiagram} /></p>
           )}
-          {checklist && <TopicChecklist topics={view.topics} disabled={streaming} onStart={(fuzzy, note) => void controller.send({ kind: "begin", fuzzy, ...(note === "" ? {} : { note }) })} />}
+          {checklist && <TopicChecklist topics={view.topics} disabled={streaming} onStart={(fuzzy, note) => {
+            setHandoff("submitted");
+            void controller.send({ kind: "begin", fuzzy, ...(note === "" ? {} : { note }) }).then((sent) => { if (!sent) setHandoff("none"); });
+          }} />}
           {!checklist && <Composer
             actions={actions.filter((a) => !["continue", "wrap_up", "pause", "resume", "end"].includes(a))}
             disabled={streaming || state.unsent.length > 0}
@@ -204,6 +237,17 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             live={state.live}
             send={(id, text, modality) => controller.send(toAct(id, text, modality))}
           />}
+          {lines.earlier.length > 0 && <>
+            <h3 id="conversation-history-heading" className="conversation-history-heading">Earlier in this review</h3>
+            <div ref={history} onScroll={() => {
+              const el = history.current;
+              if (el) followHistory.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+            }} className="conversation-history" role="region" aria-labelledby="conversation-history-heading" tabIndex={0}>
+              <ol className="lines">
+                {lines.earlier.map((l) => <LineItem key={l.key} line={l} onSource={openSource} />)}
+              </ol>
+            </div>
+          </>}
           {!checklist && view.topics.length > 0 && (
             <details className="review-topics">
               <summary>Topics in this review</summary>
@@ -240,14 +284,15 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
             <p className="eyebrow">From the lecture</p>
             <h2 ref={sourceHeading} tabIndex={-1} id="source-heading">Lecture evidence</h2>
             <p className="source-selection-label">{selection.kind === "pinned" ? selection.label : "From the current tutor explanation or check"}</p>
-            <button type="button" onClick={closeSource}>Close evidence</button>
+            <button type="button" onClick={closeSource}>Close source</button>
             {selection.kind === "pinned" && <button type="button" onClick={() => setSelection({ kind: "automatic" })}>Follow current reply</button>}
           </div>
-          {diagramTopic !== null && (shownDiagram
+          <EvidencePane key={evidenceIds.join(",")} api={api} ids={evidenceIds} titles={titles} videos={videos} grouped shownFrame={shownDiagram?.frame ?? null} />
+          {diagramTopic !== null && <div ref={diagramSection} tabIndex={-1} className="tutor-diagram">{shownDiagram
             ? <DiagramPanel key={shownDiagram.topicId} api={api} topic={shownDiagram} error={diagrams.error} onRequest={() => void diagrams.request(diagramTopic)} onCite={openSource} onClose={() => setDiagramTopic(null)} />
-            : <div className="diagram-panel">{diagrams.error !== null ? <ErrorNote error={diagrams.error} retry={diagrams.reload} /> : <p className="muted" role="status">Loading the diagram...</p>}<button type="button" onClick={() => setDiagramTopic(null)}>Close diagram</button></div>)}
-          <EvidencePane key={evidenceIds.join(",")} api={api} ids={evidenceIds} titles={titles} videos={videos} />
+            : <div className="diagram-panel">{diagrams.error !== null ? <ErrorNote error={diagrams.error} retry={diagrams.reload} /> : <p className="muted" role="status">Loading the diagram...</p>}<button type="button" onClick={() => setDiagramTopic(null)}>Close diagram</button></div>}</div>}
           <ScopeEvidence api={api} view={view} titles={titles} onSource={openSource} />
+          <button type="button" className="source-return" onClick={returnToQuestion}>Back to the question</button>
         </aside>
         </div>
       </div>
@@ -255,10 +300,13 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   );
 }
 
+const STARTING_POINT_HEADING = "starting-point-heading";
+
 /**
  * Flow D: "[code]  Show the topics in the frozen scope as a checklist."
  * "[user]  Mark the topics I'm fuzzy on (or none), optionally add a note on what feels fuzzy."
- * Starting sends one `begin` act carrying the marked concept IDs (empty for the None path) and the note.
+ * Starting sends one `begin` act carrying the marked concept IDs and the note. Starting with none marked is the None path,
+ * so the learner can always start without choosing.
  */
 export function TopicChecklist({ topics, disabled, onStart }: { readonly topics: readonly Concept[]; readonly disabled: boolean; readonly onStart: (fuzzy: readonly ConceptId[], note: string) => void }) {
   const [marked, setMarked] = useState<ReadonlySet<ConceptId>>(new Set());
@@ -266,9 +314,11 @@ export function TopicChecklist({ topics, disabled, onStart }: { readonly topics:
   const noteId = useId();
   const toggle = (id: ConceptId) => setMarked((m) => { const next = new Set(m); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   return (
-    <form className="note topic-checklist" onSubmit={(e) => { e.preventDefault(); if (marked.size > 0) onStart(topics.filter((t) => marked.has(t.id)).map((t) => t.id), note.trim()); }}>
+    <form className="note topic-checklist" onSubmit={(e) => { e.preventDefault(); onStart(topics.filter((t) => marked.has(t.id)).map((t) => t.id), note.trim()); }}>
+      <h2 id={STARTING_POINT_HEADING}>Choose a starting point</h2>
+      <p className="muted">Mark any topic that feels fuzzy and the tutor starts there, then does a quick check on up to 3 of the others. Mark none and the tutor starts with open recall questions.</p>
       <fieldset disabled={disabled}>
-        <legend>Which of these are you fuzzy on?</legend>
+        <legend>Topics that feel fuzzy (optional)</legend>
         {topics.length === 0 && <p className="muted">No topics to list for this review.</p>}
         <ul className="topic-list">
           {topics.map((t) => (
@@ -283,8 +333,7 @@ export function TopicChecklist({ topics, disabled, onStart }: { readonly topics:
         <label htmlFor={noteId}>Anything in particular that feels fuzzy? (optional)</label>
         <textarea id={noteId} value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} />
         <p className="actions">
-          <button type="submit" disabled={marked.size === 0}>Start review</button>
-          <button type="button" data-action="none" onClick={() => onStart([], note.trim())}>None, just quiz me</button>
+          <button type="submit" className="primary-action">{marked.size === 0 ? "Start review" : `Start with ${marked.size} marked topic${marked.size === 1 ? "" : "s"}`}</button>
         </p>
       </fieldset>
     </form>
@@ -307,9 +356,9 @@ export function UndeliveredNote({ unsent, failed, onRetry, onDiscard }: { readon
   );
 }
 
-function LineItem({ line, onSource }: { readonly line: Line; readonly onSource: (ids: readonly EvidenceId[], label: string, origin: HTMLButtonElement) => void }) {
+function LineItem({ line, onSource, focusRef }: { readonly line: Line; readonly onSource: (ids: readonly EvidenceId[], label: string, origin: HTMLButtonElement) => void; readonly focusRef?: Ref<HTMLLIElement> }) {
   return (
-    <li className={`line ${line.speaker}`}>
+    <li className={`line ${line.speaker}`} {...(focusRef === undefined ? {} : { ref: focusRef, tabIndex: -1 })}>
       <strong>{line.label}</strong>
       <p>{line.text}</p>
       {line.evidenceIds.length > 0 && <button type="button" className="citation" onClick={(e) => onSource(line.evidenceIds, `Source cited by this ${line.label.toLowerCase()}`, e.currentTarget)}>Lecture source · {line.evidenceIds.length} item{line.evidenceIds.length === 1 ? "" : "s"}</button>}
@@ -317,7 +366,8 @@ function LineItem({ line, onSource }: { readonly line: Line; readonly onSource: 
   );
 }
 
-export function SaveBanner({ state, onRetry, reviewId }: { readonly state: SessionState; readonly onRetry: () => void; readonly reviewId: ReviewId }) {
+/** The completion summary shows only when the backend reports the review saved; a pending or failed save shows Retry instead. */
+export function SaveBanner({ state, onRetry, reviewId, onSource }: { readonly state: SessionState; readonly onRetry: () => void; readonly reviewId: ReviewId; readonly onSource?: (ids: readonly EvidenceId[], label: string, origin: HTMLButtonElement) => void }) {
   const pending = state.saveError !== null || state.view?.saved === "save_pending";
   return (
     <>
@@ -331,12 +381,10 @@ export function SaveBanner({ state, onRetry, reviewId }: { readonly state: Sessi
           This review is not saved yet{state.saveError ? `: ${state.saveError}` : ""}. Retrying never makes a duplicate.{" "}
           <button type="button" disabled={state.saving} onClick={onRetry}>{state.saving ? "Saving..." : "Retry save"}</button>
         </p>
+      ) : state.view?.saved === "saved" ? (
+        <CompletionPanel view={state.view} reviewId={reviewId} savedSummary={state.savedSummary} justSaved={state.savedSummary !== null} onSource={onSource} />
       ) : (
-        state.view?.saved === "saved" && (
-          <p className="note">
-            Saved. <Link to={{ page: "record", reviewId }}>Open the record</Link>
-          </p>
-        )
+        state.saving && <p className="note" role="status">Saving this review to your notebook...</p>
       )}
     </>
   );
@@ -367,7 +415,7 @@ function ScopeBundle({ api, view, titles, onSource }: { readonly api: AppApi; re
 
 export function EndConfirm({ disabled, onConfirm, onCancel }: { readonly disabled: boolean; readonly onConfirm: () => void; readonly onCancel: () => void }) {
   return (
-    <span className="actions end-confirm" role="alertdialog" aria-label="End this review?">
+    <span className="actions end-confirm" role="alertdialog" aria-label="Finish and save this review?">
       <span>{END_CONFIRM_TEXT}</span>
       <button type="button" data-action="end-confirm" disabled={disabled} onClick={onConfirm}>{ACTION_LABEL.end}</button>
       <button type="button" data-action="end-cancel" onClick={onCancel}>Keep reviewing</button>
@@ -499,6 +547,8 @@ export function Composer({
   const status = turnStatus({ listening, transcript, submitting: sending, live: live ?? null });
 
   const empty = draft.trim() === "";
+  const placed = composerActions(actions);
+  const button = (id: ActionId) => <button key={id} type="button" disabled={disabled || (NEEDS_TEXT.has(id) && empty)} onClick={() => void fire(id)}>{ACTION_LABEL[id]}</button>;
   return (
     <div className="composer">
       {sendError !== null && <p className="note note-error" role="alert">{sendError}</p>}
@@ -534,15 +584,16 @@ export function Composer({
       )}
       {hasText && <p className="composer-shortcut">Ctrl / ⌘ + Enter to share your thinking</p>}
       <div className="actions primary-actions">
-        {actions.filter((id) => !["skip", "dont_know", "hint", "explain", "dispute"].includes(id)).map((id) => (
+        {placed.primary.map((id) => (
           <button key={id} type="button" className={id === "answer" ? "primary-action" : undefined} disabled={disabled || (NEEDS_TEXT.has(id) && empty)} onClick={() => void fire(id)}>
             {id === "answer" ? "Share my thinking" : ACTION_LABEL[id]}
           </button>
         ))}
       </div>
-      {actions.some((id) => ["skip", "dont_know", "hint", "explain", "dispute"].includes(id)) && <details className="review-help">
+      {placed.assist.length > 0 && <div className="assist-actions" role="group" aria-label="Help with this question">{placed.assist.map(button)}</div>}
+      {placed.more.length > 0 && <details className="review-help">
         <summary>More ways to work through it</summary>
-        <div className="actions">{actions.filter((id) => ["skip", "dont_know", "hint", "explain", "dispute"].includes(id)).map((id) => <button key={id} type="button" disabled={disabled || (NEEDS_TEXT.has(id) && empty)} onClick={() => void fire(id)}>{ACTION_LABEL[id]}</button>)}</div>
+        <div className="actions">{placed.more.map(button)}</div>
       </details>}
     </div>
   );
