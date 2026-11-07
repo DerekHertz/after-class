@@ -33,7 +33,10 @@ export type ObservationDetails = {
   readonly dispute: string | null;
   /** What the tutor proposed, before the record rules or a dispute changed it. */
   readonly proposed: string;
-  /** The tutor's latest explanation, diagnosis or dispute answer on the thread. */
+  /**
+   * The tutor's latest answer to a dispute on the thread, else its latest diagnosis hypothesis. A help explanation is
+   * teaching, not the assessment's reason, and a diagnosis's spoken text can be as short as "Nearly.".
+   */
   readonly reasoning: string | null;
   /** Lecture evidence the tutor cited on the thread, in the order cited. */
   readonly evidence: readonly EvidenceId[];
@@ -47,7 +50,6 @@ export type ObservationContext =
   | { readonly kind: "ready"; readonly details: ObservationDetails };
 
 const ANSWER_ACTS = new Set(["answer", "skip", "dont_know"]);
-const JUDGMENT_MOVES = new Set(["answer_dispute", "diagnose", "explain"]);
 
 export function observationContext(o: Observation, review: ReviewContext | undefined): ObservationContext {
   if (review === undefined || review.state === "loading") return { kind: "loading" };
@@ -65,7 +67,8 @@ export function observationContext(o: Observation, review: ReviewContext | undef
   });
   const dispute = thread.findLast((t) => t.actor === "learner" && t.act.kind === "dispute");
   const tutor = thread.filter((t): t is Extract<Turn, { actor: "tutor" }> => t.actor === "tutor");
-  const judgment = tutor.findLast((t) => JUDGMENT_MOVES.has(t.move.kind));
+  const disputeAnswer = tutor.findLast((t) => t.move.kind === "answer_dispute");
+  const diagnosis = tutor.map((t) => t.move).findLast((m) => m.kind === "diagnose");
   return {
     kind: "ready",
     details: {
@@ -75,7 +78,7 @@ export function observationContext(o: Observation, review: ReviewContext | undef
       answers,
       dispute: dispute?.actor === "learner" && dispute.act.kind === "dispute" ? dispute.act.text : null,
       proposed: STATUS_LABEL[o.proposed],
-      reasoning: judgment?.say ?? null,
+      reasoning: disputeAnswer?.say ?? diagnosis?.hypothesis ?? null,
       evidence: [...new Set(tutor.flatMap((t) => moveEvidence(t.move)))],
     },
   };
