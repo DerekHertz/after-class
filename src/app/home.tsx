@@ -1,9 +1,11 @@
 import { useState } from "react";
 import type { LecturesResponse } from "../shared/wire";
 import { parseId } from "../shared/ids";
+import type { ReviewId } from "../shared/ids";
 import type { AppApi } from "./api";
 import { formatDuration, lectureHeading } from "./core";
 import type { Route } from "./core";
+import { currentQuestionTopic, isQuestion } from "./diagram-view";
 import { ErrorNote, Link, navigate, useAsync } from "./ui";
 
 type Lecture = LecturesResponse["lectures"][number];
@@ -42,16 +44,42 @@ export function resumable(data: LecturesResponse): { readonly lecture: Lecture; 
     .sort((a, b) => b.review.startedMs - a.review.startedMs);
 }
 
+/** Where an open review stands, as its resume card says it. `no_question` is setup: the first question hasn't been asked. */
+export type ResumeTopic =
+  | { readonly kind: "topic"; readonly label: string }
+  | { readonly kind: "no_question" }
+  | { readonly kind: "unmatched" };
+
+export type ResumeApi = Pick<AppApi, "review" | "diagrams">;
+
+/** The review page's own current topic, from the same two reads. Both only read, so no summary or model call starts. */
+export async function loadResumeTopic(api: ResumeApi, reviewId: ReviewId): Promise<ResumeTopic> {
+  const view = await api.review(reviewId);
+  if (!view.turns.some(isQuestion)) return { kind: "no_question" };
+  const topic = currentQuestionTopic(view, await api.diagrams(reviewId));
+  return topic === null ? { kind: "unmatched" } : { kind: "topic", label: topic.label };
+}
+
+export function ResumeTopicLine({ topic, failed }: { readonly topic: ResumeTopic | null; readonly failed: boolean }) {
+  if (failed) return <p className="muted">Couldn't load the current topic. Continue review still works.</p>;
+  if (topic === null) return null;
+  if (topic.kind === "topic") return <p>Current topic: <strong>{topic.label}</strong></p>;
+  if (topic.kind === "no_question") return <p className="muted">No topic yet. The first question hasn't been asked.</p>;
+  return <p className="muted">The current question's topic isn't available.</p>;
+}
+
 const startedAt = (ms: number): string => new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 const questions = (n: number): string => `${n} ${n === 1 ? "question" : "questions"}`;
 
-function ContinueCard({ lecture, review }: { readonly lecture: Lecture; readonly review: LectureReview }) {
+function ContinueCard({ api, lecture, review }: { readonly api: ResumeApi; readonly lecture: Lecture; readonly review: LectureReview }) {
   const { title } = lectureHeading(lecture.sourceTitles);
   const { label, target } = reviewAction(review);
+  const topic = useAsync(() => loadResumeTopic(api, review.reviewId), [api, review.reviewId]);
   return (
     <article className="home-continue">
       <p className="page-kicker">{review.phase === "paused" ? "Paused review" : "Review in progress"}</p>
       <h3>{title}</h3>
+      <ResumeTopicLine topic={topic.data} failed={topic.error !== null} />
       <p className="muted">{questions(review.mainQuestions)} so far · started {startedAt(review.startedMs)}</p>
       {target && <p className="home-primary"><Link to={target}>{label}<span className="visually-hidden">: {title}</span></Link></p>}
     </article>
@@ -83,7 +111,7 @@ function FirstCapture() {
   );
 }
 
-export function HomeBody({ data }: { readonly data: LecturesResponse }) {
+export function HomeBody({ api, data }: { readonly api: ResumeApi; readonly data: LecturesResponse }) {
   if (data.lectures.length === 0) return <FirstCapture />;
   const open = resumable(data);
   return (
@@ -91,7 +119,7 @@ export function HomeBody({ data }: { readonly data: LecturesResponse }) {
       {open.length > 0 && (
         <section className="record-section" aria-labelledby="home-continue-heading">
           <h2 id="home-continue-heading">Pick up where you left off</h2>
-          {open.map(({ lecture, review }) => <ContinueCard key={review.reviewId} lecture={lecture} review={review} />)}
+          {open.map(({ lecture, review }) => <ContinueCard key={review.reviewId} api={api} lecture={lecture} review={review} />)}
         </section>
       )}
       <section className="record-section" aria-labelledby="home-lectures-heading">
@@ -145,7 +173,7 @@ export function HomeScreen({ api }: { readonly api: AppApi }) {
       </header>
       {lectures.error !== null && <ErrorNote error={lectures.error} retry={lectures.reload} />}
       {lectures.data === null && lectures.error === null && <p className="page-loading" role="status">Loading your lectures...</p>}
-      {lectures.data && <HomeBody data={lectures.data} />}
+      {lectures.data && <HomeBody api={api} data={lectures.data} />}
       <OpenById />
     </main>
   );

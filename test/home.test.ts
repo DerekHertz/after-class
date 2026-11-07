@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EMPTY_HOME, FIRST_CAPTURE_STEPS, HomeBody, OpenById, resumable, reviewAction, reviewTarget } from "../src/app/home";
+import { EMPTY_HOME, FIRST_CAPTURE_STEPS, HomeBody, OpenById, ResumeTopicLine, loadResumeTopic, resumable, reviewAction, reviewTarget } from "../src/app/home";
+import type { ResumeApi } from "../src/app/home";
+import { createFixture, ids } from "../scripts/ui-preview/fixtures";
 import { EndConfirm } from "../src/app/review";
 import { END_CONFIRM_TEXT, endFlow } from "../src/app/core";
 import type { EndStep } from "../src/app/core";
@@ -11,6 +13,10 @@ import type { LecturesResponse } from "../src/shared/wire";
 const cap = stableId("cap", "home-a");
 const cap2 = stableId("cap", "home-b");
 const [rActive, rEnded, rSaved] = [stableId("rvw", "a"), stableId("rvw", "b"), stableId("rvw", "c")];
+const noReads: ResumeApi = {
+  review: () => Promise.reject(new Error("static render reads nothing")),
+  diagrams: () => Promise.reject(new Error("static render reads nothing")),
+};
 
 const data: LecturesResponse = {
   lectures: [
@@ -28,7 +34,7 @@ const data: LecturesResponse = {
 
 describe("the home page", () => {
   test("lists each lecture with a link to its capture page, and its reviews underneath", () => {
-    const html = renderToStaticMarkup(createElement(HomeBody, { data }));
+    const html = renderToStaticMarkup(createElement(HomeBody, { api: noReads, data }));
     expect(html).toContain(`href="/app/capture/${cap}"`);
     expect(html).toContain(`href="/app/capture/${cap2}"`);
     expect(html).toContain("Operating Systems");
@@ -44,7 +50,7 @@ describe("the home page", () => {
   });
 
   test("an open review gets a Continue review action named with its lecture, above the lecture list", () => {
-    const html = renderToStaticMarkup(createElement(HomeBody, { data }));
+    const html = renderToStaticMarkup(createElement(HomeBody, { api: noReads, data }));
     const cont = html.indexOf("Pick up where you left off");
     expect(cont).toBeGreaterThanOrEqual(0);
     expect(cont).toBeLessThan(html.indexOf("Your lectures"));
@@ -63,20 +69,40 @@ describe("the home page", () => {
       { ...data.lectures[0]!, reviews: [{ reviewId: p2, startedMs: 9, phase: "active", saved: "unsaved", mainQuestions: 0 }, data.lectures[0]!.reviews[2]!] },
     ] };
     expect(resumable(two).map((x) => x.review.reviewId)).toEqual([p2, p1]);
-    const html = renderToStaticMarkup(createElement(HomeBody, { data: two }));
+    const html = renderToStaticMarkup(createElement(HomeBody, { api: noReads, data: two }));
     expect(html).toContain("Paused review");
     expect(html.indexOf(`href="/app/review/${p2}"`)).toBeLessThan(html.indexOf(`href="/app/review/${p1}"`));
     expect(resumable({ lectures: [{ ...data.lectures[0]!, reviews: [data.lectures[0]!.reviews[1]!, data.lectures[0]!.reviews[2]!] }] })).toEqual([]);
   });
 
+  test("a resume card names the current topic, says plainly when there is none yet, and keeps Continue when the topic can't load", () => {
+    const line = (props: Parameters<typeof ResumeTopicLine>[0]) => renderToStaticMarkup(createElement(ResumeTopicLine, props));
+    expect(line({ topic: { kind: "topic", label: "Circular wait" }, failed: false })).toBe("<p>Current topic: <strong>Circular wait</strong></p>");
+    expect(line({ topic: { kind: "no_question" }, failed: false })).toContain("No topic yet. The first question hasn&#x27;t been asked.");
+    expect(line({ topic: { kind: "unmatched" }, failed: false })).toContain("topic isn&#x27;t available");
+    expect(line({ topic: null, failed: true })).toContain("Couldn&#x27;t load the current topic. Continue review still works.");
+    expect(line({ topic: null, failed: false })).toBe("");
+    const html = renderToStaticMarkup(createElement(HomeBody, { api: noReads, data }));
+    expect(html).toContain(`href="/app/review/${rActive}">Continue review`);
+  });
+
+  test("before the first question the topic list isn't read, and a question whose claims match no topic says so", async () => {
+    const setup = createFixture("home-setup").api;
+    let topicReads = 0;
+    expect(await loadResumeTopic({ review: setup.review, diagrams: (id) => { topicReads++; return setup.diagrams(id); } }, ids.review)).toEqual({ kind: "no_question" });
+    expect(topicReads).toBe(0);
+    const active = createFixture("home").api;
+    expect(await loadResumeTopic({ review: active.review, diagrams: async () => [] }, ids.review)).toEqual({ kind: "unmatched" });
+  });
+
   test("with no open review there is no Continue section", () => {
-    const html = renderToStaticMarkup(createElement(HomeBody, { data: { lectures: [data.lectures[1]!] } }));
+    const html = renderToStaticMarkup(createElement(HomeBody, { api: noReads, data: { lectures: [data.lectures[1]!] } }));
     expect(html).not.toContain("Pick up where you left off");
     expect(html).not.toContain("Continue review");
   });
 
   test("an active review links to the review, a saved ended one to its record, an unsaved ended one is plain text", () => {
-    const html = renderToStaticMarkup(createElement(HomeBody, { data }));
+    const html = renderToStaticMarkup(createElement(HomeBody, { api: noReads, data }));
     expect(html).toContain(`href="/app/review/${rActive}"`);
     expect(html).toContain(`href="/app/record/${rSaved}"`);
     expect(html).not.toContain(rEnded);
@@ -100,7 +126,7 @@ describe("the home page", () => {
   });
 
   test("with no captures it lists the first capture steps and says only what it knows about the connection", () => {
-    const html = renderToStaticMarkup(createElement(HomeBody, { data: { lectures: [] } }));
+    const html = renderToStaticMarkup(createElement(HomeBody, { api: noReads, data: { lectures: [] } }));
     expect(html).toContain("No lectures captured yet. Start capture from the extension while watching a lecture.");
     expect(EMPTY_HOME).toBe("No lectures captured yet. Start capture from the extension while watching a lecture.");
     for (const step of FIRST_CAPTURE_STEPS) expect(html).toContain(step);

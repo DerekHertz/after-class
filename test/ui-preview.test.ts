@@ -8,7 +8,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createReviewController, needsChecklist } from "../src/app/controller";
 import { IllustratedPageView } from "../src/app/diagram";
-import { HomeBody } from "../src/app/home";
+import { HomeBody, loadResumeTopic } from "../src/app/home";
 import { illustratedPages } from "../src/app/diagram-view";
 import { RecordBody } from "../src/app/record";
 import { TopicChecklist } from "../src/app/review";
@@ -68,7 +68,7 @@ describe("UI preview fixtures", () => {
       await api.usage();
       await settle(() => api.evidence({ captureId: ids.capture }));
       const record = await settle(() => api.record(fixture.recordReviewId === null ? {} : { reviewId: fixture.recordReviewId }));
-      const diagrams = await api.diagrams(ids.review);
+      const diagrams = await settle(() => api.diagrams(ids.review));
       expect(diagrams.length).toBe(2);
       renderToStaticMarkup(createElement(RecordBody, { api, data: record, run: async () => {} }));
       // Every review in the notebook has complete illustrated pages, so an empty page means a product failure, not a fixture gap.
@@ -101,14 +101,28 @@ describe("UI preview fixtures", () => {
   });
 
   test("home scenarios: the open review leads to the review page the preview loads, and the empty home shows the first steps", async () => {
-    for (const [scenario, kicker] of [["home", "Review in progress"], ["home-paused", "Paused review"]] as const) {
-      const html = renderToStaticMarkup(createElement(HomeBody, { data: await createFixture(scenario).api.lectures() }));
+    for (const [scenario, kicker] of [["home", "Review in progress"], ["home-paused", "Paused review"], ["home-setup", "Review in progress"]] as const) {
+      const { api } = createFixture(scenario);
+      const html = renderToStaticMarkup(createElement(HomeBody, { api, data: await api.lectures() }));
       expect(html).toContain(kicker);
       expect(html.indexOf(`href="/app/review/${ids.review}"`)).toBeLessThan(html.indexOf("Your lectures"));
       expect(html).toContain(`href="/app/record/${ids.earlierReview}"`);
     }
-    const empty = renderToStaticMarkup(createElement(HomeBody, { data: await createFixture("home-empty").api.lectures() }));
+    const { api } = createFixture("home-empty");
+    const empty = renderToStaticMarkup(createElement(HomeBody, { api, data: await api.lectures() }));
     expect(empty).toContain("Capture your first lecture");
+  });
+
+  test("home scenarios: each resume card's topic comes from the reads the review page makes, and none starts a summary", async () => {
+    const cases = [["home", { kind: "topic", label: "Circular wait" }], ["home-paused", { kind: "topic", label: "Circular wait" }], ["home-setup", { kind: "no_question" }]] as const;
+    for (const [scenario, topic] of cases) {
+      const fixture = createFixture(scenario);
+      expect((await fixture.api.review(ids.review)).state.phase).toBe(scenario === "home-paused" ? "paused" : "active");
+      expect(await loadResumeTopic(fixture.api, ids.review)).toEqual(topic);
+      expect(fixture.requestLedger.snapshot()).not.toContain("diagram.request");
+    }
+    const failing = createFixture("home-topic-error");
+    await expect(loadResumeTopic(failing.api, ids.review)).rejects.toThrow("Retry is available");
   });
 
   test("record-illustrated: the record is filtered to the saved review shown on the page", async () => {

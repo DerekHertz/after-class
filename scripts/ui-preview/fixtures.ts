@@ -26,7 +26,7 @@ export const ids = {
   chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait"), ordering: id("cpt", "ordering"),
   otherCapture: id("cap", "other-capture"), pendingReview: id("rvw", "pending-review"), unsavedReview: id("rvw", "unsaved-review"),
 };
-export const scenarios = ["review", "long-history", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "capture-ready", "capture-processing", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "usage", "home", "home-paused", "home-empty", "home-error"] as const;
+export const scenarios = ["review", "long-history", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "capture-ready", "capture-processing", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "usage", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
 export type Scenario = typeof scenarios[number];
 export const scenarioFrom = (search: string): Scenario => scenarios.find(s => s === new URLSearchParams(search).get("scenario")) ?? "review";
 
@@ -64,7 +64,7 @@ export function createFixture(scenario: Scenario): Fixture {
     }
     // The fuzzy-topic checklist shows only before the first turn (flow D), so that scenario starts with none.
     let observations: object[] = [];
-    if (s !== "fuzzy-checklist") {
+    if (s !== "fuzzy-checklist" && s !== "home-setup") {
       turns.push(ask(turns.length + 1, firstQuestion));
       const mainAnswer = answer(turns.length + 1, "One holds lock A and wants B. The other holds B and wants A.");
       turns.push(mainAnswer);
@@ -83,7 +83,7 @@ export function createFixture(scenario: Scenario): Fixture {
     }
     if (s === "soft-target") turns.push(turn("code", turns.length + 1, { notice: { kind: "soft_target_reached", elapsedS: 600 } }));
     if (s === "correction") turns.push(turn("code", turns.length + 1, { notice: { kind: "correction_pending", correctionId: "fixture-correction", affectedClaims: [ids.claim] } }));
-    const checklist = s === "fuzzy-checklist";
+    const checklist = s === "fuzzy-checklist" || s === "home-setup";
     return {
       reviewId, captureId: ids.capture,
       topics: [
@@ -91,7 +91,7 @@ export function createFixture(scenario: Scenario): Fixture {
         { id: ids.ordering, label: "Resource ordering", summary: "Acquiring resources in one global order removes the circular wait." },
       ],
       scope: { chunkRevisions: [ids.chunk], material, claimsAtStart: [ids.claim, ids.orderingClaim], partial: [{ kind: "capture_gap", gap }], frozenAtSeq: 7 },
-      state: { reviewId, phase: s === "paused" ? "paused" : s === "save-failure" || s === "saving" || saved ? "ended" : "active", mainQuestions: checklist ? 0 : 1, quickChecks: saved ? 1 : 0, fuzzy: saved ? [ids.concept] : [], openThread: checklist || saved ? null : ids.thread, lastLearnerAct: null,
+      state: { reviewId, phase: s === "paused" || s === "home-paused" ? "paused" : s === "save-failure" || s === "saving" || saved ? "ended" : "active", mainQuestions: checklist ? 0 : 1, quickChecks: saved ? 1 : 0, fuzzy: saved ? [ids.concept] : [], openThread: checklist || saved ? null : ids.thread, lastLearnerAct: null,
         detour: s === "detour" ? { kind: "proposed", turnId: id("turn", "detour"), topic: "Resource ordering", needsResource: null } : s === "resource-wait" ? { kind: "awaiting_resource", resourceId: id("res", "resource"), topic: "Resource ordering" } : { kind: "none" },
         openDispute: null, corrections: [], activeSeconds: 30, softTargetS: 600, softTargetOffered: false, wrapUpRequested: false },
       turns, owesMove: false, observations, saved: saved ? "saved" : s === "save-failure" || s === "saving" ? "save_pending" : "unsaved",
@@ -127,7 +127,7 @@ export function createFixture(scenario: Scenario): Fixture {
   const at = (hour: number) => Date.UTC(2026, 10, 6, hour, 4);
   const lectures = lecturesResponse.parse({ lectures: scenario === "home-empty" ? [] : [
     { captureId: ids.capture, sourceTitles: ["Locks & deadlocks"], videos: 1, watchedSeconds: 760, status: { state: "stopped" }, reviews: [
-      { reviewId: ids.review, startedMs: at(15), phase: scenario === "home-paused" ? "paused" : "active", saved: "unsaved", mainQuestions: 1 },
+      { reviewId: ids.review, startedMs: at(15), phase: scenario === "home-paused" ? "paused" : "active", saved: "unsaved", mainQuestions: scenario === "home-setup" ? 0 : 1 },
       { reviewId: ids.pendingReview, startedMs: at(13), phase: "ended", saved: "save_pending", mainQuestions: 2 },
       { reviewId: ids.earlierReview, startedMs: at(11), phase: "ended", saved: "saved", mainQuestions: 1 },
       { reviewId: ids.unsavedReview, startedMs: at(10), phase: "ended", saved: "unsaved", mainQuestions: 0 },
@@ -137,6 +137,7 @@ export function createFixture(scenario: Scenario): Fixture {
   let attempts = 0;
   let evidenceAttempts = 0;
   let diagramAttempts = 0;
+  let topicReads = 0;
   const api: AppApi = {
     async review(reviewId) { log("review.read"); return reviewId === view.reviewId ? view : savedView; },
     async captureView() { log("capture.read"); return capture; },
@@ -153,7 +154,11 @@ export function createFixture(scenario: Scenario): Fixture {
     async startReview(_capture, _choice, reviewId) { log("review.start"); return { kind: "started", reviewId, scope: view.scope }; },
     async answerInvite(_id, answer) { log(`invite.${answer}`); },
     async retryPreparation() { log("preparation.retry"); },
-    async diagrams() { log("diagrams.read"); return diagrams; },
+    async diagrams() {
+      log("diagrams.read");
+      if (scenario === "home-topic-error" && topicReads++ === 0) throw new ApiError("Fixture topic list could not load. Retry is available.", 503);
+      return diagrams;
+    },
     async requestDiagram(_review, topicId) {
       log(`diagram.request ${topicId}`);
       const topic = diagrams.find(t => t.topicId === topicId);
