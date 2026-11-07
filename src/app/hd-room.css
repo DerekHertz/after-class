@@ -46,9 +46,9 @@
 
 .scene-shell[data-detail="hd-pixel"] .review { padding: 0; position: relative; }
 /* The current question and the composer come first and are never hidden or overlaid. The room stays as a compact scene:
-   a column beside the conversation on wide screens, with an opened source under it, and a short desk band above the
-   conversation on narrow ones, where the source follows the conversation. */
-.scene-shell[data-detail="hd-pixel"] .review .review-workspace { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "room" "conv" "src"; gap: 16px; padding: 0; }
+   a column beside the conversation on wide screens, with an opened source under it, and a short desk band below the
+   conversation on narrow ones, followed by an opened source. */
+.scene-shell[data-detail="hd-pixel"] .review .review-workspace { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "conv" "room" "src"; gap: 16px; padding: 0; }
 .scene-shell[data-detail="hd-pixel"] .review .review-source-column { display: contents; }
 .scene-shell[data-detail="hd-pixel"] .review .hd-room-tools { grid-area: room; min-width: 0; }
 .scene-shell[data-detail="hd-pixel"] .review .conversation-notebook { grid-area: conv; height: auto; min-height: 0; max-height: none; margin: 0 16px; }
@@ -65,9 +65,25 @@
   .scene-shell[data-detail="hd-pixel"] .review .source-stand { width: auto; margin: 0 16px 16px 0; }
 }
 @media (max-width: 999px) {
+  .scene-shell[data-detail="hd-pixel"] .review .conversation-notebook { margin-top: 12px; }
   /* Only the desk half of the room: the companion, source card, notebook and recorder. */
   .scene-shell[data-detail="hd-pixel"] .review .hd-room { aspect-ratio: 1672 / 520; }
   .scene-shell[data-detail="hd-pixel"] .review .hd-room-stage { top: auto; bottom: 0; transform-origin: 0 100%; }
+}
+@media (max-width: 800px) {
+  /* On a phone the current question, a three-line response field and Share my thinking fit on the first screen. The
+     type and spacing are tighter; no text is clipped or capped. */
+  .scene-shell[data-detail="hd-pixel"] .review .conversation-notebook { padding: 14px 14px 16px 16px; }
+  .scene-shell[data-detail="hd-pixel"] .review .notebook-heading { gap: 4px 12px; margin-bottom: 10px; padding-bottom: 6px; }
+  .scene-shell[data-detail="hd-pixel"] .review .current-exchange { padding: 0 10px; }
+  .scene-shell[data-detail="hd-pixel"] .review .current-exchange .eyebrow { margin-top: 8px; }
+  .scene-shell[data-detail="hd-pixel"] .review .current-exchange .line { margin: 6px 0 10px; padding-left: 12px; }
+  .scene-shell[data-detail="hd-pixel"] .review .current-exchange .line p { margin-top: 4px; }
+  .scene-shell[data-detail="hd-pixel"] .review .current-exchange .line.tutor p { font-size: 1.1rem; line-height: 1.35; }
+  .scene-shell[data-detail="hd-pixel"] .review .current-topic { margin-top: 6px; }
+  .scene-shell[data-detail="hd-pixel"] .review .current-topic button { min-height: 32px; padding-block: 4px; }
+  .scene-shell[data-detail="hd-pixel"] .review .composer { margin-top: 6px; padding-top: 10px; gap: 8px 12px; }
+  .scene-shell[data-detail="hd-pixel"] .review .composer textarea { height: 112px; min-height: 96px; }
 }
 .scene-shell[data-detail="hd-pixel"] .review .review-header { position: static; margin: 12px 16px; padding: 8px 12px; color: #fff7e1; background: #29231dba; border-radius: 4px; }
 .scene-shell[data-detail="hd-pixel"] .review .review-header h1 { font-size: 22px; color: inherit; }
@@ -80,7 +96,10 @@
 .scene-shell[data-detail="hd-pixel"] .review .review-header { width: auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .scene-shell[data-detail="hd-pixel"] .review .review-navigation { width: auto; flex-wrap: wrap; gap: 16px; }
 @media (max-width:800px) {
-  .scene-shell[data-detail="hd-pixel"] .review .review-header { flex-wrap: wrap; }
+  .scene-shell[data-detail="hd-pixel"] .review .review-header { flex-wrap: wrap; gap: 4px 12px; padding: 6px 12px; }
+  .scene-shell[data-detail="hd-pixel"] .review .review-header h1 { font-size: 18px; }
+  .scene-shell[data-detail="hd-pixel"] .review .review-scope-line { margin: 2px 0 0; font-size: .85rem; }
+  .scene-shell[data-detail="hd-pixel"] .review .review-navigation { margin: 0; gap: 4px 14px; }
 }
 .scene-shell[data-detail="hd-pixel"] .review .notebook-heading { flex-wrap: wrap; }
 .scene-shell[data-detail="hd-pixel"] .review .review-phase { color: #f2e5c9; }

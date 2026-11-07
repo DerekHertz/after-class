@@ -75,6 +75,12 @@ describe("the current question stays with the composer", () => {
     expect(hd).not.toContain('"room room"');
     expect(hd).not.toMatch(/\.review \.review-header \{[^}]*position:\s*absolute/);
   });
+
+  test("on narrow screens the desk band follows the conversation, so it never pushes the response field down", () => {
+    const hd = readFileSync(new URL("../src/app/hd-room.css", import.meta.url), "utf8");
+    expect(hd).toContain('grid-template-areas: "conv" "room" "src"');
+    expect(hd).not.toMatch(/grid-template-areas:\s*"room"\s*"conv"/);
+  });
 });
 
 describe("a spoken answer sends itself", () => {
