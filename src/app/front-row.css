@@ -7,7 +7,10 @@
 :is(.scene-shell[data-scene="projection-booth"], .front-row-scene[data-room="projection-booth"]) { --fr-plate: url('./assets/front-row/projection-booth.png'); }
 
 /* Navigation sits over the art as small chips, each with its own backing for legibility. There is no bar behind them. */
-.scene-shell:has(.front-row) { --fr-chip: color-mix(in srgb, var(--fr-bar) 86%, transparent); --fr-chip-line: color-mix(in srgb, var(--fr-bar-ink) 45%, transparent); background: var(--fr-wall); }
+.scene-shell:has(.front-row) { --fr-chip: color-mix(in srgb, var(--fr-bar) 86%, transparent); --fr-chip-line: color-mix(in srgb, var(--fr-bar-ink) 45%, transparent); background: none; }
+/* The selected room's plate stays fixed behind the whole page, so the paper panels below the scene scroll over artwork,
+   never a flat wall colour. It is crisp, ignores the pointer and sits under the shell's content (the shell isolates). */
+.scene-shell:has(.front-row)::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--fr-plate) 50% 100% / cover no-repeat; }
 .scene-shell:has(.front-row) .scene-masthead { height: auto; max-width: none; margin: 0; padding: 8px 12px; gap: 8px; background: none; border: 0; color: var(--fr-bar-ink); }
 .scene-shell:has(.front-row) .room-name { display: none; }
 .scene-shell:has(.front-row) :is(.scene-masthead > a, .appearance-picker > summary) { display: flex; align-items: center; min-height: 44px; padding: 0 12px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); color: var(--fr-bar-ink); box-shadow: 0 3px 0 #00000040; }
@@ -192,8 +195,9 @@
 @media (max-width: 899px), (max-height: 559px) {
   .scene-shell:has(.front-row) {
     --fr-phone-art-w: max(100vw, 100lvh * var(--fr-ratio));
-    background: var(--fr-plate) var(--fr-phone-x) calc(var(--fr-phone-art-w) * var(--fr-plate-tall) * var(--fr-crop-top) * -1) / var(--fr-phone-art-w) auto no-repeat, var(--fr-wall);
   }
+  /* The recomposed room scrolls with the page over the fixed backdrop; below its image the backdrop shows, not a wall colour. */
+  .scene-shell:has(.front-row)::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--fr-plate) var(--fr-phone-x) calc(var(--fr-phone-art-w) * var(--fr-plate-tall) * var(--fr-crop-top) * -1) / var(--fr-phone-art-w) auto no-repeat; }
   .scene-shell:has(.front-row) .scene-masthead { min-height: 0; padding: 8px 8px 6px; flex-wrap: nowrap; }
   .scene-shell:has(.front-row) :is(.scene-masthead > a, .appearance-picker > summary) { padding: 0 10px; }
   .scene-shell:has(.front-row) .scene-masthead > a { font-size: 1.15rem; }
