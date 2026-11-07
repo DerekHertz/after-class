@@ -6,3 +6,45 @@
 .review-complete ul { margin: 0; padding-left: var(--space-4); }
 .review-complete li { margin: var(--space-1) 0; overflow-wrap: anywhere; }
 .review-complete-next { border-top: 1px solid var(--border); margin-top: var(--space-2); }
+
+/* In the room the summary is written on the review notebook's page. The frame is review-notebook.png cut by the same
+   ROOM_OBJECTS slices as the held notebook, at a fixed scale --u so the page grows with its content and the room stays
+   in view around it. Ink and controls match the held notebook. */
+.scene-shell .front-row .front-row-notices .note.review-complete {
+  --u: .42px;
+  --fg: var(--obj-ink); --muted: var(--obj-ink-soft); --accent: var(--obj-link); --danger: var(--obj-danger);
+  --border: color-mix(in srgb, var(--obj-ink-soft) 45%, transparent);
+  --pixel: 'After Class Pixel', var(--font);
+  min-width: 0; margin: 0;
+  padding: calc(var(--obj-page-top) * var(--u)) calc(var(--obj-page-right) * var(--u)) calc(var(--obj-page-bottom) * var(--u)) calc(var(--obj-page-left) * var(--u));
+  border: 0 solid transparent; border-radius: 0; background: none; box-shadow: none;
+  border-image-source: var(--obj-art);
+  border-image-slice: var(--obj-slice-top) var(--obj-slice-right) var(--obj-slice-bottom) var(--obj-slice-left) fill;
+  border-image-width: calc(var(--obj-slice-top) * var(--u)) calc(var(--obj-slice-right) * var(--u)) calc(var(--obj-slice-bottom) * var(--u)) calc(var(--obj-slice-left) * var(--u));
+  border-image-repeat: var(--obj-repeat);
+  image-rendering: pixelated; filter: drop-shadow(0 6px 0 #00000052);
+  color: var(--obj-ink); font: 400 1.05rem/1.5 var(--pixel); overflow-wrap: anywhere;
+}
+.front-row .front-row-notices .review-complete h2 { margin: 0; padding: 0 0 8px; border-bottom: 2px dashed var(--border); color: var(--obj-ink); font: 600 clamp(1.4rem, 2vw, 1.8rem)/1.2 var(--pixel); }
+.front-row .front-row-notices .review-complete h2:focus { outline: 3px solid var(--obj-ink); outline-offset: 3px; }
+.front-row .front-row-notices .review-complete p { margin: 8px 0 0; }
+.front-row .front-row-notices .review-complete .muted { color: var(--obj-ink-soft); }
+.front-row .front-row-notices :is(.review-complete-group, .review-complete-next) { margin: 14px 0 0; padding: 10px 0 0; border-top: 2px dashed var(--border); }
+.front-row .front-row-notices .review-complete h3 { margin: 0 0 8px; color: var(--obj-ink-soft); font: 600 .9rem/1.3 var(--pixel); letter-spacing: .12em; text-transform: uppercase; }
+.front-row .front-row-notices .review-complete ul { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.front-row .front-row-notices .review-complete li { margin: 0; padding: 0 0 0 12px; border-left: 3px solid var(--border); }
+.front-row .front-row-notices .review-complete-group[data-outcome="disputed"] li { border-left-color: var(--obj-danger); }
+.front-row .front-row-notices .review-complete li strong { display: block; color: var(--obj-ink); font-weight: 600; }
+.front-row .front-row-notices .review-complete li .muted { font-size: .95rem; }
+.front-row .front-row-notices .review-complete .citation { display: flex; align-items: center; width: fit-content; max-width: 100%; min-height: 44px; margin: 2px 0 0; padding: 4px 0; border: 0; border-radius: 0; background: none; box-shadow: none; color: var(--obj-link); font: 500 .95rem/1.3 var(--pixel); text-align: left; text-decoration: underline; text-underline-offset: 3px; }
+.front-row .front-row-notices .review-complete .citation:focus-visible { outline: 3px solid var(--obj-ink); outline-offset: 2px; }
+.front-row .front-row-notices .review-complete .actions { margin: 12px 0 0; }
+.front-row .front-row-notices .review-complete .actions a { display: inline-flex; align-items: center; min-height: 44px; padding: 6px 16px; border: 2px solid var(--fr-bar); background: var(--fr-bar); color: var(--fr-bar-ink); font: 600 1.05rem/1.2 var(--pixel); text-decoration: none; box-shadow: 0 3px 0 color-mix(in srgb, var(--obj-ink) 30%, transparent); }
+.front-row .front-row-notices .review-complete .actions a:hover { border-color: var(--obj-ink); background: var(--obj-ink); }
+.front-row .front-row-notices .review-complete .actions a:focus-visible { outline: 3px solid var(--obj-ink); outline-offset: 3px; }
+
+/* Phones: a smaller frame, so the rings and cover take about 70 pixels of the width and the page keeps the rest. */
+@media (max-width: 899px), (max-height: 559px) {
+  .scene-shell .front-row .front-row-notices .note.review-complete { --u: .2px; }
+  .front-row .front-row-notices .review-complete h2 { font-size: 1.35rem; }
+}

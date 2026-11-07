@@ -3,6 +3,7 @@ import type { EvidenceId, ReviewId } from "../shared/ids";
 import type { ReviewView } from "../shared/domain";
 import type { SessionState } from "./controller";
 import { completionOf } from "./completion-view";
+import { objectStyle } from "./room-object";
 import { Link } from "./ui";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -26,7 +27,7 @@ export function CompletionPanel({ view, reviewId, savedSummary, justSaved, onSou
   }, [justSaved]);
   const outcome = completionOf(view);
   return (
-    <section className="note review-complete" aria-labelledby="review-complete-heading">
+    <section className="note review-complete" style={objectStyle("history")} aria-labelledby="review-complete-heading">
       <h2 id="review-complete-heading" ref={heading} tabIndex={-1}>Review saved</h2>
       <p>
         The conversation is finished. Your notes and these results are in your notebook, and you can reread this review here.
