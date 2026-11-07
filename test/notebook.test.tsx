@@ -6,12 +6,13 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { countsAsGap, focusLectures, notebookLectures, topicName, viewCounts } from "../src/app/notebook-view";
+import { countsAsGap, focusLectures, notebookLectures, topicName, viewCounts, withDraft } from "../src/app/notebook-view";
+import type { NoteDrafts } from "../src/app/notebook-view";
 import { loadReviewContext } from "../src/app/observation-view";
 import type { ReviewContext } from "../src/app/observation-view";
 import { RecordBody } from "../src/app/record";
 import type { Observation } from "../src/shared/domain";
-import type { ReviewId } from "../src/shared/ids";
+import type { NoteId, ReviewId } from "../src/shared/ids";
 import { createFixture, ids } from "../scripts/ui-preview/fixtures";
 import type { Scenario } from "../scripts/ui-preview/fixtures";
 
@@ -27,7 +28,8 @@ async function notebook(scenario: Scenario = "record-lectures") {
 const summary = (lectures: ReturnType<typeof notebookLectures>) =>
   lectures.map((l) => ({ title: l.title, topics: l.topics.map((t) => ({ label: t.label, notes: t.notes.length, observations: t.observations.map((o) => o.status), revisit: t.revisit, disputed: t.disputed })) }));
 
-const html = (props: Parameters<typeof RecordBody>[0]) => renderToStaticMarkup(createElement(RecordBody, props));
+type BodyProps = Parameters<typeof RecordBody>[0];
+const html = (props: Omit<BodyProps, "drafts" | "setDraft"> & Partial<BodyProps>) => renderToStaticMarkup(createElement(RecordBody, { drafts: new Map(), setDraft: () => {}, ...props }));
 const run = async (action: () => Promise<void>) => { await action(); };
 
 describe("lecture → topic grouping", () => {
@@ -122,6 +124,49 @@ describe("revisit and disputed views", () => {
     expect(page).toContain('<button type="button" aria-pressed="true">All topics (4)</button>');
     expect(page).toContain('<button type="button" aria-pressed="false">Disputed (3)</button>');
     expect(page).not.toContain("To revisit (");
+  });
+});
+
+describe("unsaved note edits", () => {
+  const typed = "Unsaved integration review draft 117";
+
+  async function circularWaitNote() {
+    const { fixture, record: before, lectures, contexts } = await notebook();
+    const [current, earlier] = notebookLectures(before, lectures, contexts);
+    expect([current!.title, current!.topics[0]!.label]).toEqual(["Locks & deadlocks", "Circular wait"]);
+    await fixture.api.resolveDispute(current!.topics[0]!.observations[0]!.id, "learner_was_right");
+    const record = await fixture.api.record({});
+    expect(focusLectures(notebookLectures(record, lectures, contexts), "disputed").map((l) => l.title)).toEqual(["Deadlock prevention"]);
+    return { fixture, record, lectures, note: current!.topics[0]!.notes[0]!.id, other: earlier!.topics[1]!.notes[0]!.id };
+  }
+
+  test("#117: an open edit is drawn from drafts held above the views, so it reads the same with or without lecture titles", async () => {
+    const { fixture, record, lectures, note } = await circularWaitNote();
+    const drafts: NoteDrafts = new Map([[note, typed]]);
+    for (const list of [lectures, null]) {
+      const page = html({ api: fixture.api, data: record, lectures: list, run, drafts });
+      expect(page).toMatch(new RegExp(`Each thread holds something the other needs\\.</p><div><label[^>]*>Your edit</label>.*?<textarea id="[^"]+" rows="4">${typed}</textarea>`));
+      expect(page.match(/>Save edit<\/button>/g)).toHaveLength(1);
+      expect(page.match(/aria-label="Edit your note on /g)).toHaveLength(1);
+    }
+  });
+
+  test("with no drafts every note shows Edit, and no textarea", async () => {
+    const { fixture, record, lectures } = await circularWaitNote();
+    const page = html({ api: fixture.api, data: record, lectures, run });
+    expect(page).not.toContain("<textarea");
+    expect(page.match(/aria-label="Edit your note on /g)).toHaveLength(2);
+  });
+
+  test("starting, typing and closing one note's draft leaves every other note's draft as it was", async () => {
+    const { note, other } = await circularWaitNote();
+    const opened = withDraft(withDraft(new Map(), note, ""), other, "Kept saved wording");
+    const typing = withDraft(opened, note, typed);
+    expect([...typing]).toEqual([[note, typed], [other, "Kept saved wording"]]);
+    const closed = withDraft(typing, note, null);
+    expect([...closed]).toEqual([[other, "Kept saved wording"]]);
+    expect(typing.get(note)).toBe(typed);
+    expect([...withDraft(closed, "note_missing" as NoteId, null)]).toEqual([...closed]);
   });
 });
 
