@@ -16,9 +16,7 @@ import { loadLabels } from "../scripts/jev-lab";
 import { splitPoint, validateLabels } from "../scripts/jev-lab-score";
 import type { LabelFile } from "../scripts/jev-lab-score";
 import { generateSheet, jsonForScript } from "../scripts/jev-lab-sheet";
-import {
-  evaluate, fmtTime, initialState, isMarked, labelJson, makeGroup, midpointOf, removeItem, removeMember, restoreState, setNote, setSignature, setStatus, toggleMark, watchUrl,
-} from "../scripts/jev-lab-sheet-client";
+import { evaluate, fmtTime, initialState, isMarked, labelJson, makeGroup, midpointOf, removeItem, removeMember, restoreState, setNote, setSignature, setStatus, toggleMark, watchUrl, } from "../scripts/jev-lab-sheet-client";
 import type { SheetState } from "../scripts/jev-lab-sheet-client";
 
 const cleanup: string[] = [];

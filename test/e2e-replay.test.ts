@@ -19,10 +19,7 @@ import { join } from "node:path";
 import type { ClaimDraft, Cost, Observation, RecordView, TutorMove, TutorMoveKind } from "../src/shared/domain";
 import type { CaptureId, EvidenceId, ReviewId, TurnId } from "../src/shared/ids";
 import { stableId } from "../src/shared/ids";
-import {
-  captureResponse, diagramsResponse, topicDiagramResponse, encodeMaterial, evidenceBundleResponse, ingestAckResponse, recordViewResponse, reviewOptionsResponse, reviewViewResponse, saveResponse,
-  startReviewResponse, tutorStreamEvent, usageResponse,
-} from "../src/shared/wire";
+import { captureResponse, diagramsResponse, topicDiagramResponse, encodeMaterial, evidenceBundleResponse, ingestAckResponse, recordViewResponse, reviewOptionsResponse, reviewViewResponse, saveResponse, startReviewResponse, tutorStreamEvent, usageResponse, } from "../src/shared/wire";
 import type { TutorStreamEvent } from "../src/shared/wire";
 import { main } from "../src/backend/main";
 import type { Running, TaskSet } from "../src/backend/main";
@@ -119,7 +116,6 @@ function faked<I, O>(real: Task<I, O>, answer: (input: I, ctx: AttemptContext) =
   };
 }
 
-const ids = <T extends { id: EvidenceId }>(xs: readonly T[]) => xs.map((x) => x.id);
 
 function fakeTasks() {
   const unexpected: string[] = [];

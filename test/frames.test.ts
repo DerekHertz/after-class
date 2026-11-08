@@ -131,7 +131,7 @@ describe("stepFrame", () => {
 
   test("a board that never settles is kept after the max wait, not held forever", () => {
     let flip = false;
-    const animating = every(1, 30, () => board((flip = !flip) ? 300 : 700));
+    const animating = every(1, 30, () => { flip = !flip; return board(flip ? 300 : 700); });
     const kept = run([[0, board(0)], ...animating]);
     const settled = kept.filter((k) => k.trigger === "change_settled");
     expect(settled.length).toBeGreaterThan(0);
@@ -269,7 +269,7 @@ function rig(opts: { width?: number; height?: number; holdJpeg?: boolean; failJp
     advanceWithoutFrames(from: number, seconds: number) {
       for (let i = 1; i <= seconds; i++) {
         (video as unknown as { currentTime: number }).currentTime = from + i;
-        for (const fn of [...intervals]) fn();
+        for (const fn of Array.from(intervals)) fn();
       }
     },
   };

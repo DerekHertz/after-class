@@ -8,19 +8,18 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { LabelProposals } from "../scripts/jev-lab-proposal-schema";
+import { BUDGET_CLAUDE_CALLS, CHUNK_OVERLAP_FRAMES, COMPARE_TOLERANCE_BOUNDARY_S, COMPARE_TOLERANCE_STEP_S, MAX_FRAMES_PER_CALL, MERGE_TOLERANCE_S, PILOT_CALLS, ProposeRefusal, validateProposals } from "../scripts/jev-lab-proposal-schema";
+import type { ClipCall } from "../scripts/jev-lab-propose";
+import { buildPrompt, callsOfClips, chunkRanges, compareFiles, compareProposals, joinBoundaries, mergeChunks, parseMaxClaudeCalls, parseResponse, planPropose, proposeLecture, readClips, runPilot } from "../scripts/jev-lab-propose";
 import { openDb } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
 import type { ClaudeCli, ClaudeProcess, ClaudeRequest, SpawnFn } from "../src/backend/providers/claude";
 import { QUESTIONS } from "../src/backend/providers/jev-tasks";
 import type { CaptureFact, CaptureFactBody } from "../src/shared/domain";
-import { randomId, stableId } from "../src/shared/ids";
 import type { CaptureId, MemoKey } from "../src/shared/ids";
+import { randomId, stableId } from "../src/shared/ids";
 import { media } from "../src/shared/time";
-import {
-  BUDGET_CLAUDE_CALLS, CHUNK_OVERLAP_FRAMES, COMPARE_TOLERANCE_BOUNDARY_S, COMPARE_TOLERANCE_STEP_S, MAX_FRAMES_PER_CALL, MERGE_TOLERANCE_S, PILOT_CALLS, ProposeRefusal,
-  buildPrompt, callsOfClips, chunkRanges, compareFiles, compareProposals, joinBoundaries, mergeChunks, parseMaxClaudeCalls, parseResponse, planPropose, proposeLecture, readClips, runPilot, validateProposals,
-} from "../scripts/jev-lab-propose";
-import type { ClipCall, LabelProposals } from "../scripts/jev-lab-propose";
 
 const cleanup: string[] = [];
 afterEach(() => {
@@ -718,7 +717,7 @@ describe("no call without both flags, a persisted counter and a ceiling", () => 
   test("stored text never contains an env secret, even when the model echoes one", async () => {
     const f = fixture();
     const secret = "sk-ant-LEAKYSECRET-987654";
-    const echo: Responder = (req, n) => JSON.stringify({ ...JSON.parse(goodText(req)), boundaries: [{ mediaS: 5, reason: `the key is ${secret}` }] });
+    const echo: Responder = (req) => JSON.stringify({ ...JSON.parse(goodText(req)), boundaries: [{ mediaS: 5, reason: `the key is ${secret}` }] });
     const { options, outDir } = f.base(echo, "opus", { env: { ANTHROPIC_API_KEY: secret, PATH: "/usr/bin" } });
     await proposeLecture(options);
     const all: string[] = [];

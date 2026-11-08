@@ -24,18 +24,17 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import type { ClaudeCli, SpawnFn } from "../src/backend/providers/claude";
+import { routeWithFraming } from "../src/backend/segmentation/core";
 import type { Passage } from "../src/shared/domain";
 import type { EvidenceId } from "../src/shared/ids";
 import { lectureWork, loadLabels, openCapture, readState, reportFromFile } from "./jev-lab";
-import { ARM7_KIND, ARM_KIND, ARM_NAME, PRODUCT_QUESTIONS, armConfigFromBaseline, exp7ConfigFromArm, validateArmConfig, validateExp7ArmConfig } from "./jev-lab-arm";
 import type { ArmConfig, Exp7ArmConfig } from "./jev-lab-arm";
-import { routeWithFraming } from "../src/backend/segmentation/core";
-import { PROPOSED_MODELS, ProposeRefusal, attemptCall, checkCommon, openSession, parseMaxClaudeCalls, readClips, refuse, writeMeta } from "./jev-lab-propose";
+import { ARM7_KIND, ARM_KIND, ARM_NAME, PRODUCT_QUESTIONS, armConfigFromBaseline, exp7ConfigFromArm, validateArmConfig, validateExp7ArmConfig } from "./jev-lab-arm";
+import { PROPOSED_MODELS, ProposeRefusal, refuse } from "./jev-lab-proposal-schema";
 import type { ClipEvidence } from "./jev-lab-propose";
-import {
-  MAX_TUNE_ROUNDS, PROPOSED_DUPLICATE_MATCH_S, PROPOSED_STEP_CATCH_S, TOLERANCE_S, clipsOf, detectBoundaries, lectureIdOfLabels, parseResults, splitterOf, verdictAt, viewOf,
-} from "./jev-lab-score";
+import { attemptCall, checkCommon, openSession, parseMaxClaudeCalls, readClips, writeMeta } from "./jev-lab-propose";
 import type { LabelInfo, LectureRecord, Origin, ParsedResults, Report } from "./jev-lab-score";
+import { MAX_TUNE_ROUNDS, PROPOSED_DUPLICATE_MATCH_S, PROPOSED_STEP_CATCH_S, TOLERANCE_S, clipsOf, detectBoundaries, lectureIdOfLabels, parseResults, splitterOf, verdictAt, viewOf, } from "./jev-lab-score";
 
 export { ProposeRefusal };
 
@@ -143,7 +142,7 @@ const squash = (s: string) => s.replace(/\s+/g, " ").trim();
 const untag = (line: string) => squash(line.replace(/^\[(?:fixture|live)\]\s*/, ""));
 export const reportLinesOf = (text: string): readonly string[] => text.split("\n").map(untag).filter((l) => l.length >= MIN_REPORT_LINE);
 /** Number tokens the guard compares: fractions and decimals (plain integers are everywhere: seconds, clip numbers). */
-export const numberTokens = (text: string): readonly string[] => [...new Set(text.match(/(?<![\d.\/])(?:\d+\/\d+|\d+\.\d+)(?![\d])/g) ?? [])];
+export const numberTokens = (text: string): readonly string[] => [...new Set(text.match(/(?<![\d./])(?:\d+\/\d+|\d+\.\d+)(?![\d])/g) ?? [])];
 const timeForms = (t: number) => [...new Set([String(t), t.toFixed(1), t.toFixed(0), String(Number(t.toFixed(2)))])];
 const hasToken = (line: string, tok: string) => new RegExp(`(^|[^0-9.])${tok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![0-9]|\\.[0-9])`).test(line);
 
@@ -701,7 +700,7 @@ function readme(info: { model: string; effort: string; origin: Origin; arm: stri
   return [
     `# Optimizer proposal: arm ${info.arm}, round ${info.round}, by ${info.model}`,
     "",
-    `A model's proposal (effort ${info.effort}), not Derek's labels, not a result. It limits itself to ${info.exp7 === true ? "the six question wordings, the thresholds and the segmentation, checked by \`validateExp7ArmConfig\`" : "decision 4 (the three question wordings, the thresholds, the segmentation), checked by \`validateArmConfig\`"}. Jev has not been run with it.`,
+    `A model's proposal (effort ${info.effort}), not Derek's labels, not a result. It limits itself to ${info.exp7 === true ? "the six question wordings, the thresholds and the segmentation, checked by `validateExp7ArmConfig`" : "decision 4 (the three question wordings, the thresholds, the segmentation), checked by `validateArmConfig`"}. Jev has not been run with it.`,
     "",
     ...(info.origin === "fixture" ? ["**Origin: fixture.** A scripted client answered, not a model. These are test files, not a proposal by the model named above.", ""] : []),
     `- Status: ${info.status}`,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { randomId } from "../shared/ids";
 import type { CaptureId, ReviewId } from "../shared/ids";
 import type { ReviewOptions, StartChoice } from "../shared/domain";
@@ -152,8 +152,8 @@ export async function checkAgain(
 }
 
 export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readonly captureId: CaptureId }) {
-  const capture = useAsync(() => api.captureView(captureId), [api, captureId]);
-  const options = useAsync(() => api.reviewOptions(captureId), [api, captureId]);
+  const capture = useAsync(useCallback(() => api.captureView(captureId), [api, captureId]));
+  const options = useAsync(useCallback(() => api.reviewOptions(captureId), [api, captureId]));
   const [startError, setStartError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [refused, setRefused] = useState<ReviewOptions | null>(null);
@@ -272,7 +272,7 @@ function summaryTitle(titles: readonly string[]): string {
 }
 
 function CaptureEvidence({ api, captureId, titles }: { readonly api: AppApi; readonly captureId: CaptureId; readonly titles: SourceTitles }) {
-  const bundle = useAsync(() => api.evidence({ captureId }), [api, captureId]);
+  const bundle = useAsync(useCallback(() => api.evidence({ captureId }), [api, captureId]));
   if (bundle.error !== null) return <ErrorNote error={bundle.error} retry={bundle.reload} />;
   if (bundle.data === null) return <p className="muted">Loading...</p>;
   return <BundleInspector report={inspectBundle(bundle.data, titles)} />;

@@ -1,4 +1,5 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { packagedResources } from "./build-resources";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,9 +11,7 @@ import { media } from "../src/shared/time";
 import type { IngestAck } from "../src/shared/wire";
 import { acceptsFact, badgeFor, isWatchUrl, safeReviewUrl, transition } from "../src/extension/worker/control";
 import type { ControlEvent, TabCaptureState } from "../src/extension/worker/control";
-import {
-  BATCH_MAX_BYTES, BATCH_MAX_FACTS, classifyStatus, createFlusher, createMemoryOutbox, flushCapture, isIngestAck, isPlaceholder, nextBackoffMs, selectBatch, toWire,
-} from "../src/extension/worker/outbox";
+import { BATCH_MAX_BYTES, BATCH_MAX_FACTS, classifyStatus, createFlusher, createMemoryOutbox, flushCapture, isIngestAck, isPlaceholder, nextBackoffMs, selectBatch, toWire, } from "../src/extension/worker/outbox";
 import type { FlushOutcome, StoredFact, Transport, TransportResult } from "../src/extension/worker/outbox";
 import { describePopup } from "../src/extension/popup/popup";
 
@@ -551,9 +550,9 @@ const scratchDir = (prefix: string) => {
 afterAll(() => scratch.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
 describe("extension build", () => {
+  const out = scratchDir("afterclass-build-product-");
+  beforeAll(async () => { await buildExtension(out); });
   test("bundles every entry, copies the manifest and pages, and the manifest's files all exist", async () => {
-    const out = scratchDir("afterclass-build-");
-    await buildExtension(out);
     const manifest = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"));
     for (const f of manifestFiles(manifest)) expect(existsSync(join(out, f))).toBe(true);
     for (const f of ["content.js", "main-world.js", "worker.js", "popup.js", "options.js"]) {
@@ -568,25 +567,15 @@ describe("extension build", () => {
   });
 
   test("every file the popup and options pages load, and every font their stylesheets load, is local and in the build", async () => {
-    const out = scratchDir("afterclass-build-pages-");
-    await buildExtension(out);
-    const refs = (file: string, pattern: RegExp) => [...readFileSync(join(out, file), "utf8").matchAll(pattern)].map((m) => m[1]!);
-    const pageFiles = ["popup.html", "options.html"].flatMap((page) => refs(page, /(?:href|src)="([^"]+)"/g));
-    const sheets = pageFiles.filter((f) => f.endsWith(".css"));
-    expect(sheets.length).toBeGreaterThan(0);
-    const loaded = [...pageFiles, ...sheets.flatMap((sheet) => refs(sheet, /url\(['"]?([^'")]+)['"]?\)/g))];
-    expect(loaded.some((f) => f.endsWith(".ttf"))).toBe(true);
-    for (const f of loaded) {
-      expect(f).not.toMatch(/^(https?:)?\/\//);
-      expect(existsSync(join(out, f))).toBe(true);
-    }
+    const loaded = [...packagedResources(out, ["popup.html", "options.html"])];
+    expect(loaded.some((file) => file.endsWith(".css"))).toBe(true);
+    expect(loaded.some((file) => file.endsWith(".ttf"))).toBe(true);
     expect(existsSync(join(out, "fonts/OFL-PixelifySans.txt"))).toBe(true);
   });
 
   test("the product build has no autostart code and keeps its name; only the test build has it, under a name that says so", async () => {
-    const product = scratchDir("afterclass-build-product-");
+    const product = out;
     const test = scratchDir("afterclass-build-autostart-");
-    await buildExtension(product);
     await buildExtension(test, { testAutostart: true });
     const productWorker = readFileSync(join(product, "worker.js"), "utf8");
     const testWorker = readFileSync(join(test, "worker.js"), "utf8");

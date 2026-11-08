@@ -138,7 +138,7 @@ function world(opts: { readonly interpret?: Task<InterpretationInput, Interpreta
   }
   async function drain(): Promise<void> {
     for (let round = 0; round < 20; round++) {
-      await Promise.race([Promise.allSettled([...running.values()]), Bun.sleep(10)]);
+      await Promise.race([Promise.allSettled(running.values()), Bun.sleep(10)]);
       const fresh = prep.demand(captureId).filter((i) => !running.has(i.key));
       if (fresh.length === 0) return;
       await Promise.race([Promise.allSettled(fresh.map(start)), Bun.sleep(10)]);

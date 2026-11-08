@@ -7,22 +7,19 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { RunOptions } from "../scripts/jev-lab";
+import { loadLabels, runLab } from "../scripts/jev-lab";
+import { validateArmConfig } from "../scripts/jev-lab-arm";
+import type { GuardAllow, HeldOut, OptimizeInputs, OptimizeOptions } from "../scripts/jev-lab-optimize";
+import { APPROVED_TEMPLATE_SHA256, ProposeRefusal, barsOf, buildOptimizerPrompt, dryRunRound, loadFlowB, loadTemplate, parseProposal, proposeRound, resolveRound, scanForHeldOut, } from "../scripts/jev-lab-optimize";
 import { openDb } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
 import type { ClaudeCli, ClaudeProcess, ClaudeRequest, SpawnFn } from "../src/backend/providers/claude";
 import type { JevAnswer, JevClient, JevRequest } from "../src/backend/providers/jev";
 import type { CaptureFact, CaptureFactBody } from "../src/shared/domain";
-import { randomId, stableId } from "../src/shared/ids";
 import type { CaptureId, MemoKey } from "../src/shared/ids";
+import { randomId, stableId } from "../src/shared/ids";
 import { media } from "../src/shared/time";
-import { loadLabels, runLab } from "../scripts/jev-lab";
-import type { RunOptions } from "../scripts/jev-lab";
-import { armConfigFromBaseline, validateArmConfig } from "../scripts/jev-lab-arm";
-import type { ArmConfig } from "../scripts/jev-lab-arm";
-import {
-  APPROVED_TEMPLATE_SHA256, ProposeRefusal, barsOf, buildOptimizerPrompt, dryRunRound, loadFlowB, loadTemplate, parseProposal, proposeRound, resolveRound, scanForHeldOut,
-} from "../scripts/jev-lab-optimize";
-import type { GuardAllow, HeldOut, OptimizeInputs, OptimizeOptions } from "../scripts/jev-lab-optimize";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -48,7 +45,7 @@ const CLIPS: ClipSpec[] = [
 ];
 const LEN = 60;
 
-const jpeg = (tag: number) => Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x01, 0x68, 0x02, 0x80, ...new Array<number>(8).fill(0), tag]);
+const jpeg = (tag: number) => Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x01, 0x68, 0x02, 0x80, ...Array.from({ length: 8 }, () => 0), tag]);
 
 function makeCapture(): { dir: string; captureId: CaptureId } {
   const dir = tmp("capture");
@@ -257,7 +254,7 @@ describe("the prompt: round 1", () => {
     for (const id of IDS.slice(3)) expect(p).not.toContain(id);
     for (const t of ["Quicksort Deep Dive", "Graph Search", "page replacement", "pivot selection", "breadth first"]) expect(p).not.toContain(t);
     expect(p).not.toMatch(/\bclip [456]\b/);
-    expect(built.heldOut.videoIds).toEqual([...IDS.slice(3)]);
+    expect(built.heldOut.videoIds).toEqual(IDS.slice(3));
     // "Introduction" is a title of both halves, so it is not a held-out title
     expect([...built.heldOut.titles].sort()).toEqual(["Graph Search", "Quicksort Deep Dive"]);
     expect(built.heldOut.windowIds.length).toBeGreaterThan(0);

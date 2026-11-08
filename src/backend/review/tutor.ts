@@ -17,9 +17,9 @@
  */
 import { z } from "zod";
 import { stableId } from "../../shared/ids";
-import type { ClaimId, ConceptId, EvidenceId, Id, IdKind, ResourceId, ThreadId, TurnId } from "../../shared/ids";
+import type { ClaimId, ConceptId, EvidenceId, Id, IdKind, ThreadId } from "../../shared/ids";
 import type {
-  AssessableClaim, Concept, Correction, DetourState, EvidenceBundle, FrozenScope, LearnerActKind, Observation, ReviewPhase, ReviewState, Turn,
+  AssessableClaim, Concept, Correction, EvidenceBundle, FrozenScope, LearnerActKind, Observation, ReviewPhase, ReviewState, Turn,
   TutorMove, TutorMoveKind,
 } from "../../shared/domain";
 import { Material, contains } from "../../shared/time";

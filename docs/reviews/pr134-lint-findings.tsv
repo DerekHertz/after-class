@@ -1,0 +1,63 @@
+file	line	rule	message
+scripts/jev-lab-optimize.ts	146	eslint(no-useless-escape)	Unnecessary escape character '/'
+scripts/jev-lab-optimize.ts	704	eslint(no-useless-escape)	Unnecessary escape character '`'
+scripts/jev-lab-optimize.ts	704	eslint(no-useless-escape)	Unnecessary escape character '`'
+scripts/jev-lab-optimize.ts	704	eslint(no-useless-escape)	Unnecessary escape character '`'
+scripts/jev-lab-optimize.ts	704	eslint(no-useless-escape)	Unnecessary escape character '`'
+scripts/jev-lab-propose.ts	1084	eslint(max-lines)	File has too many lines (1084).
+scripts/jev-lab.ts	1138	eslint(max-lines)	File has too many lines (1138).
+src/app/appearance.tsx	79	react(set-state-in-effect)	Calling setState synchronously within an effect can trigger cascading renders
+src/app/front-row.tsx	233	react(immutability)	This value cannot be modified
+src/app/front-row.tsx	233	react(immutability)	Cannot modify local variables after render completes
+src/app/notebook-view.ts	48	eslint(no-unused-vars)	Parameter '_' is declared but never used.
+src/app/record.tsx	438	react(refs)	Cannot access refs during render
+src/app/record.tsx	457	react-hooks(exhaustive-deps)	React Hook useEffect has a missing dependency: 'reviewIds'
+src/app/record.tsx	483	react-hooks(exhaustive-deps)	React Hook useEffect has missing dependencies: 'preparing.length', and 'preparing'
+src/app/record.tsx	486	react-hooks(exhaustive-deps)	React Hook useEffect has a complex expression in the dependency array.
+src/app/review.tsx	475	react(refs)	Cannot access refs during render
+src/app/review.tsx	479	react(set-state-in-effect)	Calling setState synchronously within an effect can trigger cascading renders
+src/app/ui.tsx	86	react(set-state-in-effect)	Calling setState synchronously within an effect can trigger cascading renders
+src/app/ui.tsx	87	react-hooks(exhaustive-deps)	React Hook useEffect has a missing dependency: 'load'
+src/app/ui.tsx	94	react-hooks(exhaustive-deps)	React Hook useEffect has a complex expression in the dependency array.
+src/app/ui.tsx	115	react(set-state-in-effect)	Calling setState synchronously within an effect can trigger cascading renders
+src/backend/main.ts	41	eslint(no-unused-vars)	Type 'EvidenceStore' is imported but never used.
+src/backend/review/tutor.ts	20	eslint(no-unused-vars)	Type 'ResourceId' is imported but never used.
+src/backend/review/tutor.ts	20	eslint(no-unused-vars)	Type 'TurnId' is imported but never used.
+src/backend/review/tutor.ts	22	eslint(no-unused-vars)	Type 'DetourState' is imported but never used.
+src/extension/worker/service-worker.ts	254	unicorn(no-useless-spread)	Using a spread operator here creates a new array unnecessarily.
+test/app.test.ts	962	eslint(require-yield)	This generator function does not have `yield`
+test/app.test.ts	1109	eslint(require-yield)	This generator function does not have `yield`
+test/app.test.ts	1393	eslint(max-lines)	File has too many lines (1393).
+test/capture.test.ts	77	unicorn(no-useless-spread)	Using a spread operator here creates a new array unnecessarily.
+test/capture.test.ts	85	unicorn(no-useless-spread)	Using a spread operator here creates a new array unnecessarily.
+test/capture.test.ts	111	unicorn(no-useless-spread)	Using a spread operator here creates a new array unnecessarily.
+test/capture.test.ts	536	eslint(no-unused-expressions)	Expected expression to be used
+test/e2e-replay.test.ts	122	eslint(no-unused-vars)	Variable 'ids' is declared but never used. Unused variables should start with a '_'.
+test/evidence.test.ts	1011	eslint(max-lines)	File has too many lines (1011).
+test/frames.test.ts	134	eslint(no-cond-assign)	Expected a conditional expression and instead saw an assignment
+test/frames.test.ts	272	unicorn(no-useless-spread)	Using a spread operator here creates a new array unnecessarily.
+test/http.test.ts	17	eslint(no-unused-vars)	Identifier 'asSeq' is imported but never used.
+test/http.test.ts	587	eslint(no-unused-vars)	Parameter '_' is declared but never used.
+test/http.test.ts	636	eslint(no-unused-vars)	Parameter '_' is declared but never used.
+test/http.test.ts	1538	eslint(max-lines)	File has too many lines (1538).
+test/jev-lab-arm.test.ts	38	unicorn(no-new-array)	Do not use `new Array(singleArgument)`.
+test/jev-lab-exp7.test.ts	56	unicorn(no-new-array)	Do not use `new Array(singleArgument)`.
+test/jev-lab-optimize.test.ts	20	eslint(no-unused-vars)	Identifier 'armConfigFromBaseline' is imported but never used.
+test/jev-lab-optimize.test.ts	21	eslint(no-unused-vars)	Type 'ArmConfig' is imported but never used.
+test/jev-lab-optimize.test.ts	51	unicorn(no-new-array)	Do not use `new Array(singleArgument)`.
+test/jev-lab-optimize.test.ts	260	unicorn(no-useless-spread)	Using a spread operator here creates a new array unnecessarily.
+test/jev-lab-propose.test.ts	721	eslint(no-unused-vars)	Parameter 'n' is declared but never used. Unused parameters should start with a '_'.
+test/jev-lab-set.test.ts	39	unicorn(no-new-array)	Do not use `new Array(singleArgument)`.
+test/jev-lab.test.ts	216	unicorn(no-new-array)	Do not use `new Array(singleArgument)`.
+test/preparation.test.ts	141	unicorn(no-useless-spread)	`Promise.allSettled` accepts an iterable, so it's unnecessary to convert the iterable to an array.
+test/providers.test.ts	1046	eslint(no-unused-vars)	Parameter 'tag' is declared but never used. Unused parameters should start with a '_'.
+test/providers.test.ts	1143	eslint(max-lines)	File has too many lines (1143).
+test/review.test.ts	10	eslint(no-unused-vars)	Type 'TurnId' is imported but never used.
+test/review.test.ts	96	eslint(no-unused-vars)	Parameter '_' is declared but never used.
+test/review.test.ts	136	eslint(no-unused-vars)	Parameter '_' is declared but never used.
+test/review.test.ts	227	eslint(no-unused-vars)	Type alias 'Rig' is declared but never used.
+test/review.test.ts	722	eslint(no-unused-vars)	Parameter '_' is declared but never used.
+test/review.test.ts	1432	eslint(max-lines)	File has too many lines (1432).
+test/worker-harness.ts	64	typescript(no-this-alias)	Unexpected aliasing of 'this' to local variable.
+test/worker-harness.ts	87	eslint(no-setter-return)	Setter cannot return a value
+test/worker-harness.ts	179	eslint(no-unused-vars)	Variable 'nth' is assigned a value but never used. Unused variables should start with a '_'.

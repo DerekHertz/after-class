@@ -1,5 +1,5 @@
 import { RecordScreen } from "./record";
-import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { Ref } from "react";
 import { Material } from "../shared/time";
 import type { ConceptId, EvidenceId, ReviewId } from "../shared/ids";
@@ -10,10 +10,7 @@ import { FrontRowScene, reserveNavSpace } from "./front-row";
 import { reactToCompanion } from "./companion-reaction";
 import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
-import {
-  ACTION_LABEL, END_CONFIRM_TEXT, composerActions, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow,
-  softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer,
-} from "./core";
+import { ACTION_LABEL, END_CONFIRM_TEXT, composerActions, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow, softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, selectedEvidenceIds, shouldSubmitAnswer, } from "./core";
 import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, StartHandoff, TurnStatus } from "./core";
 import type { Speaker, SpeechInput } from "./speech";
 import type { UnsentStore } from "./unsent";
@@ -69,7 +66,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   }, [handoff, checklist, question]);
 
   const captureId = state.view?.captureId ?? null;
-  const capture = useAsync(() => (captureId === null ? Promise.resolve(null) : api.captureView(captureId)), [api, captureId]);
+  const capture = useAsync(useCallback(() => (captureId === null ? Promise.resolve(null) : api.captureView(captureId)), [api, captureId]));
   const titles = sourceTitles(capture.data?.capture ?? null);
 
   const automaticIds = currentEvidenceIds(state.view?.turns ?? [], state.live);
@@ -396,7 +393,7 @@ function ScopeEvidence({ api, view, titles, onSource }: { readonly api: AppApi; 
 }
 
 function ScopeBundle({ api, view, titles, onSource }: { readonly api: AppApi; readonly view: NonNullable<SessionState["view"]>; readonly titles: ReturnType<typeof sourceTitles>; readonly onSource: (ids: readonly EvidenceId[], label: string, origin: HTMLButtonElement) => void }) {
-  const bundle = useAsync(() => api.evidence({ material: view.scope.material }), [api, view.reviewId]);
+  const bundle = useAsync(useCallback(() => api.evidence({ material: view.scope.material }), [api, view.scope.material]));
   if (bundle.error !== null) return <ErrorNote error={bundle.error} retry={bundle.reload} />;
   if (bundle.data === null) return <p className="muted">Loading...</p>;
   return <>
@@ -472,10 +469,12 @@ export function Composer({
   const heard = useRef<Heard | null>(null);
   /** The latest props, for speech callbacks that outlive the render that started them. */
   const latest = useRef({ allowed: false, send });
-  latest.current = { allowed: hasText && !disabled && showSpeak, send };
+  useLayoutEffect(() => { latest.current = { allowed: hasText && !disabled && showSpeak, send }; }, [hasText, disabled, showSpeak, send]);
   useEffect(() => { onListeningChange?.(listening); }, [listening, onListeningChange]);
   useEffect(() => () => { speech.stop(); }, [speech]);
   useEffect(() => {
+    // The speech adapter is external; mirror its forced stop when answer controls disappear.
+    // eslint-disable-next-line react/set-state-in-effect
     if (shouldStopListening(listening, hasText, showSpeak)) { speech.stop(); heard.current = null; setListening(false); }
   }, [hasText, showSpeak, listening, speech]);
 

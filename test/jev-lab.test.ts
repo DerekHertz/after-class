@@ -6,21 +6,20 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { RunOptions } from "../scripts/jev-lab";
+import { LabRefusal, assertPhaseHalf, describeSplit, loadLabels, planLab, readState, reportFromFile, resolveTuning, runLab } from "../scripts/jev-lab";
+import { draftLabels } from "../scripts/jev-lab-draft";
+import type { DuplicateGroup, FrameView, LabelFile, ParsedResults } from "../scripts/jev-lab-score";
+import { BUDGET_CALLS, DEFAULT_THRESHOLDS, buildReport, duplicateOutcomes, falseClosesPerWindow, halfOf, matchBoundaries, parseResults, percentile, splitPoint, stepOutcomes, validateLabels, verdictAt, } from "../scripts/jev-lab-score";
 import { openDb } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
 import type { JevAnswer, JevClient, JevRequest } from "../src/backend/providers/jev";
 import { toVerdict } from "../src/backend/providers/jev-tasks";
 import { SEGMENTATION_DEFAULTS } from "../src/backend/segmentation";
 import type { CaptureFact, CaptureFactBody } from "../src/shared/domain";
-import { randomId, stableId } from "../src/shared/ids";
 import type { CaptureId, MemoKey } from "../src/shared/ids";
+import { randomId, stableId } from "../src/shared/ids";
 import { media } from "../src/shared/time";
-import { LabRefusal, assertPhaseHalf, describeSplit, draftLabels, loadLabels, planLab, readState, reportFromFile, resolveTuning, runLab } from "../scripts/jev-lab";
-import type { RunOptions } from "../scripts/jev-lab";
-import {
-  BUDGET_CALLS, DEFAULT_THRESHOLDS, buildReport, duplicateOutcomes, falseClosesPerWindow, halfOf, matchBoundaries, parseResults, percentile, splitPoint, stepOutcomes, validateLabels, verdictAt,
-} from "../scripts/jev-lab-score";
-import type { DuplicateGroup, FrameView, LabelFile, ParsedResults } from "../scripts/jev-lab-score";
 
 const cleanup: string[] = [];
 afterEach(() => {
@@ -213,7 +212,7 @@ describe("label validation", () => {
 
 const VIDEO = "aaaaaaaaaaa";
 /** A JPEG header the Jev adapter accepts (640x360). The last byte tells the scripted client which frame it is. */
-const jpeg = (tag: number, pad = 0) => Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x01, 0x68, 0x02, 0x80, ...new Array<number>(8 + pad).fill(0), tag]);
+const jpeg = (tag: number, pad = 0) => Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x01, 0x68, 0x02, 0x80, ...Array.from({ length: 8 + pad }, () => 0), tag]);
 
 type Seg = { start: number; end: number; text: string };
 type Frm = { id: string; at: number; tag: number; pad?: number };

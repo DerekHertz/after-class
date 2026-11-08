@@ -230,6 +230,8 @@ function ScrollArea({ area, label, areaRef, children }: { readonly area: "board"
       ref={(node) => {
         own.current = node;
         if (typeof areaRef === "function") areaRef(node);
+        // React ref forwarding writes the supplied ref during commit, never during render.
+        // eslint-disable-next-line react/immutability
         else if (areaRef) areaRef.current = node;
       }}
       className="front-row-area" data-area={area} aria-label={label} {...(scrolls ? { tabIndex: 0 } : {})}

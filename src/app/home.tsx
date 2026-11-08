@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { LecturesResponse } from "../shared/wire";
 import { parseId } from "../shared/ids";
 import type { ReviewId } from "../shared/ids";
@@ -75,7 +75,7 @@ const questions = (n: number): string => `${n} ${n === 1 ? "question" : "questio
 function ContinueCard({ api, lecture, review }: { readonly api: ResumeApi; readonly lecture: Lecture; readonly review: LectureReview }) {
   const { title } = lectureHeading(lecture.sourceTitles);
   const { label, target } = reviewAction(review);
-  const topic = useAsync(() => loadResumeTopic(api, review.reviewId), [api, review.reviewId]);
+  const topic = useAsync(useCallback(() => loadResumeTopic(api, review.reviewId), [api, review.reviewId]));
   return (
     <article className="home-continue">
       <p className="page-kicker">{review.phase === "paused" ? "Paused review" : "Review in progress"}</p>
@@ -165,7 +165,7 @@ export function OpenById() {
 }
 
 export function HomeScreen({ api }: { readonly api: AppApi }) {
-  const lectures = useAsync(() => api.lectures(), [api]);
+  const lectures = useAsync(useCallback(() => api.lectures(), [api]));
   return (
     <main className="notebook-page home-page room-paper" {...objectFrame("source")}>
       <header className="page-heading">

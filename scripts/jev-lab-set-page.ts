@@ -7,10 +7,7 @@
  * page opens with 11 headers and one clip, not 400 frames. State changes re-render only the clips that are built.
  */
 import { fmtTime, watchUrl } from "./jev-lab-sheet-client";
-import {
-  BOUNDARY_TOLERANCE_S, FRAME_FILE, STEP_TOLERANCE_S, agreementOf, disagreements, evaluate, initialState, isMarked, labelJson, makeGroup, placeOf, proposalsLabel, removeItem, removeMember, restoreState,
-  setNote, setSignature, setStatus, storageKey, toggleMark,
-} from "./jev-lab-set-client";
+import { BOUNDARY_TOLERANCE_S, FRAME_FILE, STEP_TOLERANCE_S, agreementOf, disagreements, evaluate, initialState, isMarked, labelJson, makeGroup, placeOf, proposalsLabel, removeItem, removeMember, restoreState, setNote, setSignature, setStatus, storageKey, toggleMark, } from "./jev-lab-set-client";
 import type { Group, ItemKey, Mark, Member, SetClip, SetData, SetState, Status } from "./jev-lab-set-client";
 
 type Child = Node | string | null | false;

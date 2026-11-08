@@ -7,7 +7,9 @@
     "test": "bun test",
     "dev": "bun run src/backend/main.ts",
     "build:ext": "bun run scripts/build-extension.ts",
-    "build:app": "bun run scripts/build-app.ts"
+    "build:app": "bun run scripts/build-app.ts",
+    "lint": "oxlint src scripts test e2e --max-warnings 0",
+    "test:browser": "playwright test --config scripts/playwright.config.ts"
   },
   "dependencies": {
     "react": "19.3.1",
@@ -15,10 +17,12 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@types/bun": "1.4.3",
     "@types/chrome": "0.3.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "oxlint": "1.90.0",
     "typescript": "7.0.2"
   }
 }

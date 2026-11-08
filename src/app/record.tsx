@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { ConceptId, EvidenceId, NoteId, ReviewId } from "../shared/ids";
 import type { DiagramFrame, EvidenceBundle, LinkDecision, LinkType, Note, Observation, ObservationStatus, RecordView, TopicDiagram, UsageSummary } from "../shared/domain";
@@ -30,8 +30,8 @@ const message = (e: unknown): string => (e instanceof Error ? e.message : String
 
 /** The full-page notebook and the room's notebook dialog. Both show the same lectures, topics, labels and order. */
 export function RecordScreen({ api, reviewId }: { readonly api: AppApi; readonly reviewId: ReviewId | null }) {
-  const record = useAsync(() => api.record(reviewId === null ? {} : { reviewId }), [api, reviewId]);
-  const lectures = useAsync(() => api.lectures(), [api]);
+  const record = useAsync(useCallback(() => api.record(reviewId === null ? {} : { reviewId }), [api, reviewId]));
+  const lectures = useAsync(useCallback(() => api.lectures(), [api]));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const pending = useRef(false);
@@ -91,16 +91,17 @@ export function RecordBody({ api, data, lectures, run, drafts, setDraft }: {
   readonly drafts: NoteDrafts;
   readonly setDraft: SetDraft;
 }) {
-  const deleted = new Set<string>(data.unavailableEvidence.map((d) => d.id));
-  const cited = [...new Set(data.notes.flatMap((note) => [...note.evidence, ...note.generated.flatMap((segment) => segment.evidence)]))].filter((id) => !deleted.has(id)).sort();
-  const citationKey = cited.join(",");
-  const citations = useAsync(async (): Promise<CitationDetails | null> => {
+  const deleted = useMemo(() => new Set<string>(data.unavailableEvidence.map((d) => d.id)), [data.unavailableEvidence]);
+  const cited = useMemo(() => {
+    return [...new Set(data.notes.flatMap((note) => [...note.evidence, ...note.generated.flatMap((segment) => segment.evidence)]))].filter((id) => !deleted.has(id)).sort();
+  }, [data, deleted]);
+  const citations = useAsync(useCallback(async (): Promise<CitationDetails | null> => {
     if (cited.length === 0) return null;
     const batches = [];
     for (let offset = 0; offset < cited.length; offset += 250) batches.push(cited.slice(offset, offset + 250));
     const bundles = await Promise.all(batches.map((ids) => api.evidence({ ids })));
     return { frames: bundles.flatMap((bundle) => bundle.frames), passages: bundles.flatMap((bundle) => bundle.passages) };
-  }, [api, citationKey]);
+  }, [api, cited]));
   const reviewIds = [...new Set([...data.notes.map((n) => n.reviewId), ...data.observations.map((o) => o.reviewId)])];
   const reviews = useReviewContexts(api, reviewIds);
   const diagrams = useReviewDiagrams(api, reviewIds);
@@ -435,7 +436,7 @@ function usePerReview<T>(reviewIds: readonly ReviewId[], read: (id: ReviewId) =>
   const requests = useRef(new Map<ReviewId, number>());
   const mounted = useRef(true);
   const reader = useRef(read);
-  reader.current = read;
+  useLayoutEffect(() => { reader.current = read; }, [read]);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
@@ -452,10 +453,9 @@ function usePerReview<T>(reviewIds: readonly ReviewId[], read: (id: ReviewId) =>
     requests.current.set(id, (requests.current.get(id) ?? 0) + 1);
     setValues((m) => new Map(m).set(id, next(m.get(id))));
   }, []);
-  const key = reviewIds.join(",");
   useEffect(() => {
     for (const id of reviewIds) if (!requests.current.has(id)) load(id);
-  }, [load, key]);
+  }, [load, reviewIds]);
   return { values, load, update };
 }
 
@@ -478,12 +478,12 @@ const LOADING_DIAGRAMS: LoadedDiagrams = { state: "loading" };
 function useReviewDiagrams(api: AppApi, reviewIds: readonly ReviewId[]) {
   const read = (id: ReviewId): Promise<LoadedDiagrams> => api.diagrams(id).then((topics) => ({ state: "ready", topics, error: null }), (e: unknown) => ({ state: "failed", error: message(e) }));
   const { values, load, update } = usePerReview(reviewIds, read, LOADING_DIAGRAMS);
-  const preparing = [...values].filter(([, d]) => d.state === "ready" && shouldPollDiagrams(d.topics)).map(([id]) => id);
+  const preparing = useMemo(() => [...values].filter(([, d]) => d.state === "ready" && shouldPollDiagrams(d.topics)).map(([id]) => id), [values]);
   useEffect(() => {
     if (preparing.length === 0) return;
     const timer = setTimeout(() => { for (const id of preparing) load(id, true); }, POLL_MS);
     return () => clearTimeout(timer);
-  }, [preparing.join(","), values, load]);
+  }, [preparing, load]);
   const request = useCallback(async (reviewId: ReviewId, topicId: ConceptId): Promise<void> => {
     try {
       const next = await api.requestDiagram(reviewId, topicId);
@@ -598,7 +598,7 @@ export function UsageTable({ summary }: { readonly summary: UsageSummary }) {
 }
 
 export function UsageScreen({ api }: { readonly api: AppApi }) {
-  const usage = useAsync(() => api.usage(), [api]);
+  const usage = useAsync(useCallback(() => api.usage(), [api]));
   return (
     <main className="notebook-page usage-page room-paper" {...objectFrame("source")}>
       <header className="page-heading"><div><p className="page-kicker">Local usage record</p><h1>Usage</h1></div><nav aria-label="Usage navigation"><Link to={{ page: "record", reviewId: null }}>My notebook</Link><Link to={{ page: "home" }}>Your lectures</Link></nav></header>

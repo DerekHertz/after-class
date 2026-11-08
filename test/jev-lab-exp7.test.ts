@@ -8,24 +8,22 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import type { RunOptions } from "../scripts/jev-lab";
+import { loadLabels, runLab } from "../scripts/jev-lab";
+import type { Exp7ArmConfig } from "../scripts/jev-lab-arm";
+import { ARM7_KIND, DRAFT_EXP7_QUESTIONS, PRODUCT_QUESTIONS, exp7ConfigFromArm, validateArmConfig, validateExp7ArmConfig } from "../scripts/jev-lab-arm";
+import type { OptimizeInputs, OptimizeOptions } from "../scripts/jev-lab-optimize";
+import { APPROVED_EXP7_TEMPLATE_SHA256, DRAFT_BANNER, EXP7_BUDGET_CLAUDE_CALLS, MEASUREMENT_ARM7, TEMPLATE7_DOC, buildOptimizerPrompt, dryRunRound, loadTemplate7, parseProposal, proposeRound, resolveRound, scanForHeldOut, } from "../scripts/jev-lab-optimize";
+import type { WindowRecord } from "../scripts/jev-lab-score";
+import { detectBoundaries, parseResults } from "../scripts/jev-lab-score";
 import { openDb } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
 import type { ClaudeCli, ClaudeRequest } from "../src/backend/providers/claude";
 import type { JevAnswer, JevClient, JevRequest } from "../src/backend/providers/jev";
 import type { CaptureFact, CaptureFactBody } from "../src/shared/domain";
-import { randomId, stableId } from "../src/shared/ids";
 import type { CaptureId, MemoKey } from "../src/shared/ids";
+import { randomId, stableId } from "../src/shared/ids";
 import { media } from "../src/shared/time";
-import { loadLabels, runLab } from "../scripts/jev-lab";
-import type { RunOptions } from "../scripts/jev-lab";
-import { ARM7_KIND, DRAFT_EXP7_QUESTIONS, PRODUCT_QUESTIONS, exp7ConfigFromArm, validateArmConfig, validateExp7ArmConfig } from "../scripts/jev-lab-arm";
-import type { Exp7ArmConfig } from "../scripts/jev-lab-arm";
-import { detectBoundaries, parseResults } from "../scripts/jev-lab-score";
-import type { WindowRecord } from "../scripts/jev-lab-score";
-import {
-  APPROVED_EXP7_TEMPLATE_SHA256, DRAFT_BANNER, EXP7_BUDGET_CLAUDE_CALLS, TEMPLATE7_DOC, buildOptimizerPrompt, dryRunRound, loadTemplate7, parseProposal, proposeRound, resolveRound, scanForHeldOut, MEASUREMENT_ARM7,
-} from "../scripts/jev-lab-optimize";
-import type { OptimizeInputs, OptimizeOptions } from "../scripts/jev-lab-optimize";
 
 const repo = resolve(import.meta.dir, "..");
 const dirs: string[] = [];
@@ -53,7 +51,7 @@ const CLIPS: ClipSpec[] = [
 ];
 const LEN = 60;
 
-const jpeg = (tag: number) => Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x01, 0x68, 0x02, 0x80, ...new Array<number>(8).fill(0), tag]);
+const jpeg = (tag: number) => Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x01, 0x68, 0x02, 0x80, ...Array.from({ length: 8 }, () => 0), tag]);
 
 function makeCapture(): { dir: string; captureId: CaptureId } {
   const dir = tmp("capture");

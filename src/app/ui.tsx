@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import type { EvidenceId } from "../shared/ids";
 import type { DiagramFrame, EvidenceBundle, Frame, Passage, TranscriptOrigin } from "../shared/domain";
@@ -78,22 +78,19 @@ export function Link({ to, children }: { readonly to: Route; readonly children: 
 export type Async<T> = { readonly data: T | null; readonly error: string | null; readonly loading: boolean; readonly reload: () => void };
 
 /** Keeps the last data while reloading, so polling never blanks the screen. */
-export function useAsync<T>(load: () => Promise<T>, deps: readonly unknown[]): Async<T> {
-  const [state, setState] = useState<{ data: T | null; error: string | null; loading: boolean }>({ data: null, error: null, loading: true });
+export function useAsync<T>(load: () => Promise<T>): Async<T> {
   const [tick, setTick] = useState(0);
+  const [state, setState] = useState<{ data: T | null; error: string | null; load: (() => Promise<T>) | null; tick: number }>({ data: null, error: null, load: null, tick: -1 });
   useEffect(() => {
     let live = true;
-    setState((s) => ({ ...s, loading: true }));
     load().then(
-      (data) => live && setState({ data, error: null, loading: false }),
-      (e: unknown) => live && setState((s) => ({ data: s.data, error: e instanceof Error ? e.message : String(e), loading: false })),
+      (data) => { if (live) setState({ data, error: null, load, tick }); },
+      (e: unknown) => { if (live) setState((s) => ({ data: s.data, error: e instanceof Error ? e.message : String(e), load, tick })); },
     );
-    return () => {
-      live = false;
-    };
-  }, [...deps, tick]);
+    return () => { live = false; };
+  }, [load, tick]);
   const reload = useCallback(() => setTick((t) => t + 1), []);
-  return { ...state, reload };
+  return { data: state.data, error: state.error, loading: state.load !== load || state.tick !== tick, reload };
 }
 
 export function ErrorNote({ error, retry }: { readonly error: string | null; readonly retry?: () => void }) {
@@ -108,26 +105,26 @@ export function ErrorNote({ error, retry }: { readonly error: string | null; rea
 // ───────────────────────────── Evidence ─────────────────────────────────────
 
 export function FrameImage({ api, id }: { readonly api: AppApi; readonly id: EvidenceId }) {
-  const [image, setImage] = useState<{ id: EvidenceId; src: string | null; failed: boolean }>({ id, src: null, failed: false });
+  const request = useMemo(() => ({ api, id }), [api, id]);
+  const [image, setImage] = useState<{ request: typeof request | null; src: string | null; failed: boolean }>({ request: null, src: null, failed: false });
   useEffect(() => {
     let url: string | null = null;
     let live = true;
-    setImage({ id, src: null, failed: false });
-    api.frameImage(id).then(
+    request.api.frameImage(request.id).then(
       (blob) => {
         if (!live) return;
         url = URL.createObjectURL(blob);
-        setImage({ id, src: url, failed: false });
+        setImage({ request, src: url, failed: false });
       },
-      () => live && setImage({ id, src: null, failed: true }),
+      () => live && setImage({ request, src: null, failed: true }),
     );
     return () => {
       live = false;
       if (url !== null) URL.revokeObjectURL(url);
     };
-  }, [api, id]);
-  if (image.id === id && image.failed) return <p className="muted">Frame not available.</p>;
-  return image.id !== id || image.src === null ? <p className="muted">Loading frame...</p> : <img className="frame" src={image.src} alt="Lecture frame" />;
+  }, [request]);
+  if (image.request === request && image.failed) return <p className="muted">Frame not available.</p>;
+  return image.request !== request || image.src === null ? <p className="muted">Loading frame...</p> : <img className="frame" src={image.src} alt="Lecture frame" />;
 }
 
 /** The source evidence for a set of ids: transcript passages and frames. An id the backend does not return is shown as unavailable. */
@@ -156,8 +153,7 @@ export function EvidencePane(props: EvidenceProps) {
 
 function EvidenceContents(props: EvidenceProps) {
   const { api, ids } = props;
-  const key = ids.join(",");
-  const bundle = useAsync(() => (ids.length === 0 ? Promise.resolve(null) : api.evidence({ ids })), [api, key]);
+  const bundle = useAsync(useCallback(() => (ids.length === 0 ? Promise.resolve(null) : api.evidence({ ids })), [api, ids]));
   if (ids.length === 0) return <p className="muted">Source evidence appears here when the tutor explains or checks something.</p>;
   if (bundle.error !== null) return <ErrorNote error={bundle.error} retry={bundle.reload} />;
   if (bundle.data === null) return <p className="muted">Loading evidence...</p>;
