@@ -1,7 +1,8 @@
 /**
  * `bun run build:ext` (W2). Bun.build per entry (content, main-world, worker,
  * popup, options), target "browser", minify off (inspectable), sourcemap linked.
- * Copies manifest.json and the popup/options HTML to dist/extension/. Fails if
+ * Copies manifest.json, the popup/options HTML, their stylesheet and its bundled
+ * font and licence to dist/extension/. Fails if
  * any entry's bundle graph contains src/backend/ or a node:/bun: import.
  *
  * Content scripts must be classic scripts (iife). The worker, popup and options
@@ -28,6 +29,9 @@ const STATIC_FILES: readonly { readonly from: string; readonly to: string }[] = 
   { from: "manifest.json", to: "manifest.json" },
   { from: "popup/popup.html", to: "popup.html" },
   { from: "popup/options.html", to: "options.html" },
+  { from: "popup/stationery.css", to: "stationery.css" },
+  { from: "../app/assets/fonts-v2/pixelify-sans.ttf", to: "fonts/pixelify-sans.ttf" },
+  { from: "../app/assets/fonts-v2/OFL-PixelifySans.txt", to: "fonts/OFL-PixelifySans.txt" },
 ];
 
 const keepExtensionOnly: Bun.BunPlugin = {

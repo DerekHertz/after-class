@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { randomId } from "../shared/ids";
 import type { CaptureId, ReviewId } from "../shared/ids";
 import type { ReviewOptions, StartChoice } from "../shared/domain";
 import type { AppApi } from "./api";
 import { formatClock, inspectBundle, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
 import type { OptionsScreen, ScopeSummary, SourceTitles, StartOffer } from "./core";
+import { objectFrame } from "./room-object";
 import { BundleInspector, ErrorNote, EvidencePane, Link, navigate, useAsync } from "./ui";
 
 
@@ -151,8 +152,8 @@ export async function checkAgain(
 }
 
 export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readonly captureId: CaptureId }) {
-  const capture = useAsync(() => api.captureView(captureId), [api, captureId]);
-  const options = useAsync(() => api.reviewOptions(captureId), [api, captureId]);
+  const capture = useAsync(useCallback(() => api.captureView(captureId), [api, captureId]));
+  const options = useAsync(useCallback(() => api.reviewOptions(captureId), [api, captureId]));
   const [startError, setStartError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [refused, setRefused] = useState<ReviewOptions | null>(null);
@@ -212,7 +213,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
   }
 
   return (
-    <main className="notebook-page capture-page">
+    <main className="notebook-page capture-page room-paper" {...objectFrame("source")}>
       <header className="page-heading">
         <div><p className="page-kicker">After Class</p><h1>Your lecture</h1></div>
         <nav aria-label="Capture navigation"><Link to={{ page: "record", reviewId: null }}>My notebook</Link> <Link to={{ page: "usage" }}>Usage</Link></nav>
@@ -271,7 +272,7 @@ function summaryTitle(titles: readonly string[]): string {
 }
 
 function CaptureEvidence({ api, captureId, titles }: { readonly api: AppApi; readonly captureId: CaptureId; readonly titles: SourceTitles }) {
-  const bundle = useAsync(() => api.evidence({ captureId }), [api, captureId]);
+  const bundle = useAsync(useCallback(() => api.evidence({ captureId }), [api, captureId]));
   if (bundle.error !== null) return <ErrorNote error={bundle.error} retry={bundle.reload} />;
   if (bundle.data === null) return <p className="muted">Loading...</p>;
   return <BundleInspector report={inspectBundle(bundle.data, titles)} />;

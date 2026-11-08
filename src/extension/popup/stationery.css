@@ -1,0 +1,51 @@
+/* The popup and the options page are written on the same parchment, ink and pixel hand as the app's pages. The font is
+   bundled with the extension (scripts/build-extension.ts), so neither page makes a network request for it. */
+@font-face { font-family: 'After Class Pixel'; src: url('fonts/pixelify-sans.ttf') format('truetype'); font-weight: 400 700; font-display: swap; }
+
+:root {
+  color-scheme: light;
+  --paper: #fbf3e2; --paper-deep: #f1e2c2; --ink: #2a1a0b; --ink-soft: #563719; --rule: #56371966; --link: #1b3a7a;
+  --bar: #1a2b3b; --bar-ink: #f6ecd8; --focus: #c2410c;
+  --ok: #1f6b3a; --warn: #8a4b00; --bad: #821a12;
+  --pixel: 'After Class Pixel', system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 400 15px/1.45 var(--pixel); }
+h1 { margin: 0; font: 600 20px/1.2 var(--pixel); }
+a { color: var(--link); text-underline-offset: 3px; }
+code { font-family: var(--mono); font-size: 13px; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+button { min-height: 44px; padding: 6px 14px; border: 2px solid var(--ink); border-radius: 0; background: var(--paper-deep); color: var(--ink); font: 600 15px/1.15 var(--pixel); box-shadow: 0 3px 0 #2a1a0b4d; cursor: pointer; }
+button:hover:not(:disabled) { background: #e6d1a6; }
+button:active:not(:disabled) { translate: 0 2px; box-shadow: 0 1px 0 #2a1a0b4d; }
+button.primary { border-color: var(--bar); background: var(--bar); color: var(--bar-ink); }
+button.primary:hover:not(:disabled) { border-color: var(--ink); background: var(--ink); }
+button:disabled { opacity: .55; cursor: default; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Popup: a 340 px slip, topped with the room's navigation colour. */
+[data-page="popup"] body { width: 340px; }
+[data-page="popup"] main { display: grid; gap: 10px; padding: 12px 14px 14px; border-top: 6px solid var(--bar); }
+.status { justify-self: start; padding: 4px 10px; border: 2px solid currentColor; border-left-width: 8px; color: var(--ink-soft); font-weight: 600; }
+:is(.status, dd)[data-tone="ok"] { color: var(--ok); }
+:is(.status, dd)[data-tone="warn"] { color: var(--warn); }
+:is(.status, dd)[data-tone="bad"] { color: var(--bad); }
+dl { display: grid; grid-template-columns: 5.5em 1fr; gap: 4px 8px; margin: 0; padding-top: 8px; border-top: 2px dashed var(--rule); }
+dt { color: var(--ink-soft); }
+dd { margin: 0; overflow-wrap: anywhere; }
+dd[data-tone]:not([data-tone="neutral"]) { font-weight: 600; }
+.invite { display: grid; gap: 8px; padding: 8px 10px; border: 2px solid var(--warn); border-left-width: 8px; background: #fbe9c8; }
+.note { color: var(--ink-soft); }
+.error { padding: 6px 10px; border: 2px solid var(--bad); border-left-width: 8px; color: var(--bad); font-weight: 600; overflow-wrap: anywhere; }
+
+/* Options: one sheet of parchment on the room's navigation colour. */
+[data-page="options"] { background: var(--bar); }
+[data-page="options"] body { max-width: 34rem; margin: 32px auto; padding: 20px 24px 24px; border: 3px solid var(--ink); box-shadow: 6px 6px 0 #00000059; }
+[data-page="options"] h1 { margin-bottom: 8px; padding-bottom: 8px; border-bottom: 2px dashed var(--rule); }
+label { display: block; margin-bottom: 4px; font-weight: 600; }
+input { width: 100%; min-height: 44px; padding: 8px 12px; border: 2px solid var(--ink); border-radius: 0; background: #fffaf0; color: var(--ink); font: 400 14px/1.4 var(--mono); box-shadow: inset 2px 2px 0 #0000001a; }
+[data-page="options"] .row { margin: 12px 0; }
+#result { min-height: 1.5em; margin: 0; color: var(--ink-soft); font-weight: 600; }
+@media (max-width: 600px) { [data-page="options"] body { margin: 12px; padding: 16px; } }

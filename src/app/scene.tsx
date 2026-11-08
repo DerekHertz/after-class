@@ -39,7 +39,7 @@ export function SceneShell({ children }: { readonly children: ReactNode }) {
   return <div className="scene-shell" data-scene={appearance.scene} data-motion={appearance.motion} data-detail={appearance.detail} style={roomStyle(appearance.scene)}>
     <header className="scene-masthead">
       <Link to={{ page: "home" }}><span className="bell-mark" aria-hidden="true" /><span>After Class</span></Link>
-      <span className="room-name">{SCENES[appearance.scene].name}</span><AppearancePicker />
+      <AppearancePicker />
     </header>
     <div className="scene-content">{children}</div>
     <footer className="scene-footer">

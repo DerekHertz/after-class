@@ -4,7 +4,6 @@
 @font-face { font-family: 'After Class Sans'; src: url('./assets/fonts-v2/dm-sans-600.ttf') format('truetype'); font-weight: 600; font-display: swap; }
 @font-face { font-family: 'After Class Sans'; src: url('./assets/fonts-v2/dm-sans-700.ttf') format('truetype'); font-weight: 700; font-display: swap; }
 .scene-shell { --font: 'After Class Sans', system-ui, sans-serif; font-family: var(--font); }
-.scene-masthead > a { display: inline-flex; align-items: center; gap: 10px; font-family: 'After Class Serif', Georgia, serif; font-weight: 400; }
 .bell-mark { display: inline-block; width: 30px; height: 38px; background: url('./assets/scenes-v2/bell.png') center / contain no-repeat; }
 .review .line { margin: 12px 0 16px; padding: 0 0 0 14px; border-left: 4px solid #b3b0a2; }
 .review .line.tutor { border-color: #cd8f6b; }.review .line.you { border-color: #3159a1; }

@@ -61,30 +61,29 @@ export class FakeIDB {
   }
 
   private db(): Any {
-    const self = this;
     return {
-      objectStoreNames: { contains: (n: string) => self.stores.has(n) },
-      createObjectStore: (n: string, o: Any) => self.stores.set(n, { keyPath: o.keyPath, rows: new Map() }),
+      objectStoreNames: { contains: (n: string) => this.stores.has(n) },
+      createObjectStore: (n: string, o: Any) => this.stores.set(n, { keyPath: o.keyPath, rows: new Map() }),
       transaction: () => {
         const tx: Any = {
           objectStore: (n: string) => {
-            const s = self.stores.get(n)!;
+            const s = this.stores.get(n)!;
             const sorted = (range?: Any) =>
               [...s.rows.values()]
-                .map((v) => ({ k: self.keyOf(s, v), v }))
+                .map((v) => ({ k: this.keyOf(s, v), v }))
                 .filter((e) => !range || (cmp(e.k, range.lo) >= 0 && cmp(e.k, range.hi) <= 0))
                 .sort((a, b) => cmp(a.k, b.k));
             return {
-              get: (k: Any) => self.req(() => s.rows.get(JSON.stringify(k))),
-              put: (v: Any) => void s.rows.set(JSON.stringify(self.keyOf(s, v)), structuredClone(v)),
+              get: (k: Any) => this.req(() => s.rows.get(JSON.stringify(k))),
+              put: (v: Any) => void s.rows.set(JSON.stringify(this.keyOf(s, v)), structuredClone(v)),
               delete: (range: Any) => void sorted(range).forEach((e) => s.rows.delete(JSON.stringify(e.k))),
-              getAll: (range: Any, limit?: number) => self.req(() => sorted(range).slice(0, limit).map((e) => structuredClone(e.v))),
-              count: (range: Any) => self.req(() => sorted(range).length),
-              getAllKeys: () => self.req(() => sorted().map((e) => e.k)),
+              getAll: (range: Any, limit?: number) => this.req(() => sorted(range).slice(0, limit).map((e) => structuredClone(e.v))),
+              count: (range: Any) => this.req(() => sorted(range).length),
+              getAllKeys: () => this.req(() => sorted().map((e) => e.k)),
             };
           },
         };
-        Object.defineProperty(tx, "oncomplete", { set: (f) => void setTimeout(f, 5) });
+        Object.defineProperty(tx, "oncomplete", { set: (f) => { setTimeout(f, 5); } });
         return tx;
       },
     };
@@ -215,7 +214,8 @@ export async function boot(env: Env): Promise<{ c: FakeChrome; errors: string[] 
   const realError = console.error;
   console.error = (...a: unknown[]) => void errors.push(a.map(String).join(" "));
   try {
-    await import(`../src/extension/worker/service-worker.ts?v=${++nth}`);
+    nth += 1;
+    await import(`../src/extension/worker/service-worker.ts?v=${nth}`);
     await wait();
   } finally {
     console.error = realError;

@@ -76,6 +76,8 @@ export function AppearanceProvider({ children }: { readonly children: ReactNode 
   const [voice, setVoiceState] = useState(voiceEnabled);
   const setVoice = useCallback((on: boolean) => { voiceOn = on; persistVoice(browserStorage(), on); setVoiceState(on); }, []);
   const update = useCallback((patch: Partial<Appearance>) => setAppearance(p => ({ ...p, ...patch })), []);
+  // Report a synchronous browser-storage write failure to the user.
+  // eslint-disable-next-line react/set-state-in-effect
   useEffect(() => { setPersistent(persistAppearance(browserStorage(), appearance)); }, [appearance]);
   const value = useMemo(() => ({ appearance, update, activity, setActivity, persistent, voice, setVoice }), [appearance, update, activity, persistent, voice, setVoice]);
   return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;

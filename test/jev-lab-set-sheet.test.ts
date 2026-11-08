@@ -7,24 +7,21 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadLabels } from "../scripts/jev-lab";
+import { VISUAL_STEP_RULE, draftLabelsSet } from "../scripts/jev-lab-draft";
+import type { Proposals } from "../scripts/jev-lab-proposals";
+import { proposalsAgainstLabels, validateProposals } from "../scripts/jev-lab-proposals";
+import type { LabelFileV2 } from "../scripts/jev-lab-score";
+import { makeSplitter, validateLabels } from "../scripts/jev-lab-score";
+import type { SetData, SetState } from "../scripts/jev-lab-set-client";
+import { BOUNDARY_TOLERANCE_S, FRAME_FILE, STEP_TOLERANCE_S, disagreements, evaluate, initialState, labelJson, makeGroup, mergeProposals, modelLabel, proposalsLabel, removeItem, removeMember, restoreState, setSignature, setStatus, toggleMark } from "../scripts/jev-lab-set-client";
+import { generateSheet } from "../scripts/jev-lab-sheet";
 import { openDb } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
 import type { CaptureFact, CaptureFactBody } from "../src/shared/domain";
-import { randomId, stableId } from "../src/shared/ids";
 import type { CaptureId, MemoKey } from "../src/shared/ids";
+import { randomId, stableId } from "../src/shared/ids";
 import { media } from "../src/shared/time";
-import { VISUAL_STEP_RULE, draftLabelsSet, loadLabels } from "../scripts/jev-lab";
-import { makeSplitter, validateLabels } from "../scripts/jev-lab-score";
-import type { LabelFileV2 } from "../scripts/jev-lab-score";
-import { proposalsAgainstLabels, validateProposals } from "../scripts/jev-lab-proposals";
-import type { Proposals } from "../scripts/jev-lab-proposals";
-import { generateSheet } from "../scripts/jev-lab-sheet";
-import { proposalsLabel } from "../scripts/jev-lab-set-client";
-import {
-  BOUNDARY_TOLERANCE_S, FRAME_FILE, STEP_TOLERANCE_S, disagreements, evaluate, initialState, labelJson, makeGroup, mergeProposals, modelLabel, removeItem, removeMember, restoreState, setSignature,
-  setStatus, toggleMark,
-} from "../scripts/jev-lab-set-client";
-import type { SetData, SetState } from "../scripts/jev-lab-set-client";
 
 const cleanup: string[] = [];
 afterEach(() => {

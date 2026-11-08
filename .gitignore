@@ -6,3 +6,5 @@ data/
 .env
 .claude/*
 !.claude/skills/
+test-results/
+playwright-report/

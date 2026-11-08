@@ -45,7 +45,7 @@ export const isDisputed = (o: Pick<Observation, "status">): boolean => o.status 
 
 /** The focused views, in the order both entry points show them. A view with nothing in it is not offered. */
 export const NOTEBOOK_VIEWS = [
-  { value: "all", label: "All topics", matches: (_: NotebookTopic) => true },
+  { value: "all", label: "All topics", matches: (_input: NotebookTopic) => true },
   { value: "revisit", label: "To revisit", matches: (t: NotebookTopic) => t.revisit },
   { value: "disputed", label: "Disputed", matches: (t: NotebookTopic) => t.disputed },
 ] as const;

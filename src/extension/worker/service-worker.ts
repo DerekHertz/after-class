@@ -251,7 +251,7 @@ chrome.runtime.onConnect.addListener((port) => {
 async function onContentMessage(tabId: number, msg: FromContent): Promise<void> {
   if ("type" in msg) {
     if (msg.type === "flushed") {
-      for (const wake of [...(flushWaiters.get(tabId) ?? [])]) wake();
+      for (const wake of Array.from(flushWaiters.get(tabId) ?? [])) wake();
       return;
     }
     await applyEvent(tabId, { kind: msg.type });

@@ -6,21 +6,21 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { RunOptions } from "../scripts/jev-lab";
+import { EXP6_BUDGET_CALLS, planLab, readState, reportFromFile, runLab } from "../scripts/jev-lab";
+import type { ArmConfig, RoundReport } from "../scripts/jev-lab-arm";
+import { PRODUCT_QUESTIONS, armConfigFromBaseline, selectRound, validateArmConfig } from "../scripts/jev-lab-arm";
+import type { LabelFile, Report } from "../scripts/jev-lab-score";
+import { DEFAULT_THRESHOLDS, parseResults } from "../scripts/jev-lab-score";
 import { openDb } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
 import type { JevAnswer, JevClient, JevRequest } from "../src/backend/providers/jev";
 import { boundaryTask, boundaryWordingVersion, frameChangeTask, frameChangeWordingVersion } from "../src/backend/providers/jev-tasks";
 import { SEGMENTATION_DEFAULTS } from "../src/backend/segmentation";
 import type { CaptureFact, CaptureFactBody } from "../src/shared/domain";
-import { randomId, stableId } from "../src/shared/ids";
 import type { CaptureId, MemoKey } from "../src/shared/ids";
+import { randomId, stableId } from "../src/shared/ids";
 import { media } from "../src/shared/time";
-import { EXP6_BUDGET_CALLS, planLab, readState, reportFromFile, runLab } from "../scripts/jev-lab";
-import type { RunOptions } from "../scripts/jev-lab";
-import { PRODUCT_QUESTIONS, armConfigFromBaseline, selectRound, validateArmConfig } from "../scripts/jev-lab-arm";
-import type { ArmConfig, RoundReport } from "../scripts/jev-lab-arm";
-import { DEFAULT_THRESHOLDS, parseResults } from "../scripts/jev-lab-score";
-import type { LabelFile, Report } from "../scripts/jev-lab-score";
 
 const cleanup: string[] = [];
 afterEach(() => {
@@ -35,7 +35,7 @@ const tmp = (name: string) => {
 // ───────────────────────────── a fixture capture (the same shape experiment 2's tests use) ─────────────────────────────
 
 const VIDEO = "aaaaaaaaaaa";
-const jpeg = (tag: number) => Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x01, 0x68, 0x02, 0x80, ...new Array<number>(8).fill(0), tag]);
+const jpeg = (tag: number) => Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x01, 0x68, 0x02, 0x80, ...Array.from({ length: 8 }, () => 0), tag]);
 type Frm = { id: string; at: number; tag: number };
 
 function makeCapture(): { dir: string; captureId: CaptureId } {

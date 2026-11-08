@@ -38,7 +38,7 @@ import type { ClaudeCli, SpawnFn } from "./providers/claude";
 import { claimSupportTask, productBoundaryTask, productFrameChangeTask } from "./providers/jev-tasks";
 import type { BoundaryInput, FrameChangeInput } from "./providers/jev-tasks";
 import { createEvidence } from "./evidence";
-import type { EvidenceStore, EvidenceStoreWithProbe } from "./evidence";
+import type { EvidenceStoreWithProbe } from "./evidence";
 import { PRODUCT_JEV_SETUP } from "./jev-setup";
 import { createSegmentation } from "./segmentation";
 import type { Segmentation } from "./segmentation";

@@ -74,7 +74,7 @@ function rig() {
         wall += 250;
         if (!video.paused && !video.seeking) video.currentTime += 0.25 * video.playbackRate;
         fire("timeupdate");
-        if (i % 4 === 3) for (const fn of [...intervals]) fn();
+        if (i % 4 === 3) for (const fn of Array.from(intervals)) fn();
       }
     },
     /** Wall time passes while the player buffers: currentTime does not move. */
@@ -82,7 +82,7 @@ function rig() {
       for (let i = 0; i < Math.round(seconds * 4); i++) {
         wall += 250;
         fire("timeupdate");
-        if (i % 4 === 3) for (const fn of [...intervals]) fn();
+        if (i % 4 === 3) for (const fn of Array.from(intervals)) fn();
       }
     },
     start() {
@@ -108,7 +108,7 @@ function rig() {
     },
     setHidden(h: boolean) {
       hidden = h;
-      for (const fn of [...visibility]) fn();
+      for (const fn of Array.from(visibility)) fn();
     },
     startAd(domClass: boolean) {
       if (domClass) classes.add("ad-showing");
@@ -533,7 +533,7 @@ describe("simulated viewing sessions", () => {
 
       for (let step = 0; step < 300; step++) {
         const x = rand();
-        if (x < 0.04) r.video.paused ? r.start() : r.pause();
+        if (x < 0.04) { if (r.video.paused) r.start(); else r.pause(); }
         else if (x < 0.07) r.seek(100 + Math.floor(rand() * 400));
         else if (x < 0.09) r.setRate([0.5, 1, 1.5, 2][Math.floor(rand() * 4)]!);
         else if (x < 0.11) r.setHidden(rand() < 0.5);
