@@ -1,6 +1,6 @@
 # How to write PR descriptions and commit messages
 
-These rules come from pstack's `technical-writing` and `unslop` skills. They are here so that agents without pstack, such as the `@claude` workflow, follow them too. When a rule makes a sentence worse, fix the sentence another way.
+Every PR in this repository follows pstack's Opening a PR playbook, then its `technical-writing` and `unslop` skills. These rules apply to humans, local agents and the `@claude` workflow, even when pstack is not installed. The repository template is `.github/PULL_REQUEST_TEMPLATE.md`. When a prose rule makes a sentence worse, fix the sentence another way.
 
 A PR body is a briefing that a reviewer can read in under a minute. Say what changed, why, and how you know it works. Link logs, runs, SHA lists, and long tables instead of pasting them.
 
@@ -32,13 +32,25 @@ A PR body is a briefing that a reviewer can read in under a minute. Say what cha
 - No "simply", "easy", or "quickly" in steps.
 - No slashes such as "and/or", and no plurals written as "(s)".
 - No metaphors for code, such as "harness", "surface", "wedge", "north star", or "rides along".
-- No decorative emoji, no title-case headings, no curly quotes, and no chatbot phrases such as "Let me know if...".
+- No decorative emoji, no title-case headings beyond the required PR section names below, no curly quotes, and no chatbot phrases such as "Let me know if...".
 
-## Shape
+## Title
 
-1. The first line says what the PR does and links the issue it fixes.
-2. A short paragraph says why the change is needed.
-3. A short paragraph or a few bullets say what changed, with real paths.
-4. The last paragraph lists the checks you ran and their results, and anything not verified.
+Use `type(scope): subject`, with no trailing period. Use a short imperative subject that describes the final change. For example, `fix(review): preserve notebook drafts`.
 
-Introduce a list with a full sentence. Use numbered lists only for steps in order.
+Choose a type such as `feat`, `fix`, `docs`, `refactor`, `test`, `chore` or `perf`. The scope names the affected area. The title syntax is exempt from the prose punctuation rules above.
+
+## Body
+
+Keep the body under about 40 lines. It becomes the squash commit body. Use these exact headings in this order. Keep `## Scope` in every PR and omit other sections only when there is nothing to say.
+
+- `## Why` gives the problem and approach in one to three short sentences. Link the issue it addresses. Omit commit history and branch ancestry.
+- `## What changed` gives one to three short bullets. Name a path or symbol only when it helps explain the change. Name both sides of a rename.
+- `## Scope` always gives one to three short items about what the PR covers and deliberately leaves out. Avoid paths and file inventories here.
+- `## Tradeoffs` is optional. Include only rejected alternatives that a reviewer would otherwise ask about.
+- `## Blast Radius` gives one or two sentences about affected users or behavior and the relevant risk. If the main branch is failing, explain the cost of leaving it that way.
+- `## Verification` gives one to three bullets with actual commands or user flows and their results. State what remains unverified. For performance work, report one primary before and after measurement with its unit and link the full evidence.
+
+Attach screenshots or videos after the sections when they prove a claim. Link detailed logs, commit IDs, review notes and token reports instead of pasting them into the body. Rewrite the title and body around the final implementation when scope changes.
+
+Use whole sentences in bullets. Use numbered lists only for steps in order. When an agent uses a CLI to publish a multiline body, write the exact Markdown to a file and pass `--body-file`. Read the published PR back to verify the title and formatting.
