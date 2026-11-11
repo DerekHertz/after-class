@@ -98,12 +98,15 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 ## D. Review and learning record (approved 2026-11-03)
 
 ```text
+[code]  Before a review, order the topics by how many other topics depend on them,
+        whether their claims are definitions or mechanisms, and lecturer emphasis
+        plus the one-line goal I type. A topic with nothing reviewable is not shown.
 [code]  Show the topics in the frozen scope as a checklist.
 [user]  Mark the topics I'm fuzzy on (or none), optionally add a note on what feels fuzzy.
 [agent] Main questions go to the fuzzy topics first; follow-ups as needed.
-[agent] Then quick checks on the rest: one short recall question each, on a sample
-        of at most 3 unmarked topics. A clear answer moves on; a shaky one becomes
-        a main question if any are left.
+[agent] Group the scope's topics into clusters. For each cluster not marked fuzzy,
+        ask one short screening question that traces the cluster's chain. A clear
+        answer moves on; a shaky one becomes a main question if any are left.
 [agent] No topics marked → today's behavior (open recall question, no recap first).
 [user] Speak/type an answer, skip, "I don't know", hint, explain-it, pause, end.
 [user]  Ask "show me the diagram" on a topic, any time in the review.
@@ -112,6 +115,8 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 [agent] Add a short state-change summary: what changes, in order, with concrete
         values first; each line cites the passage or frame it comes from.
 [agent] Up to 3 main questions; follow-ups as needed. Evidence shown beside.
+[agent] A main question may trace a chain of topics end to end. Its observation
+        names every topic it touched.
 [agent] Mismatch → one tentative, source-grounded diagnostic question.
 [agent] Prerequisite gap suspected → propose a detour.
 [user] Accept or decline the detour.
@@ -148,6 +153,8 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 Amendment (2026-11-06), Derek: "I was also thinking it's probably easier if I also state like, here are the areas that like I'm a little bit fuzzy on, and those are the areas that we focus, but then the tutor kind of just checks very quickly that the other areas are good as well." The agent drafted the checklist, fuzzy-first and quick-check lines above (replacing the single "Open recall question" line) and rule R18; Derek replied "Approve as written".
 
 Amendment (2026-11-06), Derek: "diagrams, stuff that like I can use to explore and kind of pick apart the topics. And this should be interpretable, like concise diagrams that kind of describe the state." After Derek pointed to the Illustrated Notes method, the agent drafted the diagram lines above (the "show me the diagram" lines in the review and the illustrated page per topic in the record) and rule R19; Derek replied "Approve as written".
+
+Amendment (2026-11-11), Derek, on the agent's drafts: "this sounds good" for cluster screening, "this is good" for trace questions, and "i think these are all important" for the three importance definitions (dependents, claim role, lecturer emphasis plus a one-line goal). The agent drafted the cluster, trace and importance lines above, replacing the lines about a sample of at most 3 unmarked topics; Derek replied "Approve as written". R1 to R19 are unchanged. Not decided yet: whether "No topics marked → today's behavior" or screening every cluster applies when nothing is marked (#147), where the learner types the one-line goal (#149), and whether a trace question gets one status or one per topic (#148). The code still follows the earlier quick-check lines until those issues land.
 
 Amendment (2026-11-10), Derek, issue #137: "Opening a review should feel like entering a classroom." The 2026-11-06 review opened with two correction announcements before the first question. The agent drafted the "(#137)" line above and changed the next line from "Disclose the correction with evidence" to "Disclose any other correction with evidence"; Derek replied "adopt as written". No rule text changed. The TLA+ model has no disclosure step, so it is unchanged; `docs/flows/model/check.sh` was rerun on this change and still holds every [TLC] rule.
 

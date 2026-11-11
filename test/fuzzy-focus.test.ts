@@ -19,20 +19,24 @@ const ROOT = join(import.meta.dir, "..");
 const DOC = readFileSync(join(ROOT, "docs/flows/after-class.md"), "utf8");
 
 describe("flow doc: the approved lines are byte-identical", () => {
-  test("section D opens with the checklist lines, replacing the single open-recall line", () => {
+  test("section D opens with the importance and checklist lines, replacing the single open-recall line", () => {
     const lines = [
+      "[code]  Before a review, order the topics by how many other topics depend on them,",
+      "        whether their claims are definitions or mechanisms, and lecturer emphasis",
+      "        plus the one-line goal I type. A topic with nothing reviewable is not shown.",
       "[code]  Show the topics in the frozen scope as a checklist.",
       "[user]  Mark the topics I'm fuzzy on (or none), optionally add a note on what feels fuzzy.",
       "[agent] Main questions go to the fuzzy topics first; follow-ups as needed.",
-      "[agent] Then quick checks on the rest: one short recall question each, on a sample",
-      "        of at most 3 unmarked topics. A clear answer moves on; a shaky one becomes",
-      "        a main question if any are left.",
+      "[agent] Group the scope's topics into clusters. For each cluster not marked fuzzy,",
+      "        ask one short screening question that traces the cluster's chain. A clear",
+      "        answer moves on; a shaky one becomes a main question if any are left.",
       "[agent] No topics marked → today's behavior (open recall question, no recap first).",
       "[user] Speak/type an answer, skip, \"I don't know\", hint, explain-it, pause, end.",
     ].join("\n");
     expect(DOC).toContain(`\`\`\`text\n${lines}`);
     expect(DOC).not.toContain("[agent] Open recall question on the frozen scope (no recap first).");
-    expect(DOC).toContain("[agent] Up to 3 main questions; follow-ups as needed. Evidence shown beside.");
+    expect(DOC).not.toContain("on a sample\n        of at most 3 unmarked topics");
+    expect(DOC).toContain("[agent] Up to 3 main questions; follow-ups as needed. Evidence shown beside.\n[agent] A main question may trace a chain of topics end to end. Its observation\n        names every topic it touched.");
   });
 
   test("R18 follows R17, byte for byte", () => {
@@ -44,6 +48,11 @@ describe("flow doc: the approved lines are byte-identical", () => {
 
   test("the amendment quotes Derek's request and approval verbatim", () => {
     expect(DOC).toContain("Amendment (2026-11-06), Derek: \"I was also thinking it's probably easier if I also state like, here are the areas that like I'm a little bit fuzzy on, and those are the areas that we focus, but then the tutor kind of just checks very quickly that the other areas are good as well.\"");
+    expect(DOC).toContain("Derek replied \"Approve as written\"");
+  });
+
+  test("the 2026-11-11 amendment quotes Derek's replies verbatim", () => {
+    expect(DOC).toContain("Amendment (2026-11-11), Derek, on the agent's drafts: \"this sounds good\" for cluster screening, \"this is good\" for trace questions, and \"i think these are all important\" for the three importance definitions");
     expect(DOC).toContain("Derek replied \"Approve as written\"");
   });
 });
