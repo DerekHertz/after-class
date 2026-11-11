@@ -48,6 +48,11 @@ export type LearningRecord = {
    * none has succeeded since, else "unsaved".
    */
   saveState(reviewId: ReviewId): ReviewSaveState;
+  /**
+   * Called inside the transaction that ends a review: marks its save pending (a save_failures row) until a save succeeds,
+   * so an ended review always has a saved_reviews or save_failures row even if the app never sends its save (#138).
+   */
+  markEndedInTx(reviewId: ReviewId): void;
   view(filter: { readonly reviewId?: ReviewId; readonly conceptId?: ConceptId }): RecordView;
   editNote(id: NoteId, text: string): void;
   /** Tombstone in note_deletions; the snapshot it cited becomes sweepable (R16 trigger). */
@@ -113,6 +118,11 @@ export function createRecord(db: Db, deps: {
     markFailed: db.sql.query(
       `INSERT INTO save_failures (review_id, error, failed_ms) VALUES (?1, ?2, ?3)
        ON CONFLICT (review_id) DO UPDATE SET error = excluded.error, failed_ms = excluded.failed_ms`,
+    ),
+    markEnded: db.sql.query(
+      `INSERT INTO save_failures (review_id, error, failed_ms) SELECT ?1, ?2, ?3
+       WHERE NOT EXISTS (SELECT 1 FROM saved_reviews WHERE review_id = ?1)
+       ON CONFLICT (review_id) DO NOTHING`,
     ),
     clearFailed: db.sql.query(`DELETE FROM save_failures WHERE review_id = ?`),
     markSaved: db.sql.query(
@@ -295,6 +305,7 @@ export function createRecord(db: Db, deps: {
   return {
     save,
     saveState,
+    markEndedInTx: (reviewId) => void q.markEnded.run(reviewId, "the review ended and its save has not run yet", now()),
     view,
     editNote: (id, text) => void q.editNote.run(id, text, now()),
     deleteNote: (id) => void q.deleteNote.run(id, now()),

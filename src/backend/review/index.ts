@@ -97,6 +97,8 @@ export type ReviewsDeps = {
   clearFailures: Memo["clearFailures"];
   runWrapUp(input: WrapUpInput): Promise<Lookup<WrapUpOutput>>;
   nextSeq(): Seq;
+  /** The record's markEndedInTx, run in the transaction that stores the wrap_up turn, so an ended review always has a save row (#138). */
+  endedInTx?(reviewId: ReviewId): void;
 };
 
 type ReviewRow = { id: string; capture_id: string; choice: string; scope_json: string; frozen_at_seq: number; started_ms: number };
@@ -524,6 +526,7 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
       const verdict = kit.validateMove(move, { ...input, ...grounding(review, input.state, input.turns) });
       if (!verdict.ok) return { ok: false, why: verdict.why };
       appendTurn(reviewId, outId, "tutor", threadOf(move), { move, say });
+      if (move.kind === "wrap_up") deps.endedInTx?.(reviewId);
       if (move.kind === "close_thread") {
         const after = stateOf(reviewId, review, loadTurns(reviewId)).state;
         if (!after.softTargetOffered && after.activeSeconds >= softTargetS) {

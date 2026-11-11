@@ -138,8 +138,10 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
   async function runTurn(turnId: TurnId, act: LearnerAct): Promise<void> {
     speaker.beginTurn();
     set({ live: startLive(turnId) });
+    let wrappedUp = false;
     try {
       for await (const event of api.sendTurn(reviewId, turnId, act)) {
+        if (event.type === "move" && event.move.kind === "wrap_up") wrappedUp = true;
         if (event.type === "learner_turn_stored") {
           await unsent.remove(turnId);
           await refreshUnsent();
@@ -154,12 +156,14 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
     }
     await refreshView();
     if (state.live?.status === "complete") set({ live: null });
-    await saveIfEnded();
+    await saveIfEnded(wrappedUp);
   }
 
-  async function saveIfEnded(): Promise<void> {
+  async function saveIfEnded(wrappedUp: boolean): Promise<void> {
     // A reloaded `save_pending` review waits for the learner's Retry; only a fresh end saves on its own.
-    if (state.view?.state.phase === "ended" && state.view.saved === "unsaved" && state.saveError === null) await save();
+    // The backend marks the save pending in the same transaction that ends the review (#138), so a turn that wrapped up saves either way.
+    const saved = state.view?.saved;
+    if (state.view?.state.phase === "ended" && (saved === "unsaved" || (wrappedUp && saved === "save_pending")) && state.saveError === null) await save();
   }
 
   async function save(): Promise<void> {

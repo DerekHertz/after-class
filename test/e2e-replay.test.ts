@@ -400,7 +400,7 @@ async function runProduct(opts: { restartAfterTurn: number | null }): Promise<Pr
   }
   const reviewView = reviewViewResponse.parse((await send(get("review view", `/reviews/${REVIEW}`))).json);
   expect(reviewView.state.phase).toBe("ended");
-  expect(reviewView.saved).toBe("unsaved");
+  expect(reviewView.saved).toBe("save_pending"); // #138: ending marks the save pending until POST /save
 
   // 5. save, and read the record back
   const saveReq = post("save", `/reviews/${REVIEW}/save`);

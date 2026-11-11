@@ -363,7 +363,7 @@ describe("GET /reviews/:id, POST /reviews/:id/save and the replay review", () =>
     const before = await rig.view(reviewId);
     expect(before.status).toBe(200);
     reviewViewResponse.parse(before.body);
-    expect(before.body).toMatchObject({ reviewId, captureId: rig.capture, saved: "unsaved", observations: [], state: { phase: "ended", mainQuestions: 2 } });
+    expect(before.body).toMatchObject({ reviewId, captureId: rig.capture, saved: "save_pending", observations: [], state: { phase: "ended", mainQuestions: 2 } });
     expect(before.body.scope.material).toEqual([[SRC, [[0, 300]]]]);
     expect(before.body.turns.filter((t: { actor: string }) => t.actor === "learner")).toHaveLength(5);
     expect(before.body.turns.filter((t: { actor: string }) => t.actor === "tutor")).toHaveLength(6);

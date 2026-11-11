@@ -332,6 +332,7 @@ export function reviewRig(script: Script = pick, extra: { turnDeadlineMs?: numbe
     ...world.deps,
     runTutor: (input, streamTo, signal) => memo.run(task, input, { signal, streamTo }),
     clearFailures: memo.clearFailures,
+    endedInTx: (reviewId) => record.markEndedInTx(reviewId),
   });
   const usable = (reviewId: ReviewId) => world.deps.assessableIn(world.captureId, reviews.view(reviewId).scope.material);
   const flags = { failSave: false };
