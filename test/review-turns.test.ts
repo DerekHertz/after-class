@@ -3,7 +3,7 @@ import { asSeq } from "../src/backend/db";
 import type { Reviews, TutorKit } from "../src/backend/review";
 import { MAX_MOVES_PER_TURN, createReviews } from "../src/backend/review";
 import type { TutorOutput } from "../src/backend/review/tutor";
-import { nextThreadId, tutorOwesMove, waitsForLearner } from "../src/backend/review/tutor";
+import { nextThreadId, tutorOwesMove, tutorRequest, waitsForLearner } from "../src/backend/review/tutor";
 import type { LearnerAct, Turn, TurnEvent, TutorMove, TutorMoveKind } from "../src/shared/domain";
 import type { ReviewId } from "../src/shared/ids";
 import { randomId, stableId } from "../src/shared/ids";
@@ -600,5 +600,18 @@ describe("claims only out for a recheck do not end the review; the move cap does
     expect(moveKinds(again)).toEqual([...moveKinds(first), "ask_main"]);
     expect(reviews.view(r.reviewId).turns.filter((x) => x.actor === "tutor")).toHaveLength(MAX_MOVES_PER_TURN + 1);
     expect(reviews.view(r.reviewId).owesMove).toBe(false);
+  });
+});
+
+describe("#135 the tutor's stable material does not change when a thread opens", () => {
+  test("the turn after ask_main gets the same claims and evidence, so the system text is cacheable", async () => {
+    const r = startedRig((input) => (input.state.openThread === null ? reply(askMain(input.claims[0]!.id), "In your own words?") : reply({ kind: "ask_followup", threadId: THREAD }, "Say more?")), {}, true);
+    await collect(r.reviews.turn(r.reviewId, randomId("turn"), answer()));
+    await collect(r.reviews.turn(r.reviewId, randomId("turn"), answer("it orders events")));
+    const [first, second] = r.tutor.calls;
+    expect(second!.state.openThread).toBe(THREAD);
+    expect(first!.evidence.passages.length).toBe(2);
+    expect(second!.evidence).toEqual(first!.evidence);
+    expect(tutorRequest(second!).system).toBe(tutorRequest(first!).system);
   });
 });

@@ -9,14 +9,16 @@
  * ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL are removed too: a Claude Code shell may set them,
  * and either would move billing or the endpoint off the login.
  * One arg builder:
- *   claude -p --model <m> --effort <e> --system-prompt <s>
+ *   claude -p --model <m> --effort <e> --system-prompt-file <f>
  *          --restricted --tools Read --strict-mcp-config --disable-slash-commands
  *          --no-session-persistence
  *          --output-format json --json-schema <z.toJSONSchema>                (structured calls)
  *          --output-format stream-json --verbose --include-partial-messages   (tutor)
  *          --add-dir <dir>                                                    (only when images are attached)
  *   resource search only: WebSearch, WebFetch added to --tools.
- * The prompt goes in on stdin: a single argv entry is capped near 128 KiB on Linux.
+ * The prompt goes in on stdin and the system prompt in a private temp file: a single argv
+ * entry is capped near 128 KiB on Linux, and the tutor's system prompt carries the review's
+ * claims and evidence (#135).
  * Untested: the first live call confirms login works with these flags.
  *
  * Images: Claude reads them with the Read tool. Each call copies its images into a
@@ -29,7 +31,7 @@
  * our DB. No --resume, so Claude's session store is never a second copy of a review.
  * No @anthropic-ai/sdk: the CLI is the only path to Claude.
  */
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -62,12 +64,12 @@ export type ClaudeCli = {
 };
 
 /** Pure, unit-tested: the exact argv for a request. The one place auth policy lives. */
-export function claudeArgs(req: ClaudeRequest, output: "json" | "stream-json", jsonSchema: string | null, addDir: string | null = null): readonly string[] {
+export function claudeArgs(req: ClaudeRequest, output: "json" | "stream-json", jsonSchema: string | null, addDir: string | null = null, systemFile: string | null = null): readonly string[] {
   return [
     "-p",
     "--model", req.model,
     "--effort", req.effort,
-    "--system-prompt", req.system,
+    ...(systemFile === null ? ["--system-prompt", req.system] : ["--system-prompt-file", systemFile]),
     "--restricted",
     "--tools", req.webTools ? "Read,WebSearch,WebFetch" : "Read",
     "--strict-mcp-config",
@@ -297,17 +299,22 @@ async function readAll(stream: ReadableStream<Uint8Array>, onLine?: (line: strin
 
 const safeName = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 60) || "image";
 
-async function stageImages(images: readonly ClaudeImage[], root: string): Promise<{ readonly dir: string; readonly note: string } | null> {
-  if (images.length === 0) return null;
-  const dir = await mkdtemp(join(root, "afterclass-img-"));
+/** Writes the system prompt, and any images, into one private temp dir for this call. */
+async function stageFiles(req: ClaudeRequest, root: string): Promise<{ readonly dir: string; readonly systemFile: string; readonly imageDir: string | null; readonly note: string }> {
+  const dir = await mkdtemp(join(root, "afterclass-call-"));
   try {
+    const systemFile = join(dir, "system.txt");
+    await writeFile(systemFile, req.system);
+    if (req.images.length === 0) return { dir, systemFile, imageDir: null, note: "" };
+    const imageDir = join(dir, "images");
+    await mkdir(imageDir);
     const lines: string[] = [];
-    for (const [n, img] of images.entries()) {
-      const path = join(dir, `${n}-${safeName(img.label)}.${img.mediaType === "image/png" ? "png" : "jpg"}`);
+    for (const [n, img] of req.images.entries()) {
+      const path = join(imageDir, `${n}-${safeName(img.label)}.${img.mediaType === "image/png" ? "png" : "jpg"}`);
       await writeFile(path, img.bytes);
       lines.push(`- ${img.label}: ${path}`);
     }
-    return { dir, note: `\n\nImages for this task. View each one with the Read tool before answering:\n${lines.join("\n")}\n` };
+    return { dir, systemFile, imageDir, note: `\n\nImages for this task. View each one with the Read tool before answering:\n${lines.join("\n")}\n` };
   } catch (err) {
     await rm(dir, { recursive: true, force: true });
     throw err;
@@ -341,12 +348,12 @@ export function createClaudeCli(opts: {
 
   async function execute(req: ClaudeRequest, output: "json" | "stream-json", jsonSchema: string | null, signal: AbortSignal, onLine?: (line: string) => void): Promise<Outcome> {
     const release = await limiter.acquire(signal);
-    let staged: Awaited<ReturnType<typeof stageImages>> = null;
+    let staged: Awaited<ReturnType<typeof stageFiles>> | null = null;
     try {
       signal.throwIfAborted();
-      staged = await stageImages(req.images, imageRoot);
+      staged = await stageFiles(req, imageRoot);
       signal.throwIfAborted();
-      const proc = spawn([opts.bin, ...claudeArgs(req, output, jsonSchema, staged?.dir ?? null)], { cwd: opts.cwd, env: childEnv() });
+      const proc = spawn([opts.bin, ...claudeArgs(req, output, jsonSchema, staged.imageDir, staged.systemFile)], { cwd: opts.cwd, env: childEnv() });
 
       let killTimer: ReturnType<typeof setTimeout> | undefined;
       // A child that ignores SIGTERM would hold this call, and its limiter slot, forever.
@@ -363,7 +370,7 @@ export function createClaudeCli(opts: {
       signal.addEventListener("abort", onAbort, { once: true });
       try {
         try {
-          proc.stdin.write(req.prompt + (staged?.note ?? ""));
+          proc.stdin.write(req.prompt + staged.note);
           proc.stdin.end();
         } catch {
           // the process already exited; its exit code and stderr explain why

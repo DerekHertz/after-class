@@ -6,7 +6,7 @@ import type {
   AssessableClaim, CodeNotice, Correction, EvidenceBundle, Frame, FrozenScope, LearnerAct, Passage, Turn, TutorMove, TutorMoveKind,
 } from "../src/shared/domain";
 import { Material, interval } from "../src/shared/time";
-import { allowedMoves, nextThreadId, parseMoveHeader, reviewState, tutorPrompt, tutorTask, validateMove, wrapUpTask } from "../src/backend/review/tutor";
+import { allowedMoves, nextThreadId, parseMoveHeader, reviewState, tutorPrompt, tutorRequest, tutorTask, validateMove, wrapUpTask } from "../src/backend/review/tutor";
 import type { TutorInput, WrapUpOutput } from "../src/backend/review/tutor";
 import type { ClaudeCli, ClaudeRequest } from "../src/backend/providers/claude";
 import { createMemo } from "../src/backend/providers/memo";
@@ -357,7 +357,7 @@ describe("tutorTask", () => {
     expect(r.value).toEqual({ move: askMain(1), say: "Without looking back, how would you describe the row picture?" });
     expect(streamed).toBe(opening);
     expect(requests[0]!.prompt).toContain(thread(1));
-    expect(requests[0]!.prompt).toContain(claimId(1));
+    expect(requests[0]!.system).toContain(claimId(1));
   });
 
   test("a resent turn at a later time hits the memo instead of calling again", async () => {
@@ -417,5 +417,24 @@ describe("begin", () => {
     const prompt = tutorPrompt(inputFor(log().learner(begin).turns));
     expect(prompt).toContain("(learner opened the review)");
     expect(prompt).not.toContain("(no turns yet");
+  });
+});
+
+describe("#135 prompt caching: stable material first, per-turn state last", () => {
+  test("two turns send the same system text byte for byte and differ only in the per-turn prompt", () => {
+    const first = log().learner({ kind: "begin" });
+    const second = log().learner({ kind: "begin" }).tutor(askMain(1), "In your own words?").learner(answer("it orders events"), thread(1));
+    const a = tutorRequest(inputFor(first.turns));
+    const b = tutorRequest(inputFor(second.turns));
+    expect(b.system).toBe(a.system);
+    expect(b.prompt).not.toBe(a.prompt);
+    for (const stable of ["claim 1", "claim 2", "passage 1", "passage 2"]) {
+      expect(a.system).toContain(stable);
+      expect(a.prompt).not.toContain(stable);
+    }
+    for (const perTurn of ["Allowed moves this turn", "Main questions asked", "Open thread", "Review so far"]) {
+      expect(a.system).not.toContain(perTurn);
+      expect(b.prompt).toContain(perTurn);
+    }
   });
 });

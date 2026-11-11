@@ -15,7 +15,7 @@ import { stableId } from "../../shared/ids";
 import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, ConceptId, EvidenceId, ReviewId, ThreadId, TurnId } from "../../shared/ids";
 import type {
   AssessableClaim, ChunkPrep, ChunkRevision, Claim, CodeNotice, Concept, Correction, EvidenceBundle, FrozenScope, InviteAnswer, InviteState,
-  LearnerAct, ReviewOptions, ReviewState, ReviewView, ScopePreview, Seq, StartChoice, StartResult, Turn, TurnEvent, TutorMove,
+  LearnerAct, ReviewOptions, ReviewView, ScopePreview, Seq, StartChoice, StartResult, Turn, TurnEvent, TutorMove,
 } from "../../shared/domain";
 import { Material } from "../../shared/time";
 import { asSeq } from "../db";
@@ -484,12 +484,14 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     return { kind: "spoken", move: lookup.value.move, say: lookup.value.say };
   }
 
-  /** The claims and evidence the tutor may use now (R3, R7): re-read on every call, so a claim that lost its check drops out. */
-  function grounding(review: Stored, state: ReviewState, turns: readonly Turn[]): Pick<TutorInput, "claims" | "evidence"> {
+  /**
+   * The claims and evidence the tutor may use now (R3, R7): re-read on every call, so a claim that lost its check drops out.
+   * The evidence is every passage and frame a usable claim cites, whatever thread is open, so it stays the same
+   * across turns and the tutor's system prompt is read from cache (#135).
+   */
+  function grounding(review: Stored): Pick<TutorInput, "claims" | "evidence"> {
     const usable = usableNow(review);
-    const asked = turns.find((t) => t.actor === "tutor" && (t.move.kind === "ask_main" || t.move.kind === "quick_check") && t.move.threadId === state.openThread);
-    const threadClaims = new Set<ClaimId>(asked?.actor === "tutor" && (asked.move.kind === "ask_main" || asked.move.kind === "quick_check") ? asked.move.claimIds : []);
-    const cited = new Set(usable.filter((c) => threadClaims.size === 0 || threadClaims.has(c.id)).flatMap((c) => c.evidence));
+    const cited = new Set(usable.flatMap((c) => c.evidence));
     const full = deps.bundle(review.scope.material);
     return { claims: usable, evidence: { ...full, passages: full.passages.filter((p) => cited.has(p.id)), frames: full.frames.filter((f) => cited.has(f.id)) } };
   }
@@ -504,7 +506,7 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
       }
     }
     const turns = loadTurns(reviewId);
-    const { claims, evidence } = grounding(review, state, turns);
+    const { claims, evidence } = grounding(review);
     const pendingClaims = deps.claimsIn(review.captureId, review.scope.material).filter((c) => NON_TERMINAL.has(c.status)).length;
     const allowed = [...kit.allowedMoves(state, { turns, claims, pendingClaims })];
     if (allowed.length === 0) return null;
@@ -521,7 +523,7 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     return db.tx((): { readonly ok: true; readonly move: TutorMove; readonly say: string } | { readonly ok: false; readonly why: string } => {
       const already = loadTurns(reviewId).find((t) => t.id === outId);
       if (already?.actor === "tutor") return { ok: true, move: already.move, say: already.say };
-      const verdict = kit.validateMove(move, { ...input, ...grounding(review, input.state, input.turns) });
+      const verdict = kit.validateMove(move, { ...input, ...grounding(review) });
       if (!verdict.ok) return { ok: false, why: verdict.why };
       appendTurn(reviewId, outId, "tutor", threadOf(move), { move, say });
       if (move.kind === "close_thread") {

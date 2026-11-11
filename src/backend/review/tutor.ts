@@ -294,7 +294,7 @@ export type TutorInput = {
   readonly allowed: readonly TutorMoveKind[];
   readonly scope: FrozenScope;
   readonly claims: readonly AssessableClaim[]; // usable now (R3/R7)
-  readonly evidence: EvidenceBundle; // passages + frames the open thread's claims cite
+  readonly evidence: EvidenceBundle; // passages + frames the usable claims cite; the same every turn, so the system prompt caches (#135)
   readonly turns: readonly Turn[];
   readonly priorObservations: readonly Observation[]; // rewatch reuse: earlier unresolved on the same claims
   readonly repairNote: string | null; // set on the single repair attempt after an invalid header
@@ -531,8 +531,26 @@ function renderTurn(t: Turn): string {
 }
 
 /**
- * Structured state in, prompt out. Nothing time-varying goes in (no clock, no
- * active seconds), so a resent turn produces the same prompt and the same memo key.
+ * The review's stable material: usable claims, lecture evidence and capture gaps. It goes at the end
+ * of the system prompt, which the CLI caches, so from the second turn on it is read from cache (#135).
+ * Each turn is a fresh `claude -p` process, and a changed user message reuses none of its own prefix.
+ */
+export function tutorContext(input: Pick<TutorInput, "claims" | "evidence">): string {
+  const sections = [
+    `Usable claims (the only ones you may ask about or judge against):\n${input.claims.map((c) => `- ${c.id} (concept ${c.conceptId}): ${c.text} [evidence: ${c.evidence.join(", ")}]${c.assumptions.length ? ` assumptions: ${c.assumptions.join("; ")}` : ""}`).join("\n")}`,
+    `Lecture evidence (cite only these IDs):\n${[
+      ...input.evidence.passages.map((p) => `- ${p.id} passage ${p.interval.start}s-${p.interval.end}s: ${JSON.stringify(p.text)}`),
+      ...input.evidence.frames.map((f) => `- ${f.id} frame at ${f.mediaS}s (image not shown)`),
+    ].join("\n") || "- none"}`,
+  ];
+  if (input.evidence.gaps.length > 0) sections.push(`Capture gaps in scope (nothing was recorded there, do not assume what it said): ${input.evidence.gaps.map((g) => `${g.interval.start}s-${g.interval.end}s ${g.reason}`).join("; ")}`);
+  return sections.join("\n\n");
+}
+
+/**
+ * The per-turn prompt: allowed moves, counts, open thread and the review so far. Structured state in,
+ * prompt out. Nothing time-varying goes in (no clock, no active seconds), so a resent turn produces
+ * the same prompt and the same memo key.
  */
 export function tutorPrompt(input: TutorInput): string {
   const { state } = input;
@@ -559,12 +577,6 @@ export function tutorPrompt(input: TutorInput): string {
   if (rechecked.length > 0) {
     sections.push(`Open thread ${state.openThread} is paused: claim ${rechecked.join(", ")} is being rechecked and is out of assessment until it passes again. Ask or judge nothing on it; tell the learner why it is paused.`);
   }
-  sections.push(`Usable claims (the only ones you may ask about or judge against):\n${input.claims.map((c) => `- ${c.id} (concept ${c.conceptId}): ${c.text} [evidence: ${c.evidence.join(", ")}]${c.assumptions.length ? ` assumptions: ${c.assumptions.join("; ")}` : ""}`).join("\n")}`);
-  sections.push(`Lecture evidence (cite only these IDs):\n${[
-    ...input.evidence.passages.map((p) => `- ${p.id} passage ${p.interval.start}s-${p.interval.end}s: ${JSON.stringify(p.text)}`),
-    ...input.evidence.frames.map((f) => `- ${f.id} frame at ${f.mediaS}s (image not shown)`),
-  ].join("\n") || "- none"}`);
-  if (input.evidence.gaps.length > 0) sections.push(`Capture gaps in scope (nothing was recorded there, do not assume what it said): ${input.evidence.gaps.map((g) => `${g.interval.start}s-${g.interval.end}s ${g.reason}`).join("; ")}`);
   if (input.priorObservations.length > 0) {
     sections.push(`From earlier reviews of these claims:\n${input.priorObservations.map((o) => `- claims ${o.claimIds.join(", ")}: ${o.status}`).join("\n")}`);
   }
@@ -575,8 +587,9 @@ export function tutorPrompt(input: TutorInput): string {
 
 const TUTOR_REQUEST = { model: "opus", effort: "medium", images: [], webTools: false, timeoutMs: 120_000 } as const;
 
-function tutorRequest(input: TutorInput): ClaudeRequest {
-  return { ...TUTOR_REQUEST, system: TUTOR_SYSTEM, prompt: tutorPrompt(input) };
+/** The system prompt is TUTOR_SYSTEM plus the review's stable material, the prompt only what changes per turn. */
+export function tutorRequest(input: TutorInput): ClaudeRequest {
+  return { ...TUTOR_REQUEST, system: `${TUTOR_SYSTEM}\n\n${tutorContext(input)}`, prompt: tutorPrompt(input) };
 }
 
 /**
@@ -589,9 +602,12 @@ export function tutorTask(claude: ClaudeCli): Task<TutorInput, TutorOutput> {
     provider: "claude",
     purpose: "tutor_turn",
     model: TUTOR_REQUEST.model,
-    version: "tutor-2",
+    version: "tutor-3",
     maxAttempts: 2,
-    canonicalInput: (input) => ({ system: TUTOR_SYSTEM, prompt: tutorPrompt(input), effort: TUTOR_REQUEST.effort }),
+    canonicalInput: (input) => {
+      const { system, prompt } = tutorRequest(input);
+      return { system, prompt, effort: TUTOR_REQUEST.effort };
+    },
     async attempt(input, ctx) {
       const { text, usage } = await claude.streamText(tutorRequest(input), ctx.streamTo ?? (() => {}), ctx.signal);
       const header = parseMoveHeader(text.includes("\n") ? text : `${text}\n`);
