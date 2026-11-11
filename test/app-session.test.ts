@@ -208,6 +208,25 @@ describe("review session controller", () => {
     expect(h.controller.getState()).toMatchObject({ saveError: null, savedSummary: { notes: 2, observations: 1, links: 1 } });
   });
 
+  test("#138: a turn that wraps up saves automatically although the backend already marks the save pending", async () => {
+    const h = setup({
+      review: () => parsedReview({ phase: "ended", saved: "save_pending", turns: [tutorAsk] }),
+      sendTurn: ({ turnId }) => events({ type: "learner_turn_stored", turnId }, { type: "move", turnId, move: { kind: "wrap_up" } }, { type: "turn_complete", turnId }),
+      save: async () => ({ kind: "saved", notes: 1, observations: 1, links: 0 }),
+    });
+    await h.controller.send({ kind: "end" });
+    expect(h.saves()).toBe(1);
+  });
+
+  test("#138: a pending save shows Saving, not the not-saved alert, while a save runs", () => {
+    const banner = renderToStaticMarkup(createElement(SaveBanner, {
+      state: { view: parsedReview({ saved: "save_pending" }), loadError: null, live: null, unsent: [], sendError: null, saving: true, saveError: null, savedSummary: null, storageDegraded: false },
+      onRetry: () => {}, reviewId,
+    }));
+    expect(banner).toContain("Saving this review to your notebook...");
+    expect(banner).not.toContain("not saved yet");
+  });
+
   test("a review that ends unsaved is saved automatically, and a failure does not loop", async () => {
     const h = setup({
       review: () => parsedReview({ phase: "ended", saved: "unsaved", turns: [tutorAsk] }),

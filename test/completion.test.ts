@@ -137,7 +137,7 @@ describe("finishing a review in the deterministic fixtures", () => {
     await Promise.resolve();
     const during = banner(controller.getState());
     expect(controller.getState().saving).toBe(true);
-    expect(during).toContain("Saving...");
+    expect(during).toContain("Saving this review to your notebook...");
     expect(during).not.toContain("Review saved");
     fixture.continueFixture();
     await saving;

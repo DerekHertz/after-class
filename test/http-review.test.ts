@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { nextThreadId } from "../src/backend/review/tutor";
 import type { LearnerAct } from "../src/shared/domain";
 import { randomId } from "../src/shared/ids";
+import type { ReviewId } from "../src/shared/ids";
 import { interval } from "../src/shared/time";
 import { reviewOptionsResponse, reviewViewResponse, saveResponse, startReviewResponse, tutorStreamEvent } from "../src/shared/wire";
 import { JSON_HEADERS, SRC, bearer, count, learnerRows, moveOf, pick, post, registerCleanup, reviewRig, reviewRows, said, startedIn, tutorRows, until } from "./http-fixtures";
@@ -362,7 +363,7 @@ describe("GET /reviews/:id, POST /reviews/:id/save and the replay review", () =>
     const before = await rig.view(reviewId);
     expect(before.status).toBe(200);
     reviewViewResponse.parse(before.body);
-    expect(before.body).toMatchObject({ reviewId, captureId: rig.capture, saved: "unsaved", observations: [], state: { phase: "ended", mainQuestions: 2 } });
+    expect(before.body).toMatchObject({ reviewId, captureId: rig.capture, saved: "save_pending", observations: [], state: { phase: "ended", mainQuestions: 2 } });
     expect(before.body.scope.material).toEqual([[SRC, [[0, 300]]]]);
     expect(before.body.turns.filter((t: { actor: string }) => t.actor === "learner")).toHaveLength(5);
     expect(before.body.turns.filter((t: { actor: string }) => t.actor === "tutor")).toHaveLength(6);
@@ -383,6 +384,70 @@ describe("GET /reviews/:id, POST /reviews/:id/save and the replay review", () =>
     expect(await resaved.json()).toEqual({ kind: "saved", notes: 1, observations: 2, links: 1 });
     expect(count(rig.db, "SELECT COUNT(*) AS n FROM observations")).toBe(2);
     expect(count(rig.db, "SELECT COUNT(*) AS n FROM notes")).toBe(1);
+  });
+
+  /** What the app does after an end: the turn wraps up, the view reads ended, and the save (POST /save) records notes and observations. */
+  const endsAndSaves = async (rig: ReturnType<typeof reviewRig>, reviewId: ReviewId, ending: { events: readonly { type: string }[] }) => {
+    expect(ending.events.at(-1)?.type).toBe("turn_complete");
+    expect(moveOf(ending.events)).toBe("wrap_up");
+    expect((await rig.view(reviewId)).body.state.phase).toBe("ended");
+    const save = await post(rig.base, `/reviews/${reviewId}/save`, {});
+    expect(save.status).toBe(200);
+    const saved = saveResponse.parse(await save.json());
+    expect(saved).toMatchObject({ kind: "saved", notes: 1 });
+    expect(saved.kind === "saved" && saved.observations).toBeGreaterThan(0);
+    expect(count(rig.db, "SELECT COUNT(*) AS n FROM saved_reviews")).toBe(1);
+    expect(count(rig.db, "SELECT COUNT(*) AS n FROM notes")).toBe(1);
+    expect(count(rig.db, "SELECT COUNT(*) AS n FROM observations")).toBe(saved.kind === "saved" ? saved.observations : -1);
+  };
+
+  test("#136: ending a paused review wraps it up, and the save records its notes and observations", async () => {
+    const rig = reviewRig();
+    const reviewId = await startedIn(rig);
+    for (const act of [{ kind: "resume" }, said("lines meeting at a point"), { kind: "pause" }] as LearnerAct[]) await rig.turn(reviewId, act);
+    expect((await rig.view(reviewId)).body.state.phase).toBe("paused");
+    await endsAndSaves(rig, reviewId, await rig.turn(reviewId, { kind: "end" }));
+  });
+
+  test("#136: pause, resume, then end wraps up and saves", async () => {
+    const rig = reviewRig();
+    const reviewId = await startedIn(rig);
+    for (const act of [{ kind: "resume" }, said("lines meeting at a point"), { kind: "pause" }, { kind: "resume" }] as LearnerAct[]) await rig.turn(reviewId, act);
+    await endsAndSaves(rig, reviewId, await rig.turn(reviewId, { kind: "end" }));
+  });
+
+  test("#136: a pause sent while a tutor turn is in flight is refused; pausing and ending once it lands still wraps up and saves", async () => {
+    let release: (() => void) | null = null;
+    const rig = reviewRig(async (input) => {
+      if (release === null) await new Promise<void>((r) => (release = r));
+      return pick(input);
+    });
+    const reviewId = await startedIn(rig);
+    const opening = rig.turn(reviewId, { kind: "resume" });
+    await until(() => release !== null);
+    expect((await rig.turn(reviewId, { kind: "pause" })).status).toBe(409);
+    release!();
+    expect((await opening).events.at(-1)?.type).toBe("turn_complete");
+    await rig.turn(reviewId, said("lines meeting at a point"));
+    await rig.turn(reviewId, { kind: "pause" });
+    expect((await rig.view(reviewId)).body.state.phase).toBe("paused");
+    await endsAndSaves(rig, reviewId, await rig.turn(reviewId, { kind: "end" }));
+  });
+
+  test("#138: an ended review has a save row before any POST /save, so a closed tab still leaves it recoverable", async () => {
+    for (const before of [[], [{ kind: "pause" }]] as LearnerAct[][]) {
+      const rig = reviewRig();
+      const reviewId = await startedIn(rig);
+      for (const act of [{ kind: "resume" }, said("lines meeting at a point"), ...before] as LearnerAct[]) await rig.turn(reviewId, act);
+      const ending = await rig.turn(reviewId, { kind: "end" });
+      expect(moveOf(ending.events)).toBe("wrap_up");
+      expect(count(rig.db, "SELECT COUNT(*) AS n FROM saved_reviews") + count(rig.db, "SELECT COUNT(*) AS n FROM save_failures")).toBe(1);
+      expect((await rig.view(reviewId)).body.saved).toBe("save_pending");
+      // The browser's save still works afterwards, once (R15).
+      await endsAndSaves(rig, reviewId, ending);
+      expect(count(rig.db, "SELECT COUNT(*) AS n FROM save_failures")).toBe(0);
+      expect((await rig.view(reviewId)).body.saved).toBe("saved");
+    }
   });
 
   test("GET /reviews/:id of an unknown review is 404, of a bad id 400, without the token 401", async () => {

@@ -233,6 +233,8 @@ describe("main, the live backend serves save, retry-preparation, the record and 
     expect(ending.status).toBe(200);
     expect(await ending.text()).toContain("turn_complete");
     expect((await get(first, `/reviews/${reviewId}`)).body.state.phase).toBe("ended");
+    // #138: ending records a pending save before any POST /save, so a closed tab cannot leave it without a row.
+    expect((await get(first, `/reviews/${reviewId}`)).body.saved).toBe("save_pending");
 
     expect((await post(first, `/reviews/${reviewId}/save`)).body).toMatchObject({ kind: "save_failed", retryable: true });
     expect((await get(first, `/reviews/${reviewId}`)).body.saved).toBe("save_pending");

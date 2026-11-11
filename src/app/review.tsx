@@ -360,7 +360,8 @@ function LineItem({ line, onSource, focusRef }: { readonly line: Line; readonly 
 
 /** The completion summary shows only when the backend reports the review saved; a pending or failed save shows Retry instead. */
 export function SaveBanner({ state, onRetry, reviewId, onSource }: { readonly state: SessionState; readonly onRetry: () => void; readonly reviewId: ReviewId; readonly onSource?: (ids: readonly EvidenceId[], label: string, origin: HTMLButtonElement) => void }) {
-  const pending = state.saveError !== null || state.view?.saved === "save_pending";
+  // While a save runs, a backend-reported pending save shows the Saving line below rather than the not-saved alert.
+  const pending = state.saveError !== null || (state.view?.saved === "save_pending" && !state.saving);
   return (
     <>
       {state.storageDegraded && (

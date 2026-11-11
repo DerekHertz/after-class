@@ -352,6 +352,7 @@ export async function main(options: MainOptions = {}): Promise<Running> {
     runTutor: (input, streamTo, signal) => memo.run(tasks.tutor, input, { signal, streamTo }),
     clearFailures: memo.clearFailures,
     runWrapUp: (input) => memo.run(tasks.wrapUp, input),
+    endedInTx: (reviewId) => record.markEndedInTx(reviewId),
     nextSeq: () => db.nextSeq(),
   });
 
