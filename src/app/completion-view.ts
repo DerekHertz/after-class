@@ -1,16 +1,18 @@
 /**
  * The finished-review summary, built only from what the backend returns for a saved review: its topics, turns and
- * persisted observations. Nothing here calls a provider or guesses a status; a topic with no saved observation is
- * shown as not assessed.
+ * persisted observations. Nothing here calls a provider or guesses a status. A topic with no saved observation was never
+ * asked about, so it is listed as not reached; "Not assessed" is kept for a question that was skipped or left unanswered (R13).
  */
 import type { Observation, RecordedStatus, ReviewView } from "../shared/domain";
 import type { EvidenceId } from "../shared/ids";
 import { moveEvidence, STATUS_LABEL } from "./core";
 
-export type OutcomeGroup = "independent" | "with_help" | "looks_fine" | "supported" | "unresolved" | "disputed" | "not_assessed";
+export type OutcomeGroup = "independent" | "with_help" | "looks_fine" | "supported" | "unresolved" | "disputed" | "not_assessed" | "not_reached";
 
-/** Display order: what the learner did, then what is left to revisit. */
-export const OUTCOME_GROUPS: readonly OutcomeGroup[] = ["independent", "with_help", "looks_fine", "supported", "unresolved", "disputed", "not_assessed"];
+/** Display order: what the learner did, then what is left to revisit, then topics nobody asked about. */
+export const OUTCOME_GROUPS: readonly OutcomeGroup[] = ["independent", "with_help", "looks_fine", "supported", "unresolved", "disputed", "not_assessed", "not_reached"];
+
+export const NOT_REACHED = "Not reached in this review";
 
 export const OUTCOME_HEADING: Readonly<Record<OutcomeGroup, string>> = {
   independent: "Explained on your own",
@@ -20,6 +22,7 @@ export const OUTCOME_HEADING: Readonly<Record<OutcomeGroup, string>> = {
   unresolved: "Still unresolved",
   disputed: "Disputed, waiting for you to settle",
   not_assessed: "Not assessed",
+  not_reached: NOT_REACHED,
 };
 
 const GROUP_OF: Readonly<Record<RecordedStatus, OutcomeGroup>> = {
@@ -32,12 +35,10 @@ const GROUP_OF: Readonly<Record<RecordedStatus, OutcomeGroup>> = {
   not_assessed: "not_assessed",
 };
 
-export const NOT_REACHED = "Not reached in this review";
-
 export type OutcomeItem = {
   readonly key: string;
   readonly label: string;
-  /** The saved status, or NOT_REACHED for a topic with no saved observation. */
+  /** The saved status. Empty for a topic with no saved observation: its group heading already says it was not reached. */
   readonly status: string;
   /** Lecture evidence the tutor cited in this question's thread, for the next revisit. Empty when none was cited. */
   readonly evidence: readonly EvidenceId[];
@@ -66,6 +67,9 @@ export type Completion = {
   readonly revisit: readonly string[];
   readonly disputed: number;
   readonly observations: number;
+  /** Topics the review's questions named (any status, a skipped one included), out of every topic in its scope. */
+  readonly topicsAsked: number;
+  readonly topicsInScope: number;
 };
 
 export function completionOf(view: Pick<ReviewView, "topics" | "turns" | "observations">): Completion {
@@ -87,7 +91,7 @@ export function completionOf(view: Pick<ReviewView, "topics" | "turns" | "observ
     });
   }
   for (const t of view.topics) {
-    if (!seen.has(t.id)) items.get("not_assessed")!.push({ key: t.id, label: t.label, status: NOT_REACHED, evidence: [], resolution: null });
+    if (!seen.has(t.id)) items.get("not_reached")!.push({ key: t.id, label: t.label, status: "", evidence: [], resolution: null });
   }
 
   const labelsIn = (g: OutcomeGroup) => items.get(g)!.map((i) => i.label);
@@ -96,5 +100,7 @@ export function completionOf(view: Pick<ReviewView, "topics" | "turns" | "observ
     revisit: [...new Set([...labelsIn("unresolved"), ...labelsIn("with_help")])],
     disputed: items.get("disputed")!.length,
     observations: view.observations.length,
+    topicsAsked: view.topics.filter((t) => seen.has(t.id)).length,
+    topicsInScope: view.topics.length,
   };
 }
