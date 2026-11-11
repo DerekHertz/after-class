@@ -98,6 +98,8 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
         case "end":
         case "wrap_up":
           wrapUpRequested = true;
+          // Ending leaves a pause so the tutor can wrap up and the review can be saved (#136). The clock stays stopped.
+          if (phase === "paused") phase = "active";
           break;
         case "continue_past_target":
           wrapUpRequested = false;

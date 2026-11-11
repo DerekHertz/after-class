@@ -186,6 +186,13 @@ describe("allowedMoves", () => {
     expect(stateOf(l.turns, [], 10_000).activeSeconds).toBe(1 + 7);
     expect(allowed(l.turns)).toContain("ask_followup");
   });
+
+  test("ending a paused review leaves the pause so the tutor may only wrap up; the paused time stays out of active time (#136)", () => {
+    const l = log().tutor(askMain(1)).learner({ kind: "pause" }).learner({ kind: "end" });
+    // Turns land at 1 s, 2 s, 3 s. Active from 1 s to the pause at 2 s, and not after.
+    expect(stateOf(l.turns, [], 10_000)).toMatchObject({ phase: "active", wrapUpRequested: true, activeSeconds: 1 });
+    expect(allowed(l.turns)).toEqual(["wrap_up"]);
+  });
 });
 
 describe("R3: a claim being rechecked is out of assessment until it passes again", () => {
