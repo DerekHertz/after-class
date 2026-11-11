@@ -119,6 +119,48 @@ describe("R7 scope never grows (the TLC counterexample)", () => {
   });
 });
 
+// ───────────────────────────── #137: the first tutor turn is a question ─────────────────────────────
+
+describe("a correction to a claim not yet asked about in this review is applied silently and logged", () => {
+  /** The real W8 rules; the model discloses whenever disclosure is allowed, otherwise asks about the first usable claim. */
+  function pendingAtStart() {
+    const r = startedRig(undefined, {}, true);
+    const t = tutorHarness(r.db, (input) => {
+      const pending = input.state.corrections.find((c) => !c.disclosed);
+      if (input.allowed.includes("disclose_correction") && pending) return reply({ kind: "disclose_correction", correctionId: pending.id, threadIds: [], evidence: [] }, "A correction.");
+      if (input.allowed.includes("ask_main")) return reply({ kind: "ask_main", threadId: nextThreadId(input.state), claimIds: [input.claims[0]!.id] }, "A question.");
+      return input.allowed.includes("ask_followup") ? reply({ kind: "ask_followup", threadId: input.state.openThread! }, "Say more.") : reply({ kind: "wrap_up" }, "Bye.");
+    });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { now: () => 1_000_000 });
+    r.world.claims.get(r.claim)!.text = "claim 1, reworded";
+    r.world.claims.get(r.claim2!)!.status = "unverified";
+    return { ...r, t, reviews };
+  }
+  const moves = (events: readonly { type: string }[]) => events.flatMap((e) => (e.type === "move" ? [(e as { move: { kind: string } }).move.kind] : []));
+
+  test("with corrections pending at the start, the first tutor turn of a new review is a question", async () => {
+    const x = pendingAtStart();
+    const events = await collect(x.reviews.turn(x.reviewId, randomId("turn"), { kind: "begin" }));
+    expect(x.t.calls[0]!.allowed).not.toContain("disclose_correction");
+    expect(moves(events)).toEqual(["ask_main"]);
+    const view = x.reviews.view(x.reviewId);
+    expect(view.turns.filter((t) => t.actor === "code")).toMatchObject([
+      { notice: { kind: "correction_applied", affectedClaims: [x.claim] } },
+      { notice: { kind: "correction_applied", affectedClaims: [x.claim2] } },
+    ]);
+    expect(view.state.corrections.filter((c) => !c.disclosed)).toEqual([]);
+    expect(x.t.calls[0]!.claims.map((c) => c.text)).toEqual(["claim 1, reworded"]);
+  });
+
+  test("a silently applied correction is not announced later, when its claim is asked about", async () => {
+    const x = pendingAtStart();
+    await collect(x.reviews.turn(x.reviewId, randomId("turn"), { kind: "begin" }));
+    const events = await collect(x.reviews.turn(x.reviewId, randomId("turn"), answer()));
+    expect(moves(events)).not.toContain("disclose_correction");
+    expect(x.reviews.view(x.reviewId).turns.filter((t) => t.actor === "tutor" && t.move.kind === "disclose_correction")).toEqual([]);
+  });
+});
+
 // ───────────────────────────── a pending correction never sticks the review ─────────────────────────────
 
 describe("code-written disclose_correction when the model fails", () => {
