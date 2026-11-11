@@ -434,6 +434,22 @@ describe("GET /reviews/:id, POST /reviews/:id/save and the replay review", () =>
     await endsAndSaves(rig, reviewId, await rig.turn(reviewId, { kind: "end" }));
   });
 
+  test("#138: an ended review has a save row before any POST /save, so a closed tab still leaves it recoverable", async () => {
+    for (const before of [[], [{ kind: "pause" }]] as LearnerAct[][]) {
+      const rig = reviewRig();
+      const reviewId = await startedIn(rig);
+      for (const act of [{ kind: "resume" }, said("lines meeting at a point"), ...before] as LearnerAct[]) await rig.turn(reviewId, act);
+      const ending = await rig.turn(reviewId, { kind: "end" });
+      expect(moveOf(ending.events)).toBe("wrap_up");
+      expect(count(rig.db, "SELECT COUNT(*) AS n FROM saved_reviews") + count(rig.db, "SELECT COUNT(*) AS n FROM save_failures")).toBe(1);
+      expect((await rig.view(reviewId)).body.saved).toBe("save_pending");
+      // The browser's save still works afterwards, once (R15).
+      await endsAndSaves(rig, reviewId, ending);
+      expect(count(rig.db, "SELECT COUNT(*) AS n FROM save_failures")).toBe(0);
+      expect((await rig.view(reviewId)).body.saved).toBe("saved");
+    }
+  });
+
   test("GET /reviews/:id of an unknown review is 404, of a bad id 400, without the token 401", async () => {
     const rig = reviewRig();
     expect((await rig.view(randomId("rvw"))).status).toBe(404);
