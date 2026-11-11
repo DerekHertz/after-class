@@ -41,11 +41,15 @@ export function readPng(url: URL): Png {
       pixels[y * stride + x] = (row[x]! + unfilter(filter, left, up, corner)) & 0xff;
     }
   }
-  const rgba = new Uint8Array(width * height * 4);
-  for (let i = 0; i < width * height; i++) {
-    const p = pixels.subarray(i * channels, (i + 1) * channels);
-    const [r, g, b, a] = channels === 1 ? [p[0], p[0], p[0], 255] : channels === 2 ? [p[0], p[0], p[0], p[1]] : channels === 3 ? [p[0], p[1], p[2], 255] : [p[0], p[1], p[2], p[3]];
-    rgba.set([r!, g!, b!, a!], i * 4);
+  // Index arithmetic only. A view and two arrays per pixel came to ~5M short-lived objects per companion sheet, and the
+  // GC churn made sheet tests time out when the machine was busy (#142).
+  const rgba = channels === 4 ? pixels : new Uint8Array(width * height * 4);
+  const grey = channels < 3;
+  if (channels !== 4) for (let p = 0, o = 0; o < rgba.length; p += channels, o += 4) {
+    rgba[o] = pixels[p]!;
+    rgba[o + 1] = pixels[grey ? p : p + 1]!;
+    rgba[o + 2] = pixels[grey ? p : p + 2]!;
+    rgba[o + 3] = channels === 2 ? pixels[p + 1]! : 255;
   }
   return { width, height, alpha: colorType === 4 || colorType === 6, rgba };
 }
