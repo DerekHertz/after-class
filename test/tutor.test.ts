@@ -357,7 +357,7 @@ describe("tutorTask", () => {
     expect(r.value).toEqual({ move: askMain(1), say: "Without looking back, how would you describe the row picture?" });
     expect(streamed).toBe(opening);
     expect(requests[0]!.prompt).toContain(thread(1));
-    expect(requests[0]!.prompt).toContain(claimId(1));
+    expect(requests[0]!.system).toContain(claimId(1));
   });
 
   test("a resent turn at a later time hits the memo instead of calling again", async () => {

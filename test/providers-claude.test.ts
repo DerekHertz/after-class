@@ -331,6 +331,25 @@ describe("claude images", () => {
   });
 });
 
+describe("claude system prompt file", () => {
+  test("a large system prompt goes through a private file that is removed afterwards, not argv", async () => {
+    const system = "claims and evidence ".repeat(15_000);
+    let seen: { file: string; same: boolean } | null = null;
+    const fake = fakeSpawn({ stdout: [JSON.stringify(successEnvelope)] });
+    const spawn: SpawnFn = (argv, opts) => {
+      const file = argv[argv.indexOf("--system-prompt-file") + 1]!;
+      seen = { file, same: existsSync(file) && readFileSync(file, "utf8") === system };
+      return fake.spawn(argv, opts);
+    };
+    const claude = createClaudeCli({ bin: "claude", cwd: "/work", maxConcurrent: 1, spawn });
+    await claude.structured(req({ system }), Out, NEVER);
+    expect(seen!.same).toBe(true);
+    expect(fake.calls[0]!.argv).not.toContain("--system-prompt");
+    expect(fake.calls[0]!.argv.join("").length).toBeLessThan(2_000);
+    expect(existsSync(seen!.file)).toBe(false);
+  });
+});
+
 describe("claude concurrency", () => {
   test("never runs more than maxConcurrent processes, and serves everyone", async () => {
     const gates = Array.from({ length: 5 }, () => deferred<void>());
