@@ -153,11 +153,12 @@ describe("turn", () => {
     const namesClaim = (move: TutorMove) => move.kind === "ask_main" && move.claimIds.includes(r.claim);
     expect(events.filter((e) => e.type === "move" && namesClaim(e.move))).toEqual([]);
     expect(reviews.view(r.reviewId).turns.filter((x) => x.actor === "tutor" && namesClaim(x.move))).toEqual([]);
-    expect(t.calls).toHaveLength(3);
+    // The rejected question was never stored, so no question named the claim: its withdrawal is applied silently (#137).
+    expect(t.calls).toHaveLength(2);
     expect(t.calls[1]!.repairNote).not.toBeNull();
     expect(t.calls[1]!.claims.map((c) => c.id)).not.toContain(r.claim);
-    expect(t.calls[1]!.allowed).toEqual(["disclose_correction"]);
-    expect(events.filter((e) => e.type === "move")).toMatchObject([{ move: { kind: "disclose_correction" } }, { move: { kind: "ask_main" } }]);
+    expect(t.calls[1]!.allowed).not.toContain("disclose_correction");
+    expect(events.filter((e) => e.type === "move")).toMatchObject([{ move: { kind: "ask_main", claimIds: [r.claim2] } }]);
     expect(types(events).at(-1)).toBe("turn_complete");
   });
 
@@ -387,16 +388,17 @@ describe("a request goes on until a move waits for the learner", () => {
     return { ...r, t, reviews };
   }
 
-  test("begin with pending corrections: every correction is disclosed, then a question, in the one request", async () => {
+  test("begin with pending corrections: each is applied silently and logged, and the first move is a question (#137)", async () => {
     const x = chaining();
     x.world.check(x.claim, "unverified");
     x.world.claims.get(x.claim2!)!.text = "claim 2, reworded";
     const events = await collect(x.reviews.turn(x.reviewId, randomId("turn"), begin));
-    expect(moveKinds(events)).toEqual(["disclose_correction", "disclose_correction", "ask_main"]);
+    expect(moveKinds(events)).toEqual(["ask_main"]);
     expect(types(events).filter((t) => t === "turn_complete")).toHaveLength(1);
     expect(types(events).at(-1)).toBe("turn_complete");
-    const tutors = x.reviews.view(x.reviewId).turns.filter((t) => t.actor === "tutor");
-    expect(tutors.map((t) => t.actor === "tutor" && t.move.kind)).toEqual(["disclose_correction", "disclose_correction", "ask_main"]);
+    const turns = x.reviews.view(x.reviewId).turns;
+    expect(turns.filter((t) => t.actor === "tutor").map((t) => t.actor === "tutor" && t.move.kind)).toEqual(["ask_main"]);
+    expect(turns.flatMap((t) => (t.actor === "code" ? [t.notice.kind] : []))).toEqual(["correction_applied", "correction_applied"]);
     expect(x.reviews.view(x.reviewId).state.openThread).not.toBeNull();
   });
 
@@ -444,12 +446,15 @@ describe("a request goes on until a move waits for the learner", () => {
 
   test("a retried request replays every stored move", async () => {
     const x = chaining();
-    x.world.check(x.claim, "unverified");
+    await collect(x.reviews.turn(x.reviewId, randomId("turn"), begin));
+    x.world.claims.get(x.claim)!.text = "claim 1, reworded";
     const turnId = randomId("turn");
-    const first = await collect(x.reviews.turn(x.reviewId, turnId, begin));
-    const again = await collect(x.reviews.turn(x.reviewId, turnId, begin));
+    const first = await collect(x.reviews.turn(x.reviewId, turnId, answer()));
+    const calls = x.t.calls.length;
+    const again = await collect(x.reviews.turn(x.reviewId, turnId, answer()));
+    expect(moveKinds(first)[0]).toBe("disclose_correction");
     expect(moveKinds(again)).toEqual(moveKinds(first));
-    expect(x.t.calls).toHaveLength(2);
+    expect(x.t.calls).toHaveLength(calls);
   });
 
   test("waitsForLearner: only a disclosure or a closed thread lets the turn go on", () => {
@@ -479,10 +484,12 @@ describe("an interrupted chain is resumable, and a review with no usable claim e
 
   test("a chain that stops after a disclosure: the view says the tutor owes a move; a resend continues once and ends with a question", async () => {
     const x = crashing();
-    x.world.check(x.claim2!, "unverified");
+    await collect(x.reviews.turn(x.reviewId, randomId("turn"), { kind: "begin" }));
+    // The question named claim 1, so its withdrawal is disclosed (#137).
+    x.world.check(x.claim, "unverified");
     x.setDown(true);
     const turnId = randomId("turn");
-    const failed = await collect(x.reviews.turn(x.reviewId, turnId, { kind: "begin" }));
+    const failed = await collect(x.reviews.turn(x.reviewId, turnId, answer()));
     expect(moveKinds(failed)).toEqual(["disclose_correction"]);
     expect(failed.at(-1)).toMatchObject({ type: "turn_failed", retryable: true });
     const view = x.reviews.view(x.reviewId);
@@ -490,11 +497,11 @@ describe("an interrupted chain is resumable, and a review with no usable claim e
     expect(view.state.phase).toBe("active");
 
     x.setDown(false);
-    const again = await collect(x.reviews.turn(x.reviewId, turnId, { kind: "begin" }));
-    expect(moveKinds(again)).toEqual(["disclose_correction", "ask_main"]);
+    const again = await collect(x.reviews.turn(x.reviewId, turnId, answer()));
+    expect(moveKinds(again)).toEqual(["disclose_correction", "close_thread", "ask_main"]);
     expect(types(again).at(-1)).toBe("turn_complete");
-    expect(tutorRows(x.reviews, x.reviewId)).toHaveLength(2);
-    expect(x.reviews.view(x.reviewId).turns.filter((t) => t.actor === "learner")).toHaveLength(1);
+    expect(tutorRows(x.reviews, x.reviewId)).toHaveLength(4);
+    expect(x.reviews.view(x.reviewId).turns.filter((t) => t.actor === "learner")).toHaveLength(2);
     expect(x.reviews.view(x.reviewId).owesMove).toBe(false);
   });
 
@@ -514,7 +521,7 @@ describe("an interrupted chain is resumable, and a review with no usable claim e
     expect(tutorOwesMove([], "active")).toBe(false);
   });
 
-  test("every claim withdrawn: the disclosure, then an honest wrap_up, never turn_failed", async () => {
+  test("every claim withdrawn before any question: an honest wrap_up, never turn_failed", async () => {
     const base = startedRig();
     const t = tutorHarness(base.db, (input) => {
       const pending = input.state.corrections.find((c) => !c.disclosed);
@@ -525,7 +532,7 @@ describe("an interrupted chain is resumable, and a review with no usable claim e
     r.world.check(r.claim, "unverified");
     const events = await collect(r.reviews.turn(r.reviewId, randomId("turn"), { kind: "begin" }));
     expect(events.find((e) => e.type === "turn_failed")).toBeUndefined();
-    expect(moveKinds(events)).toEqual(["disclose_correction", "wrap_up"]);
+    expect(moveKinds(events)).toEqual(["wrap_up"]);
     expect(events.filter((e) => e.type === "say_delta").map((e) => (e as { text: string }).text).join("")).toContain("nothing left I can fairly ask you about");
     expect(r.tutor.calls.at(-1)!.allowed).toEqual(["wrap_up"]);
     expect(r.reviews.view(r.reviewId).state.phase).toBe("ended");

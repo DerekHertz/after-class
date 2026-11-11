@@ -395,6 +395,7 @@ const tutorMovez: z.ZodType<TutorMove> = z.discriminatedUnion("kind", [
 const codeNoticez = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("soft_target_reached"), elapsedS: z.number() }),
   z.object({ kind: z.literal("correction_pending"), correctionId: z.string(), affectedClaims: z.array(idOf("clm")) }),
+  z.object({ kind: z.literal("correction_applied"), correctionId: z.string(), affectedClaims: z.array(idOf("clm")) }),
   z.object({ kind: z.literal("resource_ready"), resourceId: idOf("res") }),
 ]);
 

@@ -211,15 +211,16 @@ describe("POST /reviews/:id/turns", () => {
       () => rig.world.check(a, "unverified"),
     );
     expect(first.events.at(-1)?.type).toBe("turn_complete");
-    expect(moveOf(first.events)).toBe("disclose_correction");
-    expect(rig.model.calls).toHaveLength(3);
+    // The rejected question was never stored, so no question named the claim: its withdrawal is applied silently (#137).
+    expect(moveOf(first.events)).toBe("ask_main");
+    expect(rig.model.calls).toHaveLength(2);
 
     const { body } = await rig.view(started.reviewId);
     const turns = body.turns as { actor: string; move?: { kind: string; claimIds?: string[] }; notice?: { kind: string } }[];
     const tutors = turns.filter((t) => t.actor === "tutor");
-    expect(tutors.map((t) => t.move?.kind)).toEqual(["disclose_correction", "ask_main"]);
+    expect(tutors.map((t) => t.move?.kind)).toEqual(["ask_main"]);
     expect(tutors.some((t) => t.move?.claimIds?.includes(a))).toBe(false);
-    expect(turns.some((t) => t.actor === "code" && t.notice?.kind === "correction_pending")).toBe(true);
+    expect(turns.some((t) => t.actor === "code" && t.notice?.kind === "correction_applied")).toBe(true);
   });
 
   test("one turn at a time per review: a second turn post with a different turnId while one runs is 409 and stores nothing; the same turnId still replays", async () => {

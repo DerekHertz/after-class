@@ -168,6 +168,31 @@ describe("allowedMoves", () => {
     expect(allowed(l.turns, [correction])).toContain("ask_followup");
   });
 
+  test("#137: a correction to a claim not yet asked about does not hold up the first question", () => {
+    const correction: Correction = { id: "cor-2", claimId: claimId(2), change: "text_changed", disclosed: false };
+    const l = log().learner({ kind: "begin" });
+    expect(allowed(l.turns, [correction])).toEqual(["ask_main"]);
+    l.tutor(askMain(1)).learner(answer("x"), thread(1));
+    expect(allowed(l.turns, [correction])).not.toContain("disclose_correction");
+  });
+
+  test("#137: a correction applied silently stays applied once its claim is asked about", () => {
+    const correction: Correction = { id: "cor-1", claimId: claimId(1), change: "text_changed", disclosed: false };
+    const l = log()
+      .learner({ kind: "begin" })
+      .code({ kind: "correction_applied", correctionId: "cor-1", affectedClaims: [claimId(1)] })
+      .tutor(askMain(1))
+      .learner(answer("x"), thread(1));
+    expect(stateOf(l.turns, [correction]).corrections).toMatchObject([{ id: "cor-1", disclosed: true }]);
+    expect(allowed(l.turns, [correction])).not.toContain("disclose_correction");
+  });
+
+  test("#137: a correction to a claim already asked about is still disclosed, even after its thread closed", () => {
+    const correction: Correction = { id: "cor-1", claimId: claimId(1), change: "text_changed", disclosed: false };
+    const l = log().learner({ kind: "begin" }).tutor(askMain(1)).learner(answer("x"), thread(1)).tutor({ kind: "close_thread", threadId: thread(1) });
+    expect(allowed(l.turns, [correction])).toEqual(["disclose_correction"]);
+  });
+
   test("wrap up or end forces wrap_up; the tutor's wrap_up ends the review", () => {
     for (const act of ["wrap_up", "end"] as const) {
       const l = log().tutor(askMain(1)).learner({ kind: act });

@@ -433,6 +433,8 @@ export const HELP_MOVES = ["hint", "explain", "disclose_correction"] as const sa
 export type CodeNotice =
   | { readonly kind: "soft_target_reached"; readonly elapsedS: number }
   | { readonly kind: "correction_pending"; readonly correctionId: string; readonly affectedClaims: readonly ClaimId[] }
+  /** A correction to a claim no question in this review has named yet: applied without telling the learner (#137). */
+  | { readonly kind: "correction_applied"; readonly correctionId: string; readonly affectedClaims: readonly ClaimId[] }
   | { readonly kind: "resource_ready"; readonly resourceId: ResourceId };
 
 /**
@@ -451,6 +453,7 @@ export type Correction = {
   readonly id: string; // stableId-ish: hash(reviewId, claimId, change)
   readonly claimId: ClaimId;
   readonly change: "withdrawn" | "text_changed" | "new_in_scope";
+  /** Settled for this review: disclosed by a disclose_correction move, or logged by a correction_applied notice. */
   readonly disclosed: boolean;
 };
 

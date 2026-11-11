@@ -6,7 +6,8 @@
  *   R3  ask_main.claimIds ⊆ usable AssessableClaim IDs; an open thread on a claim no longer usable may only be closed
  *   R11 detour_step allowed ⇔ detour.kind === "active" (only a learner detour_accept gets there)
  *   R7  cited evidence IDs ⊆ scope material
- *   ≤ 3 main questions; hint/explain requests force that move; a pending correction forces disclosure first
+ *   ≤ 3 main questions; hint/explain requests force that move; a pending correction to a claim a question
+ *   already named forces disclosure first (one to a claim not yet asked about is applied silently, #137)
  *   fuzzy topics (marked at `begin`) get the main questions first; then at most 3 quick checks on unmarked topics (R18);
  *   a quick check that goes shaky becomes a main question only while fewer than 3 main questions were asked
  *
@@ -53,7 +54,8 @@ export function nextThreadId(state: Pick<ReviewState, "reviewId" | "mainQuestion
  * DERIVED from the turn log + current corrections. Never stored.
  * `lastLearnerAct` is the learner turn the next tutor move answers: null once a
  * tutor turn has followed it, so a request forces exactly one response.
- * A correction counts as disclosed once a disclose_correction move named it.
+ * A correction counts as disclosed once a disclose_correction move named it,
+ * or once a correction_applied notice logged it as applied silently (#137).
  */
 export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly Turn[], corrections: readonly Correction[], softTargetS: number, nowMs: number): ReviewState {
   let phase: ReviewPhase = "active";
@@ -140,6 +142,8 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
       }
     } else if (t.notice.kind === "soft_target_reached") {
       softTargetOffered = true;
+    } else if (t.notice.kind === "correction_applied") {
+      disclosed.add(t.notice.correctionId);
     }
     detours.step(t);
   }
@@ -161,6 +165,23 @@ export function reviewState(reviewId: ReviewState["reviewId"], turns: readonly T
     softTargetOffered,
     wrapUpRequested,
   };
+}
+
+/** Corrections settled in this review: disclosed by the tutor, or logged by code as applied silently (#137). */
+export function settledCorrections(turns: readonly Turn[]): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const t of turns) {
+    if (t.actor === "tutor" && t.move.kind === "disclose_correction") out.add(t.move.correctionId);
+    else if (t.actor === "code" && t.notice.kind === "correction_applied") out.add(t.notice.correctionId);
+  }
+  return out;
+}
+
+/** Claims a question in this review has named (ask_main or quick_check). A correction to one of these is disclosed; any other is applied silently (#137). */
+export function askedClaims(turns: readonly Turn[]): ReadonlySet<ClaimId> {
+  const out = new Set<ClaimId>();
+  for (const t of turns) if (t.actor === "tutor" && (t.move.kind === "ask_main" || t.move.kind === "quick_check")) for (const id of t.move.claimIds) out.add(id);
+  return out;
 }
 
 /**
@@ -239,7 +260,7 @@ export function focusPlan(state: Pick<ReviewState, "fuzzy">, ctx: Pick<TutorInpu
 /**
  * R11: "A detour only starts after I say yes."
  *   if phase != "active": return {}
- *   if any correction !disclosed: return {"disclose_correction"}
+ *   if any correction !disclosed on a claim a question already named: return {"disclose_correction"}
  *   open thread names a claim not usable now (R3): return {"wrap_up"} if wrapUpRequested else {"close_thread"}
  *   hint_request / explain_request / dispute pending: return the move that answers it
  *   if wrapUpRequested (learner wrap_up or end): return {"wrap_up"}
@@ -260,7 +281,8 @@ export function focusPlan(state: Pick<ReviewState, "fuzzy">, ctx: Pick<TutorInpu
  */
 export function allowedMoves(state: ReviewState, ctx: Pick<TutorInput, "turns" | "claims"> & { readonly pendingClaims?: number }): ReadonlySet<TutorMoveKind> {
   if (state.phase !== "active") return new Set();
-  if (state.corrections.some((c) => !c.disclosed)) return new Set(["disclose_correction"]);
+  const asked = askedClaims(ctx.turns);
+  if (state.corrections.some((c) => !c.disclosed && asked.has(c.claimId))) return new Set(["disclose_correction"]);
   if (recheckedClaims(state.openThread, ctx).length > 0) return new Set([state.wrapUpRequested ? "wrap_up" : "close_thread"]);
   const last = state.lastLearnerAct?.act.kind;
   const forced = last === undefined ? undefined : FORCED_RESPONSE[last];
