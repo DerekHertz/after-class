@@ -124,7 +124,7 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 [code] A claim being rechecked is out of assessment until it passes again; an
        open question on it pauses and the tutor says why.                  (TLC fix R3)
 [code]  A correction to a claim no question in this review has named yet is
-        applied silently and logged.                                       (draft, #137)
+        applied silently and logged.                                       (#137)
 [agent] Disclose any other correction with evidence; update only affected observations.
 [code] Soft target (default 10 min, configurable) reached at a natural pause →
        offer continue / wrap up. Never a forced cutoff.
@@ -149,7 +149,7 @@ Amendment (2026-11-06), Derek: "I was also thinking it's probably easier if I al
 
 Amendment (2026-11-06), Derek: "diagrams, stuff that like I can use to explore and kind of pick apart the topics. And this should be interpretable, like concise diagrams that kind of describe the state." After Derek pointed to the Illustrated Notes method, the agent drafted the diagram lines above (the "show me the diagram" lines in the review and the illustrated page per topic in the record) and rule R19; Derek replied "Approve as written".
 
-Amendment (2026-11-10), agent draft from issue #137, awaiting Derek's approval. Issue #137 (Derek): "Opening a review should feel like entering a classroom." The 2026-11-06 review opened with two correction announcements before the first question. The agent drafted the "(draft, #137)" line above and changed the next line from "Disclose the correction with evidence" to "Disclose any other correction with evidence". The code follows the draft. Derek has not approved this wording. No rule text changed. The TLA+ model has no disclosure step, so it is unchanged; `docs/flows/model/check.sh` was rerun on this change and still holds every [TLC] rule.
+Amendment (2026-11-10), Derek, issue #137: "Opening a review should feel like entering a classroom." The 2026-11-06 review opened with two correction announcements before the first question. The agent drafted the "(#137)" line above and changed the next line from "Disclose the correction with evidence" to "Disclose any other correction with evidence"; Derek replied "adopt as written". No rule text changed. The TLA+ model has no disclosure step, so it is unchanged; `docs/flows/model/check.sh` was rerun on this change and still holds every [TLC] rule.
 
 Flow sections A–D approved as a whole on 2026-11-03. The first TLC run broke R3, R4, R7, R8, R14 and R16; Derek approved the six flow fixes marked "TLC fix" above on 2026-11-03 (rules unchanged). The re-check held 10 of 11 rules; R14 broke on a second path (a dispute Derek settles), and Derek approved the "second path" line the same day. The final re-check (2026-11-03) holds all 11 [TLC] rules, and each of the 16 mutants breaks its rule.
 
