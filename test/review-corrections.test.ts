@@ -160,6 +160,21 @@ describe("a correction to a claim not yet asked about in this review is applied 
     expect(moves(events)).not.toContain("disclose_correction");
     expect(x.reviews.view(x.reviewId).turns.filter((t) => t.actor === "tutor" && t.move.kind === "disclose_correction")).toEqual([]);
   });
+
+  test("each silently applied correction is logged once, across later turns and a replayed request", async () => {
+    const x = pendingAtStart();
+    const notices = () => x.reviews.view(x.reviewId).turns.filter((t) => t.actor === "code" && t.notice.kind.startsWith("correction")).map((t) => t.id);
+    await collect(x.reviews.turn(x.reviewId, randomId("turn"), { kind: "begin" }));
+    const first = notices();
+    expect(first).toHaveLength(2);
+    const turnId = randomId("turn");
+    await collect(x.reviews.turn(x.reviewId, turnId, answer()));
+    expect(notices()).toEqual(first);
+    await collect(x.reviews.turn(x.reviewId, turnId, answer()));
+    expect(notices()).toEqual(first);
+    await collect(x.reviews.turn(x.reviewId, randomId("turn"), answer()));
+    expect(notices()).toEqual(first);
+  });
 });
 
 // ───────────────────────────── a pending correction never sticks the review ─────────────────────────────
