@@ -21,7 +21,7 @@ import { Material } from "../../shared/time";
 import { asSeq } from "../db";
 import type { Db } from "../db";
 import type { Lookup, Memo } from "../providers/memo";
-import { MAX_MAIN_QUESTIONS, allowedMoves, parseMoveHeader, reviewState, validateMove, tutorOwesMove, waitsForLearner } from "./tutor";
+import { MAX_MAIN_QUESTIONS, allowedMoves, askedClaims, parseMoveHeader, reviewState, settledCorrections, validateMove, tutorOwesMove, waitsForLearner } from "./tutor";
 import type { TutorInput, TutorOutput, WrapUpInput, WrapUpOutput } from "./tutor";
 import {
   corrections as deriveCorrections, decodeScope, encodeScope, foldInvites, freezeScope, takeSentences, unreviewed, usableInScope,
@@ -309,7 +309,7 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
   }
 
   function correctionsOf(reviewId: ReviewId, review: Stored, turns: readonly Turn[]): Correction[] {
-    const disclosed = new Set(turns.flatMap((t) => (t.actor === "tutor" && t.move.kind === "disclose_correction" ? [t.move.correctionId] : [])));
+    const disclosed = settledCorrections(turns);
     const inScope = evidenceIds(deps.bundle(review.scope.material));
     const states = new Map(
       deps.claimsIn(review.captureId, review.scope.material).map((c) => {
@@ -498,16 +498,23 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     return { claims: usable, evidence: { ...full, passages: full.passages.filter((p) => cited.has(p.id)), frames: full.frames.filter((f) => cited.has(f.id)) } };
   }
 
-  /** Notes every undisclosed correction in the log, then builds the tutor's input; null when no move is allowed. */
+  /**
+   * Notes every undisclosed correction in the log, then builds the tutor's input; null when no move is allowed.
+   * A correction to a claim no question in this review has named is logged as applied and never announced;
+   * one to a claim already asked about is logged as pending, for the tutor to disclose with evidence (#137).
+   */
   function tutorInput(reviewId: ReviewId, review: Stored, repairNote: string | null): TutorInput | null {
-    const { corrs, state } = stateOf(reviewId, review, loadTurns(reviewId));
-    for (const c of corrs) {
+    const before = loadTurns(reviewId);
+    const asked = askedClaims(before);
+    for (const c of correctionsOf(reviewId, review, before)) {
       const noticeId = codeTurnId(reviewId, c.id);
       if (!c.disclosed && !hasTurn(noticeId)) {
-        appendTurn(reviewId, noticeId, "code", null, { notice: { kind: "correction_pending", correctionId: c.id, affectedClaims: [c.claimId] } });
+        const kind = asked.has(c.claimId) ? "correction_pending" : "correction_applied";
+        appendTurn(reviewId, noticeId, "code", null, { notice: { kind, correctionId: c.id, affectedClaims: [c.claimId] } });
       }
     }
     const turns = loadTurns(reviewId);
+    const { state } = stateOf(reviewId, review, turns);
     const { claims, evidence } = grounding(review);
     const pendingClaims = deps.claimsIn(review.captureId, review.scope.material).filter((c) => NON_TERMINAL.has(c.status)).length;
     const allowed = [...kit.allowedMoves(state, { turns, claims, pendingClaims })];

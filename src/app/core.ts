@@ -313,6 +313,7 @@ export function noticeText(turn: Extract<Turn, { actor: "code" }>): string {
   switch (n.kind) {
     case "soft_target_reached": return `You have been reviewing for ${formatDuration(n.elapsedS)}.`;
     case "correction_pending": return "The source changed under a claim in this review. The tutor will explain what changed.";
+    case "correction_applied": return "The source changed under a claim this review has not asked about yet.";
     case "resource_ready": return "A supplemental resource is ready.";
   }
 }
@@ -329,6 +330,8 @@ export function conversationLines(turns: readonly Turn[], topics: readonly Conce
         if (t.say.trim() !== "") lines.push({ key: t.id, speaker: "tutor", label: MOVE_LABEL[t.move.kind], text: t.say, evidenceIds: moveEvidence(t.move) });
         break;
       case "code":
+        // A silently applied correction is logged for the record, not shown in the conversation (#137).
+        if (t.notice.kind === "correction_applied") break;
         lines.push({ key: t.id, speaker: "system", label: "Note", text: noticeText(t), evidenceIds: [] });
         break;
     }

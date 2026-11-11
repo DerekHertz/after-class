@@ -186,6 +186,13 @@ describe("conversation", () => {
     ]);
   });
 
+  test("a correction applied silently is in the log but not in the conversation (#137)", () => {
+    const applied = turnJson(1, "code", { notice: { kind: "correction_applied", correctionId: "corr_x", affectedClaims: [stableId("clm", 1)] } });
+    const turns = reviewViewz.parse(reviewJson({ turns: [applied, tutorAsk] })).turns;
+    expect(turns[0]).toMatchObject({ actor: "code", notice: { kind: "correction_applied" } });
+    expect(conversationLines(turns).map((l) => l.label)).toEqual(["Question"]);
+  });
+
   test("the soft-target prompt stands until the learner continues or wraps up, and never blocks answering", () => {
     const notice = turnJson(3, "code", { notice: { kind: "soft_target_reached", elapsedS: 600 } });
     const prompted = parsedReview({ turns: [tutorAsk, notice] });
