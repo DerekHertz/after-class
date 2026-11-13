@@ -35,33 +35,51 @@ if [ ! -b "$device" ]; then
   exit 1
 fi
 
-# Prints "empty" when the device carries no signature at all, or the name of what it holds. blkid exits 2 only when it
-# finds nothing. Any other failure is an error, never an empty disk, so the caller refuses to format.
+# Prints "empty" when the device is readable and carries no signature at all, otherwise the name of what it holds. Any
+# failure returns 1, and the caller refuses to format. The probe tools report some read errors with the same exit status
+# they use for "nothing found", so the first and last MiB must read cleanly before an empty answer counts, and a probe
+# that prints anything on stderr or exits nonzero is an error.
 disk_signature() {
-  local probe rc=0 found
-  probe=$(blkid -p -o export "$1") || rc=$?
-  case "$rc" in
-    0)
-      found=$(sed -n -e 's/^TYPE=//p' -e 's/^PTTYPE=/partition table /p' <<<"$probe" | head -n 1)
-      echo "${found:-unrecognised signature}"
-      ;;
-    2) echo empty ;;
-    *) return 1 ;;
-  esac
+  local device=$1 err size_mib found rc=0
+  size_mib=$(( $(blockdev --getsize64 "$device") / 1048576 ))
+  if [ "$size_mib" -lt 2 ]; then
+    say "${device} reports ${size_mib} MiB" >&2
+    return 1
+  fi
+  dd if="$device" of=/dev/null bs=1M count=1 status=none \
+    && dd if="$device" of=/dev/null bs=1M skip=$((size_mib - 1)) count=1 status=none || {
+    say "${device} cannot be read end to end" >&2
+    return 1
+  }
+  err=$(mktemp)
+  found=$(wipefs --no-act --output TYPE --noheadings "$device" 2>"$err") || rc=$?
+  if [ "$rc" -ne 0 ] || [ -s "$err" ]; then
+    say "signature probe of ${device} failed: $(cat "$err")" >&2
+    rm -f "$err"
+    return 1
+  fi
+  rm -f "$err"
+  found=$(tr -s '[:space:]' ' ' <<<"$found" | sed -e 's/^ //' -e 's/ $//')
+  echo "${found:-empty}"
 }
 
-# Format only a device with no signature. A volume that holds anything but xfs is left alone and the run fails.
-signature=$(disk_signature "$device") || {
-  say "blkid failed on ${device}, refusing to format it"
-  exit 1
+# Format only a device that is readable and has no signature. A volume that holds anything but xfs is left alone and the
+# run fails.
+prepare_filesystem() {
+  local device=$1 signature
+  signature=$(disk_signature "$device") || {
+    say "cannot prove ${device} is empty, refusing to format it"
+    return 1
+  }
+  if [ "$signature" = empty ]; then
+    say "formatting ${device}"
+    mkfs.xfs -L afterclass-data "$device"
+  elif [ "$signature" != xfs ]; then
+    say "${device} holds ${signature}, refusing to touch it"
+    return 1
+  fi
 }
-if [ "$signature" = empty ]; then
-  say "formatting ${device}"
-  mkfs.xfs -L afterclass-data "$device"
-elif [ "$signature" != xfs ]; then
-  say "${device} holds ${signature}, refusing to touch it"
-  exit 1
-fi
+prepare_filesystem "$device"
 
 # A restored snapshot keeps its label. Repair a mismatch only while the filesystem is unmounted.
 if ! mountpoint -q /data && [ "$(blkid -p -o value -s LABEL "$device")" != "afterclass-data" ]; then
@@ -78,7 +96,7 @@ mountpoint -q /data || mount /data
 # One bridge network for Caddy and the app, so Caddy reaches the app by name and neither runs on the host network.
 docker network inspect afterclass >/dev/null 2>&1 || docker network create afterclass
 
-mkdir -p /data/db /data/config /data/afterclass /data/caddy/data /data/caddy/config
+mkdir -p /data/db /data/config /data/afterclass/images /data/caddy/data /data/caddy/config
 
 systemctl daemon-reload
 systemctl enable afterclass-caddy.service afterclass-app.service

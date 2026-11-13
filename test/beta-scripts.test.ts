@@ -1,9 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpDir } from "./tmp";
 
 const FILES = resolve(import.meta.dir, "../infra/beta/files");
+
+const OLD = "a".repeat(40);
+const NEW = "b".repeat(40);
+const OLDER = "c".repeat(40);
+const OLDEST = "d".repeat(40);
 
 function stub(dir: string, name: string, body: string): void {
   const path = join(dir, name);
@@ -11,69 +16,96 @@ function stub(dir: string, name: string, body: string): void {
   chmodSync(path, 0o755);
 }
 
+interface Host {
+  readonly root: string;
+  readonly bin: string;
+  readonly log: string;
+}
+
+/** A temp tree that stands in for one server's root: /data, /etc/afterclass and /usr/local/sbin. */
+function makeHost(prefix: string): Host {
+  const root = tmpDir(prefix);
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  mkdirSync(join(root, "data/afterclass/images"), { recursive: true });
+  writeFileSync(join(root, "settings.env"), "APP_PORT=8080\nAWS_REGION=us-east-2\nECR_REGISTRY=registry.test\nECR_REPOSITORY=afterclass-api\n");
+  const log = join(root, "calls.log");
+  writeFileSync(log, "");
+  return { root, bin, log };
+}
+
+function readLog(host: Host): string[] {
+  return readFileSync(host.log, "utf8").split("\n").filter(Boolean);
+}
+
+/** Copies a real script into the host with every absolute path of the real server pointed into the temp tree. */
+function installScript(host: Host, name: string): string {
+  const text = readFileSync(join(FILES, `${name}.sh`), "utf8")
+    .replaceAll("/etc/afterclass/settings.env", join(host.root, "settings.env"))
+    .replaceAll("/run/afterclass-deploy.lock", join(host.root, "lock"))
+    .replaceAll("/data/afterclass", join(host.root, "data/afterclass"))
+    .replace(/\/usr\/local\/sbin\/(afterclass-[a-z-]+)/g, join(host.root, "$1"));
+  expect(text).not.toContain("/usr/local/sbin");
+  const path = join(host.root, name);
+  writeFileSync(path, text);
+  return path;
+}
+
+function runScript(host: Host, name: string, args: string[]): { status: number; stdout: string; stderr: string } {
+  const result = Bun.spawnSync(["bash", installScript(host, name), ...args], {
+    env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` },
+  });
+  return { status: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString() };
+}
+
 interface DeployRun {
   readonly status: number;
   readonly tag: string;
   readonly log: string[];
+  readonly stdout: string;
   readonly stderr: string;
 }
 
 /**
- * Runs the real afterclass-deploy script with its absolute paths rewritten into a temp tree and every command it calls
- * replaced by a stub. `restartFails` and `unhealthy` name the tags that make the stubbed systemctl restart fail and the
- * stubbed /health answer 500. A stub reads the tag the script selected from the state file, as the real unit would.
+ * Runs the real afterclass-deploy script against stubbed commands. `restartFails` and `unhealthy` name the tags that make
+ * the stubbed systemctl restart fail and the stubbed /health answer 500. A stub reads the tag the script selected from the
+ * state file, as the real unit would. The pull and save scripts it calls are stubs that log their arguments.
  */
-function runDeploy(opts: { previous: string; next: string; restartFails?: string[]; unhealthy?: string[]; pruneFails?: boolean }): DeployRun {
-  const root = tmpDir("afterclass-deploy-test-");
-  const bin = join(root, "bin");
-  mkdirSync(bin);
-  mkdirSync(join(root, "data/afterclass"), { recursive: true });
-  writeFileSync(join(root, "data/afterclass/current-tag"), `${opts.previous}\n`);
-  writeFileSync(join(root, "settings.env"), "APP_PORT=8080\n");
-  const state = join(root, "data/afterclass/current-tag");
-  const log = join(root, "calls.log");
-  writeFileSync(log, "");
+function runDeploy(opts: {
+  previous: string;
+  next: string;
+  restartFails?: string[];
+  unhealthy?: string[];
+  pruneFails?: boolean;
+  saveFails?: boolean;
+}): DeployRun {
+  const host = makeHost("afterclass-deploy-test-");
+  const state = join(host.root, "data/afterclass/current-tag");
+  writeFileSync(state, `${opts.previous}\n`);
   const restartFails = (opts.restartFails ?? []).join(" ");
   const unhealthy = (opts.unhealthy ?? []).join(" ");
 
-  stub(bin, "mountpoint", "exit 0");
-  stub(bin, "sleep", "exit 0");
-  stub(bin, "journalctl", "exit 0");
-  stub(bin, "curl", `tag=$(cat ${state}); case " ${unhealthy} " in *" $tag "*) exit 22;; esac; exit 0`);
+  stub(host.bin, "mountpoint", "exit 0");
+  stub(host.bin, "sleep", "exit 0");
+  stub(host.bin, "journalctl", "exit 0");
+  stub(host.bin, "curl", `tag=$(cat ${state}); case " ${unhealthy} " in *" $tag "*) exit 22;; esac; exit 0`);
   stub(
-    bin,
+    host.bin,
     "systemctl",
-    `echo "systemctl $*" >> ${log}
+    `echo "systemctl $*" >> ${host.log}
 tag=$(cat ${state})
 case "$1" in
   restart) case " ${restartFails} " in *" $tag "*) exit 1;; esac;;
 esac
 exit 0`,
   );
-  stub(bin, "docker", `echo "docker $*" >> ${log}\n${opts.pruneFails ? 'if [ "$2" = prune ]; then exit 1; fi' : ""}\nexit 0`);
-  stub(root, "pull", `echo "pull $1" >> ${log}`);
+  stub(host.bin, "docker", `echo "docker $*" >> ${host.log}\n${opts.pruneFails ? 'if [ "$2" = prune ]; then exit 1; fi' : ""}\nexit 0`);
+  stub(host.root, "afterclass-pull", `echo "pull $1" >> ${host.log}`);
+  stub(host.root, "afterclass-save-image", `echo "save $*" >> ${host.log}\n${opts.saveFails ? "echo 'no space left' >&2; exit 1" : "exit 0"}`);
 
-  const script = readFileSync(join(FILES, "afterclass-deploy.sh"), "utf8")
-    .replaceAll("/etc/afterclass/settings.env", join(root, "settings.env"))
-    .replaceAll("/run/afterclass-deploy.lock", join(root, "lock"))
-    .replaceAll("/data/afterclass", join(root, "data/afterclass"))
-    .replaceAll("/usr/local/sbin/afterclass-pull", join(root, "pull"));
-  expect(script).not.toContain("/usr/local/sbin");
-  writeFileSync(join(root, "deploy.sh"), script);
-
-  const result = Bun.spawnSync(["bash", join(root, "deploy.sh"), opts.next], {
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-  });
-  return {
-    status: result.exitCode,
-    tag: readFileSync(state, "utf8").trim(),
-    log: readFileSync(log, "utf8").split("\n").filter(Boolean),
-    stderr: result.stderr.toString(),
-  };
+  const run = runScript(host, "afterclass-deploy", [opts.next]);
+  return { ...run, tag: readFileSync(state, "utf8").trim(), log: readLog(host) };
 }
-
-const OLD = "a".repeat(40);
-const NEW = "b".repeat(40);
 
 describe("afterclass-deploy", () => {
   test("a healthy deploy keeps the new tag", () => {
@@ -110,43 +142,123 @@ describe("afterclass-deploy", () => {
   });
 });
 
-/** The bootstrap script's disk_signature function, run alone against a stubbed blkid. */
-function diskSignature(blkidBody: string): { status: number; stdout: string } {
-  const root = tmpDir("afterclass-bootstrap-test-");
-  const bin = join(root, "bin");
-  mkdirSync(bin);
-  stub(bin, "blkid", blkidBody);
+/** The named functions of afterclass-bootstrap, so a test can run them alone against stubbed disk tools. */
+function bootstrapFunctions(names: string[]): string {
   const source = readFileSync(join(FILES, "afterclass-bootstrap.sh"), "utf8");
-  const match = /^disk_signature\(\) \{\n[\s\S]*?\n\}\n/m.exec(source);
-  expect(match).not.toBeNull();
-  const result = Bun.spawnSync(["bash", "-c", `set -euo pipefail\n${match![0]}\ndisk_signature /dev/test`], {
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-  });
-  return { status: result.exitCode, stdout: result.stdout.toString().trim() };
+  return names
+    .map((name) => {
+      const match = new RegExp(`^${name}\\(\\) \\{(?: .*\\}\\n|\\n[\\s\\S]*?\\n\\}\\n)`, "m").exec(source);
+      expect(match).not.toBeNull();
+      return match![0];
+    })
+    .join("\n");
 }
 
-describe("afterclass-bootstrap disk_signature", () => {
-  test("blkid exit 2, nothing found, is an empty disk", () => {
-    expect(diskSignature("exit 2")).toEqual({ status: 0, stdout: "empty" });
+/** Stub bodies for the disk tools. `dd` receives the real dd arguments. */
+interface DiskTools {
+  readonly dd?: string;
+  readonly wipefs?: string;
+  readonly blockdev?: string;
+}
+
+function prepareDisk(tools: DiskTools): { status: number; formatted: boolean } {
+  const host = makeHost("afterclass-bootstrap-test-");
+  stub(host.bin, "blockdev", tools.blockdev ?? "echo 21474836480");
+  stub(host.bin, "dd", tools.dd ?? "exit 0");
+  stub(host.bin, "wipefs", tools.wipefs ?? "exit 0");
+  stub(host.bin, "mkfs.xfs", `echo "mkfs.xfs $*" >> ${host.log}`);
+  const script = `set -euo pipefail\n${bootstrapFunctions(["say", "disk_signature", "prepare_filesystem"])}\nprepare_filesystem /dev/test`;
+  const result = Bun.spawnSync(["bash", "-c", script], { env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` } });
+  return { status: result.exitCode, formatted: readLog(host).some((line) => line.startsWith("mkfs.xfs")) };
+}
+
+describe("afterclass-bootstrap data volume", () => {
+  test("a readable disk with no signature is formatted", () => {
+    const run = prepareDisk({});
+    expect(run.status).toBe(0);
+    expect(run.formatted).toBe(true);
   });
 
-  test("a blkid error is not an empty disk", () => {
-    for (const code of [1, 4, 8, 127]) {
-      const result = diskSignature(`echo 'blkid: error' >&2; exit ${code}`);
-      expect(result.status).not.toBe(0);
-      expect(result.stdout).not.toBe("empty");
+  test("a read error that the probe reports with the exit status for nothing found is not an empty disk", () => {
+    const run = prepareDisk({
+      dd: "echo 'dd: error reading /dev/test: Input/output error' >&2; exit 1",
+      wipefs: "echo 'wipefs: error: /dev/test: probing initialization failed: Input/output error' >&2; exit 2",
+    });
+    expect(run.status).not.toBe(0);
+    expect(run.formatted).toBe(false);
+  });
+
+  test("a probe that prints an I/O error and exits 2 does not format, even when dd could read", () => {
+    const run = prepareDisk({ wipefs: "echo 'Input/output error' >&2; exit 2" });
+    expect(run.status).not.toBe(0);
+    expect(run.formatted).toBe(false);
+  });
+
+  test("a probe that prints to stderr and still exits 0 does not format", () => {
+    const run = prepareDisk({ wipefs: "echo 'warning: something' >&2; exit 0" });
+    expect(run.status).not.toBe(0);
+    expect(run.formatted).toBe(false);
+  });
+
+  test("a probe error of any exit status does not format", () => {
+    for (const code of [1, 2, 4, 8, 127]) {
+      const run = prepareDisk({ wipefs: `exit ${code}` });
+      expect(run.status).not.toBe(0);
+      expect(run.formatted).toBe(false);
     }
   });
 
-  test("an xfs filesystem is named", () => {
-    expect(diskSignature("printf 'DEVNAME=/dev/test\\nTYPE=xfs\\nLABEL=afterclass-data\\n'")).toEqual({ status: 0, stdout: "xfs" });
+  test("an unreadable last MiB does not format", () => {
+    const run = prepareDisk({ dd: 'case "$*" in *skip=*) echo "dd: Input/output error" >&2; exit 1;; esac; exit 0' });
+    expect(run.status).not.toBe(0);
+    expect(run.formatted).toBe(false);
   });
 
-  test("a partition table is a signature, so the disk is not empty", () => {
-    const result = diskSignature("printf 'DEVNAME=/dev/test\\nPTTYPE=gpt\\n'");
-    expect(result.status).toBe(0);
-    expect(result.stdout).not.toBe("empty");
-    expect(result.stdout).not.toBe("xfs");
+  test("an unreadable first MiB does not format", () => {
+    const run = prepareDisk({ dd: 'case "$*" in *skip=*) exit 0;; esac; echo "dd: Input/output error" >&2; exit 1' });
+    expect(run.status).not.toBe(0);
+    expect(run.formatted).toBe(false);
+  });
+
+  test("a device whose size cannot be read does not format", () => {
+    for (const blockdev of ["exit 1", "echo 0", "echo notanumber"]) {
+      const run = prepareDisk({ blockdev });
+      expect(run.status).not.toBe(0);
+      expect(run.formatted).toBe(false);
+    }
+  });
+
+  test("an xfs filesystem is kept, not formatted", () => {
+    const run = prepareDisk({ wipefs: "echo xfs" });
+    expect(run.status).toBe(0);
+    expect(run.formatted).toBe(false);
+  });
+
+  test("any other signature, a partition table included, is refused and not formatted", () => {
+    for (const found of ["ext4", "gpt", "gpt\\nPMBR", "LVM2_member", "xfs\\next4"]) {
+      const run = prepareDisk({ wipefs: `printf '${found}\\n'` });
+      expect(run.status).not.toBe(0);
+      expect(run.formatted).toBe(false);
+    }
+  });
+
+  const haveTools = Bun.which("wipefs") !== null && Bun.which("mkfs.ext4") !== null && Bun.which("truncate") !== null;
+  test.skipIf(!haveTools)("the real dd and wipefs tell a blank image from an ext4 one", () => {
+    const host = makeHost("afterclass-bootstrap-real-");
+    const image = join(host.root, "disk.img");
+    expect(Bun.spawnSync(["truncate", "-s", "8M", image]).exitCode).toBe(0);
+    stub(host.bin, "blockdev", "echo 8388608");
+    stub(host.bin, "mkfs.xfs", `echo "mkfs.xfs $*" >> ${host.log}`);
+    const script = `set -euo pipefail\n${bootstrapFunctions(["say", "disk_signature", "prepare_filesystem"])}\nprepare_filesystem ${image}`;
+    const run = () => Bun.spawnSync(["bash", "-c", script], { env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` } });
+
+    expect(run().exitCode).toBe(0);
+    expect(readLog(host).some((line) => line.startsWith("mkfs.xfs"))).toBe(true);
+
+    writeFileSync(host.log, "");
+    expect(Bun.spawnSync(["mkfs.ext4", "-q", image]).exitCode).toBe(0);
+    expect(run().exitCode).not.toBe(0);
+    expect(readLog(host).some((line) => line.startsWith("mkfs.xfs"))).toBe(false);
   });
 });
 
