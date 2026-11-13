@@ -253,6 +253,57 @@ describe("main, the live backend serves save, retry-preparation, the record and 
     expect((await get(second, `/record?reviewId=${reviewId}`)).status).toBe(200);
   }, 30_000);
 
+  // #95: the canonical key stays the same through failure and recovery, so only a retry that clears the stored failure can reach the recovered provider.
+  const stableWrapUp = (outcomes: readonly ("fail" | "ok")[]) => {
+    let calls = 0;
+    return scripted<unknown, { observations: never[]; notes: never[] }>("wrap_up", "claude", () => "wrap-stable", () => {
+      const outcome = outcomes[Math.min(calls, outcomes.length - 1)]!;
+      calls += 1;
+      return outcome === "fail" ? fail("claude timed out") : ok({ observations: [], notes: [] });
+    });
+  };
+
+  test("a save retry asks the wrap-up again after a cached terminal failure, across a restart, and saves one record (#95, R15)", async () => {
+    const fakes = fakeTasks();
+    const wrapUp = stableWrapUp(["fail", "fail", "ok"]);
+    const tutor = scripted("tutor_turn", "claude", () => "tutor", () => ok({ move: { kind: "wrap_up" }, say: "That is the end of this review." }));
+    const tasks = { ...fakes.tasks, wrapUp, tutor } as unknown as TaskSet;
+    const configDir = dir("afterclass-config-");
+    const env = { AFTERCLASS_DATA: dir("afterclass-data-"), AFTERCLASS_MODE: "replay" };
+    const first = await boot({ tasks, configDir }, env);
+    await ingest(first, fixture({ frames: false }));
+    await until(() => first.r.modules.segmentation.current(CAP).some((c) => first.r.modules.preparation.prep(c.id).finished));
+
+    const reviewId = stableId("rvw", "main-test-stable-wrapup");
+    expect((await post(first, `/captures/${CAP}/reviews`, { reviewId, choice: "prepared_only" })).body.kind).toBe("started");
+    const ending = await fetch(`${first.base}/reviews/${reviewId}/turns`, { method: "POST", headers: authed(first.r.token), body: JSON.stringify({ turnId: stableId("turn", "main-test-stable-end"), act: { kind: "end" } }) });
+    expect(await ending.text()).toContain("turn_complete");
+
+    // the first save fails; one request makes one model call, not a loop
+    expect((await post(first, `/reviews/${reviewId}/save`)).body).toMatchObject({ kind: "save_failed", retryable: true });
+    expect(wrapUp.calls).toHaveLength(1);
+    // the provider is still down: the retry asks once more and reports a recoverable failure
+    expect((await post(first, `/reviews/${reviewId}/save`)).body).toMatchObject({ kind: "save_failed", retryable: true });
+    expect(wrapUp.calls).toHaveLength(2);
+    expect((await get(first, `/reviews/${reviewId}`)).body.saved).toBe("save_pending");
+
+    await first.r.stop();
+    running.splice(running.indexOf(first.r), 1);
+    const second = await boot({ tasks, configDir }, env);
+    expect((await get(second, `/reviews/${reviewId}`)).body.saved).toBe("save_pending");
+
+    // the provider has recovered: the restarted backend's retry reaches it and saves
+    const once = await post(second, `/reviews/${reviewId}/save`);
+    expect(once.body).toEqual({ kind: "saved", notes: 0, observations: 0, links: 0 });
+    expect(wrapUp.calls).toHaveLength(3);
+    // R15: a further retry is answered from the first save, with no model call and no second record
+    const twice = await post(second, `/reviews/${reviewId}/save`);
+    expect(twice.body).toEqual(once.body);
+    expect(wrapUp.calls).toHaveLength(3);
+    expect((await get(second, `/reviews/${reviewId}`)).body.saved).toBe("saved");
+    expect(second.r.modules.db.sql.query("SELECT COUNT(*) AS n FROM saved_reviews").get()).toEqual({ n: 1 });
+  }, 30_000);
+
   test("the evidence routes answer from the real store: lookup, a frame image, and a delete", async () => {
     const fakes = fakeTasks();
     const b = await boot({ tasks: fakes.tasks }, { AFTERCLASS_MODE: "replay" });
