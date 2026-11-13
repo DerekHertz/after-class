@@ -2,10 +2,9 @@
  * The experiment 8 replay runner, on a tiny fixture database and a fake Messages API client.
  * Nothing here calls a model: the client is a fake and the key file is a temp file.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages";
@@ -15,16 +14,9 @@ import { ApiCallError, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, worstCaseUsd } 
 import { ProviderError } from "../src/backend/providers/memo";
 import { Spend, allowedFromPrompt, fitsUnderCap, isCost, loadCalls, main, parseArgs, reservationUsd } from "../scripts/experiments/api-tutor-replay";
 import type { Results } from "../scripts/experiments/api-tutor-replay";
+import { tmpDir } from "./tmp";
 
-const scratch: string[] = [];
-afterEach(() => {
-  for (const d of scratch.splice(0)) rmSync(d, { recursive: true, force: true });
-});
-const dir = (): string => {
-  const d = mkdtempSync(join(tmpdir(), "afterclass-replay-"));
-  scratch.push(d);
-  return d;
-};
+const dir = (): string => tmpDir("afterclass-replay-");
 
 const T0 = Date.parse("2026-11-11T09:00:00Z");
 const SYSTEM = "You are the tutor.\n\nUsable claims: clm_x";

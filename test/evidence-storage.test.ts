@@ -8,9 +8,7 @@ import type { Evidence } from "../src/shared/domain";
 import type { EvidenceId } from "../src/shared/ids";
 import { stableId } from "../src/shared/ids";
 import { Material, interval } from "../src/shared/time";
-import { DAY, JPEG, SRC, count, exceptStalls, harness, hit, keyOf, registerCleanup, stream, textsOf } from "./evidence-fixtures";
-
-registerCleanup();
+import { DAY, JPEG, SRC, count, exceptStalls, harness, hit, keyOf, stream, textsOf } from "./evidence-fixtures";
 
 describe("frames and Jev judgments", () => {
   function frameStream() {

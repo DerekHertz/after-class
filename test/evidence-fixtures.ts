@@ -1,7 +1,3 @@
-import { afterEach } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { asSeq } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
 import { sourceIdOf } from "../src/backend/evidence/core";
@@ -12,6 +8,7 @@ import type { CaptureId, EvidenceId, MemoKey } from "../src/shared/ids";
 import { randomId, stableId } from "../src/shared/ids";
 import { media } from "../src/shared/time";
 import { testDb } from "./fakes";
+import { tmpDir } from "./tmp";
 
 export const VIDEO = "aaaaaaaaaaa";
 
@@ -23,14 +20,11 @@ export const DAY = 86_400_000;
 
 export const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]).toString("base64");
 
-const cleanup: string[] = [];
-
 /** Scripted frame-change answers keyed by the `after` frame id. A frame with no entry is unjudged. */
 type Script = Map<EvidenceId, Lookup<Verdict>>;
 
 export function harness(opts: { clock?: { t: number } } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "afterclass-evidence-"));
-  cleanup.push(dir);
+  const dir = tmpDir("afterclass-evidence-");
   const db = testDb();
   const script: Script = new Map();
   const changes = { n: 0 };
@@ -87,9 +81,3 @@ export const exceptStalls = <G extends { readonly reason: string }>(gaps: readon
 export const textsOf = (passages: readonly { readonly text: string }[]) => passages.map((p) => p.text);
 
 export const count = (h: ReturnType<typeof harness>, table: string) => h.db.sql.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM ${table}`).get()!.n;
-
-export function registerCleanup() {
-  afterEach(() => {
-    for (const d of cleanup.splice(0)) rmSync(d, { recursive: true, force: true });
-  });
-}

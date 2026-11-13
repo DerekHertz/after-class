@@ -1,14 +1,11 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { packagedResources } from "./build-resources";
+import { tmpDir } from "./tmp";
 
-const directories: string[] = [];
-afterEach(() => { for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 function fixture(href = "styles/main.css") {
-  const dir = mkdtempSync(join(tmpdir(), "afterclass-resources-"));
-  directories.push(dir);
+  const dir = tmpDir("afterclass-resources-");
   mkdirSync(join(dir, "styles"));
   mkdirSync(join(dir, "fonts"));
   writeFileSync(join(dir, "popup.html"), `<link href='${href}'>`);

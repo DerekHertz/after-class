@@ -7,9 +7,7 @@ import { FRAME_DEFAULTS } from "../src/extension/content/frames";
 import type { CaptureFact } from "../src/shared/domain";
 import { randomId, stableId } from "../src/shared/ids";
 import { Material, interval, media } from "../src/shared/time";
-import { JPEG, OTHER, SRC, VIDEO, exceptStalls, harness, keyOf, registerCleanup, stream, textsOf } from "./evidence-fixtures";
-
-registerCleanup();
+import { JPEG, OTHER, SRC, VIDEO, exceptStalls, harness, keyOf, stream, textsOf } from "./evidence-fixtures";
 
 describe("R1: evidence only from intervals watched while capture was on", () => {
   test("a passage exists only for a segment wholly inside watched time; a partly watched one is a gap", () => {
