@@ -132,15 +132,16 @@ function partsOf(message: Message): UsageParts {
   return { fresh: u.input_tokens, creation5m: m5, creation1h: h1, read: u.cache_read_input_tokens ?? 0, output: u.output_tokens };
 }
 
-function usageOf(message: Message, parts: UsageParts): UsageReport {
+function usageOf(message: Message, parts: UsageParts, safe: (text: string, max?: number) => string): UsageReport {
   const usd = priceUsage(message.model, parts);
+  const model = safe(message.model, 80);
   return {
-    model: message.model,
+    model,
     // The CLI adapter's convention: input is fresh plus cache-creation tokens, cache reads are reported on their own.
     inputTokens: parts.fresh + parts.creation5m + parts.creation1h,
     outputTokens: parts.output,
     cacheReadTokens: parts.read,
-    cost: usd === null ? { kind: "unknown", reason: `no price for model ${message.model}` } : { kind: "estimated", usd, basis: COST_BASIS },
+    cost: usd === null ? { kind: "unknown", reason: `no price for model ${model}` } : { kind: "estimated", usd, basis: COST_BASIS },
   };
 }
 
@@ -148,26 +149,51 @@ function textOf(message: Message): string {
   return message.content.map((b) => (b.type === "text" ? b.text : "")).join("");
 }
 
-const clip = (text: string) => text.slice(0, 500);
+/** The longest message text this adapter lets into a thrown error, and so into the memo's failure table. */
+export const MESSAGE_CLIP = 500;
+
+/**
+ * The one way text from an SDK error, a response body, a refusal, a stop reason, a model name or the request becomes
+ * part of a message. The secret is replaced in the whole text first and only then is the text cut, because a cut made
+ * first can end inside the secret, and a prefix of a key is no longer a string the replace can find.
+ */
+export function redactThenClip(text: string, secret: string, max: number = MESSAGE_CLIP): string {
+  const redacted = secret === "" ? text : text.split(secret).join("[redacted]");
+  return redacted.slice(0, max);
+}
+
+/** Whether a failed call may have been billed. An HTTP error status is the API turning the request away, so it was not. */
+export type Billing = "not_billed" | "maybe_billed";
+
+/** A call that failed in transport or at the API, with what the runner needs to price it. A refusal or a bad stop is a plain ProviderError that carries usage. */
+export class ApiCallError extends ProviderError {
+  constructor(message: string, usage: UsageReport | null, retryable: boolean, readonly billing: Billing, readonly status: number | null) {
+    super(message, usage, retryable);
+  }
+}
 
 export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
   if (opts.apiKey === "") throw new Error("createClaudeApi needs a non-empty apiKey");
   const client = opts.client ?? sdkClient(opts.apiKey);
   const limiter = createLimiter(opts.maxConcurrent);
-  const scrub = (text: string) => text.split(opts.apiKey).join("[redacted]");
+  const safe = (text: string, max?: number) => redactThenClip(text, opts.apiKey, max);
 
   /** Typed errors only, never message text: a retryable failure is overload, a rate limit, a 5xx or the connection. */
   function failureOf(err: unknown): ProviderError {
     if (err instanceof ProviderError) return err;
-    const text = clip(scrub(err instanceof Error ? err.message : String(err)));
-    if (err instanceof Anthropic.APIConnectionError) return new ProviderError(`claude api connection error: ${text}`, null, true);
+    const text = safe(err instanceof Error ? err.message : String(err));
+    // The connection can fail before or after the request was sent, and nothing says which, so it may have been billed.
+    if (err instanceof Anthropic.APIConnectionError) return new ApiCallError(`claude api connection error: ${text}`, null, true, "maybe_billed", null);
     if (err instanceof Anthropic.APIError) {
       const retryable = err instanceof Anthropic.RateLimitError || err instanceof Anthropic.RequestTimeoutError || err instanceof Anthropic.InternalServerError || (err.status !== undefined && err.status >= 500);
-      return new ProviderError(`claude api error (${err.status ?? "no status"}): ${text}`, null, retryable);
+      // A numeric status is an HTTP answer before any output. No status means the error arrived inside a stream that had started. A 408 is a timeout.
+      const status = typeof err.status === "number" ? err.status : null;
+      const billing: Billing = status === null || status === 408 ? "maybe_billed" : "not_billed";
+      return new ApiCallError(`claude api error (${status ?? "no status"}): ${text}`, null, retryable, billing, status);
     }
     // A stream that ended without a message is the SDK's own error for an interrupted connection.
-    if (err instanceof Anthropic.AnthropicError) return new ProviderError(`claude api error: ${text}`, null, true);
-    return new ProviderError(`claude api call failed: ${text}`, null, false);
+    if (err instanceof Anthropic.AnthropicError) return new ApiCallError(`claude api error: ${text}`, null, true, "maybe_billed", null);
+    return new ApiCallError(`claude api call failed: ${text}`, null, false, "maybe_billed", null);
   }
 
   /** The slot, the timeout and the abort wrapped around one request. An abort rejects the way the CLI adapter's does. */
@@ -186,7 +212,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
       return await work(ctl.signal);
     } catch (err) {
       if (signal.aborted) throw abortError();
-      if (timedOut) throw new ProviderError(`claude api timed out after ${req.timeoutMs}ms`, null, true);
+      if (timedOut) throw new ApiCallError(`claude api timed out after ${req.timeoutMs}ms`, null, true, "maybe_billed", null);
       throw failureOf(err);
     } finally {
       clearTimeout(timer);
@@ -198,9 +224,10 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
   /** The request pieces both paths share. Throws before any call for a model or feature this trial does not cover. */
   function prepare(req: ClaudeRequest) {
     const model = (API_MODELS as Readonly<Record<string, string>>)[req.model];
-    if (model === undefined) throw new ProviderError(`claude api backend serves only "opus" and "sonnet", got "${req.model}"`, null, false);
-    if (req.webTools) throw new ProviderError("claude api backend does not support web tools; this trial covers the tutor turn and the wrap-up only", null, false);
-    if (req.images.length > 0) throw new ProviderError("claude api backend does not support images; this trial covers the tutor turn and the wrap-up only", null, false);
+    // Nothing has been sent when these throw, so none of them can be billed.
+    if (model === undefined) throw new ApiCallError(`claude api backend serves only "opus" and "sonnet", got "${safe(req.model, 80)}"`, null, false, "not_billed", null);
+    if (req.webTools) throw new ApiCallError("claude api backend does not support web tools; this trial covers the tutor turn and the wrap-up only", null, false, "not_billed", null);
+    if (req.images.length > 0) throw new ApiCallError("claude api backend does not support images; this trial covers the tutor turn and the wrap-up only", null, false, "not_billed", null);
     // One stable block, cached for an hour, so a review's lecture context is read from cache on its later turns.
     const system: TextBlockParam[] = [{ type: "text", text: req.system, cache_control: { type: "ephemeral", ttl: "1h" } }];
     return { model, system, messages: [{ role: "user", content: req.prompt }] as const };
@@ -209,16 +236,16 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
   /** Usage, then the stop reason: only a finished answer is an answer. */
   function settle(message: Message): UsageReport {
     const parts = partsOf(message);
-    const usage = usageOf(message, parts);
-    opts.onResponse?.({ ...parts, model: message.model, stopReason: message.stop_reason, costUsd: usage.cost.kind === "estimated" ? usage.cost.usd : null });
+    const usage = usageOf(message, parts, safe);
+    opts.onResponse?.({ ...parts, model: safe(message.model, 80), stopReason: message.stop_reason, costUsd: usage.cost.kind === "estimated" ? usage.cost.usd : null });
     const stop = message.stop_reason;
     if (stop === "end_turn" || stop === "stop_sequence") return usage;
     if (stop === "refusal") {
       const details = message.stop_details;
       const why = [details?.category, details?.explanation].filter((x): x is string => typeof x === "string" && x !== "").join(": ");
-      throw new ProviderError(`claude refused the request${why ? ` (${scrub(clip(why))})` : ""}`, usage, false);
+      throw new ProviderError(`claude refused the request${why ? ` (${safe(why)})` : ""}`, usage, false);
     }
-    throw new ProviderError(`claude stopped with ${stop === null ? "no stop reason" : stop}, not a finished answer`, usage, false);
+    throw new ProviderError(`claude stopped with ${stop === null ? "no stop reason" : safe(stop, 80)}, not a finished answer`, usage, false);
   }
 
   return {
@@ -229,7 +256,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
         const { parse: _parse, ...rest } = zodOutputFormat(schema);
         format = rest;
       } catch (err) {
-        throw new ProviderError(`output schema cannot be expressed as JSON Schema: ${err instanceof Error ? err.message : String(err)}`, null, false);
+        throw new ApiCallError(`output schema cannot be expressed as JSON Schema: ${safe(err instanceof Error ? err.message : String(err))}`, null, false, "not_billed", null);
       }
       return call(req, signal, async (callSignal) => {
         const message = await client.messages.create(
@@ -244,7 +271,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
           throw new ProviderError("claude returned text that is not JSON", usage, false);
         }
         const parsed = schema.safeParse(payload);
-        if (!parsed.success) throw new ProviderError(`claude output failed validation: ${parsed.error.message.slice(0, 500)}`, usage, false);
+        if (!parsed.success) throw new ProviderError(`claude output failed validation: ${safe(parsed.error.message)}`, usage, false);
         return { output: parsed.data, usage };
       });
     },

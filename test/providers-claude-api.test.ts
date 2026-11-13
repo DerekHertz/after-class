@@ -513,3 +513,54 @@ describe("the key", () => {
     expect(err.message).not.toContain(KEY);
   });
 });
+
+describe("the key where messages are clipped", () => {
+  const headers = new Headers();
+  /** Any prefix of the key, from "sk-ant" on, left in a message is a leak. */
+  const leaks = (text: string) => Array.from({ length: KEY.length - 5 }, (_, i) => KEY.slice(0, i + 6)).some((prefix) => text.includes(prefix));
+  /** The key starts at every offset across the 500 character clip, so one of them straddles it whatever text the message adds in front. */
+  const offsets = Array.from({ length: 150 }, (_, i) => 380 + i);
+  const at = (offset: number) => "a".repeat(offset) + KEY;
+  const Strict = z.strictObject({});
+
+  async function messages(name: string, offset: number): Promise<string[]> {
+    const text = at(offset);
+    const ask = (script: Script, run: "stream" | "structured" = "stream", schema: z.ZodType = Out, r = req()) => {
+      const { claude } = api(script);
+      return (run === "stream" ? claude.streamText(r, () => {}, NEVER) : claude.structured(r, schema, NEVER)).then(
+        (ok) => [JSON.stringify(ok)],
+        (e: ProviderError) => [e.message, JSON.stringify(e.usage)],
+      );
+    };
+    switch (name) {
+      case "refusal explanation":
+        return ask({ deltas: ["p"], final: message({ stop: "refusal", details: { type: "refusal", category: "x", explanation: text } }) });
+      case "refusal category":
+        return ask({ deltas: ["p"], final: message({ stop: "refusal", details: { type: "refusal", category: text, explanation: "e" } }) });
+      case "API error body":
+        return ask({ fail: new Anthropic.BadRequestError(400, body(text), undefined, headers) });
+      case "connection error":
+        return ask({ fail: new Anthropic.APIConnectionError({ message: text }) });
+      case "unknown error":
+        return ask({ fail: new TypeError(text) });
+      case "validation failure":
+        return ask({ final: message({ text: JSON.stringify({ [text]: 1 }) }) }, "structured", Strict);
+      case "stop reason":
+        return ask({ deltas: ["p"], final: message({ stop: text }) });
+      case "unsupported model":
+        return ask({ deltas: ["x"] }, "stream", Out, req({ model: text }));
+      case "unpriced model":
+        return ask({ deltas: ["x"], final: message({ model: text }) });
+      default:
+        throw new Error(name);
+    }
+  }
+
+  test.each([
+    "refusal explanation", "refusal category", "API error body", "connection error", "unknown error", "validation failure", "stop reason", "unsupported model", "unpriced model",
+  ])("%s: no part of the key survives, wherever it falls against the clip", async (name) => {
+    for (const offset of offsets) {
+      for (const text of await messages(name, offset)) expect(leaks(text)).toBe(false);
+    }
+  });
+});

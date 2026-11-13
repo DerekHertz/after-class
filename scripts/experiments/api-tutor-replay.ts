@@ -26,13 +26,15 @@ import { join, resolve } from "node:path";
 import { z } from "zod";
 import { readKeys } from "../../src/backend/main";
 import type { ApiCallDetail, ApiClient } from "../../src/backend/providers/claude-api";
-import { API_MODELS, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, createClaudeApi, worstCaseUsd } from "../../src/backend/providers/claude-api";
+import { API_MODELS, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, createClaudeApi, redactThenClip, worstCaseUsd } from "../../src/backend/providers/claude-api";
 import type { ClaudeCli, ClaudeRequest, Effort } from "../../src/backend/providers/claude";
 import { ProviderError } from "../../src/backend/providers/memo";
 import { parseMoveHeader, wrapUpSchema } from "../../src/backend/review/tutor";
 
 export const DEFAULT_KEYS_PATH = join(homedir(), ".config", "afterclass", "keys.env");
 export const DEFAULT_CAP_USD = 5;
+/** The key a run with an injected fake client hands the adapter. */
+const FAKE_CLIENT_KEY = "fake-client-key";
 
 /** The timeouts the product's own tasks use (tutor.ts TUTOR_REQUEST and WRAP_UP_REQUEST). */
 const TIMEOUT_MS = { tutor_turn: 120_000, wrap_up: 180_000 } as const;
@@ -348,9 +350,10 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
   }
 
   const out = options.out!;
+  const secret = apiKey ?? FAKE_CLIENT_KEY;
   let last: ApiCallDetail | null = null;
   const claude: ClaudeCli = createClaudeApi({
-    apiKey: apiKey ?? "fake-client-key",
+    apiKey: secret,
     maxConcurrent: 1,
     ...(deps.client ? { client: deps.client } : {}),
     onResponse: (detail) => {
@@ -408,7 +411,8 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
         usageCost = result.usage.cost.kind === "estimated" ? result.usage.cost.usd : null;
       }
     } catch (e) {
-      failure = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+      // Redacted in full before any clip, here and in every later cut of this text (the log line, the table cell).
+      failure = redactThenClip(e instanceof Error ? `${e.name}: ${e.message}` : String(e), secret);
       if (e instanceof ProviderError) {
         usageCost = e.usage?.cost.kind === "estimated" ? e.usage.cost.usd : null;
         if (call.purpose === "wrap_up" && e.usage !== null) schemaValid = false;
@@ -458,7 +462,7 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
     });
     // Written after every call, so an interrupted run keeps what it paid for.
     writeResults(out, snapshot());
-    log(`call ${i + 1} of ${calls.length} ${call.purpose}: ${failure === null ? "ok" : `failed (${failure.slice(0, 120)})`}, ${usd(costUsd)}, cumulative ${usd(committed)}`);
+    log(`call ${i + 1} of ${calls.length} ${call.purpose}: ${failure === null ? "ok" : `failed (${redactThenClip(failure, secret, 120)})`}, ${usd(costUsd)}, cumulative ${usd(committed)}`);
     if (deps.signal?.aborted) break;
   }
 

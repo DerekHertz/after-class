@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Anthropic from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages";
 import { openDb } from "../src/backend/db";
 import type { ApiClient } from "../src/backend/providers/claude-api";
@@ -357,5 +358,20 @@ describe("the key", () => {
     const { code, errors } = await run(["--db", seeded(), "--since", "2026-11-11", "--out", join(dir(), "out"), "--keys", keys]);
     expect(code).toBe(1);
     expect(errors.join("\n")).toContain("has no AFTERCLASS_ANTHROPIC_API_KEY");
+  });
+});
+
+describe("the key in a recorded failure", () => {
+  test("no part of it reaches results.json, results.md or the log, wherever it falls against the clips", async () => {
+    const key = "fake-client-key";
+    const leaks = (text: string) => Array.from({ length: key.length - 4 }, (_, i) => key.slice(0, i + 5)).some((prefix) => text.includes(prefix));
+    const path = fixtureDb([{ key: "t1", purpose: "tutor_turn", atMs: T0 }]);
+    for (const offset of [60, 90, 100, 105, 110, 115, 118, 119, 120, 380, 450, 480, 490, 495, 499, 500]) {
+      const out = join(dir(), "out");
+      const fail = new Anthropic.BadRequestError(400, { type: "error", error: { type: "x", message: "a".repeat(offset) + key } }, undefined, new Headers());
+      const { client } = fakeApi([{ text: "", fail }]);
+      const { logs, errors } = await run(["--db", path, "--since", "2026-11-11", "--out", out], client);
+      for (const text of [readFileSync(join(out, "results.json"), "utf8"), readFileSync(join(out, "results.md"), "utf8"), logs.join("\n"), errors.join("\n")]) expect(leaks(text)).toBe(false);
+    }
   });
 });
