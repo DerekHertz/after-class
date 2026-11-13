@@ -613,7 +613,7 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
       inputBytes: call.inputBytes,
       repair: /Your previous reply was rejected/.test(call.prompt),
       firstOfContext,
-      tokens: detail === null ? null : { fresh: detail.fresh, cacheCreation: detail.creation5m + detail.creation1h, cacheRead: detail.read, output: detail.output },
+      tokens: detail?.usage == null ? null : { fresh: detail.usage.fresh, cacheCreation: detail.usage.creation5m + detail.usage.creation1h, cacheRead: detail.usage.read, output: detail.usage.output },
       billing,
       costUsd,
       reservedUsd,

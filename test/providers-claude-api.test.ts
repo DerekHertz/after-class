@@ -9,7 +9,7 @@ import type { Message, MessageCreateParamsNonStreaming } from "@anthropic-ai/sdk
 import { z } from "zod";
 import type { ClaudeRequest } from "../src/backend/providers/claude";
 import {
-  API_MODELS, REQUEST_OVERHEAD_TOKENS, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, ApiCallError, clientOptions, createClaudeApi, outputFormatOf, priceUsage, worstCaseUsd,
+  API_MODELS, MAX_TOKEN_COUNT, REQUEST_OVERHEAD_TOKENS, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, ApiCallError, billingOfStatus, clientOptions, createClaudeApi, outputFormatOf, parseUsage, priceUsage, worstCaseUsd,
 } from "../src/backend/providers/claude-api";
 import type { ApiCallDetail, ApiClient, ApiStream } from "../src/backend/providers/claude-api";
 import { ProviderError } from "../src/backend/providers/memo";
@@ -272,7 +272,7 @@ describe("usage and cost", () => {
     const { claude } = api({ deltas: ["x"], final: message({ usage: { input: 10, creation: 20, read: 30, output: 40, breakdown: { m5: 5, h1: 15 } } }) }, { onResponse: (d) => seen.push(d) });
     await claude.streamText(req(), () => {}, NEVER);
     expect(seen).toHaveLength(1);
-    expect(seen[0]).toMatchObject({ model: "claude-opus-5-5", stopReason: "end_turn", fresh: 10, creation5m: 5, creation1h: 15, read: 30, output: 40 });
+    expect(seen[0]).toMatchObject({ model: "claude-opus-5-5", stopReason: "end_turn", usage: { fresh: 10, creation5m: 5, creation1h: 15, read: 30, output: 40 } });
   });
 });
 
@@ -409,11 +409,11 @@ describe("which failures may have been billed", () => {
     ["413", http(Anthropic.ContentTooLargeError as never, 413), 413],
     ["422", http(Anthropic.UnprocessableEntityError as never, 422), 422],
     ["429", http(Anthropic.RateLimitError as never, 429), 429],
-    ["500", http(Anthropic.InternalServerError as never, 500), 500],
-    ["529", http(Anthropic.OverloadedError as never, 529), 529],
   ];
   const maybeBilled: readonly [string, unknown][] = [
     ["408", http(Anthropic.RequestTimeoutError as never, 408)],
+    ["500", http(Anthropic.InternalServerError as never, 500)],
+    ["529", http(Anthropic.OverloadedError as never, 529)],
     ["connection error", new Anthropic.APIConnectionError({ message: "closed" })],
     ["SDK timeout", new Anthropic.APIConnectionTimeoutError()],
     ["an error event inside an open stream", new Anthropic.APIError(undefined as never, body("overloaded") as never, undefined as never, headers)],
@@ -628,6 +628,218 @@ describe("the key where messages are clipped", () => {
   ])("%s: no part of the key survives, wherever it falls against the clip", async (name) => {
     for (const offset of offsets) {
       for (const text of await messages(name, offset)) expect(leaks(text)).toBe(false);
+    }
+  });
+});
+
+describe("what leaves the adapter is parsed at the boundary", () => {
+  /** Every string the adapter hands out, in one place: a thrown error, the usage report, the callback detail and the result. */
+  const everything = (parts: unknown) => JSON.stringify(parts);
+  const stopOf = async (stop: unknown) => {
+    const seen: ApiCallDetail[] = [];
+    const { claude } = api({ deltas: ["p"], final: message({ stop: stop as string }) }, { onResponse: (d) => seen.push(d) });
+    const err = await claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    return { seen, err };
+  };
+
+  test("a stop reason that is the key reaches no callback, error or usage report, and is reported as unknown", async () => {
+    const { seen, err } = await stopOf(KEY);
+    expect(seen[0]!.stopReason).toBe("unknown");
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.message).toContain("unknown");
+    expect(everything([seen, err.message, err.usage])).not.toContain(KEY);
+  });
+
+  test.each([
+    ["a made-up string", "something_new"],
+    ["a number", 7],
+    ["an object", { x: 1 }],
+    ["a very long string", "e".repeat(10_000)],
+  ])("%s as the stop reason is mapped to unknown, never passed on", async (_name, stop) => {
+    const { seen } = await stopOf(stop);
+    expect(seen[0]!.stopReason).toBe("unknown");
+  });
+
+  test("every known stop reason passes through as itself, and an absent one stays null", async () => {
+    for (const stop of ["end_turn", "stop_sequence", "max_tokens", "refusal", "tool_use", "pause_turn", "model_context_window_exceeded"]) {
+      expect((await stopOf(stop)).seen[0]!.stopReason).toBe(stop as never);
+    }
+    expect((await stopOf(null)).seen[0]!.stopReason).toBeNull();
+  });
+
+  test("the model name is redacted and clipped in the callback and in the usage report", async () => {
+    const seen: ApiCallDetail[] = [];
+    const { claude } = api({ deltas: ["x"], final: message({ model: `claude-x-${KEY}-${"m".repeat(200)}` }) }, { onResponse: (d) => seen.push(d) });
+    const { usage } = await claude.streamText(req(), () => {}, NEVER);
+    expect(seen[0]!.model.length).toBeLessThanOrEqual(80);
+    expect(usage.model.length).toBeLessThanOrEqual(80);
+    expect(everything([seen, usage])).not.toContain(KEY);
+    const odd = api({ deltas: ["x"], final: message({ model: { toString: () => KEY } as never }) });
+    const report = await odd.claude.streamText(req(), () => {}, NEVER);
+    expect(typeof report.usage.model).toBe("string");
+    expect(everything(report.usage)).not.toContain(KEY);
+  });
+
+  test("a refusal's category and explanation are redacted, and values that are not strings are ignored", async () => {
+    const leaky = await api({ final: message({ stop: "refusal", details: { type: "refusal", category: KEY, explanation: `why ${KEY}` } }) }).claude.structured(req(), Out, NEVER).catch((e) => e);
+    expect(leaky.message).toContain("refus");
+    expect(everything([leaky.message, leaky.usage])).not.toContain(KEY);
+    const odd = await api({ final: message({ stop: "refusal", details: { type: "refusal", category: { k: KEY }, explanation: 5 } }) }).claude.structured(req(), Out, NEVER).catch((e) => e);
+    expect(odd.message).toBe("claude refused the request");
+  });
+
+  test("the reply text has the key removed, in the returned text and in every delta, even when the key is split across deltas", async () => {
+    const heard: string[] = [];
+    const { claude } = api({ deltas: ["say ", KEY.slice(0, 9), KEY.slice(9), " now"], final: message({ text: `say ${KEY} now` }) });
+    const out = await claude.streamText(req(), (d) => heard.push(d), NEVER);
+    expect(out.text).toBe("say [redacted] now");
+    expect(heard.join("")).toBe("say [redacted] now");
+    expect(everything(heard)).not.toContain(KEY);
+  });
+
+  test("text that only looks like the start of the key is still delivered whole", async () => {
+    const heard: string[] = [];
+    const { claude } = api({ deltas: ["use sk-an", "t tools"], final: message({ text: "use sk-ant tools" }) });
+    await claude.streamText(req(), (d) => heard.push(d), NEVER);
+    expect(heard.join("")).toBe("use sk-ant tools");
+  });
+
+  test("a structured answer is validated on text with the key removed, so the key is not in the returned output", async () => {
+    const { claude } = api({ final: message({ text: JSON.stringify({ concepts: [`a ${KEY}`] }) }) });
+    const { output } = await claude.structured(req(), Out, NEVER);
+    expect(everything(output)).not.toContain(KEY);
+  });
+
+  test("content that is not text blocks is skipped, and a message that is not an object is a failed call with unknown fields", async () => {
+    const mixed = await api({ deltas: [], final: message({ blocks: [{ type: "text", text: 5 }, null, "x", { type: "text", text: "ok" }] }) }).claude.streamText(req(), () => {}, NEVER);
+    expect(mixed.text).toBe("ok");
+    for (const bad of [[], "nope", 7, { content: "x" }]) {
+      const seen: ApiCallDetail[] = [];
+      const err = await api({ deltas: [], final: bad as never }, { onResponse: (d) => seen.push(d) }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+      expect(err).toBeInstanceOf(ProviderError);
+      expect(seen[0]).toMatchObject({ stopReason: null, usage: null, costUsd: null });
+    }
+  });
+
+  test("an SDK error's status is read only when it is an HTTP status, and its message is redacted", async () => {
+    const headers = new Headers({ "x-echo": KEY });
+    const err = new Anthropic.APIError(400, body(`bad ${KEY}`), `bad ${KEY}`, headers);
+    (err as { cause?: unknown }).cause = new Error(`cause ${KEY}`);
+    const out = await api({ fail: err }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    expect(out.status).toBe(400);
+    expect(everything([out.message, out.status, out.usage])).not.toContain(KEY);
+    for (const status of ["504", Number.NaN, 1000, -1, 200.5, KEY, null]) {
+      const weird = Object.assign(new Anthropic.APIError(undefined as never, {} as never, "x", headers), { status });
+      const got = await api({ fail: weird }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+      expect(got.status).toBeNull();
+      expect(got.billing).toBe("maybe_billed");
+      expect(got.message).not.toContain(KEY);
+    }
+  });
+});
+
+describe("the billing table, one row per status", () => {
+  const headers = new Headers();
+  /** Rejected before any model ran: the request was invalid, unauthenticated, forbidden, aimed at nothing, too large or unprocessable, or the caller was rate limited. */
+  const free = [400, 401, 403, 404, 413, 422, 429];
+  /** Everything else keeps its reservation. 408 and 409 do not say whether the work started, and a 5xx may come after a model ran. */
+  const kept = [402, 405, 408, 409, 410, 418, 500, 501, 502, 503, 504, 507, 529, 599];
+
+  test.each(free)("HTTP %i is not billed, on both paths", async (status) => {
+    const fail = Anthropic.APIError.generate(status, body("x") as never, "x", headers);
+    for (const run of [(c: ReturnType<typeof api>["claude"]) => c.streamText(req(), () => {}, NEVER), (c: ReturnType<typeof api>["claude"]) => c.structured(req(), Out, NEVER)]) {
+      const err = await run(api({ fail }).claude).catch((e) => e);
+      expect(err).toBeInstanceOf(ApiCallError);
+      expect(err.status).toBe(status);
+      expect(err.billing).toBe("not_billed");
+    }
+  });
+
+  test.each(kept)("HTTP %i keeps its reservation, on both paths", async (status) => {
+    const fail = Anthropic.APIError.generate(status, body("x") as never, "x", headers);
+    for (const run of [(c: ReturnType<typeof api>["claude"]) => c.streamText(req(), () => {}, NEVER), (c: ReturnType<typeof api>["claude"]) => c.structured(req(), Out, NEVER)]) {
+      const err = await run(api({ fail }).claude).catch((e) => e);
+      expect(err).toBeInstanceOf(ApiCallError);
+      expect(err.status).toBe(status);
+      expect(err.billing).toBe("maybe_billed");
+    }
+  });
+
+  test("the table function agrees, and a missing status is maybe billed", () => {
+    for (const s of free) expect(billingOfStatus(s)).toBe("not_billed");
+    for (const s of kept) expect(billingOfStatus(s)).toBe("maybe_billed");
+    expect(billingOfStatus(null)).toBe("maybe_billed");
+  });
+
+  test("an abort, a caller timeout and a broken stream keep their reservation", async () => {
+    const ctl = new AbortController();
+    const held = api({ hold: true }).claude.streamText(req(), () => {}, ctl.signal).catch((e) => e);
+    ctl.abort();
+    const aborted = await held;
+    expect(aborted.name).toBe("AbortError");
+    const timedOut = await api({ hold: true }).claude.structured(req({ timeoutMs: 20 }), Out, NEVER).catch((e) => e);
+    expect(timedOut.billing).toBe("maybe_billed");
+    const broken = await api({ fail: new Anthropic.AnthropicError("stream ended without producing a Message") }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    expect(broken.billing).toBe("maybe_billed");
+  });
+});
+
+describe("usage is parsed into non-negative safe integers or it is unknown", () => {
+  const good = { input_tokens: 100, output_tokens: 20, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, cache_creation: null };
+  const withUsage = (usage: unknown) => ({ ...message({ text: "x" }), usage } as unknown as Message);
+  const without = (key: string) => Object.fromEntries(Object.entries(good).filter(([k]) => k !== key));
+  const invalid: readonly [string, unknown][] = [
+    ["input_tokens missing", without("input_tokens")],
+    ["output_tokens missing", without("output_tokens")],
+    ["usage missing", undefined],
+    ["usage null", null],
+    ["usage a string", "lots"],
+    ["input_tokens a numeric string", { ...good, input_tokens: "100" }],
+    ["input_tokens NaN", { ...good, input_tokens: Number.NaN }],
+    ["output_tokens Infinity", { ...good, output_tokens: Number.POSITIVE_INFINITY }],
+    ["input_tokens negative", { ...good, input_tokens: -1 }],
+    ["output_tokens negative", { ...good, output_tokens: -5_000_000 }],
+    ["output_tokens fractional", { ...good, output_tokens: 1.5 }],
+    ["output_tokens one billion", { ...good, output_tokens: 1_000_000_000 }],
+    ["output_tokens past the safe integer range", { ...good, output_tokens: 2 ** 53 }],
+    ["output_tokens just over the bound", { ...good, output_tokens: MAX_TOKEN_COUNT + 1 }],
+    ["cache read negative", { ...good, cache_read_input_tokens: -1 }],
+    ["cache read not a number", { ...good, cache_read_input_tokens: "7" }],
+    ["cache creation negative", { ...good, cache_creation_input_tokens: -1 }],
+    ["cache breakdown not an object", { ...good, cache_creation: 5 }],
+    ["cache breakdown with a negative part", { ...good, cache_creation: { ephemeral_5m_input_tokens: -1, ephemeral_1h_input_tokens: 0 } }],
+    ["cache breakdown with a missing part", { ...good, cache_creation: { ephemeral_5m_input_tokens: 1 } }],
+  ];
+
+  test.each(invalid)("%s: unknown cost, no tokens reported, and no NaN or negative number anywhere", async (_name, usage) => {
+    const seen: ApiCallDetail[] = [];
+    const { claude } = api({ deltas: ["x"], final: withUsage(usage) }, { onResponse: (d) => seen.push(d) });
+    const { usage: report } = await claude.streamText(req(), () => {}, NEVER);
+    expect(report.cost.kind).toBe("unknown");
+    expect([report.inputTokens, report.outputTokens, report.cacheReadTokens]).toEqual([null, null, null]);
+    expect(seen[0]).toMatchObject({ usage: null, costUsd: null });
+    expect(JSON.stringify([report, seen])).not.toMatch(/NaN|Infinity|:-\d/);
+  });
+
+  test("the same on the structured path and on a failing stop, which still carries an unknown cost", async () => {
+    const bad = withUsage({ ...good, output_tokens: -1 });
+    const ok = await api({ final: { ...bad, content: [{ type: "text", text: '{"concepts":[]}' }] } as Message }).claude.structured(req(), Out, NEVER);
+    expect(ok.usage.cost.kind).toBe("unknown");
+    const refused = await api({ deltas: [], final: { ...bad, stop_reason: "refusal" } as Message }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    expect(refused.usage.cost.kind).toBe("unknown");
+    expect(refused.usage.outputTokens).toBeNull();
+  });
+
+  test("the bound is inclusive, and the cache fields may be absent or null", () => {
+    expect(parseUsage({ input_tokens: MAX_TOKEN_COUNT, output_tokens: 0 })).toEqual({ fresh: MAX_TOKEN_COUNT, creation5m: 0, creation1h: 0, read: 0, output: 0 });
+    expect(parseUsage({ input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: null, cache_read_input_tokens: null, cache_creation: null })).toEqual({ fresh: 0, creation5m: 0, creation1h: 0, read: 0, output: 0 });
+    expect(parseUsage({ input_tokens: 1, output_tokens: 2, cache_creation_input_tokens: 20, cache_read_input_tokens: 3, cache_creation: { ephemeral_5m_input_tokens: 5, ephemeral_1h_input_tokens: 15 } })).toEqual({ fresh: 1, creation5m: 5, creation1h: 15, read: 3, output: 2 });
+  });
+
+  test("priceUsage never returns NaN, Infinity or a negative figure", () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      expect(priceUsage("claude-opus-5-5", { fresh: bad, creation5m: 0, creation1h: 0, read: 0, output: 0 })).toBeNull();
+      expect(priceUsage("claude-opus-5-5", { fresh: 0, creation5m: 0, creation1h: 0, read: 0, output: bad })).toBeNull();
     }
   });
 });

@@ -558,8 +558,6 @@ describe("failed calls and the cap", () => {
     ["413", new Anthropic.ContentTooLargeError(413, body, undefined, headers)],
     ["422", new Anthropic.UnprocessableEntityError(422, body, undefined, headers)],
     ["429", new Anthropic.RateLimitError(429, body, undefined, headers)],
-    ["500", new Anthropic.InternalServerError(500, body, undefined, headers)],
-    ["529", new Anthropic.OverloadedError(529, body, undefined, headers)],
   ])("a %s is failed, not billed: it counts $0 and the next call is still allowed", async (_name, fail) => {
     const out = join(dir(), "out");
     // A cap that holds one reservation and a half. Counting the failed call at its worst case would stop the run before call 2.
@@ -576,6 +574,13 @@ describe("failed calls and the cap", () => {
   });
 
   test.each([
+    ["a 408", Anthropic.APIError.generate(408, body as never, "x", headers)],
+    ["a 409", Anthropic.APIError.generate(409, body as never, "x", headers)],
+    ["a 500", Anthropic.APIError.generate(500, body as never, "x", headers)],
+    ["a 502", Anthropic.APIError.generate(502, body as never, "x", headers)],
+    ["a 503", Anthropic.APIError.generate(503, body as never, "x", headers)],
+    ["a 504", Anthropic.APIError.generate(504, body as never, "x", headers)],
+    ["a 529", Anthropic.APIError.generate(529, body as never, "x", headers)],
     ["a connection error", new Anthropic.APIConnectionError({ message: "socket closed" })],
     ["a connection timeout", new Anthropic.APIConnectionTimeoutError()],
     ["an error inside a stream that had started", new Anthropic.APIError(undefined as never, body as never, undefined as never, headers)],

@@ -19,6 +19,10 @@
  * no auth token so the environment cannot move the key to another endpoint, and with logging off.
  * The key lives only in the client and is scrubbed from every error message. It is never passed to a child process.
  *
+ * Nothing the network sends is trusted. A response and an SDK error are parsed once, in `parseMessage` and `failureOf`
+ * below, into values this file made: a stop reason from a fixed set, usage as non-negative integers or nothing, strings
+ * redacted and clipped. Nothing past those two functions (an error, `onResponse`, the usage report, a result) holds a raw field.
+ *
  * Structured calls use `create` plus `zodOutputFormat`, not `messages.parse`: parse throws on text that is not
  * valid JSON before the caller can look at stop_reason, so a truncated or refused answer would hide its cause.
  */
@@ -68,11 +72,13 @@ function priceOf(model: string): (typeof PRICES)[keyof typeof PRICES] | null {
   return null;
 }
 
-/** USD for one response from the price table, or null when the model has no price. */
+/** USD for one response from the price table, or null when the model has no price or the figure is not a finite non-negative number. */
 export function priceUsage(model: string, u: UsageParts): number | null {
   const price = priceOf(model);
   if (price === null) return null;
-  return (u.fresh * price.input + u.creation5m * price.input * CACHE_WRITE_5M + u.creation1h * price.input * CACHE_WRITE_1H + u.read * price.cacheRead + u.output * price.output) / 1_000_000;
+  const usd = (u.fresh * price.input + u.creation5m * price.input * CACHE_WRITE_5M + u.creation1h * price.input * CACHE_WRITE_1H + u.read * price.cacheRead + u.output * price.output) / 1_000_000;
+  // A figure that is not a finite non-negative number is not a cost. Callers read null as unknown.
+  return Number.isFinite(usd) && usd >= 0 ? usd : null;
 }
 
 /** The fixed allowance, in input tokens, for what a request adds around its text. See `worstCaseUsd`. */
@@ -128,10 +134,21 @@ function sdkClient(apiKey: string): ApiClient {
   };
 }
 
-/** One completed response, as the experiment runner records it. Reported before a failing stop reason throws. */
-export type ApiCallDetail = UsageParts & {
+/**
+ * The stop reasons the API documents. Anything else a response carries is reported as "unknown", never copied, because
+ * the field is a string the network chose and it would go into logs and result files as it came.
+ */
+const KNOWN_STOPS = ["end_turn", "stop_sequence", "max_tokens", "refusal", "tool_use", "pause_turn", "model_context_window_exceeded"] as const;
+export type StopLabel = (typeof KNOWN_STOPS)[number] | "unknown";
+
+/** One completed response, as the experiment runner records it. Reported before a failing stop reason throws. Every field is parsed. */
+export type ApiCallDetail = {
+  /** Redacted and clipped, or "unknown" when the response named no model. */
   readonly model: string;
-  readonly stopReason: string | null;
+  /** Null when the response carried no stop reason. */
+  readonly stopReason: StopLabel | null;
+  /** Null when the response's usage failed `parseUsage`. Its cost is then unknown, and `costUsd` is null. */
+  readonly usage: UsageParts | null;
   readonly costUsd: number | null;
 };
 
@@ -142,32 +159,6 @@ export type ClaudeApiOptions = {
   readonly client?: ApiClient;
   readonly onResponse?: (detail: ApiCallDetail) => void;
 };
-
-function partsOf(message: Message): UsageParts {
-  const u = message.usage;
-  const total = u.cache_creation_input_tokens ?? 0;
-  // Writes bill by lifetime. Without the breakdown every write is the 1 hour write this adapter asks for.
-  const m5 = u.cache_creation?.ephemeral_5m_input_tokens ?? 0;
-  const h1 = u.cache_creation === null || u.cache_creation === undefined ? total : Math.max(u.cache_creation.ephemeral_1h_input_tokens, total - m5);
-  return { fresh: u.input_tokens, creation5m: m5, creation1h: h1, read: u.cache_read_input_tokens ?? 0, output: u.output_tokens };
-}
-
-function usageOf(message: Message, parts: UsageParts, safe: (text: string, max?: number) => string): UsageReport {
-  const usd = priceUsage(message.model, parts);
-  const model = safe(message.model, 80);
-  return {
-    model,
-    // The CLI adapter's convention: input is fresh plus cache-creation tokens, cache reads are reported on their own.
-    inputTokens: parts.fresh + parts.creation5m + parts.creation1h,
-    outputTokens: parts.output,
-    cacheReadTokens: parts.read,
-    cost: usd === null ? { kind: "unknown", reason: `no price for model ${model}` } : { kind: "estimated", usd, basis: COST_BASIS },
-  };
-}
-
-function textOf(message: Message): string {
-  return message.content.map((b) => (b.type === "text" ? b.text : "")).join("");
-}
 
 /** The longest message text this adapter lets into a thrown error, and so into the memo's failure table. */
 export const MESSAGE_CLIP = 500;
@@ -182,13 +173,145 @@ export function redactThenClip(text: string, secret: string, max: number = MESSA
   return redacted.slice(0, max);
 }
 
-/** Whether a failed call may have been billed. An HTTP error status is the API turning the request away, so it was not. */
+/** Whether a failed call may have been billed. */
 export type Billing = "not_billed" | "maybe_billed";
+
+/**
+ * The one table of HTTP statuses that prove a request was turned away before any model ran, so the call cost nothing:
+ *   400 invalid request, 401 bad key, 403 no permission, 404 no such model, 413 request too large, 422 unprocessable,
+ *   all checked while the request is validated and authenticated, and 429 rate limited, which is admission control.
+ * Every other outcome keeps its reservation, because the request may have reached a model and its answer may have been
+ * billed even though the caller never saw it: every 5xx (500, 502, 503, 504, 529 and any other), 408 and 409 (a timeout or
+ * a conflict that does not say whether the work started), a status the SDK did not give or that is not an HTTP status,
+ * a connection error or timeout after the request was sent, an abort, and a stream that broke. A status not listed here
+ * is maybe billed, so adding a row is the only way to call a failure free, and the default is the safe side of the cap.
+ */
+const REJECTED_BEFORE_ANY_MODEL_RAN: ReadonlySet<number> = new Set([400, 401, 403, 404, 413, 422, 429]);
+
+export function billingOfStatus(status: number | null): Billing {
+  return status !== null && REJECTED_BEFORE_ANY_MODEL_RAN.has(status) ? "not_billed" : "maybe_billed";
+}
 
 /** A call that failed in transport or at the API, with what the runner needs to price it. A refusal or a bad stop is a plain ProviderError that carries usage. */
 export class ApiCallError extends ProviderError {
   constructor(message: string, usage: UsageReport | null, retryable: boolean, readonly billing: Billing, readonly status: number | null) {
     super(message, usage, retryable);
+  }
+}
+
+/**
+ * The largest token count one usage field may report. The largest context window is 1,000,000 tokens and the largest
+ * output limit this adapter sets is 32,000, so a count of ten million in one field is not a measurement. At the dearest
+ * price it is already $80, more than any cap the runner takes in practice. A count above this is invalid, and its call
+ * is held at its worst case, which is the safe side of the cap.
+ */
+export const MAX_TOKEN_COUNT = 10_000_000;
+
+const isRecord = (v: unknown): v is Readonly<Record<string, unknown>> => typeof v === "object" && v !== null;
+
+/** A token count: a non-negative safe integer no larger than MAX_TOKEN_COUNT, else null. Missing, non-numeric, NaN, infinite, negative and fractional all fail. */
+const countOf = (v: unknown): number | null => (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 && v <= MAX_TOKEN_COUNT ? v : null);
+/** A count the API may leave out or null: that is zero. Present and invalid is still invalid. */
+const optionalCountOf = (v: unknown): number | null => (v === undefined || v === null ? 0 : countOf(v));
+
+/** The response's usage as non-negative integers, or null when any part of it is missing or invalid. A null means the cost of the call is unknown. */
+export function parseUsage(raw: unknown): UsageParts | null {
+  if (!isRecord(raw)) return null;
+  const fresh = countOf(raw.input_tokens);
+  const output = countOf(raw.output_tokens);
+  const total = optionalCountOf(raw.cache_creation_input_tokens);
+  const read = optionalCountOf(raw.cache_read_input_tokens);
+  if (fresh === null || output === null || total === null || read === null) return null;
+  let creation5m = 0;
+  let creation1h = total;
+  const breakdown = raw.cache_creation;
+  if (breakdown !== undefined && breakdown !== null) {
+    if (!isRecord(breakdown)) return null;
+    const m5 = countOf(breakdown.ephemeral_5m_input_tokens);
+    const h1 = countOf(breakdown.ephemeral_1h_input_tokens);
+    if (m5 === null || h1 === null) return null;
+    // Writes bill by lifetime. A total above the breakdown's two parts is billed as the 1 hour write this adapter asks for.
+    creation5m = m5;
+    creation1h = Math.max(h1, total - m5);
+  }
+  const parts = { fresh, creation5m, creation1h, read, output };
+  return Object.values(parts).every((n) => countOf(n) !== null) ? parts : null;
+}
+
+/** Everything the adapter takes from a response, each field already parsed. The reply text has the key removed. */
+type Parsed = {
+  readonly model: string;
+  readonly stop: StopLabel | null;
+  readonly usage: UsageParts | null;
+  readonly text: string;
+  /** The refusal's category and explanation, redacted and clipped. Empty when there is none. */
+  readonly refusal: string;
+};
+
+/** The one place a response becomes values this adapter trusts. Reads each field it uses, and no other. */
+function parseMessage(raw: unknown, secret: string): Parsed {
+  const msg = isRecord(raw) ? raw : {};
+  const model = typeof msg.model === "string" && msg.model !== "" ? redactThenClip(msg.model, secret, 80) : "unknown";
+  const stop = msg.stop_reason === null || msg.stop_reason === undefined ? null : ((KNOWN_STOPS as readonly unknown[]).includes(msg.stop_reason) ? (msg.stop_reason as StopLabel) : "unknown");
+  const content = Array.isArray(msg.content) ? (msg.content as readonly unknown[]) : [];
+  const text = content.map((b) => (isRecord(b) && b.type === "text" && typeof b.text === "string" ? b.text : "")).join("").split(secret).join("[redacted]");
+  const details = isRecord(msg.stop_details) ? msg.stop_details : {};
+  const refusal = [details.category, details.explanation].filter((x): x is string => typeof x === "string" && x !== "").join(": ");
+  return { model, stop, usage: parseUsage(msg.usage), text, refusal: redactThenClip(refusal, secret) };
+}
+
+function usageOf(parsed: Parsed): UsageReport {
+  const { model, usage: u } = parsed;
+  if (u === null) return { model, inputTokens: null, outputTokens: null, cacheReadTokens: null, cost: { kind: "unknown", reason: "the response's usage was missing or invalid" } };
+  const usd = priceUsage(model, u);
+  return {
+    model,
+    // The CLI adapter's convention: input is fresh plus cache-creation tokens, cache reads are reported on their own.
+    inputTokens: u.fresh + u.creation5m + u.creation1h,
+    outputTokens: u.output,
+    cacheReadTokens: u.read,
+    cost: usd === null ? { kind: "unknown", reason: `no price for model ${model}` } : { kind: "estimated", usd, basis: COST_BASIS },
+  };
+}
+
+/**
+ * Passes streamed text on with the key removed. A key split across two deltas is still found, because a tail that could be
+ * the start of the key is held until the next delta shows whether it is.
+ */
+function redactingSink(secret: string, emit: (text: string) => void) {
+  let held = "";
+  return {
+    push(delta: unknown) {
+      if (typeof delta !== "string") return;
+      const text = (held + delta).split(secret).join("[redacted]");
+      let keep = 0;
+      for (let n = Math.min(secret.length - 1, text.length); n > 0; n--) {
+        if (secret.startsWith(text.slice(text.length - n))) {
+          keep = n;
+          break;
+        }
+      }
+      held = text.slice(text.length - keep);
+      const out = text.slice(0, text.length - keep);
+      if (out !== "") emit(out);
+    },
+    flush() {
+      if (held !== "") emit(held);
+      held = "";
+    },
+  };
+}
+
+/** An HTTP status, or null for anything else a thrown value might carry in that field. */
+const statusOf = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 100 && v <= 599 ? v : null);
+
+/** The text of a thrown value, which may be anything, including a value whose own accessors throw. */
+function textOfError(err: unknown): string {
+  try {
+    const text = err instanceof Error ? err.message : String(err);
+    return typeof text === "string" ? text : "unreadable error";
+  } catch {
+    return "unreadable error";
   }
 }
 
@@ -198,18 +321,17 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
   const limiter = createLimiter(opts.maxConcurrent);
   const safe = (text: string, max?: number) => redactThenClip(text, opts.apiKey, max);
 
-  /** Typed errors only, never message text: a retryable failure is overload, a rate limit, a 5xx or the connection. */
+  /** Typed errors only, never message text: a retryable failure is overload, a rate limit, a 5xx or the connection. The only fields read from the error are its class, its status and its message. */
   function failureOf(err: unknown): ProviderError {
     if (err instanceof ProviderError) return err;
-    const text = safe(err instanceof Error ? err.message : String(err));
+    const text = safe(textOfError(err));
     // The connection can fail before or after the request was sent, and nothing says which, so it may have been billed.
     if (err instanceof Anthropic.APIConnectionError) return new ApiCallError(`claude api connection error: ${text}`, null, true, "maybe_billed", null);
     if (err instanceof Anthropic.APIError) {
-      const retryable = err instanceof Anthropic.RateLimitError || err instanceof Anthropic.RequestTimeoutError || err instanceof Anthropic.InternalServerError || (err.status !== undefined && err.status >= 500);
-      // A numeric status is an HTTP answer before any output. No status means the error arrived inside a stream that had started. A 408 is a timeout.
-      const status = typeof err.status === "number" ? err.status : null;
-      const billing: Billing = status === null || status === 408 ? "maybe_billed" : "not_billed";
-      return new ApiCallError(`claude api error (${status ?? "no status"}): ${text}`, null, retryable, billing, status);
+      // No status means the error arrived inside a stream that had started.
+      const status = statusOf(err.status);
+      const retryable = err instanceof Anthropic.RateLimitError || err instanceof Anthropic.RequestTimeoutError || err instanceof Anthropic.InternalServerError || (status !== null && status >= 500);
+      return new ApiCallError(`claude api error (${status ?? "no status"}): ${text}`, null, retryable, billingOfStatus(status), status);
     }
     // A stream that ended without a message is the SDK's own error for an interrupted connection.
     if (err instanceof Anthropic.AnthropicError) return new ApiCallError(`claude api error: ${text}`, null, true, "maybe_billed", null);
@@ -253,19 +375,14 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
     return { model, system, messages: [{ role: "user", content: req.prompt }] as const };
   }
 
-  /** Usage, then the stop reason: only a finished answer is an answer. */
-  function settle(message: Message): UsageReport {
-    const parts = partsOf(message);
-    const usage = usageOf(message, parts, safe);
-    opts.onResponse?.({ ...parts, model: safe(message.model, 80), stopReason: message.stop_reason, costUsd: usage.cost.kind === "estimated" ? usage.cost.usd : null });
-    const stop = message.stop_reason;
-    if (stop === "end_turn" || stop === "stop_sequence") return usage;
-    if (stop === "refusal") {
-      const details = message.stop_details;
-      const why = [details?.category, details?.explanation].filter((x): x is string => typeof x === "string" && x !== "").join(": ");
-      throw new ProviderError(`claude refused the request${why ? ` (${safe(why)})` : ""}`, usage, false);
-    }
-    throw new ProviderError(`claude stopped with ${stop === null ? "no stop reason" : safe(stop, 80)}, not a finished answer`, usage, false);
+  /** Parse the response, report it, then check the stop reason: only a finished answer is an answer. */
+  function settle(raw: unknown): { readonly parsed: Parsed; readonly usage: UsageReport } {
+    const parsed = parseMessage(raw, opts.apiKey);
+    const usage = usageOf(parsed);
+    opts.onResponse?.({ model: parsed.model, stopReason: parsed.stop, usage: parsed.usage, costUsd: usage.cost.kind === "estimated" ? usage.cost.usd : null });
+    if (parsed.stop === "end_turn" || parsed.stop === "stop_sequence") return { parsed, usage };
+    if (parsed.stop === "refusal") throw new ProviderError(`claude refused the request${parsed.refusal ? ` (${parsed.refusal})` : ""}`, usage, false);
+    throw new ProviderError(`claude stopped with ${parsed.stop === null ? "no stop reason" : parsed.stop}, not a finished answer`, usage, false);
   }
 
   return {
@@ -282,10 +399,10 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
           { model, max_tokens: STRUCTURED_MAX_TOKENS, system, messages: [...messages], output_config: { effort: req.effort, format } },
           { signal: callSignal },
         );
-        const usage = settle(message);
+        const { parsed: reply, usage } = settle(message);
         let payload: unknown;
         try {
-          payload = JSON.parse(textOf(message));
+          payload = JSON.parse(reply.text);
         } catch {
           throw new ProviderError("claude returned text that is not JSON", usage, false);
         }
@@ -302,10 +419,12 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
           { model, max_tokens: STREAM_MAX_TOKENS, system, messages: [...messages], output_config: { effort: req.effort } },
           { signal: callSignal },
         );
-        stream.on("text", (delta) => onText(delta));
+        const sink = redactingSink(opts.apiKey, onText);
+        stream.on("text", (delta) => sink.push(delta));
         const message = await stream.finalMessage();
-        const usage = settle(message);
-        return { text: textOf(message), usage };
+        const { parsed: reply, usage } = settle(message);
+        sink.flush();
+        return { text: reply.text, usage };
       });
     },
   };
