@@ -24,7 +24,7 @@ function Preview() {
   const path = usePathname();
   const calls = useSyncExternalStore(requestLedger.subscribe, requestLedger.snapshot);
   const home = path === "/app/" || path === "/app" || (path === "/" && scenario.startsWith("home"));
-  const page = home ? "home" : path.includes("/record") || scenario.startsWith("record") ? "record" : path.includes("/capture") || scenario.startsWith("capture") ? "capture" : path.includes("/usage") || scenario === "usage" ? "usage" : "review";
+  const page = home ? "home" : path.includes("/record") || scenario.startsWith("record") ? "record" : path.includes("/capture") || scenario.startsWith("capture") ? "capture" : path.includes("/usage") || scenario.startsWith("usage") ? "usage" : "review";
   return <>
     <aside className="fixture-toolbar" aria-label="Preview fixtures" hidden={clean}>
       <strong>Deterministic UI fixture</strong><span>No live lecture or model calls.</span>
