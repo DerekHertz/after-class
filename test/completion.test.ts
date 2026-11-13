@@ -32,13 +32,15 @@ async function savedWith(fixture: Fixture, observations: (o: Observation) => rea
 }
 
 describe("completion summary from saved observations", () => {
-  test("each saved observation lands in its group, and a topic with none is shown as not assessed", async () => {
+  test("each saved observation lands in its group, and a topic with none is listed as not reached, not as not assessed", async () => {
     const { fixture } = await load("record");
     const view = await savedWith(fixture, (o) => (o.threadId === ids.thread ? [o] : []));
     const outcome = completionOf(view);
-    expect(outcome.groups.map((g) => g.group)).toEqual(["disputed", "not_assessed"]);
+    expect(outcome.groups.map((g) => g.group)).toEqual(["disputed", "not_reached"]);
     expect(outcome.groups[0]!.items).toEqual([expect.objectContaining({ label: "Circular wait", status: "Disputed" })]);
-    expect(outcome.groups[1]!.items).toEqual([expect.objectContaining({ label: "Resource ordering", status: NOT_REACHED, evidence: [] })]);
+    expect(outcome.groups[1]).toMatchObject({ heading: NOT_REACHED, items: [expect.objectContaining({ label: "Resource ordering", status: "", evidence: [] })] });
+    expect(outcome.topicsAsked).toBe(1);
+    expect(outcome.topicsInScope).toBe(2);
     expect(outcome.disputed).toBe(1);
     expect(outcome.revisit).toEqual([]);
   });
@@ -101,12 +103,12 @@ describe("completion summary from saved observations", () => {
     expect(html).not.toMatch(/tutor was wrong|your gap/i);
   });
 
-  test("with no saved observations every topic reads as not assessed and the panel says so", async () => {
+  test("with no saved observations every topic reads as not reached and the panel says so", async () => {
     const { fixture } = await load("record");
     const view = await savedWith(fixture, () => []);
     const outcome = completionOf(view);
-    expect(outcome.groups).toEqual([{ group: "not_assessed", heading: "Not assessed", items: expect.any(Array) }]);
-    expect(outcome.groups[0]!.items.map((i) => i.status)).toEqual([NOT_REACHED, NOT_REACHED]);
+    expect(outcome.groups).toEqual([{ group: "not_reached", heading: NOT_REACHED, items: expect.any(Array) }]);
+    expect(outcome.groups[0]!.items.map((i) => i.status)).toEqual(["", ""]);
     const html = banner({ view, loadError: null, live: null, unsent: [], storageDegraded: false, sendError: null, saving: false, saveError: null, savedSummary: null });
     expect(html).toContain("The tutor saved no observations for this review, so nothing here is assessed.");
   });
@@ -123,8 +125,10 @@ describe("finishing a review in the deterministic fixtures", () => {
     expect(html).toContain("Review saved");
     expect(html).toContain("Saved 1 note and 1 observation.");
     expect(html).toContain("Disputed, waiting for you to settle (1)");
-    expect(html).toContain("Not assessed (1)");
-    expect(html).toContain("Not reached in this review");
+    expect(html).toContain("Not reached in this review (1)");
+    expect(html).toContain("<details");
+    expect(html).not.toContain("Not assessed (1)");
+    expect(html).toContain("Questions covered 1 of 2 topics in this review.");
     expect(html).toContain("Settle the disputed item in your notebook");
     expect(html).toContain(`href="/app/record/${ids.review}"`);
     expect(html).toContain(">Open this review in my notebook<");

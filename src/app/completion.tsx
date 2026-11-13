@@ -34,13 +34,15 @@ export function CompletionPanel({ view, reviewId, savedSummary, justSaved, onSou
         {savedSummary !== null && ` Saved ${plural(savedSummary.notes, "note")} and ${plural(savedSummary.observations, "observation")}.`}
       </p>
       {outcome.observations === 0 && <p className="muted">The tutor saved no observations for this review, so nothing here is assessed.</p>}
-      {outcome.groups.map((g) => (
-        <div key={g.group} className="review-complete-group" data-outcome={g.group}>
-          <h3>{g.heading} ({g.items.length})</h3>
+      {outcome.observations > 0 && outcome.topicsAsked < outcome.topicsInScope && (
+        <p className="muted review-complete-coverage">Questions covered {outcome.topicsAsked} of {outcome.topicsInScope} topics in this review.</p>
+      )}
+      {outcome.groups.map((g) => {
+        const rows = (
           <ul>
             {g.items.map((item) => (
               <li key={item.key}>
-                <strong>{item.label}</strong> <span className="muted">{item.status}</span>
+                <strong>{item.label}</strong>{item.status !== "" && <> <span className="muted">{item.status}</span></>}
                 {item.resolution !== null && <span className="muted">. {item.resolution}.</span>}
                 {onSource && item.evidence.length > 0 && (
                   <>
@@ -53,8 +55,20 @@ export function CompletionPanel({ view, reviewId, savedSummary, justSaved, onSou
               </li>
             ))}
           </ul>
-        </div>
-      ))}
+        );
+        // Topics nobody asked about can be most of the scope. They stay folded so the list of what was assessed leads.
+        return g.group === "not_reached" ? (
+          <details key={g.group} className="review-complete-group" data-outcome={g.group}>
+            <summary>{g.heading} ({g.items.length})</summary>
+            {rows}
+          </details>
+        ) : (
+          <div key={g.group} className="review-complete-group" data-outcome={g.group}>
+            <h3>{g.heading} ({g.items.length})</h3>
+            {rows}
+          </div>
+        );
+      })}
       <div className="review-complete-next">
         <h3>Next</h3>
         {outcome.revisit.length > 0 && <p>Next time, start with {outcome.revisit.join(", ")}.</p>}
