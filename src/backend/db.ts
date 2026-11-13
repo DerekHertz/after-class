@@ -13,6 +13,8 @@
  */
 import { Database } from "bun:sqlite";
 import type { Seq } from "../shared/domain";
+import { stableId } from "../shared/ids";
+import type { UserId } from "../shared/ids";
 
 export type Db = {
   readonly sql: Database;
@@ -21,6 +23,9 @@ export type Db = {
   tx<T>(fn: () => T): T;
   close(): void;
 };
+
+/** A `Db` bound to the user whose data the holder may touch. Modules move from `Db` to `UserDb` one at a time. */
+export type UserDb = Db & { readonly userId: UserId };
 
 export const OWNERS = ["kernel", "providers", "evidence", "segmentation", "preparation", "review", "record"] as const;
 export type Owner = (typeof OWNERS)[number];
@@ -55,6 +60,16 @@ export const MIGRATIONS: { readonly [O in Owner]: readonly Migration[] } = {
       sql: `
 CREATE TABLE seq_counter (id INTEGER PRIMARY KEY CHECK (id = 1), value INTEGER NOT NULL) STRICT;
 INSERT INTO seq_counter (id, value) VALUES (1, 0);`,
+    },
+    {
+      id: "002-users",
+      sql: `
+-- One row per person. The local app has exactly one, inserted by ensureLocalUser at boot and not by this migration,
+-- so an upgraded database and a fresh one take the same path.
+CREATE TABLE users (
+  id TEXT PRIMARY KEY,
+  created_ms INTEGER NOT NULL
+) STRICT;`,
     },
   ],
 
@@ -500,6 +515,64 @@ CREATE TABLE save_failures (
     },
   ],
 };
+
+export type TableScope = "user" | "shared" | "identity";
+
+/**
+ * Whether a table's rows belong to one user. Every table must appear here (test/db.test.ts), so a new table has to
+ * pick a side. "user" tables get a `user_id` column in the Phase 1 PRs, one per owning module, and the boundary test
+ * for them follows. "shared" tables hold lecture-derived or process-wide rows. "identity" is `users` itself.
+ */
+export const TABLE_SCOPES: { readonly [table: string]: TableScope } = {
+  users: "identity",
+  seq_counter: "shared", // becomes a per-user sequence row in the Postgres phase
+  schema_migrations: "shared",
+  // The memo mixes lecture-derived rows with tutor_turn and wrap_up rows that hold a learner's answers, dialogue and notes,
+  // so it is per-user until the budget phase moves lecture-only purposes into a separate shared cache.
+  memo_inputs: "user",
+  memo: "user",
+  memo_failures: "user",
+  usage_events: "user",
+  voice_usage_events: "user",
+  capture_facts: "user",
+  frames: "user",
+  evidence_snapshots: "user",
+  evidence_deletions: "user",
+  chunk_revisions: "user",
+  claim_index: "user",
+  concept_index: "user", // content-derived, but carries a per-pipeline seq
+  prep_controls: "user",
+  prep_inputs: "user",
+  invite_answers: "user",
+  reviews: "user",
+  review_turns: "user",
+  notes: "user",
+  note_edits: "user",
+  note_deletions: "user",
+  note_evidence: "user",
+  observations: "user",
+  observation_decisions: "user",
+  link_suggestions: "user",
+  link_decisions: "user",
+  saved_reviews: "user",
+  save_failures: "user",
+};
+
+/** The local app's only user. Derived, so every boot on every machine names it the same. */
+export const LOCAL_USER: UserId = stableId("usr", "local");
+
+/** Insert the local user if absent and return its id. Idempotent. A hosted deployment maps its accounts to rows instead. */
+export function ensureLocalUser(db: Db): UserId {
+  db.sql.query("INSERT OR IGNORE INTO users (id, created_ms) VALUES (?, ?)").run(LOCAL_USER, Date.now());
+  return LOCAL_USER;
+}
+
+/** Bind a handle to a user that has a `users` row. The handle shares the connection and the Seq counter. */
+export function scopeDb(db: Db, userId: UserId): UserDb {
+  const known = db.sql.query<{ id: string }, [string]>("SELECT id FROM users WHERE id = ?").get(userId);
+  if (!known) throw new Error(`scopeDb: no such user ${userId}`);
+  return { sql: db.sql, nextSeq: () => db.nextSeq(), tx: (fn) => db.tx(fn), close: () => db.close(), userId };
+}
 
 /** Table name → owning module, read from the CREATE TABLE statements above. */
 export function tableOwners(migrations: typeof MIGRATIONS = MIGRATIONS): ReadonlyMap<string, Owner> {

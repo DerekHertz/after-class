@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MIGRATIONS, OWNERS, openDb, tableOwners } from "../src/backend/db";
+import { LOCAL_USER, MIGRATIONS, OWNERS, TABLE_SCOPES, ensureLocalUser, openDb, scopeDb, tableOwners } from "../src/backend/db";
 import type { Db } from "../src/backend/db";
 import { testDb } from "./fakes";
 
@@ -206,5 +206,68 @@ describe("append-only facts and snapshots", () => {
     expect(() =>
       db.sql.run("INSERT INTO observation_decisions (observation_id, kind, value, decided_ms) VALUES ('obs_1', 'override', 'disputed', 0)"),
     ).toThrow();
+  });
+});
+
+describe("users", () => {
+  const userRows = (db: Db) => db.sql.query<{ id: string }, []>("SELECT id FROM users").all();
+
+  test("first boot creates exactly one user", () => {
+    const db = testDb();
+    expect(userRows(db)).toEqual([]);
+    expect(ensureLocalUser(db)).toBe(LOCAL_USER);
+    expect(userRows(db)).toEqual([{ id: LOCAL_USER }]);
+  });
+
+  test("a reboot keeps the one user and its creation time", () => {
+    withFile((path) => {
+      const a = openDb(path);
+      ensureLocalUser(a);
+      const created = a.sql.query<{ created_ms: number }, []>("SELECT created_ms FROM users").get()!.created_ms;
+      a.close();
+      const b = openDb(path);
+      expect(ensureLocalUser(b)).toBe(LOCAL_USER);
+      expect(ensureLocalUser(b)).toBe(LOCAL_USER);
+      expect(userRows(b)).toHaveLength(1);
+      expect(b.sql.query<{ created_ms: number }, []>("SELECT created_ms FROM users").get()!.created_ms).toBe(created);
+      b.close();
+    });
+  });
+
+  test("a database from before the users migration gains the table and one user, and keeps its data", () => {
+    withFile((path) => {
+      const old = { ...MIGRATIONS, kernel: MIGRATIONS.kernel.filter((m) => m.id !== "002-users") };
+      const a = openDb(path, old);
+      const seq = a.nextSeq();
+      expect(a.sql.query("SELECT name FROM sqlite_master WHERE name = 'users'").all()).toEqual([]);
+      a.close();
+      const b = openDb(path);
+      expect(userRows(b)).toEqual([]);
+      ensureLocalUser(b);
+      expect(userRows(b)).toEqual([{ id: LOCAL_USER }]);
+      expect(b.nextSeq()).toBe((seq + 1) as typeof seq);
+      b.close();
+    });
+  });
+
+  test("scopeDb binds the user, shares the Seq counter, and refuses an unknown user", () => {
+    const db = testDb();
+    expect(() => scopeDb(db, LOCAL_USER)).toThrow(/no such user/);
+    const scoped = scopeDb(db, ensureLocalUser(db));
+    expect(scoped.userId).toBe(LOCAL_USER);
+    const a = scoped.nextSeq();
+    expect(db.nextSeq()).toBe((a + 1) as typeof a);
+    expect(scoped.tx(() => 7)).toBe(7);
+  });
+
+  test("every table is classified as per-user, shared or identity, and nothing else is", () => {
+    const tables = testDb().sql.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
+    expect(Object.keys(TABLE_SCOPES).sort()).toEqual(tables.sort());
+    expect(Object.entries(TABLE_SCOPES).filter(([, s]) => s === "identity").map(([t]) => t)).toEqual(["users"]);
+  });
+
+  test("only tables that hold no learner's data are shared", () => {
+    const shared = Object.entries(TABLE_SCOPES).filter(([, s]) => s === "shared").map(([t]) => t).sort();
+    expect(shared).toEqual(["schema_migrations", "seq_counter"]);
   });
 });

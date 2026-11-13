@@ -8,13 +8,19 @@
  */
 import type { Cost, Provider, Purpose, Seq } from "../src/shared/domain";
 import type { IdPart } from "../src/shared/ids";
-import { asSeq, openDb } from "../src/backend/db";
-import type { Db } from "../src/backend/db";
+import { asSeq, ensureLocalUser, openDb, scopeDb } from "../src/backend/db";
+import type { Db, UserDb } from "../src/backend/db";
 import { ProviderError } from "../src/backend/providers/memo";
 import type { AttemptContext, Task, UsageReport } from "../src/backend/providers/memo";
 
 export function testDb(): Db {
   return openDb(":memory:");
+}
+
+/** An in-memory database already scoped to the local user. */
+export function testUserDb(): UserDb {
+  const db = testDb();
+  return scopeDb(db, ensureLocalUser(db));
 }
 
 export function testSeq(n: number): Seq {

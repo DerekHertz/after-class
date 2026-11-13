@@ -30,8 +30,8 @@ import { join, resolve } from "node:path";
 import { buildApp } from "../../scripts/build-app";
 import type { CaptureId, EvidenceId } from "../shared/ids";
 import type { AssessableClaim, BoundaryJudgment, BoundaryWindow, Evidence, Frame, Passage, Verdict } from "../shared/domain";
-import { openDb } from "./db";
-import type { Db } from "./db";
+import { ensureLocalUser, openDb, scopeDb } from "./db";
+import type { UserDb } from "./db";
 import { createMemo, ProviderError } from "./providers/memo";
 import type { Memo, MemoMode, Task } from "./providers/memo";
 import { createLedger } from "./providers/ledger";
@@ -117,7 +117,7 @@ export type Modules = {
   readonly ledger: Ledger;
   readonly memo: Memo;
   readonly scheduler: Scheduler;
-  readonly db: Db;
+  readonly db: UserDb;
 };
 
 export type Running = {
@@ -256,7 +256,9 @@ export async function main(options: MainOptions = {}): Promise<Running> {
 
   const dataDir = resolve(env.AFTERCLASS_DATA ?? "data");
   mkdirSync(dataDir, { recursive: true });
-  const db = openDb(join(dataDir, "afterclass.sqlite"));
+  const rawDb = openDb(join(dataDir, "afterclass.sqlite"));
+  // The local app has one user, created on first boot. Modules still take a plain `Db`; each moves to `UserDb` in its own PR.
+  const db = scopeDb(rawDb, ensureLocalUser(rawDb));
 
   // evidence is created after the tasks that need its bytes; the tasks only read it when a call runs
   const frameBytes: FrameBytes = (id) => evidence.frameBytes(id);
