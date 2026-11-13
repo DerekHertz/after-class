@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import type { ConceptId, EvidenceId, ReviewId } from "../shared/ids";
 import type { TopicDiagram } from "../shared/domain";
 import type { AppApi } from "./api";
 import { formatClock } from "./core";
 import { frameLink, lineSources, NO_FRAME_NOTE, shouldPollDiagrams, SUMMARY_NOTE } from "./diagram-view";
+import { usePolled } from "./poll";
 import { ErrorNote, FrameImage } from "./ui";
 
 export type Diagrams = {
@@ -21,36 +22,19 @@ const message = (e: unknown): string => (e instanceof Error ? e.message : String
  * The review's topic diagrams, kept fresh while a summary is being written. A summary is only ever asked for by `request`.
  */
 export function useDiagrams(api: AppApi, reviewId: ReviewId): Diagrams {
-  const [topics, setTopics] = useState<readonly TopicDiagram[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    let live = true;
-    api.diagrams(reviewId).then(
-      (list) => { if (live) { setTopics(list); setError(null); } },
-      (e: unknown) => { if (live) setError(message(e)); },
-    );
-    return () => { live = false; };
-  }, [api, reviewId, tick]);
-
-  const reload = useCallback(() => setTick((t) => t + 1), []);
+  const load = useCallback(() => api.diagrams(reviewId), [api, reviewId]);
+  const { data: topics, error, reload, setData, setError } = usePolled(load, shouldPollDiagrams, POLL_MS);
 
   const request = useCallback(async (topicId: ConceptId): Promise<void> => {
     try {
       const next = await api.requestDiagram(reviewId, topicId);
-      setTopics((prev) => prev?.map((t) => (t.topicId === topicId ? next : t)) ?? prev);
+      setData((prev) => prev?.map((t) => (t.topicId === topicId ? next : t)) ?? prev);
       setError(null);
+      if (next.summary.state === "preparing") reload();
     } catch (e) {
       setError(message(e));
     }
-  }, [api, reviewId]);
-
-  useEffect(() => {
-    if (!shouldPollDiagrams(topics)) return;
-    const timer = setTimeout(reload, POLL_MS);
-    return () => clearTimeout(timer);
-  }, [topics, reload]);
+  }, [api, reviewId, reload, setData, setError]);
 
   return { topics, error, reload, request };
 }
