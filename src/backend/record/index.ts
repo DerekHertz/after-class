@@ -35,7 +35,7 @@ import type {
 } from "../../shared/domain";
 import type { WrapUpOutput } from "../review/tutor";
 import { clampStatus, quickCheckThreads, threadDispute } from "../review/clamp";
-import type { Db } from "../db";
+import type { UserDb } from "../db";
 import { buildBundle, correctionsByThread } from "./core";
 import type { RecordBundle } from "./core";
 
@@ -78,7 +78,7 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? `${err.name}: ${err.message}` : String(err);
 }
 
-export function createRecord(db: Db, deps: {
+export function createRecord(db: UserDb, deps: {
   turns(reviewId: ReviewId): readonly Turn[];
   claims(reviewId: ReviewId): readonly AssessableClaim[];
   wrapUp(reviewId: ReviewId): Promise<WrapUpOutput>; // memo-backed; a retried save reuses the same proposal
@@ -150,8 +150,8 @@ export function createRecord(db: Db, deps: {
        ORDER BY n.rowid`,
     ),
     noteEvidenceOf: db.sql.query<{ evidence_id: string }, [string]>(`SELECT evidence_id FROM note_evidence WHERE note_id = ? ORDER BY evidence_id`),
-    deletedEvidence: db.sql.query<{ evidence_id: string; deleted_ms: number }, [string]>(
-      `SELECT evidence_id, deleted_ms FROM evidence_deletions WHERE evidence_id IN (SELECT value FROM json_each(?)) ORDER BY evidence_id`,
+    deletedEvidence: db.sql.query<{ evidence_id: string; deleted_ms: number }, [string, string]>(
+      `SELECT evidence_id, deleted_ms FROM evidence_deletions WHERE user_id = ? AND evidence_id IN (SELECT value FROM json_each(?)) ORDER BY evidence_id`,
     ),
     observations: db.sql.query<ObservationRow, [string | null, string | null]>(
       `SELECT o.id, o.review_id, o.thread_id, o.claim_ids_json, o.concept_ids_json, o.proposed, o.facts_json, o.assessable,
@@ -199,7 +199,7 @@ export function createRecord(db: Db, deps: {
       }
       for (const l of b.links) q.upsertLink.run(l.id, reviewId, l.from, l.to, l.type, JSON.stringify(l.evidence), l.rationale, ms);
       // A re-save must not bring back evidence the user let go: a deleted note's citations, or evidence they deleted.
-      const deleted = new Set(q.deletedEvidence.all(JSON.stringify([...cited])).map((r) => r.evidence_id));
+      const deleted = new Set(q.deletedEvidence.all(db.userId, JSON.stringify([...cited])).map((r) => r.evidence_id));
       deps.snapshotEvidenceInTx([...cited].filter((id) => !deleted.has(id)).sort());
       // Last, so the R16 hold on raw evidence lifts only once the snapshots exist.
       q.markSaved.run(reviewId, b.hash, ms);
@@ -296,7 +296,7 @@ export function createRecord(db: Db, deps: {
 
     const cited = [...new Set(notes.flatMap((n) => n.evidence))];
     const unavailableEvidence: DeletedEvidence[] = q.deletedEvidence
-      .all(JSON.stringify(cited))
+      .all(db.userId, JSON.stringify(cited))
       .map((r) => ({ kind: "deleted", id: r.evidence_id as EvidenceId, deletedAtMs: r.deleted_ms }));
 
     return { notes, observations, links, unavailableEvidence };
