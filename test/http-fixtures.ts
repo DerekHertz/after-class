@@ -384,11 +384,8 @@ export function reviewRig(script: Script = pick, extra: { turnDeadlineMs?: numbe
     task: fakeTask<IdPart, never>({ purpose: "diagram_summary", provider: "claude", answer: () => fail("diagrams are not under test") }) as unknown as Task<DiagramSummaryInput, DiagramSummaryOutput>,
     memo,
   });
-  const server = serve({
-    modules: { ledger: createLedger(db), evidence, reviews, record, preparation, segmentation, diagrams },
-    auth: { port: 0, extensionId: EXT_ID, token: TOKEN },
-    appDir: fixtureApp(), ...serveExtra,
-  });
+  const modules = { ledger: createLedger(db), evidence, reviews, record, preparation, segmentation, diagrams };
+  const server = serve({ modules, auth: { port: 0, extensionId: EXT_ID, token: TOKEN }, appDir: fixtureApp(), ...serveExtra });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
   const capture = world.captureId;
@@ -415,7 +412,7 @@ export function reviewRig(script: Script = pick, extra: { turnDeadlineMs?: numbe
     return { status: r.status, body: (await r.json()) as Record<string, any> };
   };
 
-  return { db, world, model, base, flags, retries, snapshots, evidence, reviews, record, capture, prepare, startReview, turn, view };
+  return { db, world, model, base, flags, retries, snapshots, evidence, reviews, record, modules, capture, prepare, startReview, turn, view };
 }
 
 type Rig = ReturnType<typeof reviewRig>;

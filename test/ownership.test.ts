@@ -5,13 +5,18 @@
  * same id must not be a 404, so the ids are real.
  */
 import { describe, expect, test } from "bun:test";
-import { ensureLocalUser, scopeDb } from "../src/backend/db";
+import { createClerkVerifier } from "../src/backend/clerk";
+import { ensureLocalUser, scopeDb, userForIdentity } from "../src/backend/db";
+import type { Db, UserDb } from "../src/backend/db";
+import { serve } from "../src/backend/http";
+import { clerkUsers } from "../src/backend/main";
 import { randomId, stableId } from "../src/shared/ids";
 import type { CaptureId, ConceptId, EvidenceId } from "../src/shared/ids";
 import { ROUTES, routeUrl } from "../src/shared/wire";
 import type { RouteName } from "../src/shared/wire";
+import { ISSUER, PUBLIC_ORIGIN, PUBLISHABLE_KEY, claims, fakeJwks, sign, signingKey } from "./clerk-fixtures";
 import { stream } from "./evidence-fixtures";
-import { JSON_HEADERS, bearer, pick, registerCleanup, reviewRig, said, savedRig, send } from "./http-fixtures";
+import { EXT_ID, JSON_HEADERS, fixtureApp, pick, registerCleanup, reviewRig, said, savedRig, send } from "./http-fixtures";
 import { otherUserDb, testDb } from "./fakes";
 
 registerCleanup();
@@ -26,62 +31,61 @@ type Ids = {
   readonly topicId: ConceptId;
 };
 
-type Call = { readonly request: (base: string, ids: Ids) => Promise<Response>; readonly bStatus: number; readonly ownerSkipped?: string };
+type Call = { readonly request: (base: string, ids: Ids, headers: Record<string, string>) => Promise<Response>; readonly bStatus: number; readonly ownerSkipped?: string };
 
-const get = (path: string) => (base: string) => fetch(`${base}${path}`, { headers: bearer });
+const get = (path: string) => (base: string, headers: Record<string, string>) => fetch(`${base}${path}`, { headers });
 const url = <N extends RouteName>(name: N, params: Record<string, string>) => routeUrl(ROUTES[name] as never, params as never);
 
 /** `none`: the route takes no id, so there is nothing to present. Anything else lists the requests a second user makes. */
 const CASES: { readonly [N in RouteName]: "none" | ((ids: Ids) => readonly Call[]) } = {
   ingest: (ids) => [{
-    request: (base) => send(base, "POST", "/ingest", { captureId: ids.captureId, facts: [{ kind: "control", action: "start", reason: "user", clientSeq: 0, wallMs: 1000 }] }),
+    request: (base, _ids, h) => send(base, "POST", "/ingest", { captureId: ids.captureId, facts: [{ kind: "control", action: "start", reason: "user", clientSeq: 0, wallMs: 1000 }] }, h),
     bStatus: 404,
   }],
   lectures: "none",
-  captureView: () => [{ request: (base, ids) => get(url("captureView", { captureId: ids.captureId }))(base), bStatus: 404 }],
-  answerInvite: () => [{ request: (base, ids) => send(base, "POST", url("answerInvite", { captureId: ids.captureId }), { answer: "later" }), bStatus: 404 }],
-  reviewOptions: () => [{ request: (base, ids) => get(url("reviewOptions", { captureId: ids.captureId }))(base), bStatus: 404 }],
+  captureView: () => [{ request: (base, ids, h) => get(url("captureView", { captureId: ids.captureId }))(base, h), bStatus: 404 }],
+  answerInvite: () => [{ request: (base, ids, h) => send(base, "POST", url("answerInvite", { captureId: ids.captureId }), { answer: "later" }, h), bStatus: 404 }],
+  reviewOptions: () => [{ request: (base, ids, h) => get(url("reviewOptions", { captureId: ids.captureId }))(base, h), bStatus: 404 }],
   startReview: () => [
-    { request: (base, ids) => send(base, "POST", url("startReview", { captureId: ids.captureId }), { reviewId: randomId("rvw"), choice: "prepared_only" }), bStatus: 404 },
+    { request: (base, ids, h) => send(base, "POST", url("startReview", { captureId: ids.captureId }), { reviewId: randomId("rvw"), choice: "prepared_only" }, h), bStatus: 404 },
   ],
-  sendTurn: () => [{ request: (base, ids) => send(base, "POST", url("sendTurn", { reviewId: ids.reviewId }), { turnId: randomId("turn"), act: said("hi") }), bStatus: 404 }],
-  review: () => [{ request: (base, ids) => get(url("review", { reviewId: ids.reviewId }))(base), bStatus: 404 }],
-  save: () => [{ request: (base, ids) => send(base, "POST", url("save", { reviewId: ids.reviewId }), {}), bStatus: 404 }],
-  diagrams: () => [{ request: (base, ids) => get(url("diagrams", { reviewId: ids.reviewId }))(base), bStatus: 404 }],
+  sendTurn: () => [{ request: (base, ids, h) => send(base, "POST", url("sendTurn", { reviewId: ids.reviewId }), { turnId: randomId("turn"), act: said("hi") }, h), bStatus: 404 }],
+  review: () => [{ request: (base, ids, h) => get(url("review", { reviewId: ids.reviewId }))(base, h), bStatus: 404 }],
+  save: () => [{ request: (base, ids, h) => send(base, "POST", url("save", { reviewId: ids.reviewId }), {}, h), bStatus: 404 }],
+  diagrams: () => [{ request: (base, ids, h) => get(url("diagrams", { reviewId: ids.reviewId }))(base, h), bStatus: 404 }],
   requestDiagram: () => [
     {
-      request: (base, ids) => send(base, "POST", url("requestDiagram", { reviewId: ids.reviewId, topicId: ids.topicId }), {}),
+      request: (base, ids, h) => send(base, "POST", url("requestDiagram", { reviewId: ids.reviewId, topicId: ids.topicId }), {}, h),
       bStatus: 404,
       ownerSkipped: "the fixture review has no topics, so its owner gets 404 for the topic",
     },
   ],
-  record: () => [{ request: (base, ids) => get(`/record?reviewId=${ids.reviewId}`)(base), bStatus: 404 }],
+  record: () => [{ request: (base, ids, h) => get(`/record?reviewId=${ids.reviewId}`)(base, h), bStatus: 404 }],
   usage: "none",
   evidence: () => [
-    { request: (base, ids) => get(`/evidence?captureId=${ids.captureId}`)(base), bStatus: 404 },
+    { request: (base, ids, h) => get(`/evidence?captureId=${ids.captureId}`)(base, h), bStatus: 404 },
     // Documented no-op: evidence ids and material another user holds read as an id nobody holds, an empty bundle.
-    { request: (base, ids) => get(`/evidence?ids=${ids.frameId}`)(base), bStatus: 200 },
+    { request: (base, ids, h) => get(`/evidence?ids=${ids.frameId}`)(base, h), bStatus: 200 },
   ],
-  frameImage: () => [{ request: (base, ids) => get(url("frameImage", { evidenceId: ids.frameId }))(base), bStatus: 404 }],
-  editNote: () => [{ request: (base, ids) => send(base, "PATCH", url("editNote", { noteId: ids.noteId }), { text: "stolen" }), bStatus: 404 }],
-  deleteNote: () => [{ request: (base, ids) => send(base, "DELETE", url("deleteNote", { noteId: ids.noteId })), bStatus: 404 }],
-  decideLink: () => [{ request: (base, ids) => send(base, "POST", url("decideLink", { linkId: ids.linkId }), { decision: "accepted" }), bStatus: 404 }],
+  frameImage: () => [{ request: (base, ids, h) => get(url("frameImage", { evidenceId: ids.frameId }))(base, h), bStatus: 404 }],
+  editNote: () => [{ request: (base, ids, h) => send(base, "PATCH", url("editNote", { noteId: ids.noteId }), { text: "stolen" }, h), bStatus: 404 }],
+  deleteNote: () => [{ request: (base, ids, h) => send(base, "DELETE", url("deleteNote", { noteId: ids.noteId }), undefined, h), bStatus: 404 }],
+  decideLink: () => [{ request: (base, ids, h) => send(base, "POST", url("decideLink", { linkId: ids.linkId }), { decision: "accepted" }, h), bStatus: 404 }],
   resolveDispute: () => [
-    { request: (base, ids) => send(base, "POST", url("resolveDispute", { observationId: ids.observationId }), { outcome: "it_was_my_gap" }), bStatus: 404 },
+    { request: (base, ids, h) => send(base, "POST", url("resolveDispute", { observationId: ids.observationId }), { outcome: "it_was_my_gap" }, h), bStatus: 404 },
   ],
   overrideObservation: () => [
-    { request: (base, ids) => send(base, "POST", url("overrideObservation", { observationId: ids.observationId }), { status: "independent" }), bStatus: 404 },
+    { request: (base, ids, h) => send(base, "POST", url("overrideObservation", { observationId: ids.observationId }), { status: "independent" }, h), bStatus: 404 },
   ],
-  deleteEvidence: () => [{ request: (base, ids) => send(base, "POST", "/record/evidence/delete", { evidenceIds: [ids.frameId] }), bStatus: 404 }],
-  retryPreparation: () => [{ request: (base, ids) => send(base, "POST", url("retryPreparation", { captureId: ids.captureId }), {}), bStatus: 404 }],
+  deleteEvidence: () => [{ request: (base, ids, h) => send(base, "POST", "/record/evidence/delete", { evidenceIds: [ids.frameId] }, h), bStatus: 404 }],
+  retryPreparation: () => [{ request: (base, ids, h) => send(base, "POST", url("retryPreparation", { captureId: ids.captureId }), {}, h), bStatus: 404 }],
   voiceStatus: "none",
   speak: "none",
 };
 
-async function world() {
-  const raw = testDb();
-  const alice = await savedRig(scopeDb(raw, ensureLocalUser(raw)));
-  const bob = await savedRig(otherUserDb(raw, "bob"));
+async function world(raw: Db = testDb(), aliceDb: UserDb = scopeDb(raw, ensureLocalUser(raw)), bobDb: UserDb = otherUserDb(raw, "bob")) {
+  const alice = await savedRig(aliceDb);
+  const bob = await savedRig(bobDb);
   const s = stream(alice.capture);
   s.control("start");
   s.source();
@@ -107,6 +111,44 @@ async function world() {
   return { raw, alice, bob, ids };
 }
 
+type Party = { readonly base: string; readonly headers: Record<string, string> };
+
+/** The second user presents each id and gets `bStatus` with nothing changed; then the owner presents it and is answered. */
+async function walk(raw: Db, ids: Ids, alice: Party, bob: Party): Promise<void> {
+  const state = () =>
+    JSON.stringify(
+      ["capture_facts", "frames", "invite_answers", "reviews", "review_turns", "notes", "note_edits", "note_deletions", "observation_decisions", "link_decisions", "saved_reviews", "save_failures", "evidence_deletions"].map(
+        (t) => raw.sql.query(`SELECT * FROM ${t} ORDER BY rowid`).all(),
+      ),
+    );
+  const before = state();
+  const walked: string[] = [];
+  for (const [name, c] of Object.entries(CASES)) {
+    if (c === "none") continue;
+    for (const call of c(ids)) {
+      const res = await call.request(bob.base, ids, bob.headers);
+      const text = await res.text();
+      expect(res.status, `${name} as the second user`).toBe(call.bStatus);
+      if (call.bStatus === 200) expect(JSON.parse(text), `${name} is a no-op`).toMatchObject({ passages: [], frames: [] });
+      walked.push(name);
+    }
+  }
+  expect(state()).toBe(before);
+  expect(new Set(walked).size).toBe(Object.values(CASES).filter((c) => c !== "none").length);
+
+  for (const [name, c] of Object.entries(CASES)) {
+    if (c === "none") continue;
+    for (const call of c(ids)) {
+      if (call.ownerSkipped !== undefined) continue;
+      const res = await call.request(alice.base, ids, alice.headers);
+      await res.text();
+      expect(res.status, `${name} as the owner`).not.toBe(404);
+      expect([401, 403], `${name} as the owner`).not.toContain(res.status);
+      expect(res.status, `${name} as the owner`).toBeLessThan(500);
+    }
+  }
+}
+
 describe("every route that takes an id", () => {
   test("is covered: each route is in the table, and one with a path parameter or an id in its request is not marked as taking none", () => {
     expect(Object.keys(CASES).sort()).toEqual(Object.keys(ROUTES).sort());
@@ -118,36 +160,29 @@ describe("every route that takes an id", () => {
 
   test("answers a second user who presents the first user's id with 404 and changes nothing, and answers the owner", async () => {
     const { raw, alice, bob, ids } = await world();
-    const state = () =>
-      JSON.stringify(
-        ["capture_facts", "frames", "invite_answers", "reviews", "review_turns", "notes", "note_edits", "note_deletions", "observation_decisions", "link_decisions", "saved_reviews", "save_failures", "evidence_deletions"].map(
-          (t) => raw.sql.query(`SELECT * FROM ${t} ORDER BY rowid`).all(),
-        ),
-      );
-    const before = state();
-    const walked: string[] = [];
-    for (const [name, c] of Object.entries(CASES)) {
-      if (c === "none") continue;
-      for (const call of c(ids)) {
-        const res = await call.request(bob.base, ids);
-        const text = await res.text();
-        expect(res.status, `${name} as the second user`).toBe(call.bStatus);
-        if (call.bStatus === 200) expect(JSON.parse(text), `${name} is a no-op`).toMatchObject({ passages: [], frames: [] });
-        walked.push(name);
-      }
-    }
-    expect(state()).toBe(before);
-    expect(new Set(walked).size).toBe(Object.values(CASES).filter((c) => c !== "none").length);
+    await walk(raw, ids, { base: alice.base, headers: JSON_HEADERS }, { base: bob.base, headers: JSON_HEADERS });
+  });
 
-    for (const [name, c] of Object.entries(CASES)) {
-      if (c === "none") continue;
-      for (const call of c(ids)) {
-        if (call.ownerSkipped !== undefined) continue;
-        const res = await call.request(alice.base, ids);
-        await res.text();
-        expect(res.status, `${name} as the owner`).not.toBe(404);
-        expect(res.status, `${name} as the owner`).toBeLessThan(500);
-      }
+  test("hosted: one server, two Clerk sign-ins; the second user's session token gets 404 on every id route and changes nothing", async () => {
+    const key = await signingKey("k1");
+    const raw = testDb();
+    const aliceId = userForIdentity(raw, { provider: "clerk", subject: "user_alice" });
+    const bobId = userForIdentity(raw, { provider: "clerk", subject: "user_bob" });
+    const { alice, bob, ids } = await world(raw, scopeDb(raw, aliceId), scopeDb(raw, bobId));
+    const verifier = createClerkVerifier({ issuer: ISSUER, jwksUrl: "https://clerk.afterclass.test/.well-known/jwks.json", authorizedParties: [PUBLIC_ORIGIN] }, { fetch: fakeJwks([key]).fetch });
+    const byUser = new Map([[aliceId, alice.modules], [bobId, bob.modules]]);
+    const server = serve({
+      hosted: { publicOrigin: PUBLIC_ORIGIN, extensionId: EXT_ID, clerk: { scriptUrl: "https://clerk.afterclass.test/clerk.js", publishableKey: PUBLISHABLE_KEY }, userFor: clerkUsers(verifier, raw) },
+      port: 0,
+      modulesFor: (userId) => byUser.get(userId)!,
+      appDir: fixtureApp(),
+    });
+    try {
+      const base = `http://127.0.0.1:${server.port}`;
+      const as = async (sub: string) => ({ base, headers: { Authorization: `Bearer ${await sign(key, claims({ sub }))}`, "Content-Type": "application/json" } });
+      await walk(raw, ids, await as("user_alice"), await as("user_bob"));
+    } finally {
+      await server.stop(true);
     }
   });
 

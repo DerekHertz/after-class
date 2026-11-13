@@ -124,13 +124,18 @@ export const json = (body: unknown, status = 200) => new Response(JSON.stringify
 
 type FakeTx = { oncomplete: (() => void) | null; onerror: (() => void) | null; onabort: (() => void) | null; error: unknown };
 
-/** An IndexedDB whose open and transactions the test releases by hand. Requests succeed on the next tick, as in a browser. */
-export function fakeIdb(opts: { opens?: boolean } = {}) {
-  const rows = new Map<string, unknown>();
+/**
+ * An IndexedDB whose open and transactions the test releases by hand, unless `autoComplete` completes each transaction
+ * after its request. Requests succeed on the next tick, as in a browser. Each database name has its own rows.
+ */
+export function fakeIdb(opts: { opens?: boolean; autoComplete?: boolean } = {}) {
+  const dbs = new Map<string, Map<string, unknown>>();
+  const rowsOf = (name: string) => dbs.get(name) ?? dbs.set(name, new Map()).get(name)!;
   const txs: FakeTx[] = [];
-  const db = {
+  const connection = (name: string) => ({
     close() {},
     transaction() {
+      const rows = rowsOf(name);
       const tx: FakeTx = { oncomplete: null, onerror: null, onabort: null, error: null };
       txs.push(tx);
       const request = <T,>(result: T, apply: () => void) => {
@@ -138,6 +143,7 @@ export function fakeIdb(opts: { opens?: boolean } = {}) {
         queueMicrotask(() => {
           apply();
           r.onsuccess?.();
+          if (opts.autoComplete) tx.oncomplete?.();
         });
         return r;
       };
@@ -149,16 +155,30 @@ export function fakeIdb(opts: { opens?: boolean } = {}) {
         }),
       });
     },
-  };
+  });
+  type Request = { result: unknown; error: unknown; onsuccess: (() => void) | null; onerror: (() => void) | null; onupgradeneeded: (() => void) | null; onblocked: (() => void) | null };
   const factory = {
-    open() {
-      const r: { result: unknown; error: unknown; onsuccess: (() => void) | null; onerror: (() => void) | null; onupgradeneeded: (() => void) | null; onblocked: (() => void) | null } =
-        { result: { ...db, createObjectStore() {} }, error: null, onsuccess: null, onerror: null, onupgradeneeded: null, onblocked: null };
-      if (opts.opens !== false) queueMicrotask(() => r.onsuccess?.());
+    open(name: string) {
+      const r: Request = { result: { ...connection(name), createObjectStore() {} }, error: null, onsuccess: null, onerror: null, onupgradeneeded: null, onblocked: null };
+      if (opts.opens !== false) queueMicrotask(() => (rowsOf(name), r.onsuccess?.()));
       return r;
     },
+    deleteDatabase(name: string) {
+      const r: Request = { result: undefined, error: null, onsuccess: null, onerror: null, onupgradeneeded: null, onblocked: null };
+      queueMicrotask(() => (dbs.delete(name), r.onsuccess?.()));
+      return r;
+    },
+    databases: async () => [...dbs.keys()].map((name) => ({ name, version: 1 })),
   } as unknown as IDBFactory;
-  return { factory, rows, txs, complete: (i = txs.length - 1) => txs[i]!.oncomplete?.(), abort: (i = txs.length - 1) => { txs[i]!.error = new Error("QuotaExceededError"); txs[i]!.onabort?.(); } };
+  return {
+    factory, dbs, txs,
+    /** The local app's database. */
+    get rows() {
+      return rowsOf("afterclass-app");
+    },
+    complete: (i = txs.length - 1) => txs[i]!.oncomplete?.(),
+    abort: (i = txs.length - 1) => { txs[i]!.error = new Error("QuotaExceededError"); txs[i]!.onabort?.(); },
+  };
 }
 
 // ───────────────────────────── Session controller ───────────────────────────

@@ -9,6 +9,8 @@ import { HomeScreen } from "../../src/app/home";
 import { Link, usePathname } from "../../src/app/ui";
 import { createMemoryUnsent } from "../../src/app/unsent";
 import type { AppApi } from "../../src/app/api";
+import { SignOutButton } from "../../src/app/sign-in";
+import type { ClerkClient } from "../../src/app/sign-in";
 import { createFixture, ids, scenarioFrom, scenarios } from "./fixtures";
 
 const scenario = scenarioFrom(location.search);
@@ -20,6 +22,8 @@ const api: AppApi = holdReview ? { ...fixtureApi, review: async (id) => { await 
 const unsent = createMemoryUnsent();
 const speaker = { beginTurn() {}, speak() {}, stop() {} };
 const clean = new URLSearchParams(location.search).get("clean") === "1";
+/** `?account=1` shows the hosted app's sign-out control, so its place in each layout can be checked. */
+const account = new URLSearchParams(location.search).get("account") === "1" ? <SignOutButton clerk={{ signOut: async () => {} } as unknown as ClerkClient} /> : undefined;
 function Preview() {
   const path = usePathname();
   const calls = useSyncExternalStore(requestLedger.subscribe, requestLedger.snapshot);
@@ -37,7 +41,7 @@ function Preview() {
       <Link to={{ page: "record", reviewId: null }}>Notebook</Link>
       <details><summary>Request ledger</summary><pre>{calls || "No requests"}</pre></details>
     </aside>
-    <AppearanceProvider><SceneShell>
+    <AppearanceProvider><SceneShell account={account}>
       {page === "home" ? <HomeScreen api={api} /> : page === "capture" ? <CaptureScreen api={api} captureId={ids.capture} /> : page === "record" ? <RecordScreen api={api} reviewId={recordReviewId} /> : page === "usage" ? <UsageScreen api={api} /> : <ReviewScreen api={api} reviewId={ids.review} speaker={speaker} speech={speech} unsent={unsent} />}
     </SceneShell></AppearanceProvider>
   </>;

@@ -1,5 +1,5 @@
 .scene-masthead { pointer-events: none; }
-.scene-masthead > a, .scene-masthead .appearance-picker { pointer-events: auto; }
+.scene-masthead > a, .scene-masthead .appearance-picker, .scene-masthead > .sign-out { pointer-events: auto; }
 /* The folio or notebook lifts off the desk once when picked up; switching between them keeps it still. */
 .scene-shell[data-motion="system"] .review .room-object[open] { animation: room-object-lift 260ms cubic-bezier(.2,.8,.2,1) both; }
 @keyframes room-object-lift { from { opacity: 0; translate: 0 18px; scale: .97; } }

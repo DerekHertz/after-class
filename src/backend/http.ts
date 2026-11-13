@@ -20,13 +20,21 @@
  * Accepted limit: the token is in the HTML of GET /app/, so any local process or user that can reach 127.0.0.1:<port>
  * can read it, even though the token file is 0600. The checks above stop web pages and DNS rebinding, not local code.
  * Not yet: GET /events (SSE), GET /trace/captures/:id, GET /memo/:key.
+ *
+ * Hosted mode (`ServeOptions.hosted`) replaces all three checks. There is no Host check. Origin, when a browser sends
+ * one, must be exactly the public origin or the pinned extension; with none, Sec-Fetch-Site must not be cross-site or
+ * same-site, as above. Every `ROUTES` entry needs `Authorization: Bearer <session token>`, and `HostedAuth.userFor` turns
+ * the token into the caller's user, whose modules (`modulesFor`) serve the request. The extension has no session token
+ * yet, so its routes answer 401 until device tokens land. GET /health answers anyone. GET /app/* needs no token and no
+ * Origin check, because sign-in returns to it as a cross-site navigation and the page holds no secret: it loads ClerkJS
+ * instead of carrying the pairing token. GET / redirects to /app/.
  */
 import { createHash, timingSafeEqual } from "node:crypto";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import { parseId } from "../shared/ids";
 import type { IdKind } from "../shared/ids";
-import type { CaptureId, ConceptId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, SourceId, TurnId } from "../shared/ids";
+import type { CaptureId, ConceptId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, SourceId, TurnId, UserId } from "../shared/ids";
 import type { EvidenceBundle, Frame, FrozenScope, Passage, ReviewOptions, ReviewSaveState, ReviewView, ScopePreview, StartResult, TurnEvent } from "../shared/domain";
 import { Material } from "../shared/time";
 import type { Interval } from "../shared/time";
@@ -57,6 +65,18 @@ export type Modules = {
 };
 
 export type AuthConfig = { readonly port: number; readonly extensionId: string; readonly token: string };
+
+/** Hosted mode: who may call, and how a bearer token becomes a user. */
+export type HostedAuth = {
+  /** Scheme, host and port the app is served from, e.g. https://afterclass.example. Origin must match it exactly. */
+  readonly publicOrigin: string;
+  /** "" refuses every extension origin. */
+  readonly extensionId: string;
+  /** The ClerkJS script the app page loads, and the publishable key it is loaded with. */
+  readonly clerk: { readonly scriptUrl: string; readonly publishableKey: string };
+  /** The signed-in user a bearer token names, or null when the token does not verify. */
+  readonly userFor: (token: string) => Promise<UserId | null>;
+};
 
 type Origin = "extension" | "review_app" | "none";
 type Denied = { readonly ok: false; readonly status: 401 | 403 };
@@ -89,15 +109,24 @@ export function authorize(headers: Headers, expected: AuthConfig, opts: { readon
   return { ok: true, origin: kind };
 }
 
-export type ServeOptions = {
-  /**
-   * main.ts passes every module. `record`, `preparation` and `segmentation` stay optional so a test can serve a subset:
-   * a route that needs a missing one answers 501, and a review's `saved` reads "unsaved".
-   */
-  readonly modules: Pick<Modules, "ledger" | "reviews"> & { readonly evidence: EvidenceStore & Pick<EvidenceStoreWithProbe, "watchedMaterial"> }
-    & Partial<Pick<Modules, "record" | "preparation" | "segmentation" | "voice" | "diagrams">>;
-  /** `port` 0 binds a free port (tests); the Host check then uses the bound port. */
-  readonly auth: AuthConfig;
+/**
+ * One user's modules. main.ts passes every module. `record`, `preparation` and `segmentation` stay optional so a test can
+ * serve a subset: a route that needs a missing one answers 501, and a review's `saved` reads "unsaved".
+ */
+export type ServedModules = Pick<Modules, "ledger" | "reviews"> & { readonly evidence: EvidenceStore & Pick<EvidenceStoreWithProbe, "watchedMaterial"> }
+  & Partial<Pick<Modules, "record" | "preparation" | "segmentation" | "voice" | "diagrams">>;
+
+/** Local mode serves one user's `modules` behind the pairing token. Hosted mode serves each signed-in user their own. */
+export type ServeOptions = ServeCommon & (
+  | {
+    readonly modules: ServedModules;
+    /** `port` 0 binds a free port (tests); the Host check then uses the bound port. */
+    readonly auth: AuthConfig;
+  }
+  | { readonly hosted: HostedAuth; readonly port: number; readonly modulesFor: (userId: UserId) => ServedModules }
+);
+
+type ServeCommon = {
   /** Directory holding the bundled review app (scripts/build-app.ts writes dist/app). */
   readonly appDir: string;
   /** Largest request body the server reads; Bun answers 413 beyond it. Defaults to `MAX_BODY_BYTES`. */
@@ -138,11 +167,18 @@ const failure = (status: number, error: string, extra?: Record<string, string>) 
 
 const escapeAttr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+const TOKEN_META = /<meta\s+name="afterclass-token"[^>]*>/i;
+
 function injectToken(html: string, token: string): string {
   const tag = `<meta name="afterclass-token" content="${escapeAttr(token)}">`;
-  const meta = /<meta\s+name="afterclass-token"[^>]*>/i;
-  if (meta.test(html)) return html.replace(meta, () => tag);
+  if (TOKEN_META.test(html)) return html.replace(TOKEN_META, () => tag);
   return html.replace(/<\/head>/i, () => `${tag}</head>`);
+}
+
+/** The hosted page: no token tag at all, and ClerkJS loaded the way Clerk documents it, keyed by the script's attribute. */
+function injectClerk(html: string, clerk: HostedAuth["clerk"]): string {
+  const tag = `<script async crossorigin="anonymous" data-clerk-publishable-key="${escapeAttr(clerk.publishableKey)}" src="${escapeAttr(clerk.scriptUrl)}"></script>`;
+  return html.replace(TOKEN_META, "").replace(/<\/head>/i, () => `${tag}</head>`);
 }
 
 type AppTarget = { readonly kind: "file"; readonly path: string } | { readonly kind: "index" } | { readonly kind: "missing" };
@@ -175,7 +211,7 @@ function resolveApp(root: string, rest: string): AppTarget {
   return statSync(real).isFile() ? { kind: "file", path: real } : { kind: "index" };
 }
 
-function serveApp(req: Request, rest: string, opts: ServeOptions, token: string): Response {
+function serveApp(req: Request, rest: string, opts: ServeOptions, page: (html: string) => string): Response {
   if (req.method !== "GET" && req.method !== "HEAD") return failure(405, "method not allowed", { Allow: "GET, HEAD" });
   let root: string;
   try {
@@ -194,7 +230,7 @@ function serveApp(req: Request, rest: string, opts: ServeOptions, token: string)
   }
   let html: string;
   try {
-    html = injectToken(readFileSync(indexPath, "utf8"), token);
+    html = page(readFileSync(indexPath, "utf8"));
   } catch {
     return failure(503, "the review app is not built; run scripts/build-app.ts");
   }
@@ -212,8 +248,8 @@ function corsHeaders(origin: string | null, allowed: Origin): Record<string, str
   return allowed !== "none" && origin !== null ? { "Access-Control-Allow-Origin": origin, Vary: "Origin" } : { Vary: "Origin" };
 }
 
-function preflight(req: Request, auth: AuthConfig): Response {
-  const verdict = authorize(req.headers, auth, { requireToken: false });
+function preflight(req: Request, gate: Gate): Response {
+  const verdict = gate.origin(req.headers);
   const origin = req.headers.get("origin");
   if (!verdict.ok || verdict.origin === "none" || origin === null) return failure(403, "forbidden");
   return new Response(null, {
@@ -387,8 +423,8 @@ function ndjson(events: AsyncIterable<TurnEvent>, cors: Record<string, string>, 
   return new Response(body, { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", ...SECURITY_HEADERS, ...cors } });
 }
 
-async function mounted(name: string, matched: { readonly params: Record<string, string> }, req: Request, opts: ServeOptions, port: number, cors: Record<string, string>, guard: TurnGuard): Promise<Response | null> {
-  const { evidence, reviews, record, preparation, segmentation, voice, diagrams } = opts.modules;
+async function mounted(name: string, matched: { readonly params: Record<string, string> }, req: Request, modules: ServedModules, appOrigin: string, cors: Record<string, string>, guard: TurnGuard): Promise<Response | null> {
+  const { evidence, reviews, record, preparation, segmentation, voice, diagrams } = modules;
   const captureId = matched.params.captureId as CaptureId | undefined;
   const reviewId = matched.params.reviewId as ReviewId | undefined;
   const noteId = matched.params.noteId as NoteId | undefined;
@@ -417,7 +453,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
             ackedThroughSeq,
             invite: reviews.invite(batch.captureId),
             capture: evidence.captureView(batch.captureId),
-            reviewAppUrl: `http://127.0.0.1:${port}/app/capture/${batch.captureId}`,
+            reviewAppUrl: `${appOrigin}/app/capture/${batch.captureId}`,
           },
           cors,
         );
@@ -576,56 +612,128 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
   }
 }
 
-async function handle(req: Request, opts: ServeOptions, auth: AuthConfig, guard: TurnGuard): Promise<Response> {
+type Allowed = { readonly ok: true; readonly origin: Origin };
+
+/** What differs between local and hosted mode. Everything else in `handle` is shared. */
+type Gate = {
+  /** The Origin (and, locally, Host) check alone: preflight and unrouted paths. */
+  origin(headers: Headers): Allowed | Denied;
+  /** The full check for a `ROUTES` entry, and the modules of the user it names. */
+  caller(headers: Headers): Promise<(Allowed & { readonly modules: ServedModules }) | Denied>;
+  health(headers: Headers): Allowed | Denied;
+  app(headers: Headers): Allowed | Denied;
+  /** Where GET / redirects; null answers it like any unrouted path. */
+  readonly home: string | null;
+  page(html: string): string;
+  readonly appOrigin: string;
+};
+
+const allowAll = (): Allowed => ({ ok: true, origin: "none" });
+
+function localGate(auth: AuthConfig, modules: ServedModules, healthAnyHost: boolean): Gate {
+  const originOnly = (h: Headers) => authorize(h, auth, { requireToken: false });
+  return {
+    origin: originOnly,
+    async caller(h) {
+      const v = authorize(h, auth);
+      return v.ok ? { ...v, modules } : v;
+    },
+    health: healthAnyHost ? allowAll : originOnly,
+    app: originOnly,
+    home: null,
+    page: (html) => injectToken(html, auth.token),
+    appOrigin: `http://127.0.0.1:${auth.port}`,
+  };
+}
+
+/** Pure over request headers; unit-tested. A browser's Origin must be the public origin or the pinned extension. */
+export function hostedOrigin(headers: Headers, hosted: Pick<HostedAuth, "publicOrigin" | "extensionId">): Allowed | Denied {
+  const origin = headers.get("origin");
+  if (origin === null) {
+    const site = headers.get("sec-fetch-site");
+    return site === "cross-site" || site === "same-site" ? { ok: false, status: 403 } : { ok: true, origin: "none" };
+  }
+  if (origin === hosted.publicOrigin) return { ok: true, origin: "review_app" };
+  if (hosted.extensionId !== "" && origin === `chrome-extension://${hosted.extensionId}`) return { ok: true, origin: "extension" };
+  return { ok: false, status: 403 };
+}
+
+function hostedGate(hosted: HostedAuth, modulesFor: (userId: UserId) => ServedModules): Gate {
+  const originOnly = (h: Headers) => hostedOrigin(h, hosted);
+  return {
+    origin: originOnly,
+    async caller(h) {
+      const v = originOnly(h);
+      if (!v.ok) return v;
+      const token = /^Bearer (.+)$/i.exec(h.get("authorization") ?? "")?.[1];
+      const userId = token === undefined ? null : await hosted.userFor(token);
+      return userId === null ? { ok: false, status: 401 } : { ...v, modules: modulesFor(userId) };
+    },
+    health: allowAll,
+    app: allowAll,
+    home: "/app/",
+    page: (html) => injectClerk(html, hosted.clerk),
+    appOrigin: hosted.publicOrigin,
+  };
+}
+
+async function handle(req: Request, opts: ServeOptions, gate: Gate, guard: TurnGuard): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
 
-  if (req.method === "OPTIONS") return preflight(req, auth);
+  if (req.method === "OPTIONS") return preflight(req, gate);
 
   if (req.method === "GET" && path === "/health") {
-    if (opts.healthAnyHost === true) return json(200, { ok: true });
-    const v = authorize(req.headers, auth, { requireToken: false });
+    const v = gate.health(req.headers);
     return v.ok ? json(200, { ok: true }) : failure(v.status, "forbidden");
   }
 
   if (path === "/app" || path.startsWith("/app/")) {
-    const v = authorize(req.headers, auth, { requireToken: false });
-    return v.ok ? serveApp(req, path.slice("/app/".length), opts, auth.token) : failure(v.status, "forbidden");
+    const v = gate.app(req.headers);
+    return v.ok ? serveApp(req, path.slice("/app/".length), opts, gate.page) : failure(v.status, "forbidden");
   }
+
+  if (gate.home !== null && req.method === "GET" && path === "/") return new Response(null, { status: 302, headers: { Location: gate.home, ...SECURITY_HEADERS } });
 
   // Bun normalises `..` out of req.url before we see it, so a traversal aimed past /app/ arrives as an unrouted path;
   // answering 404 before the token check keeps it a 404 (and reveals nothing: ROUTES is public).
   const matched = matchRoute(req.method, path);
-  const v = authorize(req.headers, auth, { requireToken: matched !== null });
+  if (matched === null) {
+    const v = gate.origin(req.headers);
+    return v.ok ? failure(404, "not found", corsHeaders(req.headers.get("origin"), v.origin)) : failure(v.status, "forbidden");
+  }
+  const v = await gate.caller(req.headers);
   if (!v.ok) return failure(v.status, v.status === 401 ? "unauthorized" : "forbidden");
   const cors = corsHeaders(req.headers.get("origin"), v.origin);
-  if (matched === null) return failure(404, "not found", cors);
   for (const [name, value] of Object.entries(matched.params)) {
     const kind = (PARAM_KIND as Record<string, IdKind>)[name];
     if (kind === undefined || parseId(kind, value) === null) return failure(400, `invalid ${name}`, cors);
   }
 
-  if (matched.name === "usage") return json(200, opts.modules.ledger.summary(), cors);
-  return (await mounted(matched.name, matched, req, opts, auth.port, cors, guard)) ?? failure(501, "not implemented", cors);
+  if (matched.name === "usage") return json(200, v.modules.ledger.summary(), cors);
+  return (await mounted(matched.name, matched, req, v.modules, gate.appOrigin, cors, guard)) ?? failure(501, "not implemented", cors);
 }
 
 export function serve(opts: ServeOptions): Bun.Server<undefined> {
-  let auth = opts.auth;
   const guard: TurnGuard = { inFlight: new Map(), deadlineMs: opts.turnDeadlineMs ?? TURN_DEADLINE_MS };
+  let gate: Gate | undefined;
   const server = Bun.serve({
     hostname: opts.hostname ?? "127.0.0.1",
-    port: opts.auth.port,
+    port: "hosted" in opts ? opts.port : opts.auth.port,
     // A tutor turn can be silent for a long while before its first word; Bun's default of 10 s would cut the stream.
     idleTimeout: 255,
     maxRequestBodySize: opts.maxBodyBytes ?? MAX_BODY_BYTES,
     async fetch(req) {
       try {
-        return await handle(req, opts, auth, guard);
+        return await handle(req, opts, gate!, guard);
       } catch {
         return failure(500, "internal error");
       }
     },
   });
-  auth = { ...opts.auth, port: server.port as number };
+  // The local Host check names the bound port, which is known only now (port 0 in tests).
+  gate = "hosted" in opts
+    ? hostedGate(opts.hosted, opts.modulesFor)
+    : localGate({ ...opts.auth, port: server.port as number }, opts.modules, opts.healthAnyHost === true);
   return server;
 }

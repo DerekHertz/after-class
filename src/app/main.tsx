@@ -1,19 +1,22 @@
+import { useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { AppearanceProvider, voiceEnabled } from "./appearance";
 import { SceneShell } from "./scene";
 import { parseId } from "../shared/ids";
-import { createApi } from "./api";
-import type { AppApi } from "./api";
+import { followAccount, servicesFor } from "./account";
+import type { Accounts, Platform, Services } from "./account";
 import { CaptureScreen } from "./capture";
 import { parseRoute } from "./core";
 import { RecordScreen, UsageScreen } from "./record";
 import { ReviewScreen } from "./review";
 import { browserSpeaker, browserSpeechInput } from "./speech";
-import { audioElementPlayer, chooseSpeaker, createElevenLabsSpeaker, gateSpeaker, synthPlayback } from "./voice";
-import { createIndexedDbUnsent } from "./unsent";
+import { audioElementPlayer, synthPlayback } from "./voice";
+import { LOCAL_UNSENT_DB, browserIdb } from "./unsent";
 import { Link, usePathname } from "./ui";
 import { HomeScreen } from "./home";
 import { objectFrame } from "./room-object";
+import { SignInScreen, SignInUnavailable, SignOutButton, clerkScript, loadClerk } from "./sign-in";
+import type { ClerkClient } from "./sign-in";
 
 /** The backend writes the pairing token into the served HTML; it is never in the URL or in storage. */
 function readToken(): string {
@@ -21,21 +24,14 @@ function readToken(): string {
   return meta ?? (globalThis as { __AFTERCLASS_TOKEN__?: string }).__AFTERCLASS_TOKEN__ ?? "";
 }
 
-const api: AppApi = createApi(readToken());
-/** Chat-first: nothing is spoken (and no voice request is made) unless the voice setting is on. */
-const speaker = gateSpeaker(voiceEnabled, () => chooseSpeaker(
-  api.voiceAvailable().catch(() => false),
-  createElevenLabsSpeaker({
-    fetchAudio: (text, signal) => api.speech(text, signal),
-    play: audioElementPlayer(),
-    fallback: typeof speechSynthesis === "undefined" ? () => ({ done: Promise.resolve(), stop() {} }) : synthPlayback(speechSynthesis),
-  }),
-  browserSpeaker(),
-));
-const speech = browserSpeechInput();
-const unsent = createIndexedDbUnsent();
-
-const Home = () => <HomeScreen api={api} />;
+const browser: Platform = {
+  voiceEnabled,
+  play: audioElementPlayer(),
+  fallback: typeof speechSynthesis === "undefined" ? () => ({ done: Promise.resolve(), stop() {} }) : synthPlayback(speechSynthesis),
+  browserSpeaker,
+  speechInput: browserSpeechInput,
+  idb: browserIdb(),
+};
 
 function NotFound() {
   return (
@@ -47,18 +43,18 @@ function NotFound() {
   );
 }
 
-function App() {
+function App({ services: { api, speaker, speech, unsent } }: { readonly services: Services }) {
   const route = parseRoute(usePathname());
   switch (route.page) {
     case "home":
-      return <Home />;
+      return <HomeScreen api={api} />;
     case "capture": {
       const id = parseId("cap", route.id);
-      return id ? <CaptureScreen api={api} captureId={id} /> : <Home />;
+      return id ? <CaptureScreen api={api} captureId={id} /> : <HomeScreen api={api} />;
     }
     case "review": {
       const id = parseId("rvw", route.id);
-      return id ? <ReviewScreen key={id} api={api} reviewId={id} speaker={speaker} speech={speech} unsent={unsent} /> : <Home />;
+      return id ? <ReviewScreen key={id} api={api} reviewId={id} speaker={speaker} speech={speech} unsent={unsent} /> : <HomeScreen api={api} />;
     }
     case "record":
       return <RecordScreen api={api} reviewId={route.reviewId === null ? null : parseId("rvw", route.reviewId)} />;
@@ -69,4 +65,23 @@ function App() {
   }
 }
 
-createRoot(document.getElementById("root")!).render(<AppearanceProvider><SceneShell><App /></SceneShell></AppearanceProvider>);
+/** Signed out: Clerk's sign-in. Signed in: the app on that account's services, which `followAccount` disposes when the account changes. */
+function Hosted({ clerk, accounts }: { readonly clerk: ClerkClient; readonly accounts: Accounts }) {
+  const account = useSyncExternalStore(accounts.subscribe, accounts.current);
+  return (
+    <SceneShell account={account && <SignOutButton clerk={clerk} />}>
+      {account ? <App key={account.userId} services={account.services} /> : <SignInScreen clerk={clerk} />}
+    </SceneShell>
+  );
+}
+
+const root = createRoot(document.getElementById("root")!);
+const script = clerkScript(document);
+if (script === null) {
+  root.render(<AppearanceProvider><SceneShell><App services={servicesFor(readToken(), LOCAL_UNSENT_DB, browser)} /></SceneShell></AppearanceProvider>);
+} else {
+  loadClerk(script).then(
+    (clerk) => root.render(<AppearanceProvider><Hosted clerk={clerk} accounts={followAccount(clerk, browser)} /></AppearanceProvider>),
+    () => root.render(<AppearanceProvider><SceneShell><SignInUnavailable /></SceneShell></AppearanceProvider>),
+  );
+}

@@ -17,6 +17,15 @@
  *   hosted   The container image sets AFTERCLASS_HOST=0.0.0.0, AFTERCLASS_HEALTH_ANY_HOST=1, AFTERCLASS_BUILD_APP=0 and
  *            AFTERCLASS_CONFIG_DIR. Unset, the backend binds 127.0.0.1 and every route keeps the localhost Host check.
  *            AFTERCLASS_HEALTH_ANY_HOST=1 relaxes the Host check for GET /health only, for the load balancer's health check.
+ *   sign-in  AFTERCLASS_AUTH=local | clerk. Unset or local: the pairing token and the one local user, as above. clerk
+ *            (`mainHosted`): Clerk session tokens, one user per Clerk account, no pairing token, and the app and API on
+ *            AFTERCLASS_PUBLIC_ORIGIN (a bare origin, e.g. https://afterclass.example). Also required:
+ *            AFTERCLASS_CLERK_ISSUER (the instance's Frontend API URL), AFTERCLASS_CLERK_JWKS_URL (its
+ *            /.well-known/jwks.json) and AFTERCLASS_CLERK_PUBLISHABLE_KEY. Who may sign up is Clerk's setting
+ *            (restricted mode or the allowlist in Clerk's dashboard), not ours.
+ *
+ * Each user's modules sit on that user's `UserDb` (`wire`), built at boot for every known user and on first sign-in for
+ * a new one. The Jev and Claude clients and the scheduler are shared, so provider limits hold across users.
  *
  * Replay mode builds no Jev client and no `claude` adapter. Its providers refuse every call, and the memo is in replay
  * mode, so a lookup that misses throws ReplayMiss before any task runs: nothing opens a socket or spawns a process,
@@ -31,10 +40,13 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { buildApp } from "../../scripts/build-app";
-import type { CaptureId, EvidenceId } from "../shared/ids";
+import { stableId } from "../shared/ids";
+import type { CaptureId, EvidenceId, UserId } from "../shared/ids";
 import type { AssessableClaim, BoundaryJudgment, BoundaryWindow, Evidence, Frame, Passage, Verdict } from "../shared/domain";
-import { ensureLocalUser, openDb, scopeDb } from "./db";
-import type { UserDb } from "./db";
+import { LOCAL_USER, ensureLocalUser, openDb, scopeDb, signedInUsers, userForIdentity } from "./db";
+import type { Db, UserDb } from "./db";
+import { clerkScriptUrl, createClerkVerifier, frontendApiOf } from "./clerk";
+import type { ClerkConfig, Rejection, Verifier } from "./clerk";
 import { createMemo, ProviderError } from "./providers/memo";
 import type { Memo, MemoMode, Task } from "./providers/memo";
 import { createLedger } from "./providers/ledger";
@@ -68,6 +80,7 @@ import type { LearningRecord } from "./record";
 import { DEFAULT_LIMITS, createScheduler } from "./scheduler";
 import type { Scheduler, WorkItem } from "./scheduler";
 import { DEFAULT_PORT, serve } from "./http";
+import type { HostedAuth, ServedModules } from "./http";
 import { DEFAULT_VOICE_ID, DEFAULT_VOICE_MODEL, checkVoiceSettings, createVoice, unavailableVoice } from "./providers/elevenlabs";
 import type { Voice } from "./providers/elevenlabs";
 
@@ -89,7 +102,7 @@ export type TaskSet = {
 export type Env = Readonly<Record<string, string | undefined>>;
 
 export type MainOptions = {
-  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_CLAUDE_BACKEND, AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_HOST, AFTERCLASS_HEALTH_ANY_HOST, AFTERCLASS_BUILD_APP, AFTERCLASS_CONFIG_DIR, AFTERCLASS_EXTENSION_ID, AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL. */
+  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_CLAUDE_BACKEND, AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_HOST, AFTERCLASS_HEALTH_ANY_HOST, AFTERCLASS_BUILD_APP, AFTERCLASS_CONFIG_DIR, AFTERCLASS_EXTENSION_ID, AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL, and the sign-in settings AFTERCLASS_AUTH, AFTERCLASS_CLERK_ISSUER, AFTERCLASS_CLERK_JWKS_URL, AFTERCLASS_CLERK_PUBLISHABLE_KEY, AFTERCLASS_PUBLIC_ORIGIN. */
   readonly env?: Env;
   /** Holds keys.env and pairing-token. Defaults to AFTERCLASS_CONFIG_DIR, then ~/.config/afterclass. */
   readonly configDir?: string;
@@ -227,9 +240,84 @@ const parsePort = (text: string | undefined): number | null => {
   return n;
 };
 
+// ───────────────────────────── sign-in ─────────────────────────────
+
+/** How callers prove who they are. Local: the pairing token, one user. Clerk: hosted sign-in, one user per Clerk account. */
+export type Auth =
+  | { readonly kind: "local" }
+  | { readonly kind: "clerk"; readonly clerk: ClerkConfig; readonly publishableKey: string; readonly frontendApi: string; readonly publicOrigin: string };
+
+const HOSTED_SETTINGS = ["AFTERCLASS_CLERK_ISSUER", "AFTERCLASS_CLERK_JWKS_URL", "AFTERCLASS_CLERK_PUBLISHABLE_KEY", "AFTERCLASS_PUBLIC_ORIGIN"] as const;
+
+const originOf = (text: string): string | null => {
+  try {
+    return new URL(text).origin;
+  } catch {
+    return null;
+  }
+};
+
+/** https, or http to a loopback host, which only a test's fake JWKS uses. */
+function keysUrlOk(text: string): boolean {
+  try {
+    const u = new URL(text);
+    return u.protocol === "https:" || (u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost"));
+  } catch {
+    return false;
+  }
+}
+
+/** AFTERCLASS_AUTH: unset or "local" keeps the pairing token; "clerk" is hosted sign-in and needs every Clerk setting. */
+export function resolveAuth(env: Env): Auth {
+  const requested = env.AFTERCLASS_AUTH;
+  if (requested === undefined || requested === "" || requested === "local") return { kind: "local" };
+  if (requested !== "clerk") throw new Error(`AFTERCLASS_AUTH must be "local" or "clerk", got "${requested}"`);
+  const missing = HOSTED_SETTINGS.filter((name) => !env[name]);
+  if (missing.length > 0) throw new Error(`AFTERCLASS_AUTH=clerk needs ${missing.join(", ")}; refusing to start`);
+  const publicOrigin = env.AFTERCLASS_PUBLIC_ORIGIN!;
+  if (originOf(publicOrigin) !== publicOrigin) throw new Error(`AFTERCLASS_PUBLIC_ORIGIN must be a bare origin such as https://afterclass.example, got "${publicOrigin}"`);
+  const jwksUrl = env.AFTERCLASS_CLERK_JWKS_URL!;
+  if (!keysUrlOk(jwksUrl)) throw new Error(`AFTERCLASS_CLERK_JWKS_URL must be an https URL, got "${jwksUrl}"`);
+  const publishableKey = env.AFTERCLASS_CLERK_PUBLISHABLE_KEY!;
+  const frontendApi = frontendApiOf(publishableKey);
+  if (frontendApi === null) throw new Error("AFTERCLASS_CLERK_PUBLISHABLE_KEY is not a Clerk publishable key (pk_test_... or pk_live_...)");
+  return { kind: "clerk", clerk: { issuer: env.AFTERCLASS_CLERK_ISSUER!, jwksUrl, authorizedParties: [publicOrigin] }, publishableKey, frontendApi, publicOrigin };
+}
+
+/** A session token's user: verified against Clerk's keys, then mapped to its `users` row, which its first sign-in creates. */
+export function clerkUsers(verifier: Verifier, db: Db, onRefused: (reason: Rejection) => void = () => {}): HostedAuth["userFor"] {
+  return async (token) => {
+    const verdict = await verifier.verify(token);
+    if (!verdict.ok) {
+      onRefused(verdict.reason);
+      return null;
+    }
+    return userForIdentity(db, { provider: "clerk", subject: verdict.subject });
+  };
+}
+
 // ───────────────────────────── composition ─────────────────────────────
 
-export async function main(options: MainOptions = {}): Promise<Running> {
+/** Everything one user's requests and background work run on. Built once per user and kept for the process's life. */
+type UserGraph = Omit<Modules, "scheduler"> & {
+  readonly tasks: TaskSet;
+  readonly served: EvidenceStoreWithProbe;
+  readonly diagrams: Diagrams;
+  readonly voice: Voice;
+  /** Every capture of this user that may still have work: those on disk at boot, plus any ingested since. */
+  readonly captures: Set<CaptureId>;
+};
+
+type Composed = {
+  readonly mode: Mode;
+  readonly port: number;
+  readonly token: string;
+  readonly graphs: { get(userId: UserId): UserGraph };
+  readonly scheduler: Scheduler;
+  stop(): Promise<void>;
+};
+
+async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   const env = options.env ?? process.env;
   const log = options.log ?? ((text: string) => console.log(text));
   const logError = options.error ?? ((text: string) => console.error(text));
@@ -253,18 +341,15 @@ export async function main(options: MainOptions = {}): Promise<Running> {
   if (mode === "live" && claudeBackend === "api" && anthropicKey === undefined) {
     throw new Error(`AFTERCLASS_CLAUDE_BACKEND=api needs AFTERCLASS_ANTHROPIC_API_KEY in ${keysPath}; refusing to start`);
   }
-  const token = loadPairingToken(join(configDir, "pairing-token"));
+  // Hosted mode has no pairing token: sign-in replaces it.
+  const token = auth.kind === "local" ? loadPairingToken(join(configDir, "pairing-token")) : "";
   const port = options.port ?? parsePort(env.AFTERCLASS_PORT) ?? DEFAULT_PORT;
   const extensionId = env.AFTERCLASS_EXTENSION_ID ?? "";
 
   const dataDir = resolve(env.AFTERCLASS_DATA ?? "data");
   mkdirSync(dataDir, { recursive: true });
   const rawDb = openDb(join(dataDir, "afterclass.sqlite"));
-  // The local app has one user, created on first boot. Segmentation, preparation, providers take this `UserDb`; the other modules still take a plain `Db` and move in their own PRs.
-  const db = scopeDb(rawDb, ensureLocalUser(rawDb));
 
-  // evidence is created after the tasks that need its bytes; the tasks only read it when a call runs
-  const frameBytes: FrameBytes = (id) => evidence.frameBytes(id);
   const liveClaude = (): ClaudeCli => {
     if (claudeBackend === "api") {
       log("claude backend: api for every Claude task (paid, priced from usage); no claude binary is used");
@@ -276,13 +361,14 @@ export async function main(options: MainOptions = {}): Promise<Running> {
     const { TYPESAFE_API_KEY: _jevKey, ELEVENLABS_API_KEY: _voiceKey, AFTERCLASS_ANTHROPIC_API_KEY: _messagesKey, ...childEnv } = env;
     return createClaudeCli({ bin: options.claudeBin ?? "claude", cwd: claudeCwd, maxConcurrent: DEFAULT_LIMITS.claude, env: childEnv, ...(options.spawn ? { spawn: options.spawn } : {}) });
   };
-  const liveTasks = (): TaskSet => buildTasks(createJevClient({ apiKey: apiKey!, ...(options.fetch ? { fetch: options.fetch } : {}) }), liveClaude(), frameBytes);
-  const tasks: TaskSet = options.tasks ?? (mode === "live" ? liveTasks() : buildTasks(refusingJev, refusingClaude, frameBytes));
+  // One client per provider for the whole process, so their concurrency limits hold across users.
+  const providers: { readonly jev: JevClient; readonly claude: ClaudeCli } =
+    mode === "live" && !options.tasks
+      ? { jev: createJevClient({ apiKey: apiKey!, ...(options.fetch ? { fetch: options.fetch } : {}) }), claude: liveClaude() }
+      : { jev: refusingJev, claude: refusingClaude };
 
   // Injected tasks make no live call, so the memo may run them. Without them, replay never runs a task at all.
   const memoMode: MemoMode = mode === "replay" && !options.tasks ? "replay" : "live";
-  const memo = createMemo(db, memoMode);
-  const ledger = createLedger(db);
 
   let alive = true;
   let scheduler: Scheduler | null = null;
@@ -305,148 +391,191 @@ export async function main(options: MainOptions = {}): Promise<Running> {
     logError(`backend: ${line}`);
   }
 
-  const evidence: EvidenceStoreWithProbe = createEvidence(db, dataDir, {
-    lookupFrameChange: (input) => memo.lookup(tasks.frameChange, input),
-    // The first frame of a source has nothing to compare with: evidence keeps it without a call, and so does this.
-    runFrameChange: (input, signal) => (input.before === null ? Promise.resolve(null) : memo.run(tasks.frameChange, input, { signal })),
-    frameChangeKey: (input) => memo.key(tasks.frameChange, input),
-    onChange: pump,
-  });
+  /** One user's modules on that user's `UserDb`. The tasks read frame bytes through this user's evidence only. */
+  function wire(db: UserDb): UserGraph {
+    // evidence is created after the tasks that need its bytes; the tasks only read it when a call runs
+    const frameBytes: FrameBytes = (id) => evidence.frameBytes(id);
+    const tasks: TaskSet = options.tasks ?? buildTasks(providers.jev, providers.claude, frameBytes);
+    const memo = createMemo(db, memoMode);
+    const ledger = createLedger(db);
 
-  const passageOf = (e: Evidence | { readonly kind: "deleted" } | undefined): e is Passage => e?.kind === "passage";
-  const frameOf = (e: Evidence | { readonly kind: "deleted" } | undefined): e is Frame => e?.kind === "frame";
-
-  function boundaryInput(window: BoundaryWindow): BoundaryInput {
-    const found = evidence.get([...window.newPassages, ...window.contextPassages, ...window.frames]);
-    const passages = (ids: readonly EvidenceId[]) => ids.map((id) => found.get(id)).filter(passageOf);
-    return {
-      window,
-      newPassages: passages(window.newPassages),
-      contextPassages: passages(window.contextPassages),
-      frames: window.frames.map((id) => found.get(id)).filter(frameOf).map((frame) => ({
-        frame,
-        bytes: () => {
-          const bytes = evidence.frameBytes(frame.id);
-          if (bytes === null) throw new ProviderError(`frame bytes unavailable for ${frame.id}`, null, false);
-          return bytes;
-        },
-      })),
-    };
-  }
-
-  const segmentation = createSegmentation(
-    db,
-    {
-      watchOrder: evidence.watchOrder,
-      lookupBoundary: (input) => memo.lookup(tasks.boundary, input),
-      boundaryInput,
-      nextSeq: () => db.nextSeq(),
-    },
-    PRODUCT_JEV_SETUP.segmentation,
-    PRODUCT_JEV_SETUP.routing,
-  );
-
-  const preparationBase = createPreparation(db, {
-    chunk: segmentation.revision,
-    currentChunks: segmentation.current,
-    bundle: evidence.bundle,
-    lookup: memo.lookup,
-    run: (task, input, signal) => memo.run(task, input, { signal }),
-    clearFailures: memo.clearFailures,
-    tasks: tasks.preparation,
-    frameBytes: evidence.frameBytes,
-  });
-  // Stop early is a fact that cancels work by derivation; the pump is what aborts what is already running.
-  const preparation: Preparation = { ...preparationBase, stopEarly: (captureId, ids) => {
-    const seq = preparationBase.stopEarly(captureId, ids);
-    pump();
-    return seq;
-  }, retry: (captureId, ids) => {
-    const seq = preparationBase.retry(captureId, ids);
-    pump();
-    return seq;
-  } };
-
-  const reviews = createReviews(db, {
-    currentChunks: segmentation.current,
-    chunkHistory: segmentation.history,
-    prep: preparation.prep,
-    stopEarly: preparation.stopEarly,
-    assessableIn: preparation.assessableIn,
-    claimsIn: preparation.claimsIn,
-    concepts: preparation.concepts,
-    bundle: evidence.bundle,
-    watchedSeconds: (captureId) => evidence.captureView(captureId).watchedSeconds,
-    runTutor: (input, streamTo, signal, onRetry) => memo.run(tasks.tutor, input, { signal, streamTo, onRetry }),
-    clearFailures: memo.clearFailures,
-    runWrapUp: (input) => memo.run(tasks.wrapUp, input),
-    endedInTx: (reviewId) => record.markEndedInTx(reviewId),
-    nextSeq: () => db.nextSeq(),
-  });
-
-  /** The claims usable now (R3, R7) inside the review's frozen material, not the ones it started with. */
-  function usableNow(reviewId: Parameters<LearningRecord["save"]>[0]): readonly AssessableClaim[] {
-    const { captureId, scope } = reviews.view(reviewId);
-    const bundle = evidence.bundle(scope.material);
-    const inScope = new Set<EvidenceId>([...bundle.passages.map((p) => p.id), ...bundle.frames.map((f) => f.id)]);
-    return preparation.assessableIn(captureId, scope.material).filter((c) => c.evidence.every((e) => inScope.has(e)));
-  }
-
-  const record = createRecord(db, {
-    turns: (reviewId) => reviews.view(reviewId).turns,
-    claims: usableNow,
-    async wrapUp(reviewId) {
-      const turns = reviews.view(reviewId).turns;
-      const threads = [...new Set(turns.flatMap((t) => (t.actor === "tutor" && (t.move.kind === "ask_main" || t.move.kind === "quick_check") ? [t.move.threadId] : [])))];
-      const input = { turns, claims: usableNow(reviewId), threads };
-      // A terminal failure stored before this request began answered an earlier save, so this retry clears it and asks once more.
-      // A failure this request produced is returned as is. A hit is never cleared.
-      const asOf = db.nextSeq();
-      let result = await memo.run(tasks.wrapUp, input);
-      if (result.kind === "failed" && result.atSeq < asOf) {
-        memo.clearFailures([result.key]);
-        result = await memo.run(tasks.wrapUp, input);
-      }
-      if (result.kind === "hit") return result.value;
-      throw new Error(result.kind === "failed" ? `wrap-up failed: ${result.lastError}` : `wrap-up ${result.kind}`);
-    },
-    snapshotEvidenceInTx: evidence.snapshotInTx,
-    links: preparation.linkSuggestions,
-  });
-
-  const diagrams: Diagrams = createDiagrams({
-    review(reviewId) {
-      try {
-        const { captureId, scope, topics } = reviews.view(reviewId);
-        return { captureId, scope, topics };
-      } catch (e) {
-        if (e instanceof Error && e.message.startsWith("unknown review")) return null;
-        throw e;
-      }
-    },
-    usable: usableNow,
-    bundle: evidence.bundle,
-    sources: (captureId) => evidence.captureView(captureId).sources,
-    task: tasks.diagramSummary,
-    memo,
-  });
-
-  // Every capture that may still have work: those on disk now, plus any ingested since. A stopped capture keeps preparing.
-  const captures = new Set<CaptureId>(evidence.captures());
-
-  const perCapture = (where: string, items: (captureId: CaptureId) => readonly WorkItem[]) => (): readonly WorkItem[] =>
-    [...captures].flatMap((captureId) => {
-      try {
-        return items(captureId);
-      } catch (e) {
-        reportOnce(`${where} ${captureId}`, e);
-        return [];
-      }
+    const evidence: EvidenceStoreWithProbe = createEvidence(db, dataDir, {
+      lookupFrameChange: (input) => memo.lookup(tasks.frameChange, input),
+      // The first frame of a source has nothing to compare with: evidence keeps it without a call, and so does this.
+      runFrameChange: (input, signal) => (input.before === null ? Promise.resolve(null) : memo.run(tasks.frameChange, input, { signal })),
+      frameChangeKey: (input) => memo.key(tasks.frameChange, input),
+      onChange: pump,
     });
+
+    const passageOf = (e: Evidence | { readonly kind: "deleted" } | undefined): e is Passage => e?.kind === "passage";
+    const frameOf = (e: Evidence | { readonly kind: "deleted" } | undefined): e is Frame => e?.kind === "frame";
+
+    function boundaryInput(window: BoundaryWindow): BoundaryInput {
+      const found = evidence.get([...window.newPassages, ...window.contextPassages, ...window.frames]);
+      const passages = (ids: readonly EvidenceId[]) => ids.map((id) => found.get(id)).filter(passageOf);
+      return {
+        window,
+        newPassages: passages(window.newPassages),
+        contextPassages: passages(window.contextPassages),
+        frames: window.frames.map((id) => found.get(id)).filter(frameOf).map((frame) => ({
+          frame,
+          bytes: () => {
+            const bytes = evidence.frameBytes(frame.id);
+            if (bytes === null) throw new ProviderError(`frame bytes unavailable for ${frame.id}`, null, false);
+            return bytes;
+          },
+        })),
+      };
+    }
+
+    const segmentation = createSegmentation(
+      db,
+      {
+        watchOrder: evidence.watchOrder,
+        lookupBoundary: (input) => memo.lookup(tasks.boundary, input),
+        boundaryInput,
+        nextSeq: () => db.nextSeq(),
+      },
+      PRODUCT_JEV_SETUP.segmentation,
+      PRODUCT_JEV_SETUP.routing,
+    );
+
+    const preparationBase = createPreparation(db, {
+      chunk: segmentation.revision,
+      currentChunks: segmentation.current,
+      bundle: evidence.bundle,
+      lookup: memo.lookup,
+      run: (task, input, signal) => memo.run(task, input, { signal }),
+      clearFailures: memo.clearFailures,
+      tasks: tasks.preparation,
+      frameBytes: evidence.frameBytes,
+    });
+    // Stop early is a fact that cancels work by derivation; the pump is what aborts what is already running.
+    const preparation: Preparation = { ...preparationBase, stopEarly: (captureId, ids) => {
+      const seq = preparationBase.stopEarly(captureId, ids);
+      pump();
+      return seq;
+    }, retry: (captureId, ids) => {
+      const seq = preparationBase.retry(captureId, ids);
+      pump();
+      return seq;
+    } };
+
+    const reviews = createReviews(db, {
+      currentChunks: segmentation.current,
+      chunkHistory: segmentation.history,
+      prep: preparation.prep,
+      stopEarly: preparation.stopEarly,
+      assessableIn: preparation.assessableIn,
+      claimsIn: preparation.claimsIn,
+      concepts: preparation.concepts,
+      bundle: evidence.bundle,
+      watchedSeconds: (captureId) => evidence.captureView(captureId).watchedSeconds,
+      runTutor: (input, streamTo, signal, onRetry) => memo.run(tasks.tutor, input, { signal, streamTo, onRetry }),
+      clearFailures: memo.clearFailures,
+      runWrapUp: (input) => memo.run(tasks.wrapUp, input),
+      endedInTx: (reviewId) => record.markEndedInTx(reviewId),
+      nextSeq: () => db.nextSeq(),
+    });
+
+    /** The claims usable now (R3, R7) inside the review's frozen material, not the ones it started with. */
+    function usableNow(reviewId: Parameters<LearningRecord["save"]>[0]): readonly AssessableClaim[] {
+      const { captureId, scope } = reviews.view(reviewId);
+      const bundle = evidence.bundle(scope.material);
+      const inScope = new Set<EvidenceId>([...bundle.passages.map((p) => p.id), ...bundle.frames.map((f) => f.id)]);
+      return preparation.assessableIn(captureId, scope.material).filter((c) => c.evidence.every((e) => inScope.has(e)));
+    }
+
+    const record = createRecord(db, {
+      turns: (reviewId) => reviews.view(reviewId).turns,
+      claims: usableNow,
+      async wrapUp(reviewId) {
+        const turns = reviews.view(reviewId).turns;
+        const threads = [...new Set(turns.flatMap((t) => (t.actor === "tutor" && (t.move.kind === "ask_main" || t.move.kind === "quick_check") ? [t.move.threadId] : [])))];
+        const input = { turns, claims: usableNow(reviewId), threads };
+        // A terminal failure stored before this request began answered an earlier save, so this retry clears it and asks once more.
+        // A failure this request produced is returned as is. A hit is never cleared.
+        const asOf = db.nextSeq();
+        let result = await memo.run(tasks.wrapUp, input);
+        if (result.kind === "failed" && result.atSeq < asOf) {
+          memo.clearFailures([result.key]);
+          result = await memo.run(tasks.wrapUp, input);
+        }
+        if (result.kind === "hit") return result.value;
+        throw new Error(result.kind === "failed" ? `wrap-up failed: ${result.lastError}` : `wrap-up ${result.kind}`);
+      },
+      snapshotEvidenceInTx: evidence.snapshotInTx,
+      links: preparation.linkSuggestions,
+    });
+
+    const diagrams: Diagrams = createDiagrams({
+      review(reviewId) {
+        try {
+          const { captureId, scope, topics } = reviews.view(reviewId);
+          return { captureId, scope, topics };
+        } catch (e) {
+          if (e instanceof Error && e.message.startsWith("unknown review")) return null;
+          throw e;
+        }
+      },
+      usable: usableNow,
+      bundle: evidence.bundle,
+      sources: (captureId) => evidence.captureView(captureId).sources,
+      task: tasks.diagramSummary,
+      memo,
+    });
+
+    const captures = new Set<CaptureId>(evidence.captures());
+    // The scheduler is the only holder of these; http gets the same store with ingest registering the capture first.
+    const served: EvidenceStoreWithProbe = {
+      ...evidence,
+      ingest(batch) {
+        captures.add(batch.captureId);
+        return evidence.ingest(batch);
+      },
+    };
+
+    const voice: Voice =
+      keys.ELEVENLABS_API_KEY === undefined
+        ? unavailableVoice
+        : createVoice({ apiKey: keys.ELEVENLABS_API_KEY, voiceId, model: voiceModel, db, ...(options.fetch ? { fetch: options.fetch } : {}) });
+
+    return { tasks, evidence, served, segmentation, preparation, reviews, record, ledger, memo, diagrams, voice, captures, db };
+  }
+
+  const graphs = new Map<UserId, UserGraph>();
+  /** Synchronous, so two first requests from one user can never build two graphs. */
+  const graphFor = (userId: UserId): UserGraph => {
+    let graph = graphs.get(userId);
+    if (graph === undefined) {
+      graph = wire(scopeDb(rawDb, userId));
+      graphs.set(userId, graph);
+    }
+    return graph;
+  };
+  // Before the scheduler, whose first sweep runs as it is created.
+  if (auth.kind === "local") graphFor(ensureLocalUser(rawDb));
+  else for (const userId of signedInUsers(rawDb)) graphFor(userId);
+
+  /**
+   * Every user's demand, each item keyed by its user as well: memo keys hash the call alone, so two users' identical
+   * calls share a key, and the scheduler would otherwise treat one user's run as the other's.
+   */
+  const everyCapture = (where: string, items: (graph: UserGraph, captureId: CaptureId) => readonly WorkItem[]) => (): readonly WorkItem[] =>
+    [...graphs.values()].flatMap((graph) =>
+      [...graph.captures].flatMap((captureId) => {
+        try {
+          return items(graph, captureId).map((item) => ({ ...item, key: stableId("key", graph.db.userId, item.key) }));
+        } catch (e) {
+          reportOnce(`${where} ${captureId}`, e);
+          return [];
+        }
+      }),
+    );
 
   scheduler = createScheduler(
     [
-      perCapture("segmentation", (captureId) =>
+      everyCapture("segmentation", ({ segmentation, memo, tasks }, captureId) =>
         segmentation.sync(captureId).demand.map((input): WorkItem => ({
           key: memo.key(tasks.boundary, input),
           purpose: "boundary",
@@ -454,24 +583,25 @@ export async function main(options: MainOptions = {}): Promise<Running> {
           run: (signal) => memo.run(tasks.boundary, input, { signal, captureId }),
         })),
       ),
-      perCapture("frame demand", evidence.frameDemand),
-      perCapture("preparation", preparation.demand),
+      everyCapture("frame demand", ({ evidence }, captureId) => evidence.frameDemand(captureId)),
+      everyCapture("preparation", ({ preparation }, captureId) => preparation.demand(captureId)),
     ],
     DEFAULT_LIMITS,
     {
-      sweep: { run: () => void evidence.sweepExpired(Date.now(), RETENTION_DAYS) },
+      sweep: {
+        run: () => {
+          for (const graph of graphs.values()) {
+            try {
+              graph.evidence.sweepExpired(Date.now(), RETENTION_DAYS);
+            } catch (e) {
+              reportOnce(`sweepExpired ${graph.db.userId}`, e);
+            }
+          }
+        },
+      },
       onError: reportOnce,
     },
   );
-
-  // The scheduler is the only holder of these; http gets the same store with ingest registering the capture first.
-  const served: EvidenceStoreWithProbe = {
-    ...evidence,
-    ingest(batch) {
-      captures.add(batch.captureId);
-      return evidence.ingest(batch);
-    },
-  };
 
   const appDir = resolve(options.appDir ?? join(ROOT, "dist", "app"));
   if (options.buildApp !== false && env.AFTERCLASS_BUILD_APP !== "0") {
@@ -482,30 +612,43 @@ export async function main(options: MainOptions = {}): Promise<Running> {
     }
   }
 
-  const voice: Voice =
-    keys.ELEVENLABS_API_KEY === undefined
-      ? unavailableVoice
-      : createVoice({ apiKey: keys.ELEVENLABS_API_KEY, voiceId, model: voiceModel, db, ...(options.fetch ? { fetch: options.fetch } : {}) });
-
-  const hostname = env.AFTERCLASS_HOST || "127.0.0.1";
-  const server = serve({
-    modules: { ledger, evidence: served, reviews, record, preparation, segmentation, voice, diagrams },
-    auth: { port, extensionId, token },
-    appDir,
-    hostname,
-    healthAnyHost: env.AFTERCLASS_HEALTH_ANY_HOST === "1",
+  const served = (g: UserGraph): ServedModules => ({
+    ledger: g.ledger, evidence: g.served, reviews: g.reviews, record: g.record, preparation: g.preparation, segmentation: g.segmentation, voice: g.voice, diagrams: g.diagrams,
   });
+  const hostname = env.AFTERCLASS_HOST || "127.0.0.1";
+  const server =
+    auth.kind === "local"
+      ? serve({
+        modules: served(graphFor(LOCAL_USER)),
+        auth: { port, extensionId, token },
+        appDir,
+        hostname,
+        healthAnyHost: env.AFTERCLASS_HEALTH_ANY_HOST === "1",
+      })
+      : serve({
+        hosted: {
+          publicOrigin: auth.publicOrigin,
+          extensionId,
+          clerk: { scriptUrl: clerkScriptUrl(auth.frontendApi), publishableKey: auth.publishableKey },
+          userFor: clerkUsers(createClerkVerifier(auth.clerk), rawDb, (reason) => reportOnce("sign-in", new Error(`a session token was refused (${reason})`))),
+        },
+        port,
+        modulesFor: (userId) => served(graphFor(userId)),
+        appDir,
+        hostname,
+      });
   const boundPort = server.port as number;
 
-  if (extensionId === "") logError("backend: AFTERCLASS_EXTENSION_ID is not set, so the extension's requests are refused (403) until it is");
+  if (auth.kind === "local" && extensionId === "") logError("backend: AFTERCLASS_EXTENSION_ID is not set, so the extension's requests are refused (403) until it is");
   log(
     mode === "live"
       ? "mode: live (Jev with the key from keys.env; Claude through claude -p on your login)"
       : `mode: replay (${keysFile ? "AFTERCLASS_MODE=replay" : "no keys file"}: Jev unavailable, Claude unavailable, every live call is refused)`,
   );
-  log(voice.available ? `voice: ElevenLabs (model ${voice.model}, voice ${voice.voiceId})` : "voice: unavailable (no ELEVENLABS_API_KEY in keys.env, or replay mode); the app speaks with Chrome's voice");
+  log(keys.ELEVENLABS_API_KEY !== undefined ? `voice: ElevenLabs (model ${voiceModel}, voice ${voiceId})` : "voice: unavailable (no ELEVENLABS_API_KEY in keys.env, or replay mode); the app speaks with Chrome's voice");
+  if (auth.kind === "clerk") log(`sign-in: Clerk for ${auth.publicOrigin}; the extension's routes answer 401 until device tokens land`);
   // The token is printed only for a loopback bind. A hosted container's log goes to CloudWatch, which is not a place for a secret.
-  log(hostname === "127.0.0.1" ? `listening on 127.0.0.1:${boundPort}\npairing token: ${token}` : `listening on ${hostname}:${boundPort}`);
+  log(hostname === "127.0.0.1" && auth.kind === "local" ? `listening on 127.0.0.1:${boundPort}\npairing token: ${token}` : `listening on ${hostname}:${boundPort}`);
 
   pump();
 
@@ -513,18 +656,52 @@ export async function main(options: MainOptions = {}): Promise<Running> {
     mode,
     port: boundPort,
     token,
-    modules: { evidence, segmentation, preparation, reviews, record, ledger, memo, scheduler, db },
+    graphs: { get: graphFor },
+    scheduler,
     async stop() {
       alive = false;
       await scheduler?.stop();
       await server.stop(true);
-      db.close();
+      rawDb.close();
     },
   };
 }
 
+/** Local mode: the pairing token and the one local user. Refuses hosted settings, which `mainHosted` serves. */
+export async function main(options: MainOptions = {}): Promise<Running> {
+  const auth = resolveAuth(options.env ?? process.env);
+  if (auth.kind !== "local") throw new Error("AFTERCLASS_AUTH=clerk is served by mainHosted, not main");
+  const c = await compose(options, auth);
+  const { evidence, segmentation, preparation, reviews, record, ledger, memo, db } = c.graphs.get(LOCAL_USER);
+  return { mode: c.mode, port: c.port, token: c.token, modules: { evidence, segmentation, preparation, reviews, record, ledger, memo, scheduler: c.scheduler, db }, stop: c.stop };
+}
+
+export type HostedRunning = {
+  readonly mode: Mode;
+  readonly port: number;
+  /** A signed-in user's modules, built on first use. */
+  modulesFor(userId: UserId): Modules;
+  stop(): Promise<void>;
+};
+
+/** Hosted mode (AFTERCLASS_AUTH=clerk): Clerk sign-in, one user per Clerk account, the app and API on the public origin. */
+export async function mainHosted(options: MainOptions = {}): Promise<HostedRunning> {
+  const auth = resolveAuth(options.env ?? process.env);
+  if (auth.kind !== "clerk") throw new Error("mainHosted needs AFTERCLASS_AUTH=clerk");
+  const c = await compose(options, auth);
+  return {
+    mode: c.mode,
+    port: c.port,
+    modulesFor(userId) {
+      const { evidence, segmentation, preparation, reviews, record, ledger, memo, db } = c.graphs.get(userId);
+      return { evidence, segmentation, preparation, reviews, record, ledger, memo, scheduler: c.scheduler, db };
+    },
+    stop: c.stop,
+  };
+}
+
 if (import.meta.main) {
-  const running = await main();
+  const running = resolveAuth(process.env).kind === "clerk" ? await mainHosted() : await main();
   const shutdown = () => void running.stop().then(() => process.exit(0));
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);

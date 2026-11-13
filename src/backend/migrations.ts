@@ -46,6 +46,14 @@ CREATE TABLE users (
   created_ms INTEGER NOT NULL
 ) STRICT;`,
     },
+    {
+      id: "003-identity",
+      sql: `
+-- A hosted account's sign-in identity: one row per provider and subject. The local user has neither.
+ALTER TABLE users ADD COLUMN auth_provider TEXT CHECK (auth_provider IN ('clerk'));
+ALTER TABLE users ADD COLUMN auth_subject TEXT CHECK ((auth_subject IS NULL) = (auth_provider IS NULL));
+CREATE UNIQUE INDEX users_identity ON users (auth_provider, auth_subject);`,
+    },
   ],
 
   providers: [
