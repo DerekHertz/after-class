@@ -10,6 +10,12 @@
  *
  * AFTERCLASS_EXT_OUT=<dir> also copies the finished build there, for loading
  * unpacked from Windows Chrome (it does not load extensions reliably from \\wsl$).
+ *
+ * AFTERCLASS_EXT_BACKEND=<origin> makes a hosted build for that backend, such as
+ * https://useafterclass.com: the manifest's host permission and externally_connectable
+ * name that origin instead of 127.0.0.1:4317, and the extension connects through the
+ * web app instead of taking a pasted pairing token (src/extension/worker/backend.ts).
+ * Unset, the build is the local one, unchanged.
  */
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -57,11 +63,41 @@ export function manifestFiles(manifest: unknown): string[] {
   return [m.background?.service_worker, m.action?.default_popup, m.options_page, ...(m.content_scripts ?? []).flatMap((c) => c.js ?? [])].filter((f): f is string => typeof f === "string");
 }
 
-/** The test-only autostart variant: its own name and folder, so it is never mistaken for the product build. */
-export type BuildOptions = { readonly testAutostart?: boolean };
+/** The test-only autostart variant: its own name and folder, so it is never mistaken for the product build. `hostedOrigin`: a hosted build for that origin. */
+export type BuildOptions = { readonly testAutostart?: boolean; readonly hostedOrigin?: string | null };
+
+const LOCAL_HOST_PERMISSION = "http://127.0.0.1:4317/*";
+
+/** AFTERCLASS_EXT_BACKEND: unset or empty is a local build; set, a bare https origin, or http to a loopback host for tests. */
+export function hostedOriginFrom(value: string | undefined): string | null {
+  if (value === undefined || value === "") return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`AFTERCLASS_EXT_BACKEND must be an origin such as https://useafterclass.com, got "${value}"`);
+  }
+  const loopback = url.hostname === "127.0.0.1" || url.hostname === "localhost";
+  if (url.origin !== value || !(url.protocol === "https:" || (url.protocol === "http:" && loopback))) {
+    throw new Error(`AFTERCLASS_EXT_BACKEND must be a bare https origin such as https://useafterclass.com, got "${value}"`);
+  }
+  return url.origin;
+}
+
+type Manifest = Record<string, unknown> & { name: string; host_permissions: string[] };
+
+/** A hosted build reaches its backend instead of the local one, and only that backend's pages may hand it a connect code. */
+export function hostedManifest(manifest: Manifest, origin: string): Manifest {
+  return {
+    ...manifest,
+    host_permissions: manifest.host_permissions.map((p) => (p === LOCAL_HOST_PERMISSION ? `${origin}/*` : p)),
+    externally_connectable: { matches: [`${origin}/*`] },
+  };
+}
 
 export async function buildExtension(outDir: string, options: BuildOptions = {}): Promise<void> {
   const testAutostart = options.testAutostart === true;
+  const hostedOrigin = options.hostedOrigin ?? null;
   const out = resolve(ROOT, outDir);
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
@@ -76,16 +112,17 @@ export async function buildExtension(outDir: string, options: BuildOptions = {})
       minify: false,
       sourcemap: "linked",
       plugins: [keepExtensionOnly],
-      define: { __AFTERCLASS_TEST_AUTOSTART__: String(testAutostart) },
+      define: { __AFTERCLASS_TEST_AUTOSTART__: String(testAutostart), __AFTERCLASS_HOSTED_ORIGIN__: JSON.stringify(hostedOrigin) },
       throw: false,
     });
     if (!result.success) throw new Error(`build of ${entry} failed:\n${result.logs.map(String).join("\n")}`);
   }
 
   for (const { from, to } of STATIC_FILES) cpSync(join(SRC, from), join(out, to));
-  if (testAutostart) {
-    const manifest = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8")) as { name: string };
-    manifest.name = "After Class (TEST autostart)";
+  if (testAutostart || hostedOrigin !== null) {
+    let manifest = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8")) as Manifest;
+    if (testAutostart) manifest.name = "After Class (TEST autostart)";
+    if (hostedOrigin !== null) manifest = hostedManifest(manifest, hostedOrigin);
     writeFileSync(join(out, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
   }
 
@@ -112,5 +149,6 @@ export function copyBuild(from: string, dest: string): void {
 
 if (import.meta.main) {
   const testAutostart = process.env.AFTERCLASS_TEST_AUTOSTART === "1";
-  await buildExtension(testAutostart ? "dist/extension-test-autostart" : "dist/extension", { testAutostart });
+  const hostedOrigin = hostedOriginFrom(process.env.AFTERCLASS_EXT_BACKEND);
+  await buildExtension(testAutostart ? "dist/extension-test-autostart" : "dist/extension", { testAutostart, hostedOrigin });
 }

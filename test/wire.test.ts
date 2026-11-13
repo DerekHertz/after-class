@@ -353,7 +353,7 @@ describe("both clients stay inside ROUTES", () => {
       expect(hit, `${method} ${path} is not in ROUTES`).not.toBeNull();
       return hit!.name;
     });
-    expect([...new Set(hits)].sort()).toEqual(["answerInvite", "ingest", "usage"]);
+    expect([...new Set(hits)].sort()).toEqual(["answerInvite", "exchangeConnectCode", "ingest", "usage"]);
   });
 
   test("the extension reads the invite state back from the invite answer", () => {

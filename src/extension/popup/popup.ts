@@ -7,7 +7,9 @@
  * `describePopup` is the pure view model (unit-tested); `renderPopup` only draws it.
  */
 import type { CaptureView, InviteAnswer, InviteState } from "../../shared/domain";
+import { backend, connectPageUrl } from "../worker/backend";
 import { isWatchUrl, safeReviewUrl } from "../worker/control";
+import type { Connection } from "../worker/control";
 import type { PopupRequest, TabCaptureState } from "../worker/service-worker";
 
 export type PopupAction = "start" | "pause" | "resume" | "stop";
@@ -33,6 +35,15 @@ export type PopupView = {
   readonly problem: string | null;
   /** Facts the backend refused and the outbox set aside; each is a logged gap, shown so it is never silent. */
   readonly deadLetters: string | null;
+  /** Hosted builds with no working device token: the button that opens the web app's connect page, and why. */
+  readonly connect: { readonly label: "Connect" | "Reconnect"; readonly text: string } | null;
+};
+
+const CONNECT: Readonly<Record<Connection["kind"], PopupView["connect"]>> = {
+  local: null,
+  connected: null,
+  not_connected: { label: "Connect", text: "Connect After Class to your account to send your lectures there." },
+  disconnected: { label: "Reconnect", text: "After Class was disconnected from your account. Reconnect to keep sending your lectures." },
 };
 
 const CAPTION_TEXT: Readonly<Record<CaptureView["transcript"], string>> = {
@@ -43,14 +54,12 @@ const CAPTION_TEXT: Readonly<Record<CaptureView["transcript"], string>> = {
   unknown: "Checking captions",
 };
 
-const REVIEW_ORIGIN = "http://127.0.0.1:4317";
-
-/** The backend's reviewAppUrl when it is this capture's screen on the local backend, else the same address built from the capture id. */
+/** The backend's reviewAppUrl when it is this capture's screen on this build's backend, else the same address built from the capture id. */
 function reviewLink(ack: TabCaptureState["lastAck"]): string | null {
   const captureId = ack?.capture?.captureId;
   if (!captureId) return null;
   const path = `/app/capture/${captureId}`;
-  const fallback = `${REVIEW_ORIGIN}${path}`;
+  const fallback = `${backend().origin}${path}`;
   const url = safeReviewUrl(ack.reviewAppUrl, fallback);
   try {
     return new URL(url).pathname === path ? url : fallback;
@@ -64,7 +73,11 @@ function formatSeconds(s: number): string {
   return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min ${Math.round(s % 60)} s`;
 }
 
-export function describePopup(state: TabCaptureState | null, tab: { readonly url: string | undefined }, opts: { readonly startFailed?: boolean } = {}): PopupView {
+export function describePopup(
+  state: TabCaptureState | null,
+  tab: { readonly url: string | undefined },
+  opts: { readonly startFailed?: boolean; readonly connection?: Connection } = {},
+): PopupView {
   const onWatch = isWatchUrl(tab.url);
   const capture = state?.lastAck?.capture ?? null;
   const source = capture?.sources.find((s) => s.id === capture.currentSourceId) ?? null;
@@ -107,6 +120,10 @@ export function describePopup(state: TabCaptureState | null, tab: { readonly url
   const invite: InviteState = state?.lastAck?.invite ?? { state: "none" };
   const inviteAnswers: InviteAnswer[] = invite.state === "invited" || invite.state === "waiting" ? ["review_now", "later", "wait", "stop_early"] : ["review_now"];
 
+  const connect = CONNECT[opts.connection?.kind ?? "local"];
+  // A new capture belongs to the connected account, so Start waits for one; a capture already running keeps its controls.
+  if (connect !== null) actions = actions.filter((a) => a !== "start");
+
   const dead = state?.deadLetters;
   const deadLetters = dead && dead.count > 0 ? `${dead.count} ${dead.count === 1 ? "fact was" : "facts were"} refused by the backend and set aside, logged as a gap${dead.latestReason ? ` (latest: ${dead.latestReason})` : ""}` : null;
 
@@ -126,6 +143,7 @@ export function describePopup(state: TabCaptureState | null, tab: { readonly url
     reviewUrl: reviewLink(state?.lastAck ?? null),
     problem,
     deadLetters,
+    connect,
   };
 }
 
@@ -147,15 +165,17 @@ const RETRY_LABEL: Readonly<Record<PopupRetry, string>> = { start: "Retry start"
 const POLL_MS = 1500;
 
 /** A plain link from this page reaches the backend as a cross-site navigation and is refused, so the tab is opened with the tabs API, as the worker does for Review now. */
-const openInTab = (url: string): void => void chrome.tabs.create({ url });
+export const openInTab = (url: string): void => void chrome.tabs.create({ url });
 
 export function renderPopup(
   root: HTMLElement,
   send: (req: PopupRequest) => Promise<TabCaptureState | null>,
   tab: { readonly id: number; readonly url: string | undefined },
   openTab: (url: string) => void = openInTab,
+  readConnection: () => Promise<Connection> = () => Promise.resolve({ kind: "local" }),
 ): () => void {
   let state: TabCaptureState | null = null;
+  let connection: Connection = { kind: "local" };
   let error: string | null = null;
   let busy = false;
   let startFailed = false;
@@ -163,6 +183,7 @@ export function renderPopup(
 
   async function request(req: PopupRequest): Promise<void> {
     if (req.type !== "status") busy = true;
+    if (req.type === "status") connection = await readConnection().catch(() => connection);
     try {
       state = await send(req);
       error = null;
@@ -180,7 +201,7 @@ export function renderPopup(
   const answer = (a: InviteAnswer) => () => void request({ type: "invite_answer", tabId: tab.id, answer: a });
 
   function draw(): void {
-    const v = describePopup(state, tab, { startFailed });
+    const v = describePopup(state, tab, { startFailed, connection });
     const signature = JSON.stringify([v, error, busy]);
     if (signature === lastDrawn) return;
     lastDrawn = signature;
@@ -206,6 +227,9 @@ export function renderPopup(
 
     const children: Child[] = [
       h("h1", { text: "After Class" }),
+      v.connect === null
+        ? null
+        : h("div", { class: "invite" }, h("div", { text: v.connect.text }), h("div", { class: "row" }, h("button", { text: v.connect.label, class: "primary", onclick: () => openTab(connectPageUrl(backend())) }))),
       h("div", { class: "status", text: v.headline, data: { tone: v.tone } }),
       h("div", { class: "row" }, ...v.actions.map((a) => h("button", { text: ACTION_LABEL[a], class: a === "start" || a === "resume" ? "primary" : "", disabled: busy, onclick: act(a) }))),
       v.hint ? h("div", { class: "note", text: v.hint }) : null,
