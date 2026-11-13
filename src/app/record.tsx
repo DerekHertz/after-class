@@ -13,6 +13,7 @@ import type { NoteDrafts, NotebookLecture, NotebookTopic, NotebookViewName } fro
 import { objectFrame } from "./room-object";
 import { ErrorNote, EvidencePane, FrameImage, Link, useAsync } from "./ui";
 import { DiagramSummaryView, POLL_MS } from "./diagram";
+import { ConnectedBrowsers } from "./connect";
 import { frameLink, NO_FRAME_NOTE, shouldPollDiagrams } from "./diagram-view";
 
 
@@ -597,7 +598,8 @@ export function UsageTable({ summary }: { readonly summary: UsageSummary }) {
   );
 }
 
-export function UsageScreen({ api }: { readonly api: AppApi }) {
+/** `browsers`: hosted, where the account's connected browsers are listed under the usage record. */
+export function UsageScreen({ api, browsers = false }: { readonly api: AppApi; readonly browsers?: boolean }) {
   const usage = useAsync(useCallback(() => api.usage(), [api]));
   return (
     <main className="notebook-page usage-page room-paper" {...objectFrame("source")}>
@@ -605,6 +607,7 @@ export function UsageScreen({ api }: { readonly api: AppApi }) {
       <ErrorNote error={usage.error} retry={usage.reload} />
       {usage.data === null && usage.error === null && <p className="page-loading" role="status">Opening the usage record...</p>}
       {usage.data && <div className="record-section"><UsageTable summary={usage.data} /></div>}
+      {browsers && <ConnectedBrowsers api={api} />}
     </main>
   );
 }

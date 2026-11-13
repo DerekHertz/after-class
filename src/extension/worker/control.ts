@@ -5,8 +5,10 @@
 import { randomId } from "../../shared/ids";
 import type { CaptureId } from "../../shared/ids";
 import type { CaptureFactBody, ControlReason, InviteAnswer } from "../../shared/domain";
-import type { IngestAck } from "../../shared/wire";
+import type { ConnectMessage, IngestAck } from "../../shared/wire";
 import type { ContentSignal } from "../content/capture";
+import { backend, reviewOrigins } from "./backend";
+import type { Backend } from "./backend";
 
 export type TabCaptureState = {
   readonly tabId: number;
@@ -64,6 +66,59 @@ export function closingSpanGap(why: string): CaptureFactBody {
 
 /** Options page → worker. */
 export type OptionsRequest = { readonly type: "test_backend" };
+
+/**
+ * Hosted builds keep one record in chrome.storage.local: the device token and the account it was issued for. A 401
+ * empties `token` and keeps `userId`, so the popup can say Reconnect and the captures stay that account's.
+ */
+export type StoredConnection = { readonly token: string | null; readonly userId: string };
+
+/** What the popup and options page show: a local build, or whether a hosted build holds a working device token. */
+export type Connection = { readonly kind: "local" | "connected" | "not_connected" | "disconnected" };
+
+/** Popup or options page → worker. */
+export type ConnectionRequest = { readonly type: "connection" };
+
+export function connectionOf(backend: Backend, stored: StoredConnection | null): Connection {
+  if (backend.kind === "local") return { kind: "local" };
+  if (stored === null) return { kind: "not_connected" };
+  return { kind: stored.token === null ? "disconnected" : "connected" };
+}
+
+export function isStoredConnection(v: unknown): v is StoredConnection {
+  const c = v as Partial<StoredConnection> | null;
+  return typeof c === "object" && c !== null && (c.token === null || typeof c.token === "string") && typeof c.userId === "string";
+}
+
+/**
+ * Only the hosted web app's own pages may hand the worker a connect code. Chrome sets `origin` for a web page sender
+ * (Chrome 80 and later); `url` is the fallback.
+ */
+export function acceptsConnectSender(backend: Backend, sender: { readonly origin?: string; readonly url?: string; readonly id?: string }): boolean {
+  if (backend.kind !== "hosted") return false;
+  let origin = sender.origin;
+  if (origin === undefined && sender.url !== undefined) {
+    try {
+      origin = new URL(sender.url).origin;
+    } catch {
+      return false;
+    }
+  }
+  return origin === backend.origin;
+}
+
+export function isConnectMessage(v: unknown): v is ConnectMessage {
+  const m = v as Partial<ConnectMessage> | null;
+  return typeof m === "object" && m !== null && m.type === "afterclass_connect" && typeof m.code === "string" && m.code.length > 0 && m.code.length <= 200;
+}
+
+/**
+ * Whether a capture's facts may go up with this connection. A hosted capture belongs to the account that was connected
+ * when it started, so a browser later connected to another account never uploads it into that account.
+ */
+export function mayUpload(owner: string | undefined, stored: StoredConnection): boolean {
+  return owner !== undefined && owner === stored.userId;
+}
 
 export type ControlEvent =
   | { readonly kind: "start"; readonly tabId: number }
@@ -135,12 +190,10 @@ export function isWatchUrl(url: string | undefined): boolean {
   }
 }
 
-const ALLOWED_REVIEW_ORIGINS: ReadonlySet<string> = new Set(["http://127.0.0.1:4317", "http://localhost:4317"]);
-
-/** The ack's reviewAppUrl is opened in a tab, so it must point at the local backend. */
+/** The ack's reviewAppUrl is opened in a tab, so it must point at this build's backend. */
 export function safeReviewUrl(candidate: string | undefined, fallback: string): string {
   try {
-    if (candidate && ALLOWED_REVIEW_ORIGINS.has(new URL(candidate).origin)) return candidate;
+    if (candidate && reviewOrigins(backend()).has(new URL(candidate).origin)) return candidate;
   } catch {
     // fall through to the fallback
   }

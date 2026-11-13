@@ -142,8 +142,11 @@ for (const table of ["notes", "note_edits", "note_deletions", "note_evidence", "
 /** The kernel files that hold schema text; migrations-record.ts holds the record's last migration because migrations.ts is at the line limit. */
 const MIGRATION_FILES = new Set(["src/backend/db.ts", "src/backend/migrations.ts", "src/backend/migrations-record.ts"]);
 
+/** devices.ts holds the kernel's devices and connect_codes tables, their migration, and their only writes. */
+const KERNEL_FILES = new Set([...MIGRATION_FILES, "src/backend/devices.ts"]);
+
 function ownerOfFile(path: string): Owner | "none" {
-  if (MIGRATION_FILES.has(path)) return "kernel";
+  if (KERNEL_FILES.has(path)) return "kernel";
   const dir = path.match(/^src\/backend\/(\w+)\//)?.[1];
   return dir !== undefined && ((MODULES as readonly string[]).includes(dir) || dir === "providers") ? (dir as Owner) : "none";
 }

@@ -37,6 +37,7 @@ export const ID_KINDS = [
   "use", // usage event
   "key", // provider memo key
   "usr", // user (derived: the local app's one user is stableId("usr", "local"))
+  "dev", // connected browser: a user's extension holding a device token (random, backend-minted)
 ] as const;
 export type IdKind = (typeof ID_KINDS)[number];
 
@@ -59,6 +60,7 @@ export type ResourceId = Id<"res">;
 export type UsageEventId = Id<"use">;
 export type MemoKey = Id<"key">;
 export type UserId = Id<"usr">;
+export type DeviceId = Id<"dev">;
 
 export type ClientMintedKind = "cap" | "rvw" | "turn";
 

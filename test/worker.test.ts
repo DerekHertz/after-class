@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildExtension, copyBuild, manifestFiles } from "../scripts/build-extension";
+import { buildExtension, copyBuild, hostedOriginFrom, manifestFiles } from "../scripts/build-extension";
 import type { CaptureFactBody } from "../src/shared/domain";
 import type { CaptureId } from "../src/shared/ids";
 import { randomId } from "../src/shared/ids";
@@ -511,6 +511,14 @@ describe("popup view", () => {
     expect(describePopup(null, home).inviteAnswers).toEqual(["review_now"]);
   });
 
+  test("a hosted build with no working device token offers Connect or Reconnect in place of Start, and keeps a running capture's controls", () => {
+    expect(describePopup(null, watch, { connection: { kind: "not_connected" } })).toMatchObject({ actions: [], connect: { label: "Connect" } });
+    expect(describePopup(null, watch, { connection: { kind: "disconnected" } })).toMatchObject({ actions: [], connect: { label: "Reconnect" } });
+    expect(describePopup(state(), watch, { connection: { kind: "disconnected" } }).actions).toEqual(["pause", "stop"]);
+    expect(describePopup(null, watch, { connection: { kind: "connected" } })).toMatchObject({ actions: ["start"], connect: null });
+    expect(describePopup(null, watch)).toMatchObject({ actions: ["start"], connect: null });
+  });
+
   test("a failed Start offers Retry in place of Start", () => {
     expect(describePopup(null, watch, { startFailed: true })).toMatchObject({ actions: [], retries: ["start"] });
     expect(describePopup(null, watch).retries).toEqual([]);
@@ -584,6 +592,36 @@ describe("extension build", () => {
     expect(testWorker).toContain("ac_autostart");
     expect(JSON.parse(readFileSync(join(product, "manifest.json"), "utf8")).name).toBe("After Class");
     expect(JSON.parse(readFileSync(join(test, "manifest.json"), "utf8")).name).toBe("After Class (TEST autostart)");
+  });
+
+  test("the local build's manifest is the source manifest, and its code names no hosted origin", () => {
+    const source = JSON.parse(readFileSync(join(import.meta.dir, "../src/extension/manifest.json"), "utf8"));
+    expect(JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"))).toEqual(source);
+    expect(readFileSync(join(out, "worker.js"), "utf8")).not.toContain("__AFTERCLASS_HOSTED_ORIGIN__");
+  });
+
+  test("a hosted build reaches its origin instead of the local backend, and only that origin's pages can message it", async () => {
+    const hosted = scratchDir("afterclass-build-hosted-");
+    await buildExtension(hosted, { hostedOrigin: "https://useafterclass.com" });
+    const manifest = JSON.parse(readFileSync(join(hosted, "manifest.json"), "utf8"));
+    expect(manifest.host_permissions).toEqual(["https://www.youtube.com/*", "https://useafterclass.com/*"]);
+    expect(manifest.externally_connectable).toEqual({ matches: ["https://useafterclass.com/*"] });
+    expect(manifest.name).toBe("After Class");
+    for (const f of ["worker.js", "popup.js", "options.js"]) {
+      const code = readFileSync(join(hosted, f), "utf8");
+      expect(code, f).toContain('"https://useafterclass.com"');
+      expect(code, f).not.toContain("__AFTERCLASS_HOSTED_ORIGIN__");
+    }
+  });
+
+  test("AFTERCLASS_EXT_BACKEND takes a bare https origin, or http only to a loopback host", () => {
+    expect(hostedOriginFrom(undefined)).toBeNull();
+    expect(hostedOriginFrom("")).toBeNull();
+    expect(hostedOriginFrom("https://useafterclass.com")).toBe("https://useafterclass.com");
+    expect(hostedOriginFrom("http://127.0.0.1:8774")).toBe("http://127.0.0.1:8774");
+    for (const bad of ["https://useafterclass.com/", "https://useafterclass.com/app", "http://useafterclass.com", "useafterclass.com", "ftp://x.test"]) {
+      expect(() => hostedOriginFrom(bad), bad).toThrow(/AFTERCLASS_EXT_BACKEND/);
+    }
   });
 
   test("copying to a Windows path replaces a previous build but refuses an unrelated non-empty folder", () => {

@@ -23,25 +23,32 @@
  *
  * Hosted mode (`ServeOptions.hosted`) replaces all three checks. There is no Host check. Origin, when a browser sends
  * one, must be exactly the public origin or the pinned extension; with none, Sec-Fetch-Site must not be cross-site or
- * same-site, as above. Every `ROUTES` entry needs `Authorization: Bearer <session token>`, and `HostedAuth.userFor` turns
- * the token into the caller's user, whose modules (`modulesFor`) serve the request. The extension has no session token
- * yet, so its routes answer 401 until device tokens land. GET /health answers anyone. GET /app/* needs no token and no
+ * same-site, as above. Each `ROUTES` entry names the bearer tokens it accepts (`Route.bearer`), and `HostedAuth.userFor`
+ * turns a token into the caller's user and says whether it was a session token or a device token; a token of a kind the
+ * route does not accept is 401. A device token is accepted only from the pinned extension's Origin. The user's modules
+ * (`modulesFor`) serve the request. The connect-code exchange takes no bearer, because the code in its body is the
+ * credential, and is served only to the pinned extension. GET /health answers anyone. GET /app/* needs no token and no
  * Origin check, because sign-in returns to it as a cross-site navigation and the page holds no secret: it loads ClerkJS
- * instead of carrying the pairing token. GET / redirects to /app/.
+ * instead of carrying the pairing token, and names the pinned extension so the connect page can reach it. GET /
+ * redirects to /app/.
  */
 import { createHash, timingSafeEqual } from "node:crypto";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import { parseId } from "../shared/ids";
 import type { IdKind } from "../shared/ids";
-import type { CaptureId, ConceptId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, SourceId, TurnId, UserId } from "../shared/ids";
+import type { CaptureId, ConceptId, DeviceId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, SourceId, TurnId, UserId } from "../shared/ids";
 import type { EvidenceBundle, Frame, FrozenScope, Passage, ReviewOptions, ReviewSaveState, ReviewView, ScopePreview, StartResult, TurnEvent } from "../shared/domain";
 import { Material } from "../shared/time";
 import type { Interval } from "../shared/time";
 import {
-  BadRequest, ROUTES, matchRoute, parseDisputeResolutionRequest, parseEvidenceDeleteRequest, parseIngestBatch, parseInviteAnswerRequest,
-  parseLinkDecisionRequest, parseNoteEditRequest, parseObservationOverrideRequest, parseSpeakRequest, parseStartReviewRequest, parseTurnRequest,
+  BadRequest, ROUTES, matchRoute, parseConnectCodeRequest, parseDisputeResolutionRequest, parseEvidenceDeleteRequest, parseExchangeRequest, parseIngestBatch,
+  parseInviteAnswerRequest, parseLinkDecisionRequest, parseNoteEditRequest, parseObservationOverrideRequest, parseSpeakRequest, parseStartReviewRequest,
+  parseTurnRequest,
 } from "../shared/wire";
+import type { Bearer, RouteName } from "../shared/wire";
+import { LOCAL_USER } from "./db";
+import type { Devices } from "./devices";
 import type { EvidenceStore, EvidenceStoreWithProbe } from "./evidence";
 import type { Preparation } from "./preparation";
 import type { Reviews } from "./review";
@@ -74,9 +81,13 @@ export type HostedAuth = {
   readonly extensionId: string;
   /** The ClerkJS script the app page loads, and the publishable key it is loaded with. */
   readonly clerk: { readonly scriptUrl: string; readonly publishableKey: string };
-  /** The signed-in user a bearer token names, or null when the token does not verify. */
-  readonly userFor: (token: string) => Promise<UserId | null>;
+  /** The user a bearer token names and which kind of token it is, or null when the token does not verify. */
+  readonly userFor: (token: string) => Promise<Caller | null>;
+  /** Connect codes, device tokens and their revocation. */
+  readonly devices: Devices;
 };
+
+export type Caller = { readonly userId: UserId; readonly bearer: Bearer };
 
 type Origin = "extension" | "review_app" | "none";
 type Denied = { readonly ok: false; readonly status: 401 | 403 };
@@ -154,7 +165,7 @@ export const MAX_BODY_BYTES = 16 * 1024 * 1024;
 
 /** Path parameter name → id kind, so `matchRoute` (which does not validate) never hands a raw string to a module. */
 const PARAM_KIND = {
-  captureId: "cap", reviewId: "rvw", topicId: "cpt", evidenceId: "ev", noteId: "note", linkId: "lnk", observationId: "obs",
+  captureId: "cap", reviewId: "rvw", topicId: "cpt", evidenceId: "ev", noteId: "note", linkId: "lnk", observationId: "obs", deviceId: "dev",
 } as const satisfies Record<string, IdKind>;
 
 const SECURITY_HEADERS = { "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" } as const;
@@ -175,10 +186,15 @@ function injectToken(html: string, token: string): string {
   return html.replace(/<\/head>/i, () => `${tag}</head>`);
 }
 
-/** The hosted page: no token tag at all, and ClerkJS loaded the way Clerk documents it, keyed by the script's attribute. */
-function injectClerk(html: string, clerk: HostedAuth["clerk"]): string {
+/**
+ * The hosted page: no token tag at all, ClerkJS loaded the way Clerk documents it, keyed by the script's attribute, and
+ * the pinned extension's id, which the connect page sends the connect code to.
+ */
+function injectClerk(html: string, hosted: Pick<HostedAuth, "clerk" | "extensionId">): string {
+  const { clerk } = hosted;
+  const extension = `<meta name="afterclass-extension-id" content="${escapeAttr(hosted.extensionId)}">`;
   const tag = `<script async crossorigin="anonymous" data-clerk-publishable-key="${escapeAttr(clerk.publishableKey)}" src="${escapeAttr(clerk.scriptUrl)}"></script>`;
-  return html.replace(TOKEN_META, "").replace(/<\/head>/i, () => `${tag}</head>`);
+  return html.replace(TOKEN_META, "").replace(/<\/head>/i, () => `${extension}${tag}</head>`);
 }
 
 type AppTarget = { readonly kind: "file"; readonly path: string } | { readonly kind: "index" } | { readonly kind: "missing" };
@@ -612,37 +628,75 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
   }
 }
 
+const DEVICE_ROUTES: ReadonlySet<RouteName> = new Set(["createConnectCode", "exchangeConnectCode", "devices", "revokeDevice"]);
+
+/**
+ * The connected-browser routes. `userId` is the signed-in caller, or null for the exchange, whose code names the user.
+ * A device id the caller does not hold, another user's included, is 404 and changes nothing.
+ */
+async function deviceRoute(name: RouteName, matched: { readonly params: Record<string, string> }, req: Request, devices: Devices, userId: UserId | null, cors: Record<string, string>): Promise<Response> {
+  try {
+    if (name === "exchangeConnectCode") {
+      const result = devices.exchange(parseExchangeRequest(await readJson(req)).code);
+      if (result.kind === "limited") return failure(429, "too many connect attempts; try again shortly", { ...cors, "Retry-After": String(result.retryAfterS) });
+      if (result.kind === "refused") return failure(401, "that connect code is not valid; press Connect again", cors);
+      return reply("exchangeConnectCode", { token: result.token, userId: result.userId }, cors);
+    }
+    if (userId === null) return failure(401, "unauthorized", cors);
+    switch (name) {
+      case "createConnectCode":
+        return reply("createConnectCode", devices.createCode(userId, parseConnectCodeRequest(await readJson(req)).label), cors);
+      case "devices":
+        return reply("devices", { devices: devices.list(userId) }, cors);
+      case "revokeDevice":
+        return devices.revoke(userId, matched.params.deviceId as DeviceId) ? noContent(cors) : failure(404, "unknown device", cors);
+      default:
+        return failure(501, "not implemented", cors);
+    }
+  } catch (e) {
+    if (e instanceof BadRequest) return failure(400, e.message, cors);
+    throw e;
+  }
+}
+
 type Allowed = { readonly ok: true; readonly origin: Origin };
+
+/** Who a routed request is for. Null only on a route that takes no bearer (the exchange), where the request body names the user. */
+type Served = { readonly userId: UserId; readonly modules: ServedModules } | null;
 
 /** What differs between local and hosted mode. Everything else in `handle` is shared. */
 type Gate = {
   /** The Origin (and, locally, Host) check alone: preflight and unrouted paths. */
   origin(headers: Headers): Allowed | Denied;
-  /** The full check for a `ROUTES` entry, and the modules of the user it names. */
-  caller(headers: Headers): Promise<(Allowed & { readonly modules: ServedModules }) | Denied>;
+  /** The full check for a `ROUTES` entry, and the user it names with that user's modules. */
+  caller(headers: Headers, route: RouteName): Promise<(Allowed & { readonly served: Served }) | Denied>;
   health(headers: Headers): Allowed | Denied;
   app(headers: Headers): Allowed | Denied;
   /** Where GET / redirects; null answers it like any unrouted path. */
   readonly home: string | null;
   page(html: string): string;
   readonly appOrigin: string;
+  /** Null locally, where the device routes answer 501. */
+  readonly devices: Devices | null;
 };
 
 const allowAll = (): Allowed => ({ ok: true, origin: "none" });
 
 function localGate(auth: AuthConfig, modules: ServedModules, healthAnyHost: boolean): Gate {
   const originOnly = (h: Headers) => authorize(h, auth, { requireToken: false });
+  const served: Served = { userId: LOCAL_USER, modules };
   return {
     origin: originOnly,
     async caller(h) {
       const v = authorize(h, auth);
-      return v.ok ? { ...v, modules } : v;
+      return v.ok ? { ...v, served } : v;
     },
     health: healthAnyHost ? allowAll : originOnly,
     app: originOnly,
     home: null,
     page: (html) => injectToken(html, auth.token),
     appOrigin: `http://127.0.0.1:${auth.port}`,
+    devices: null,
   };
 }
 
@@ -658,22 +712,34 @@ export function hostedOrigin(headers: Headers, hosted: Pick<HostedAuth, "publicO
   return { ok: false, status: 403 };
 }
 
+/**
+ * Pure over the route and the verified caller: whether hosted mode serves it. The token's kind must be one the route
+ * accepts, and a device token must come from the pinned extension, so a web page that got hold of one cannot use it.
+ */
+export function bearerAllowed(route: RouteName, caller: Caller, origin: Origin): boolean {
+  return ROUTES[route].bearer.includes(caller.bearer) && (caller.bearer !== "device" || origin === "extension");
+}
+
 function hostedGate(hosted: HostedAuth, modulesFor: (userId: UserId) => ServedModules): Gate {
   const originOnly = (h: Headers) => hostedOrigin(h, hosted);
   return {
     origin: originOnly,
-    async caller(h) {
+    async caller(h, route) {
       const v = originOnly(h);
       if (!v.ok) return v;
+      // The exchange's credential is the code in its body; only the extension trades one, so the app page cannot mint a device token.
+      if (ROUTES[route].bearer.length === 0) return v.origin === "extension" ? { ...v, served: null } : { ok: false, status: 403 };
       const token = /^Bearer (.+)$/i.exec(h.get("authorization") ?? "")?.[1];
-      const userId = token === undefined ? null : await hosted.userFor(token);
-      return userId === null ? { ok: false, status: 401 } : { ...v, modules: modulesFor(userId) };
+      const caller = token === undefined ? null : await hosted.userFor(token);
+      if (caller === null || !bearerAllowed(route, caller, v.origin)) return { ok: false, status: 401 };
+      return { ...v, served: { userId: caller.userId, modules: modulesFor(caller.userId) } };
     },
     health: allowAll,
     app: allowAll,
     home: "/app/",
-    page: (html) => injectClerk(html, hosted.clerk),
+    page: (html) => injectClerk(html, hosted),
     appOrigin: hosted.publicOrigin,
+    devices: hosted.devices,
   };
 }
 
@@ -702,7 +768,7 @@ async function handle(req: Request, opts: ServeOptions, gate: Gate, guard: TurnG
     const v = gate.origin(req.headers);
     return v.ok ? failure(404, "not found", corsHeaders(req.headers.get("origin"), v.origin)) : failure(v.status, "forbidden");
   }
-  const v = await gate.caller(req.headers);
+  const v = await gate.caller(req.headers, matched.name);
   if (!v.ok) return failure(v.status, v.status === 401 ? "unauthorized" : "forbidden");
   const cors = corsHeaders(req.headers.get("origin"), v.origin);
   for (const [name, value] of Object.entries(matched.params)) {
@@ -710,8 +776,12 @@ async function handle(req: Request, opts: ServeOptions, gate: Gate, guard: TurnG
     if (kind === undefined || parseId(kind, value) === null) return failure(400, `invalid ${name}`, cors);
   }
 
-  if (matched.name === "usage") return json(200, v.modules.ledger.summary(), cors);
-  return (await mounted(matched.name, matched, req, v.modules, gate.appOrigin, cors, guard)) ?? failure(501, "not implemented", cors);
+  if (DEVICE_ROUTES.has(matched.name)) {
+    return gate.devices === null ? failure(501, "not implemented", cors) : deviceRoute(matched.name, matched, req, gate.devices, v.served?.userId ?? null, cors);
+  }
+  if (v.served === null) return failure(401, "unauthorized", cors);
+  if (matched.name === "usage") return json(200, v.served.modules.ledger.summary(), cors);
+  return (await mounted(matched.name, matched, req, v.served.modules, gate.appOrigin, cors, guard)) ?? failure(501, "not implemented", cors);
 }
 
 export function serve(opts: ServeOptions): Bun.Server<undefined> {

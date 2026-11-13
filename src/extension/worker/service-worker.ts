@@ -9,23 +9,38 @@
  * script fetches carry the youtube.com origin, and the pairing token must never
  * be reachable from the page.
  *
+ * A hosted build (backend.ts) has no pairing token. The web app's connect page hands
+ * the worker a one-time code (onMessageExternal, from that origin only); the worker
+ * trades it for a device token, keeps it in chrome.storage.local with the account it
+ * belongs to, and sends it as its bearer. A 401 empties the token and the popup says
+ * Reconnect. Each capture belongs to the account connected when it started, and its
+ * facts go up only while that account is connected.
+ *
  * Control state is in chrome.storage.session (survives SW restarts, not browser
  * restarts: a browser restart ends capture, which is the visible, honest outcome).
  * The policy itself is in control.ts and the upload loop in outbox.ts, both pure.
  */
 import type { CaptureId } from "../../shared/ids";
 import type { CaptureFactBody, InviteAnswer, InviteState } from "../../shared/domain";
-import type { IngestAck } from "../../shared/wire";
-import { FLUSH_TIMEOUT_MS, acceptsFact, badgeFor, closingSpanGap, isWatchUrl, playbackRecovered, safeReviewUrl, transition } from "./control";
-import type { ControlEvent, DeadLetterSummary, FromContent, OptionsRequest, PopupRequest, TabCaptureState, ToContent } from "./control";
+import type { ConnectReply, IngestAck } from "../../shared/wire";
+import { backend } from "./backend";
+import {
+  FLUSH_TIMEOUT_MS, acceptsConnectSender, acceptsFact, badgeFor, closingSpanGap, connectionOf, isConnectMessage, isStoredConnection, isWatchUrl, mayUpload,
+  playbackRecovered, safeReviewUrl, transition,
+} from "./control";
+import type {
+  Connection, ConnectionRequest, ControlEvent, DeadLetterSummary, FromContent, OptionsRequest, PopupRequest, StoredConnection, TabCaptureState, ToContent,
+} from "./control";
 import { classifyStatus, createFlusher, createIdbOutbox, isIngestAck } from "./outbox";
 import type { FlushOutcome, Transport } from "./outbox";
 
 export { transition } from "./control";
 export type { PopupRequest, TabCaptureState } from "./control";
 
-const BACKEND = "http://127.0.0.1:4317";
+const BACKEND = backend();
 const TOKEN_KEY = "pairingToken";
+const CONNECTION_KEY = "connection";
+const OWNERS_KEY = "captureOwners";
 const TABS_KEY = "tabs";
 const FLUSH_ALARM = "afterclass-flush";
 const HEARTBEAT_MIN_MS = 3000;
@@ -79,17 +94,61 @@ async function pairingToken(): Promise<string | null> {
   return typeof t === "string" && t !== "" ? t : null;
 }
 
-async function backendFetch(method: "GET" | "POST", path: string, body?: unknown): Promise<{ readonly ok: true; readonly json: unknown } | { readonly ok: false; readonly retryable: boolean; readonly error: string; readonly rejected?: boolean }> {
-  const token = await pairingToken();
-  if (token === null) return { ok: false, retryable: false, error: "no pairing token: paste it in After Class options" };
+async function storedConnection(): Promise<StoredConnection | null> {
+  const c: unknown = (await chrome.storage.local.get(CONNECTION_KEY))[CONNECTION_KEY];
+  return isStoredConnection(c) ? c : null;
+}
+
+async function captureOwners(): Promise<Record<string, string>> {
+  return ((await chrome.storage.local.get(OWNERS_KEY))[OWNERS_KEY] as Record<string, string> | undefined) ?? {};
+}
+
+let connectionChain: Promise<unknown> = Promise.resolve();
+/** Connecting and the 401 that empties a token both rewrite the stored connection; one at a time, so a late 401 cannot undo a new connection. */
+function connectionWrite<T>(fn: () => Promise<T>): Promise<T> {
+  const run = connectionChain.then(fn, fn);
+  connectionChain = run.catch(() => {});
+  return run;
+}
+
+/** Empties the token only if it is still the one the backend refused. */
+const forgetToken = (refused: string) =>
+  connectionWrite(async () => {
+    const c = await storedConnection();
+    if (c?.token === refused) await chrome.storage.local.set({ [CONNECTION_KEY]: { token: null, userId: c.userId } satisfies StoredConnection });
+  });
+
+type Fetched = { readonly ok: true; readonly json: unknown } | { readonly ok: false; readonly retryable: boolean; readonly error: string; readonly rejected?: boolean };
+
+/** The bearer this request carries, or why it has none. A hosted request for a capture also needs that capture's account to be the connected one. */
+async function credential(capture: CaptureId | undefined): Promise<{ readonly token: string } | { readonly error: string }> {
+  if (BACKEND.kind === "local") {
+    const token = await pairingToken();
+    return token === null ? { error: "no pairing token: paste it in After Class options" } : { token };
+  }
+  const c = await storedConnection();
+  if (c === null) return { error: "not connected: press Connect in the After Class popup" };
+  if (c.token === null) return { error: "disconnected from your account: press Reconnect in the After Class popup" };
+  if (capture !== undefined && !mayUpload((await captureOwners())[capture], c)) return { error: "this capture belongs to another account; connect that account to upload it" };
+  return { token: c.token };
+}
+
+/** `bearer: false` sends no token: the connect-code exchange, whose code is its credential. */
+async function backendFetch(method: "GET" | "POST", path: string, body?: unknown, opts: { readonly capture?: CaptureId; readonly bearer?: false } = {}): Promise<Fetched> {
+  const cred = opts.bearer === false ? null : await credential(opts.capture);
+  if (cred !== null && "error" in cred) return { ok: false, retryable: false, error: cred.error };
   try {
-    const res = await fetch(`${BACKEND}${path}`, {
+    const res = await fetch(`${BACKEND.origin}${path}`, {
       method,
-      headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      headers: { ...(cred === null ? {} : { Authorization: `Bearer ${cred.token}` }), ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) {
+      if (BACKEND.kind === "hosted" && cred !== null && res.status === 401) {
+        await forgetToken(cred.token);
+        return { ok: false, retryable: false, error: "disconnected from your account: press Reconnect in the After Class popup" };
+      }
       const c = classifyStatus(res.status);
       // The backend says which fact it refused; keep that with the dead letter.
       const detail = c.rejected ? (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 200) : "";
@@ -102,7 +161,7 @@ async function backendFetch(method: "GET" | "POST", path: string, body?: unknown
 }
 
 const transport: Transport = async (captureId, facts) => {
-  const r = await backendFetch("POST", "/ingest", { captureId, facts });
+  const r = await backendFetch("POST", "/ingest", { captureId, facts }, { capture: captureId });
   if (!r.ok) return r;
   return isIngestAck(r.json) ? { ok: true, ack: r.json } : { ok: false, retryable: false, error: "backend sent an unexpected acknowledgement" };
 };
@@ -207,6 +266,7 @@ async function applyEventNow(tabId: number, event: ControlEvent): Promise<TabCap
     const tabs = await loadTabs();
     const { next, fact } = transition(tabs[tabId] ?? null, event);
     if (next === null) return null;
+    if (BACKEND.kind === "hosted" && next.captureId !== tabs[tabId]?.captureId) await ownCapture(next.captureId);
     tabs[tabId] = next;
     if (fact && gap !== null) {
       await appendIn(tabs, tabId, closingSpanGap(gap));
@@ -310,10 +370,10 @@ chrome.tabs.onRemoved.addListener((tabId) => {
  */
 export async function answerInvite(tabId: number, answer: InviteAnswer): Promise<InviteState> {
   const state = await readState(tabId);
-  if (answer === "review_now" || answer === "stop_early") await chrome.tabs.create({ url: safeReviewUrl(state?.lastAck?.reviewAppUrl, `${BACKEND}/app/`) });
+  if (answer === "review_now" || answer === "stop_early") await chrome.tabs.create({ url: safeReviewUrl(state?.lastAck?.reviewAppUrl, `${BACKEND.origin}/app/`) });
   const current: InviteState = state?.lastAck?.invite ?? { state: "none" };
   if (state === null || (answer === "review_now" && current.state !== "invited")) return current;
-  const r = await backendFetch("POST", `/captures/${state.captureId}/invite`, { answer });
+  const r = await backendFetch("POST", `/captures/${state.captureId}/invite`, { answer }, { capture: state.captureId });
   if (!r.ok) throw new Error(r.error);
   const s = (r.json as { state?: unknown } | null)?.state;
   return s === "none" || s === "invited" || s === "later" || s === "waiting" ? (r.json as InviteState) : current;
@@ -328,6 +388,8 @@ async function handlePopup(req: PopupRequest): Promise<WorkerResponse> {
   switch (req.type) {
     case "start":
     case "resume": {
+      // A new capture belongs to the connected account, so a hosted build needs one before it starts.
+      if (req.type === "start" && !["local", "connected"].includes((await connection()).kind)) throw new Error("connect After Class to your account first: press Connect");
       await ensureWatchPage(req.tabId);
       await ensureContentScript(req.tabId);
       return { state: await applyEvent(req.tabId, req.type === "start" ? { kind: "start", tabId: req.tabId } : { kind: "resume" }) };
@@ -374,6 +436,11 @@ async function handlePopup(req: PopupRequest): Promise<WorkerResponse> {
 }
 
 async function handleOptions(_req: OptionsRequest): Promise<{ readonly ok: boolean; readonly detail: string }> {
+  // Hosted, a device token reaches only the capture routes, and the stored connection already says whether it works.
+  if (BACKEND.kind === "hosted") {
+    const c = await connection();
+    return { ok: c.kind === "connected", detail: c.kind };
+  }
   const r = await backendFetch("GET", "/usage");
   if (r.ok) {
     void recover();
@@ -382,11 +449,47 @@ async function handleOptions(_req: OptionsRequest): Promise<{ readonly ok: boole
   return { ok: false, detail: r.error };
 }
 
-chrome.runtime.onMessage.addListener((msg: PopupRequest | OptionsRequest, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg: PopupRequest | OptionsRequest | ConnectionRequest, sender, sendResponse) => {
   // Content scripts also carry sender.tab; the options page opens in a tab too, so tell them apart by URL.
   if (sender.id !== chrome.runtime.id || (sender.tab !== undefined && sender.url?.startsWith(chrome.runtime.getURL("")) !== true)) return false;
-  const work = msg.type === "test_backend" ? handleOptions(msg) : handlePopup(msg).catch((e: unknown): WorkerResponse => ({ state: null, error: e instanceof Error ? e.message : String(e) }));
+  const work =
+    msg.type === "test_backend" ? handleOptions(msg)
+    : msg.type === "connection" ? connection()
+    : handlePopup(msg).catch((e: unknown): WorkerResponse => ({ state: null, error: e instanceof Error ? e.message : String(e) }));
   void work.then(sendResponse);
+  return true;
+});
+
+// ───────────────────────────── Connecting (hosted builds) ───────────────────
+
+export const connection = async (): Promise<Connection> => connectionOf(BACKEND, BACKEND.kind === "hosted" ? await storedConnection() : null);
+
+/** Runs inside the control chain, as the start fact is written: the new capture is the connected account's. */
+async function ownCapture(captureId: CaptureId): Promise<void> {
+  const c = await storedConnection();
+  if (c === null) return;
+  await chrome.storage.local.set({ [OWNERS_KEY]: { ...(await captureOwners()), [captureId]: c.userId } });
+}
+
+/** Trades the connect page's code for a device token and keeps it with its account. Captures of another account stay where they are. */
+async function connect(code: string): Promise<ConnectReply> {
+  const r = await backendFetch("POST", "/devices/exchange", { code }, { bearer: false });
+  if (!r.ok) return { ok: false, error: r.error.includes("HTTP 401") ? "the connect code was not accepted." : `${r.error}.` };
+  const reply = r.json as { token?: unknown; userId?: unknown } | null;
+  if (typeof reply?.token !== "string" || typeof reply.userId !== "string") return { ok: false, error: "the backend sent an unexpected answer." };
+  const stored: StoredConnection = { token: reply.token, userId: reply.userId };
+  await connectionWrite(() => chrome.storage.local.set({ [CONNECTION_KEY]: stored }));
+  void recover();
+  return { ok: true };
+}
+
+chrome.runtime.onMessageExternal?.addListener((msg: unknown, sender, sendResponse) => {
+  if (!acceptsConnectSender(BACKEND, sender)) return false;
+  if (!isConnectMessage(msg)) {
+    sendResponse({ ok: false, error: "the message was not a connect request." } satisfies ConnectReply);
+    return false;
+  }
+  void connect(msg.code).then(sendResponse);
   return true;
 });
 

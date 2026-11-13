@@ -181,7 +181,7 @@ export async function boot(env: Env): Promise<{ c: FakeChrome; errors: string[] 
   for (const k of GLOBALS) if (!originals.has(k)) originals.set(k, g[k]);
   const errors: string[] = [];
   const c: FakeChrome = {
-    runtime: { id: "ext", onConnect: event(), onMessage: event(), onStartup: event() },
+    runtime: { id: "ext", onConnect: event(), onMessage: event(), onMessageExternal: event(), onStartup: event() },
     storage: {
       session: { get: async (k: string) => ({ [k]: structuredClone(env.session[k]) }), set: async (o: Any) => void Object.assign(env.session, structuredClone(o)) },
       local: {

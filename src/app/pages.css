@@ -142,3 +142,8 @@
   .observation-context dd { margin-bottom: 8px; }
   .notebook-page .actions > :is(label, select) { max-width: 100%; }
 }
+
+/* Connected browsers: one ruled line per browser, its Revoke at the line's end. */
+.notebook-page .device-list { list-style: none; margin: 0 0 12px; padding: 0; }
+.notebook-page .device-list li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; padding: 10px 0; border-bottom: 1px dashed var(--border); }
+.connect-page .note p { margin: 4px 0; }
