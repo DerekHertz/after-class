@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { randomId } from "../shared/ids";
 import type { CaptureId, ReviewId } from "../shared/ids";
 import type { ReviewOptions, StartChoice } from "../shared/domain";
 import type { AppApi } from "./api";
 import { formatClock, inspectBundle, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
 import type { OptionsScreen, ScopeSummary, SourceTitles, StartOffer } from "./core";
+import { usePolled } from "./poll";
 import { objectFrame } from "./room-object";
 import { BundleInspector, ErrorNote, EvidencePane, Link, navigate, useAsync } from "./ui";
 
 
 const POLL_MS = 3000;
+const isProcessing = (options: ReviewOptions): boolean => options.kind === "processing";
 
 export type OptionsViewProps = {
   readonly screen: OptionsScreen;
@@ -153,7 +155,7 @@ export async function checkAgain(
 
 export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readonly captureId: CaptureId }) {
   const capture = useAsync(useCallback(() => api.captureView(captureId), [api, captureId]));
-  const options = useAsync(useCallback(() => api.reviewOptions(captureId), [api, captureId]));
+  const options = usePolled(useCallback(() => api.reviewOptions(captureId), [api, captureId]), isProcessing, POLL_MS);
   const [startError, setStartError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [refused, setRefused] = useState<ReviewOptions | null>(null);
@@ -161,14 +163,6 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
   const actionPending = useRef(false);
   // One id per choice until the start settles, so a retried start is the same review.
   const pendingIds = useRef(new Map<StartChoice, ReviewId>());
-
-  const processing = options.data?.kind === "processing";
-  const { reload } = options;
-  useEffect(() => {
-    if (!processing) return;
-    const timer = setTimeout(reload, POLL_MS);
-    return () => clearTimeout(timer);
-  }, [processing, options.data, reload]);
 
   const titles = sourceTitles(capture.data?.capture ?? null);
   const videos = sourceVideos(capture.data?.capture ?? null);
