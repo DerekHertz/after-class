@@ -362,7 +362,7 @@ export function reviewRig(script: Script = pick, extra: { turnDeadlineMs?: numbe
       return db.nextSeq();
     },
   } as unknown as Preparation;
-  const segmentation = { current: world.deps.currentChunks } as unknown as Segmentation;
+  const segmentation = { current: world.deps.currentChunks, heldByAnotherUser: () => false } as unknown as Segmentation;
 
   const evidence = evidenceOn(db);
   const server = serve({

@@ -257,7 +257,7 @@ export async function main(options: MainOptions = {}): Promise<Running> {
   const dataDir = resolve(env.AFTERCLASS_DATA ?? "data");
   mkdirSync(dataDir, { recursive: true });
   const rawDb = openDb(join(dataDir, "afterclass.sqlite"));
-  // The local app has one user, created on first boot. Modules still take a plain `Db`; each moves to `UserDb` in its own PR.
+  // The local app has one user, created on first boot. Segmentation, preparation, providers take this `UserDb`; the other modules still take a plain `Db` and move in their own PRs.
   const db = scopeDb(rawDb, ensureLocalUser(rawDb));
 
   // evidence is created after the tasks that need its bytes; the tasks only read it when a call runs

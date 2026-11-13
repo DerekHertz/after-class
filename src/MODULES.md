@@ -4,14 +4,14 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 
 | Module | Owner | Owned files | Owned tables | Frozen exports |
 | --- | --- | --- | --- | --- |
-| Kernel | W10 | `src/shared/*`, `src/backend/db.ts`, `src/backend/providers/memo.ts`, `test/fakes.ts`, `test/boundaries.test.ts`, `test/{ids,time,wire,db,memo,rules}.test.ts` | `schema_migrations`, `seq_counter`, `users` | everything in `shared/` (`domain.ts` types, `ids.ts`, `time.ts`, `wire.ts` schemas, `parse*`, `ROUTES`, `Route`, `routeUrl`, `matchRoute`, `encodeMaterial`, `decodeMaterial`), `Db`, `UserDb`, `openDb`, `scopeDb`, `ensureLocalUser`, `LOCAL_USER`, `TABLE_SCOPES`, `asSeq`, `MIGRATIONS`, `tableOwners`, `Task`, `Lookup`, `LookupFn`, `Memo`, `UsageReport`, `ProviderError`, `ReplayMiss`, `appliesBefore`, `createMemo` |
+| Kernel | W10 | `src/shared/*`, `src/backend/db.ts`, `src/backend/migrations.ts`, `src/backend/providers/memo.ts`, `test/fakes.ts`, `test/boundaries.test.ts`, `test/{ids,time,wire,db,memo,rules}.test.ts` | `schema_migrations`, `seq_counter`, `users` | everything in `shared/` (`domain.ts` types, `ids.ts`, `time.ts`, `wire.ts` schemas, `parse*`, `ROUTES`, `Route`, `routeUrl`, `matchRoute`, `encodeMaterial`, `decodeMaterial`), `Db`, `UserDb`, `openDb`, `scopeDb`, `ensureLocalUser`, `LOCAL_USER`, `TABLE_SCOPES`, `asSeq`, `MIGRATIONS`, `tableOwners`, `Task`, `Lookup`, `LookupFn`, `Memo`, `UsageReport`, `ProviderError`, `ReplayMiss`, `appliesBefore`, `createMemo` |
 | Composition | W10 (after W1 to W9) | `src/backend/http.ts`, `src/backend/main.ts`, `src/backend/scheduler.ts` | none | `WorkItem`, `Scheduler`, `Modules`, `AuthConfig`, `authorize` |
 | Playback and frames | W1 | `src/extension/content/capture.ts`, `src/extension/content/frames.ts` | none | `Emit`, `ControlMessage`, `ContentSignal`, `PlaybackTracker`, `AdSignals`, `isAdShowing`, `FrameSamplerConfig`, `FrameSampler`, `normalizedSize` |
 | Transcripts, worker, popup, build | W2 | `src/extension/content/transcript.ts`, `src/extension/content/main-world.ts`, `src/extension/content/content-entry.ts`, `src/extension/content/stream-id.ts`, `src/extension/worker/*`, `src/extension/popup/*`, `src/extension/manifest.json`, `scripts/build-extension.ts` | none (IndexedDB outbox, `chrome.storage.session`) | `TranscriptResult`, `TabCaptureState`, `PopupRequest`, `transition` |
 | Evidence | W3 | `src/backend/evidence/*` | `capture_facts`, `frames`, `evidence_snapshots`, `evidence_deletions`, `capture_owners` | `WatchedPassage`, `WatchOrder`, `EvidenceStore`, `createEvidence` |
-| Segmentation | W4 | `src/backend/segmentation/*` | `chunk_revisions` | `SegmentationConfig`, `SEGMENTATION_DEFAULTS`, `Segmentation`, `WindowTrace`, `createSegmentation`, `buildWindows`, `planChunks` |
+| Segmentation | W4 | `src/backend/segmentation/*` | `chunk_revisions` (has `user_id`) | `SegmentationConfig`, `SEGMENTATION_DEFAULTS`, `Segmentation` (now with `heldByAnotherUser(captureId)`), `WindowTrace`, `createSegmentation` (takes a `UserDb`), `buildWindows`, `planChunks` |
 | Providers | W5 | `src/backend/providers/{ledger,jev,jev-tasks,claude,claude-api}.ts` | `memo_inputs`, `memo`, `memo_failures`, `usage_events` (written only by `memo.ts`), `voice_usage_events` (written only by `elevenlabs.ts`); all five have `user_id` | `Ledger`, `JevClient`, `JevRequest`, `JevAnswer`, `BoundaryInput`, `FrameChangeInput`, `ClaimSupportInput`, `toVerdict`, the three Jev task factories, `ClaudeCli`, `ClaudeRequest`, `claudeArgs`, `createClaudeApi`, `MemoRunOptions` |
-| Preparation | W6 | `src/backend/preparation/*` | `claim_index`, `concept_index`, `prep_controls` | `Preparation`, `createPreparation`, `PreparationTasks`, `InterpretationInput`, `InterpretationOutput`, `RevisionInput`, `ResourceSearchInput` |
+| Preparation | W6 | `src/backend/preparation/*` | `claim_index`, `concept_index`, `prep_controls`, `prep_inputs`; all four have `user_id` | `Preparation`, `createPreparation` (takes a `UserDb`), `PreparationTasks`, `InterpretationInput`, `InterpretationOutput`, `RevisionInput`, `ResourceSearchInput` |
 | Review lifecycle | W7 | `src/backend/review/index.ts`, `src/backend/review/core.ts` | `invite_answers`, `reviews`, `review_turns` | `Reviews`, `createReviews` |
 | Tutor and record | W8 | `src/backend/review/tutor.ts`, `src/backend/review/clamp.ts`, `src/backend/review/detour.ts`, `src/backend/record/*` | `notes`, `note_edits`, `note_deletions`, `note_evidence`, `observations`, `observation_decisions`, `link_suggestions`, `link_decisions`, `saved_reviews`, `save_failures` | `TutorInput`, `TutorOutput`, `WrapUpInput`, `WrapUpOutput`, `parseMoveHeader`, `validateMove`, `allowedMoves`, `reviewState`, `clampStatus`, `isLearningGap`, `LearningRecord` (now with `saveState(reviewId)`), `createRecord` (takes a `UserDb`; only its `evidence_deletions` read is user-scoped so far), `RecordBundle` |
 | Review app | W9 | `src/app/*` | none (IndexedDB holding unsent turns) | `Api`, `createApi` |
@@ -21,7 +21,7 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 
 - Tests go in `test/<module>.test.ts` and use `fakeTask` from `test/fakes.ts`. No live Jev or Claude call outside Derek's five approved experiments. When you write the real test for a rule, delete its `test.todo` line in `test/rules.test.ts` in the same commit.
 - Pure logic goes in your module's `core.ts`. Only your module and `test/` may import it.
-- To change your tables, append a migration to your own array in `MIGRATIONS` (`src/backend/db.ts`). Never edit an applied migration; `openDb` refuses one whose text changed. That array is the only line range of a kernel file you may touch.
+- To change your tables, append a migration to your own array in `MIGRATIONS` (`src/backend/migrations.ts`). Never edit an applied migration; `openDb` refuses one whose text changed. That array is the only line range of a kernel file you may touch.
 - Write SQL only against tables your row lists. `test/boundaries.test.ts` fails otherwise.
 - Quote Derek's rules as `Rn: "<exact text>"` wherever code enforces one. `test/rules.test.ts` fails on any wording that differs from `docs/flows/after-class.md`.
 - Every provider call is `memo.run(task, input)`. Derivations read `memo.lookup` and apply results only through `appliesBefore(lookup, cutoff)`.
@@ -30,6 +30,18 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 
 - `createMemo`, `createLedger` and `createVoice` take a `UserDb` and read and write only its `userId`'s rows. A memo is per user: its rows are keyed by (`user_id`, `key`), and the key stays a hash of the call alone. A `MemoKey` is therefore unique only within one user, so a module that stores one beside its own rows reads it back through that user's memo.
 - `memo.run` takes an optional `captureId`, stored on the call's usage events. `main.ts` passes it for boundary calls; the other callers do not know the capture yet and leave `usage_events.capture_id` null.
+
+## Users in segmentation
+
+- `createSegmentation` takes a `UserDb` and reads and writes only its `userId`'s chunk revisions. A chunk id derives from the capture id and a revision id from the chunk and its material, so two users who hold one capture id make identical ids. The table is keyed by (`user_id`, `id`) and unique on (`user_id`, `chunk_id`, `revision_no`), and `supersedes` is a composite foreign key to the same user's revision. The derivations are unchanged, so every stored id, scope and memo key stays valid.
+- `Segmentation.heldByAnotherUser(captureId)` is true when another user has chunks of the capture and the caller has none. `POST /captures/:captureId/retry-preparation` answers 404 then. A capture nobody holds keeps its 204 no-op.
+
+## Users in preparation
+
+- `createPreparation` takes a `UserDb`, and every statement carries its `userId`. Claim ids hash the interpretation's memo key, concept ids hash a label, and a frozen input's subject is a chunk revision, claim or concept id, so two users who watch one lecture derive identical ids. All four tables therefore key by (`user_id`, id) and the derivations stay.
+- A frozen input (`prep_inputs`, one row per user, kind and subject) is first-writer-wins per user. Another user's row never holds a slot, so one user's job is never dropped as outdated because the other froze a different input, and a stop early or retry fact (`prep_controls`) reaches only its own user's derivation (R8).
+- `prep_inputs.memo_key` is read back through the same user's memo. It has no foreign key to `memo_inputs`, because a frozen input is written before the job's memo row exists.
+- Preparation has no route of its own that takes an id. `retry-preparation` is guarded through `Segmentation.heldByAnotherUser`.
 
 ## Wire contract
 
