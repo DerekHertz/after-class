@@ -121,7 +121,7 @@ describe("every route that takes an id", () => {
     const state = () =>
       JSON.stringify(
         ["capture_facts", "frames", "invite_answers", "reviews", "review_turns", "notes", "note_edits", "note_deletions", "observation_decisions", "link_decisions", "saved_reviews", "save_failures", "evidence_deletions"].map(
-          (t) => raw.sql.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM ${t}`).get()!.n,
+          (t) => raw.sql.query(`SELECT * FROM ${t} ORDER BY rowid`).all(),
         ),
       );
     const before = state();

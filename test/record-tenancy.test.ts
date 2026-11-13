@@ -283,4 +283,3 @@ describe("a database from before the record got user_id", () => {
     db.close();
   });
 });
-

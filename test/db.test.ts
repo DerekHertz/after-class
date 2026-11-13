@@ -200,14 +200,21 @@ describe("append-only facts and snapshots", () => {
 
   test("R14: the record refuses 'disputed' as a stored proposal or override", () => {
     const db = testDb();
-    expect(() =>
-      db.sql.run(
-        "INSERT INTO observations (id, review_id, thread_id, claim_ids_json, concept_ids_json, proposed, facts_json, saved_ms) VALUES ('obs_1', 'rvw_1', 'thr_1', '[]', '[]', 'disputed', '{}', 0)",
-      ),
-    ).toThrow();
-    expect(() =>
-      db.sql.run("INSERT INTO observation_decisions (observation_id, kind, value, decided_ms) VALUES ('obs_1', 'override', 'disputed', 0)"),
-    ).toThrow();
+    const user = ensureLocalUser(db);
+    const observation = (id: string, ord: number, thread: string, proposed: string) =>
+      db.sql
+        .query(
+          "INSERT INTO observations (user_id, id, ord, review_id, thread_id, claim_ids_json, concept_ids_json, proposed, facts_json, saved_ms) VALUES (?, ?, ?, 'rvw_1', ?, '[]', '[]', ?, '{}', 0)",
+        )
+        .run(user, id, ord, thread, proposed);
+    const override = (id: string, value: string) =>
+      db.sql
+        .query("INSERT INTO observation_decisions (user_id, observation_id, kind, value, decided_ms) VALUES (?, ?, 'override', ?, 0)")
+        .run(user, id, value);
+    observation("obs_ok", 1, "thr_ok", "independent");
+    override("obs_ok", "independent");
+    expect(() => observation("obs_1", 2, "thr_1", "disputed")).toThrow(/CHECK constraint failed/);
+    expect(() => override("obs_ok2", "disputed")).toThrow(/CHECK constraint failed/);
   });
 });
 
