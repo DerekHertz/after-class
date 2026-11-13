@@ -1,16 +1,27 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { COMPANIONS, SCENES, parseAppearance } from "../src/app/appearance";
 import type { CompanionId, SceneId } from "../src/app/appearance";
-import { CROP_LIMIT, FRONT_ROW_ROOMS, FrontRowScene, PLATE, reserveNavSpace, roomStyle, stageBox, topCropLimit } from "../src/app/front-row";
-import type { FrontRowLayout, PlateBox } from "../src/app/front-row";
+import { FRONT_ROW_ROOMS, FrontRowScene, ROOM_ART, reserveNavSpace, roomStyle } from "../src/app/front-row";
+import type { FrontRowLayout, NineSlice } from "../src/app/front-row";
 import { OBJECT_ART_SIZE, ROOM_OBJECTS } from "../src/app/room-object";
 import type { ObjectArt, RoomObject } from "../src/app/room-object";
 import { contrast, medianColor, readPng } from "./png";
 
 const rooms = Object.keys(FRONT_ROW_ROOMS) as SceneId[];
+/** The asset names of each room's layers, as the files in assets/front-row-v2 are called. */
+const ART = { "last-desk": "rail", "study-bench": "harbor", "projection-booth": "canal" } as const satisfies Record<SceneId, string>;
+const decoded = new Map<string, ReturnType<typeof readPng>>();
+/** The layers are large, so each is decoded once. */
+const layer = (scene: SceneId, name: string) => {
+  const file = `${ART[scene]}-${name}.png`;
+  if (!decoded.has(file)) decoded.set(file, readPng(new URL(`../src/app/assets/front-row-v2/${file}`, import.meta.url)));
+  return decoded.get(file)!;
+};
 const plate = (scene: SceneId) => readPng(new URL(`../src/app/assets/front-row/${scene}.png`, import.meta.url));
-const overlaps = (a: PlateBox, b: PlateBox) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+/** The plain area of a nine-slice as fractions of the image, for sampling the colour the text sits on. */
+const innerBox = ({ size, inner }: NineSlice) => ({ left: inner.left / size.width, top: inner.top / size.height, right: 1 - inner.right / size.width, bottom: 1 - inner.bottom / size.height });
 
 describe("the three skins keep saved preferences", () => {
   test("each saved scene ID opens its selected skin", () => {
@@ -22,24 +33,48 @@ describe("the three skins keep saved preferences", () => {
 });
 
 describe("each room's text sits on its own art and reads clearly", () => {
-  test("every plate is the measured size with no transparency", () => {
+  test("every layer is the measured size, and only the background is opaque", () => {
     for (const scene of rooms) {
-      const png = plate(scene);
-      expect({ scene, width: png.width, height: png.height, alpha: png.alpha }).toEqual({ scene, ...PLATE, alpha: false });
+      const room = FRONT_ROW_ROOMS[scene];
+      const bg = layer(scene, "background");
+      expect({ scene, width: bg.width, height: bg.height, alpha: bg.alpha }).toEqual({ scene, width: ROOM_ART.plate.width * ROOM_ART.scale, height: ROOM_ART.plate.height * ROOM_ART.scale, alpha: false });
+      for (const [name, art] of [["board", room.board.art], ["desk", room.desk.art], ["mat", room.mat.art]] as const) {
+        const png = layer(scene, name);
+        expect({ scene, name, width: png.width, height: png.height, alpha: png.alpha }).toEqual({ scene, name, ...art.size, alpha: true });
+      }
+    }
+  }, 60_000);
+
+  test("each nine-slice keeps its corners apart, and its plain area ends inside the corner cuts so it never stretches", () => {
+    for (const scene of rooms) {
+      const room = FRONT_ROW_ROOMS[scene];
+      for (const [name, art] of [["board", room.board.art], ["mat", room.mat.art]] as const) {
+        const { slice, inner, size } = art;
+        expect({ scene, name, apart: slice.left + slice.right < size.width && slice.top + slice.bottom < size.height }).toEqual({ scene, name, apart: true });
+        expect({ scene, name, inside: inner.left <= slice.left && inner.right <= slice.right + 2 && inner.top <= slice.top && inner.bottom <= slice.bottom + 2 }).toEqual({ scene, name, inside: true });
+      }
+      const { slice, size } = room.desk.art;
+      expect({ scene, desk: slice.top === 0 && slice.bottom === 0 && slice.left + slice.right < size.width }).toEqual({ scene, desk: true });
     }
   });
 
-  test("board and mat ink pass WCAG AA against the colour the plate actually has there", () => {
+  test("board and mat ink pass WCAG AA against the colour the layer actually has in its plain area", () => {
     for (const scene of rooms) {
-      const png = plate(scene);
       const room = FRONT_ROW_ROOMS[scene];
       for (const [surface, spec] of [["board", room.board], ["mat", room.mat]] as const) {
-        const painted = medianColor(png, spec.box);
+        const painted = medianColor(layer(scene, surface), innerBox(spec.art));
         for (const ink of [spec.ink, spec.inkSoft]) expect({ scene, surface, ink, ratio: contrast(ink, painted) >= 4.5 }).toEqual({ scene, surface, ink, ratio: true });
         // A phone draws the surface in flat colour; it must be the art's own colour, not a recolour.
         const [r, g, b] = [1, 3, 5].map((i) => parseInt(spec.fill.slice(i, i + 2), 16));
         expect({ scene, surface, distance: Math.abs(r! - painted[0]) + Math.abs(g! - painted[1]) + Math.abs(b! - painted[2]) < 24 }).toEqual({ scene, surface, distance: true });
       }
+    }
+  });
+
+  test("the room picker's plates are still the measured size with no transparency", () => {
+    for (const scene of rooms) {
+      const png = plate(scene);
+      expect({ scene, width: png.width, height: png.height, alpha: png.alpha }).toEqual({ scene, width: 1585, height: 992, alpha: false });
     }
   });
 
@@ -60,45 +95,21 @@ describe("each room's text sits on its own art and reads clearly", () => {
 });
 
 describe("room geometry", () => {
-  test("board above mat, companion and notebook beside the mat, all inside the shown part of the plate", () => {
-    for (const scene of rooms) {
-      const room = FRONT_ROW_ROOMS[scene];
-      for (const box of [room.board.box, room.mat.box, room.companion, room.notebook]) {
-        expect(box.left).toBeGreaterThanOrEqual(0);
-        expect(box.right).toBeLessThanOrEqual(1);
-        expect(box.top).toBeGreaterThanOrEqual(room.cropTop);
-        expect(box.bottom).toBeLessThanOrEqual(1);
-        expect(box.left).toBeLessThan(box.right);
-        expect(box.top).toBeLessThan(box.bottom);
-      }
-      expect(room.board.box.bottom).toBeLessThan(room.mat.box.top);
-      for (const side of [room.companion, room.notebook]) {
-        expect(overlaps(side, room.mat.box)).toBe(false);
-        expect(overlaps(side, room.board.box)).toBe(false);
-      }
-    }
+  test("the roomStyle custom properties carry the nine-slice cuts, the text insets and the palette", () => {
+    const rail = roomStyle("last-desk");
+    expect(rail).toMatchObject({ "--fr-board-slice": "88 128 124 128", "--fr-mat-slice": "56 60 60 56", "--fr-desk-slice": "0 300 0 300", "--fr-bg-ax": 1, "--fr-wall-to": 1228 });
+    expect(rail["--fr-board-bw"]).toBe("calc(var(--fr-u) * 44) calc(var(--fr-u) * 64) calc(var(--fr-u) * 62) calc(var(--fr-u) * 64)");
+    expect(rail["--fr-board-il"]).toBe(`calc(var(--fr-u) * ${128 / ROOM_ART.scale + ROOM_ART.boardTextPad})`);
+    expect(roomStyle("study-bench")).toMatchObject({ "--fr-board-min-aspect": 0, "--fr-field-ink": FRONT_ROW_ROOMS["study-bench"].palette.fieldInk, "--fr-phone-x": "50%" });
   });
 
-  test("at the full-bleed crop limits the board stays mostly in view and the notebook and companion stay over their art", () => {
-    const perSide = CROP_LIMIT.sides / 2;
-    for (const scene of rooms) {
-      const room = FRONT_ROW_ROOMS[scene];
-      const board = stageBox(room.board.box, room.cropTop);
-      const kept = (board.top + board.height - topCropLimit(scene) * 100) / board.height;
-      expect({ scene, kept: kept >= 0.75 }).toEqual({ scene, kept: true });
-      expect(roomStyle(scene)["--fr-max-crop-top"]).toBe(topCropLimit(scene));
-      for (const [name, box] of [["notebook", room.notebook], ["companion", room.companion]] as const) {
-        const slide = Math.max(0, perSide - Math.min(box.left, 1 - box.right));
-        expect({ scene, name, overArt: slide <= (box.right - box.left) / 2 }).toEqual({ scene, name, overArt: true });
-      }
-      expect({ scene, matWhole: perSide < room.mat.box.left && perSide < 1 - room.mat.box.right }).toEqual({ scene, matWhole: true });
+  test("each extra is the size its room declares, and the harbor stands three lamps on its beam", () => {
+    for (const scene of rooms) for (const extra of FRONT_ROW_ROOMS[scene].extras) {
+      const png = layer(scene, extra.name);
+      expect({ scene, name: extra.name, width: png.width / ROOM_ART.scale, height: png.height / ROOM_ART.scale, alpha: png.alpha, placed: Object.keys(extra.place).length > 0 })
+        .toEqual({ scene, name: extra.name, width: extra.width, height: extra.height, alpha: true, placed: true });
     }
-  });
-
-  test("a plate box moves into scene percentages under the cropped top bar", () => {
-    expect(stageBox({ left: 0.25, top: 0.1, right: 0.75, bottom: 1 }, 0.1)).toEqual({ left: 25, top: 0, width: 50, height: 100 });
-    expect(stageBox({ left: 0, top: 0.5, right: 1, bottom: 0.75 }, 0)).toEqual({ left: 0, top: 50, width: 100, height: 25 });
-    expect(roomStyle("study-bench")).toMatchObject({ "--fr-board-left": "20.5%", "--fr-field-ink": FRONT_ROW_ROOMS["study-bench"].palette.fieldInk });
+    expect(FRONT_ROW_ROOMS["study-bench"].extras.filter((e) => e.name === "lamp")).toHaveLength(3);
   });
 });
 
@@ -107,7 +118,8 @@ describe("switching room or companion keeps one tree", () => {
   const scene = (room: SceneId, companion: CompanionId, visible = true) => renderToStaticMarkup(
     <FrontRowScene scene={room} layout={layout} appearance={{ companion, visible, motion: "system" }} activity="idle" />,
   );
-  const skeleton = (html: string) => html.replace(/ (data-[a-z-]+|style|aria-label)="[^"]*"/g, "").replace(/>[^<]+</g, "><");
+  // The art layers differ by room, but they sit in one wrapper ahead of the text areas, so they never move the response field.
+  const skeleton = (html: string) => html.replace(/<div class="front-row-art"[^>]*>.*?<\/div>/, "<art/>").replace(/ (data-[a-z-]+|style|aria-label)="[^"]*"/g, "").replace(/>[^<]+</g, "><");
 
   test("every room renders the same elements in the same order, so the draft is never remounted", () => {
     const shapes = new Set(rooms.map((room) => skeleton(scene(room, "mote"))));
@@ -180,6 +192,20 @@ describe("the folio and the notebook are the supplied art, and their pages read 
     let diff = 0;
     for (let x = 0; x < slice.left; x++) for (let c = 0; c < 3; c++) diff += Math.abs(pixel(png, x, slice.top)[c]! - pixel(png, x, end)[c]!);
     expect(diff / (slice.left * 3)).toBeLessThan(12);
+  });
+});
+
+describe("the objects on the desk are closed", () => {
+  const sprites = { source: "closed-folio", history: "closed-notebook" } as const;
+  const css = readFileSync(new URL("../src/app/front-row.css", import.meta.url), "utf8");
+
+  test("each desk object draws a closed-object sprite with transparent corners, never the open frame", () => {
+    for (const [object, name] of Object.entries(sprites)) {
+      const png = readPng(new URL(`../src/app/assets/front-row-v2/${name}.png`, import.meta.url));
+      expect({ object, alpha: png.alpha, width: png.width > 500 && png.width < 2000 }).toEqual({ object, alpha: true, width: true });
+      for (const [x, y] of [[0, 0], [png.width - 1, 0], [0, png.height - 1], [png.width - 1, png.height - 1]] as const) expect({ object, x, y, alpha: png.rgba[(y * png.width + x) * 4 + 3] }).toEqual({ object, x, y, alpha: 0 });
+      expect(css).toContain(`.front-row-object[data-object="${object}"] { --fr-object-art: url('./assets/front-row-v2/${name}.png'); }`);
+    }
   });
 });
 

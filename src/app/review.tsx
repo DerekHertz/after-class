@@ -193,10 +193,10 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const boardContent = <>
     {(lines.current.length > 0 || live !== null) && (
       <section ref={currentQuestion} className="current-exchange" aria-labelledby="current-exchange-heading" tabIndex={-1}>
-        <div className="front-row-heading">
+        <div className="front-row-heading-box"><div className="front-row-heading">
           <h2 id="current-exchange-heading" className="front-row-eyebrow"><span className="visually-hidden">Current question: </span>{questionTopic?.label ?? questionMarker ?? "Current question"}</h2>
           {questionTopic !== null && <ShowDiagramButton topic={{ id: questionTopic.topicId, label: questionTopic.label }} onShow={showDiagram} />}
-        </div>
+        </div></div>
         <ol className="lines">
           {lines.current.map((l) => <LineItem key={l.key} line={l} onSource={openSource} {...(l.key === questionKey ? { focusRef: questionLine } : {})} />)}
           {live !== null && (
