@@ -52,8 +52,9 @@ describe("flow doc: the approved lines are byte-identical", () => {
   });
 
   test("the 2026-11-11 amendment quotes Derek's replies verbatim", () => {
-    expect(DOC).toContain("Amendment (2026-11-11), Derek, on the agent's drafts: \"this sounds good\" for cluster screening, \"this is good\" for trace questions, and \"i think these are all important\" for the three importance definitions");
-    expect(DOC).toContain("Derek replied \"Approve as written\"");
+    const amendment = DOC.split("\n").find((line) => line.startsWith("Amendment (2026-11-11)")) ?? "";
+    expect(amendment).toContain("Amendment (2026-11-11), Derek, on the agent's drafts: \"this sounds good\" for cluster screening, \"this is good\" for trace questions, and \"i think these are all important\" for the three importance definitions");
+    expect(amendment).toContain("; Derek replied \"Approve as written\". R1 to R19 are unchanged.");
   });
 });
 
