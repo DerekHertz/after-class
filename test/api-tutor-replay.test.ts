@@ -148,6 +148,25 @@ describe("loadCalls", () => {
     expect(calls[1]!.cliNotionalUsd).toBeNull();
   });
 
+  test("reads one user's inputs only, and matches their CLI cost by user and key", () => {
+    const path = fixtureDb([{ key: "shared", purpose: "tutor_turn", atMs: T0 }], { shared: 0.5 });
+    const db = openDb(path);
+    const other = "usr_other" as typeof LOCAL_USER;
+    db.sql.run(`INSERT INTO users (id, created_ms) VALUES (?, 0)`, [other]);
+    db.sql.run(`INSERT INTO memo_inputs (user_id, key, provider, purpose, version, model, input_json, first_seen_ms) VALUES (?, 'shared', 'claude', 'tutor_turn', 'v', 'opus', ?, ?)`, [other, JSON.stringify({ system: "private", prompt: "their answer", effort: "medium" }), T0]);
+    db.sql.run(`INSERT INTO memo_inputs (user_id, key, provider, purpose, version, model, input_json, first_seen_ms) VALUES (?, 'theirs', 'claude', 'tutor_turn', 'v', 'opus', ?, ?)`, [other, JSON.stringify({ system: "private", prompt: "their answer", effort: "medium" }), T0 + 1]);
+    db.sql.run(
+      `INSERT INTO usage_events (id, user_id, memo_key, attempt_no, provider, model, purpose, outcome, input_tokens, output_tokens, cache_read_tokens, cost_kind, cost_usd, cost_basis, cost_reason, started_ms, duration_ms)
+       VALUES ('use_other', ?, 'shared', 1, 'claude', 'claude-opus-5-5', 'tutor_turn', 'ok', 1, 1, 0, 'notional', 0.7, 'claude_subscription', NULL, 1, 1)`,
+      [other],
+    );
+    db.close();
+    const mine = loadCalls(path, 0);
+    expect(mine.map((c) => [c.key, c.system, c.cliNotionalUsd, c.cliAttempts])).toEqual([["shared", SYSTEM, 0.5, 1]]);
+    const theirs = loadCalls(path, 0, other);
+    expect(theirs.map((c) => [c.key, c.system, c.cliNotionalUsd])).toEqual([["shared", "private", 0.7], ["theirs", "private", null]]);
+  });
+
   test("an input that is not {system, prompt, effort} is an error that names its key", () => {
     const path = fixtureDb([{ key: "bad", purpose: "tutor_turn", atMs: T0, input: { nope: 1 } }]);
     expect(() => loadCalls(path, 0)).toThrow("memo input bad");
