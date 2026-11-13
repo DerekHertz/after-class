@@ -88,6 +88,32 @@ export function ensureLocalUser(db: Db): UserId {
   return LOCAL_USER;
 }
 
+/** Who signed in, as the sign-in provider names them. `subject` is the provider's user id. */
+export type Identity = { readonly provider: "clerk"; readonly subject: string };
+
+/**
+ * The user row for a signed-in identity, created on its first sign-in. Idempotent: the unique index on
+ * (auth_provider, auth_subject) makes a second insert for the same identity a no-op, so concurrent first sign-ins
+ * converge on one row. The id is random, so it reveals nothing about the provider's subject.
+ */
+export function userForIdentity(db: Db, identity: Identity): UserId {
+  const find = db.sql.query<{ id: UserId }, [string, string]>("SELECT id FROM users WHERE auth_provider = ? AND auth_subject = ?");
+  return db.tx(() => {
+    const known = find.get(identity.provider, identity.subject);
+    if (known) return known.id;
+    const id = stableId("usr", identity.provider, crypto.randomUUID());
+    db.sql
+      .query("INSERT INTO users (id, created_ms, auth_provider, auth_subject) VALUES (?, ?, ?, ?) ON CONFLICT (auth_provider, auth_subject) DO NOTHING")
+      .run(id, Date.now(), identity.provider, identity.subject);
+    return find.get(identity.provider, identity.subject)!.id;
+  });
+}
+
+/** Every user who has signed in through a provider. Hosted mode builds their modules at boot so their work resumes. */
+export function signedInUsers(db: Db): UserId[] {
+  return db.sql.query<{ id: UserId }, []>("SELECT id FROM users WHERE auth_provider IS NOT NULL ORDER BY created_ms, id").all().map((r) => r.id);
+}
+
 /** Bind a handle to a user that has a `users` row. The handle shares the connection and the Seq counter. */
 export function scopeDb(db: Db, userId: UserId): UserDb {
   const known = db.sql.query<{ id: string }, [string]>("SELECT id FROM users WHERE id = ?").get(userId);
