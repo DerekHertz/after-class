@@ -1,6 +1,7 @@
 /**
  * Evidence store (W3). Owns: capture_facts, frames (bytes on disk at
- * <dataDir>/frames/<sourceId>/<evidenceId>.jpg), evidence_snapshots, evidence_deletions.
+ * <dataDir>/frames/<userId>/<sourceId>/<evidenceId>.jpg, snapshots at <dataDir>/snapshots/<userId>/<evidenceId>.jpg; rows written before
+ * per-user paths keep their old path), evidence_snapshots, evidence_deletions.
  *
  * One store serves one user (the `UserDb` it is built on): every query reads or writes with that user_id. A capture id
  * belongs to the first user that ingests it (capture_owners, kept after expiry), and another user's batch for it is refused, so a frame's evidence id and its
@@ -273,15 +274,22 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   const otherOwner = db.sql.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM capture_owners WHERE capture_id = ? AND user_id <> ?");
   const claimCapture = db.sql.query("INSERT INTO capture_owners (capture_id, user_id, claimed_ms) VALUES (?, ?, ?) ON CONFLICT DO NOTHING");
 
+  const pathInUse = db.sql.query<{ n: number }, [string, string]>(
+    "SELECT (SELECT COUNT(*) FROM frames WHERE path = ?) + (SELECT COUNT(*) FROM evidence_snapshots WHERE frame_path = ?) AS n",
+  );
+  /** Paths carry the user id, so two users never share one. This still refuses to unlink a file any row, of any user, points at. */
+  const unlinkUnreferenced = (paths: readonly string[]) => {
+    for (const p of paths) if (pathInUse.get(p, p)!.n === 0) unlinkQuiet(abs(p));
+  };
+
   const store: EvidenceStoreWithProbe = {
     ingest(batch) {
       const { captureId } = batch;
-      if (store.capturedByAnotherUser(captureId)) throw new RangeError(`ingest: capture ${captureId} belongs to another user`);
-      // Before any file is written. The claim outlives the capture's facts, so expiry never frees a capture id for another user.
-      claimCapture.run(captureId, userId, now());
       for (const f of batch.facts) {
         if (f.captureId !== captureId) throw new RangeError(`ingest: fact ${f.clientSeq} belongs to ${f.captureId}, not ${captureId}`);
       }
+      // A read-only early refusal so no file is written for a capture that is not this user's. The claim itself is in the transaction below.
+      if (store.capturedByAnotherUser(captureId)) throw new RangeError(`ingest: capture ${captureId} belongs to another user`);
       const have = new Set(
         db.sql
           .query<{ client_seq: number }, [string, string]>("SELECT client_seq FROM capture_facts WHERE user_id = ? AND capture_id = ?")
@@ -302,7 +310,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
         if (f.kind !== "frame") continue;
         const sourceId = stableId("src", "youtube", f.videoId);
         const id = stableId("ev", captureId, f.frameId);
-        const path = join("frames", sourceId, `${id}.jpg`);
+        const path = join("frames", userId, sourceId, `${id}.jpg`);
         const decoded = new Uint8Array(Buffer.from(f.jpegBase64, "base64"));
         const jpeg = isJpeg(decoded);
         // A resent frameId keeps the first bytes: the file is written only for an id with no row yet.
@@ -316,6 +324,9 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
 
       const at = now();
       db.tx(() => {
+        // The claim commits or rolls back with the rows. It outlives the capture's facts, so expiry never frees a capture id.
+        claimCapture.run(captureId, userId, at);
+        if (store.capturedByAnotherUser(captureId)) throw new RangeError(`ingest: capture ${captureId} belongs to another user`);
         for (const f of fresh) {
           const body: Record<string, unknown> = { ...f };
           delete body.captureId;
@@ -472,8 +483,8 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
           }
           const f = hit.entry.frame;
           const source = frameOf(id)!.path;
-          const link = join("snapshots", `${id}.jpg`);
-          mkdirSync(abs("snapshots"), { recursive: true });
+          const link = join("snapshots", userId, `${id}.jpg`);
+          mkdirSync(dirname(abs(link)), { recursive: true });
           if (!existsSync(abs(link))) {
             try {
               linkSync(abs(source), abs(link));
@@ -508,7 +519,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
           for (const r of db.sql.query<{ path: string }, [string, string]>("DELETE FROM frames WHERE user_id = ? AND evidence_id = ? RETURNING path").all(userId, id)) files.push(r.path);
         }
       });
-      for (const f of files) unlinkQuiet(abs(f));
+      unlinkUnreferenced(files);
       invalidate();
       deps.onChange();
     },
@@ -553,7 +564,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
         snapshotsDeleted = gone.length;
         for (const r of gone) if (r.frame_path !== null) files.push(r.frame_path);
       });
-      for (const f of files) unlinkQuiet(abs(f));
+      unlinkUnreferenced(files);
 
       // Files are one namespace for every user, so an orphan is a file no user's row points at. Filtering by this user
       // here would delete the other users' frames.

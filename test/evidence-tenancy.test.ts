@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { LOCAL_USER, MIGRATIONS, ensureLocalUser, openDb, scopeDb } from "../src/backend/db";
 import type { Db, UserDb } from "../src/backend/db";
@@ -238,6 +238,48 @@ describe("two users in one database", () => {
     raw.sql.run("DELETE FROM evidence_snapshots WHERE user_id = ?", [alice.id]);
     expect(countFor(raw, "evidence_snapshots", alice.id)).toBe(0);
     expect(countFor(raw, "evidence_snapshots", bob.id)).toBe(1);
+  });
+
+  test("a surviving snapshot with no owner row is never shared or unlinked by another user", () => {
+    const { raw, dir, alice, bob } = twoUsers();
+    const a = lecture();
+    const frame = frameIdOf(a.captureId);
+    // What an upgraded database can hold: Alice's cited snapshot at the old shared-layout path, her raw capture and any owner row gone.
+    const old = join("snapshots", `${frame}.jpg`);
+    mkdirSync(join(dir, "snapshots"), { recursive: true });
+    writeFileSync(join(dir, old), Buffer.from(JPEG, "base64"));
+    raw.sql.run("INSERT INTO evidence_snapshots (user_id, evidence_id, kind, source_id, start_s, end_s, frame_path, created_ms, width, height) VALUES (?, ?, 'frame', 'src_x', 3, 3, ?, 0, 640, 360)", [
+      alice.id, frame, old,
+    ]);
+    raw.sql.run("INSERT INTO note_evidence (note_id, evidence_id) VALUES (?, ?)", [stableId("note", "cites"), frame]);
+    const original = alice.evidence.frameBytes(frame)!;
+
+    const b = lecture(a.captureId);
+    bob.evidence.ingest({ captureId: a.captureId, facts: b.facts });
+    bob.evidence.snapshotInTx([frame]);
+    const bobPath = raw.sql.query<{ frame_path: string }, [string]>("SELECT frame_path FROM evidence_snapshots WHERE user_id = ?").get(bob.id)!.frame_path;
+    expect(bobPath).not.toBe(old);
+    bob.evidence.deleteByUser([frame], "req-b");
+    expect(existsSync(join(dir, old))).toBe(true);
+    expect(alice.evidence.frameBytes(frame)).toEqual(original);
+  });
+
+  test("a failed ingest rolls back its ownership claim, and the files it wrote are swept as orphans", () => {
+    const { raw, dir, alice, bob } = twoUsers();
+    const s = lecture();
+    raw.sql.run("CREATE TRIGGER boom BEFORE INSERT ON capture_facts BEGIN SELECT RAISE(ABORT, 'boom'); END");
+    expect(() => alice.evidence.ingest({ captureId: s.captureId, facts: s.facts })).toThrow(/boom/);
+    raw.sql.run("DROP TRIGGER boom");
+    expect(rows(raw, "SELECT COUNT(*) AS n FROM capture_owners")).toBe(0);
+    expect(rows(raw, "SELECT COUNT(*) AS n FROM capture_facts")).toBe(0);
+    expect(rows(raw, "SELECT COUNT(*) AS n FROM frames")).toBe(0);
+    const jpgs = () => (readdirSync(join(dir, "frames"), { recursive: true }) as string[]).filter((f) => f.endsWith(".jpg"));
+    expect(jpgs()).toHaveLength(1);
+
+    expect(bob.evidence.ingest({ captureId: s.captureId, facts: s.facts }).ackedThroughSeq).toBe(s.facts.length - 1);
+    expect(alice.evidence.sweepExpired(NOW, 30).framesDeleted).toBe(1);
+    expect(jpgs()).toHaveLength(1);
+    expect(bob.evidence.frameBytes(frameIdOf(s.captureId))).not.toBeNull();
   });
 
   test("the same capture id and client sequence may exist for two users at the table level", () => {

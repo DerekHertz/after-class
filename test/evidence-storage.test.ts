@@ -124,7 +124,7 @@ describe("capture probe bundle", () => {
     expect(bundle.watched).toEqual([{ sourceId: SRC, intervals: [[0, 10]] }]);
     expect(bundle.passages).toHaveLength(1);
     expect(bundle.frames).toHaveLength(1);
-    expect(bundle.frames[0]!.file).toBe(join(h.dir, "frames", SRC, `${stableId("ev", s.captureId, "f1")}.jpg`));
+    expect(bundle.frames[0]!.file).toBe(join(h.dir, "frames", h.db.userId, SRC, `${stableId("ev", s.captureId, "f1")}.jpg`));
     expect(exceptStalls(bundle.gaps).map((g) => g.reason)).toEqual(["partially_watched_segment"]);
     expect(bundle.ads).toHaveLength(1);
   });
@@ -270,8 +270,8 @@ describe("R16: cited evidence is deleted only by the user, never by expiry", () 
 
   test("orphan frame files (a crash between the file write and the row commit) are swept", () => {
     const { h } = capture();
-    const orphan = join(h.dir, "frames", SRC, "ev_orphan.jpg");
-    mkdirSync(join(h.dir, "frames", SRC), { recursive: true });
+    const orphan = join(h.dir, "frames", h.db.userId, SRC, "ev_orphan.jpg");
+    mkdirSync(join(h.dir, "frames", h.db.userId, SRC), { recursive: true });
     writeFileSync(orphan, "x");
     writeFileSync(`${orphan}.tmp-1`, "x");
     expect(h.evidence.sweepExpired(1_000_000, 30).framesDeleted).toBe(2);
