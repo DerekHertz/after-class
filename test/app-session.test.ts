@@ -7,7 +7,7 @@ import type { SessionState } from "../src/app/controller";
 import { createReviewController, needsChecklist, needsResume, resumeOnce } from "../src/app/controller";
 import { conversationLines, owedLearnerTurn, startLive, stepStartHandoff, strandedEndTurn } from "../src/app/core";
 import { reviewViewz } from "../src/app/decode";
-import { Composer, SaveBanner, TopicChecklist, UndeliveredNote } from "../src/app/review";
+import { Composer, HeaderActions, SaveBanner, TopicChecklist, UndeliveredNote } from "../src/app/review";
 import type { Speaker } from "../src/app/speech";
 import { createSynthSpeaker } from "../src/app/speech";
 import { createMemoryUnsent } from "../src/app/unsent";
@@ -19,7 +19,7 @@ import { answer, clm, cpt, events, findElements, learnerAnswer, parsedReview, re
 
 describe("save banner", () => {
   const session = (o: Partial<SessionState>): SessionState => ({
-    view: parsedReview(), loadError: null, live: null, unsent: [], sendError: null, saving: false, saveError: null, savedSummary: null, storageDegraded: false, ...o,
+    view: parsedReview(), loadError: null, live: null, unsent: [], sendError: null, saving: false, saveError: null, savedSummary: null, storageDegraded: false, busy: false, ...o,
   });
   const banner = (o: Partial<SessionState>) => renderToStaticMarkup(createElement(SaveBanner, { state: session(o), onRetry: () => {}, reviewId }));
 
@@ -214,6 +214,30 @@ describe("review session controller", () => {
     expect(h.sends).toHaveLength(1);
   });
 
+  test("a learner act made while the finished turn is still settling is held visibly and refused with a message, never dropped silently", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const h = setup({
+      reviewGate: gate,
+      sendTurn: ({ turnId }) => events({ type: "learner_turn_stored", turnId }, { type: "turn_complete", turnId }),
+    });
+    const { controller } = h;
+    expect(controller.getState().busy).toBe(false);
+    const first = controller.send(answer);
+    while (controller.getState().live?.status !== "complete") await Promise.resolve();
+    // The stream is done and the follow-up review call is pending: the lock is still held.
+    expect(controller.getState().busy).toBe(true);
+    expect(await controller.send({ kind: "end" })).toBe(false);
+    expect(controller.getState().sendError).toContain("try again");
+    expect(h.sends).toHaveLength(1);
+    release();
+    await first;
+    expect(controller.getState().busy).toBe(false);
+    expect(await controller.send({ kind: "end" })).toBe(true);
+    expect(h.sends).toHaveLength(2);
+    expect(controller.getState().sendError).toBeNull();
+  });
+
   test("a pending save waits for Retry, and Retry calls the same save until it succeeds", async () => {
     const results: Awaited<ReturnType<Api["save"]>>[] = [
       { kind: "save_failed", error: "disk full", retryable: true },
@@ -245,7 +269,7 @@ describe("review session controller", () => {
 
   test("#138: a pending save shows Saving, not the not-saved alert, while a save runs", () => {
     const banner = renderToStaticMarkup(createElement(SaveBanner, {
-      state: { view: parsedReview({ saved: "save_pending" }), loadError: null, live: null, unsent: [], sendError: null, saving: true, saveError: null, savedSummary: null, storageDegraded: false },
+      state: { view: parsedReview({ saved: "save_pending" }), loadError: null, live: null, unsent: [], sendError: null, saving: true, saveError: null, savedSummary: null, storageDegraded: false, busy: false },
       onRetry: () => {}, reviewId,
     }));
     expect(banner).toContain("Saving this review to your notebook...");
@@ -395,7 +419,7 @@ describe("review composer", () => {
 
 describe("opening the review (flow D: topic checklist, then the learner starts it)", () => {
   const state = (o: Partial<SessionState> = {}): SessionState => ({
-    view: parsedReview(), loadError: null, live: null, unsent: [], sendError: null, saving: false, saveError: null, savedSummary: null, storageDegraded: false, ...o,
+    view: parsedReview(), loadError: null, live: null, unsent: [], sendError: null, saving: false, saveError: null, savedSummary: null, storageDegraded: false, busy: false, ...o,
   });
   const cpt2 = stableId("cpt", "concept-2");
   const topics = [{ id: cpt, label: "Logical clocks", summary: "Order events without a shared clock." }, { id: cpt2, label: "Vector clocks", summary: "" }];
@@ -516,7 +540,7 @@ describe("a chain that stopped part-way resumes after reload", () => {
   const closeThread = turnJson(3, "tutor", { move: { kind: "close_thread", threadId: thr }, say: "Let's leave that question there and move on." });
   const owing = (o: Parameters<typeof reviewJson>[0] = {}) => parsedReview({ turns: [tutorAsk, learnerAnswer(2), closeThread], owesMove: true, ...o });
   const state = (view: ReviewView | null, o: Partial<SessionState> = {}): SessionState => ({
-    view, loadError: null, live: null, unsent: [], sendError: null, saving: false, saveError: null, savedSummary: null, storageDegraded: false, ...o,
+    view, loadError: null, live: null, unsent: [], sendError: null, saving: false, saveError: null, savedSummary: null, storageDegraded: false, busy: false, ...o,
   });
   const run = (states: SessionState[]) => {
     let n = 0;
@@ -580,5 +604,22 @@ describe("a chain that stopped part-way resumes after reload", () => {
     expect(needsResume(h.controller.getState())).toBe(false);
     await h.controller.retryTurn();
     expect(h.sends.map((s) => s.turnId)).toEqual([learnerAnswer(2).id, learnerAnswer(2).id]);
+  });
+});
+
+describe("the header actions while a turn settles", () => {
+  const state = (o: Partial<SessionState> = {}): SessionState => ({
+    view: parsedReview(), loadError: null, live: null, unsent: [], sendError: null, saving: false, busy: false, saveError: null, savedSummary: null, storageDegraded: false, ...o,
+  });
+  const header = (o: Partial<SessionState>) => renderToStaticMarkup(createElement(HeaderActions, { ids: ["pause", "end"], state: state(o), send: () => {} }));
+
+  test("Pause and Finish are disabled while the controller is busy, although no stream is live", () => {
+    const busy = header({ busy: true });
+    expect(busy).toMatch(/<button[^>]*data-action="end"[^>]*disabled/);
+    expect(busy).toMatch(/<button[^>]*data-action="pause"[^>]*disabled/);
+  });
+
+  test("they are enabled when nothing holds the lock", () => {
+    expect(header({})).not.toContain("disabled");
   });
 });

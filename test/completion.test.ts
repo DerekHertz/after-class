@@ -76,7 +76,7 @@ describe("completion summary from saved observations", () => {
     ]);
     expect(outcome.revisit).toEqual([]);
     expect(outcome.disputed).toBe(0);
-    const html = banner({ view, loadError: null, live: null, unsent: [], storageDegraded: false, sendError: null, saving: false, saveError: null, savedSummary: null });
+    const html = banner({ view, loadError: null, live: null, unsent: [], storageDegraded: false, busy: false, sendError: null, saving: false, saveError: null, savedSummary: null });
     expect(html).toContain("You marked your explanation as supported (2)");
     expect(html).not.toContain("Next time, start with");
     expect(html).not.toContain("Still unresolved");
@@ -109,7 +109,7 @@ describe("completion summary from saved observations", () => {
     const outcome = completionOf(view);
     expect(outcome.groups).toEqual([{ group: "not_reached", heading: NOT_REACHED, items: expect.any(Array) }]);
     expect(outcome.groups[0]!.items.map((i) => i.status)).toEqual(["", ""]);
-    const html = banner({ view, loadError: null, live: null, unsent: [], storageDegraded: false, sendError: null, saving: false, saveError: null, savedSummary: null });
+    const html = banner({ view, loadError: null, live: null, unsent: [], storageDegraded: false, busy: false, sendError: null, saving: false, saveError: null, savedSummary: null });
     expect(html).toContain("The tutor saved no observations for this review, so nothing here is assessed.");
   });
 });

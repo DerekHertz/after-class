@@ -36,6 +36,8 @@ export type SessionState = {
   /** Why the last `send` was refused, or null. */
   readonly sendError: string | null;
   readonly saving: boolean;
+  /** True exactly while a turn holds the controller's lock: wider than `live.status === "streaming"`, it lasts until the view is refreshed and any save has run. */
+  readonly busy: boolean;
   /** Set while a save is pending: the last attempt failed, or the backend reports `save_pending`. Retry calls the same save. */
   readonly saveError: string | null;
   readonly savedSummary: { readonly notes: number; readonly observations: number; readonly links: number } | null;
@@ -101,7 +103,7 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
   const { api, reviewId, speaker, unsent } = deps;
   const mint = deps.mintTurnId ?? (() => randomId("turn"));
   const now = deps.nowMs ?? Date.now;
-  let state: SessionState = { view: null, loadError: null, live: null, unsent: [], storageDegraded: false, sendError: null, saving: false, saveError: null, savedSummary: null };
+  let state: SessionState = { view: null, loadError: null, live: null, unsent: [], storageDegraded: false, sendError: null, saving: false, busy: false, saveError: null, savedSummary: null };
   const listeners = new Set<() => void>();
   let streaming = false;
 
@@ -128,10 +130,12 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
   async function exclusive<T>(run: () => Promise<T>): Promise<T | undefined> {
     if (streaming) return undefined;
     streaming = true;
+    set({ busy: true });
     try {
       return await run();
     } finally {
       streaming = false;
+      set({ busy: false });
     }
   }
 
@@ -193,8 +197,8 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
       await refreshUnsent();
       await refreshView();
     },
-    send: async (act) =>
-      (await exclusive(async () => {
+    send: async (act) => {
+      const sent = await exclusive(async () => {
         const parsed = learnerAct.safeParse(act);
         if (!parsed.success) {
           set({ sendError: `Not sent. ${z.prettifyError(parsed.error)}` });
@@ -213,7 +217,12 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
         await refreshUnsent();
         await runTurn(turnId, act);
         return true;
-      })) ?? false,
+      });
+      if (sent !== undefined) return sent;
+      // The lock is held by a turn that is still settling: say so rather than drop the act.
+      set({ sendError: "The last turn is still finishing. Please try again in a moment." });
+      return false;
+    },
     retryTurn: () =>
       exclusive(async () => {
         const [oldest] = await unsent.forReview(reviewId);
