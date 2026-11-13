@@ -365,7 +365,10 @@ export function questionScrollTop(box: RevealBox, line: { readonly top: number; 
   const fits = line.bottom - line.top <= box.clientHeight;
   const inView = fits ? line.top >= viewTop && line.bottom <= viewBottom : line.bottom > viewTop && line.bottom <= viewBottom;
   if (inView) return null;
-  const target = Math.min(Math.max(line.bottom + gap - box.clientHeight, 0), Math.max(box.scrollHeight - box.clientHeight, 0));
+  // Anchor on the line's end, but never past a line's start when the whole line fits: the gap gives way first.
+  const anchored = line.bottom + gap - box.clientHeight;
+  const wanted = fits ? Math.min(anchored, line.top) : anchored;
+  const target = Math.min(Math.max(wanted, 0), Math.max(box.scrollHeight - box.clientHeight, 0));
   return target === box.scrollTop ? null : target;
 }
 

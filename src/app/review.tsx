@@ -133,7 +133,14 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
    * a short reply that already fits does not move.
    */
   useEffect(() => {
-    if (questionKey === undefined || replyPending || revealed.current === questionKey) return;
+    if (replyPending) {
+      // A smooth scroll toward the last question may still be running when the learner sends again. Stop it where it
+      // is, so the board never moves on its own while the next reply streams.
+      const area = board.current;
+      if (area !== null) area.scrollTo({ top: area.scrollTop, behavior: "auto" });
+      return;
+    }
+    if (questionKey === undefined || revealed.current === questionKey) return;
     const first = revealed.current === undefined;
     let frame = 0;
     let cancelled = false;

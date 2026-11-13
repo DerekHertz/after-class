@@ -63,6 +63,9 @@ describe("scrolling the board to the tutors question", () => {
   test("a reply above the visible area is brought back into view", () => {
     expect(questionScrollTop({ ...board, scrollTop: 800 }, { top: 20, bottom: 200 })).toBe(0);
   });
+  test("a reply that only just fits shows its first line, and the gap below gives way", () => {
+    expect(questionScrollTop(board, { top: 400, bottom: 695 })).toBe(400);
+  });
   test("the target never passes the end of the contents of the board", () => {
     expect(questionScrollTop({ scrollTop: 0, clientHeight: 300, scrollHeight: 700 }, { top: 500, bottom: 690 })).toBe(400);
   });
