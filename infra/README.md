@@ -23,7 +23,7 @@ Nothing here has been planned or applied. Derek runs every command below, with `
 
 `shared/`
 
-- An ECR repository `afterclass-api` with scan on push, immutable tags and a lifecycle rule that keeps the 10 newest images.
+- An ECR repository `afterclass-api` with scan on push and immutable tags. Its lifecycle policy expires untagged images after a day, keeps the 3 newest `live-<commit>` images whatever else is pushed, and keeps the 10 newest other images. The deploy workflow adds the `live-` tag to an image after the server reports it healthy, so the running image and the one it replaced cannot expire, even after many failed deploys. Immutable tags forbid re-tagging, but a second tag on the same image is a new name.
 - The account's GitHub OIDC provider.
 
 `beta/`
@@ -34,7 +34,7 @@ Nothing here has been planned or applied. Derek runs every command below, with `
 - A `t4g.small` Amazon Linux 2023 ARM instance. The AMI comes from the SSM public parameter, IMDSv2 is required and the root volume is encrypted gp3. There is no key pair. Session Manager is the way in.
 - A separate encrypted gp3 data volume of 20 GB with `prevent_destroy`, attached at `/dev/sdf` and mounted at `/data`. A Data Lifecycle Manager policy snapshots it daily and keeps 7.
 - An instance role with `AmazonSSMManagedInstanceCore`, ECR pull from the shared repository only, and CloudWatch Logs write to its own log group (14 days).
-- Cloud-init (`user_data`) installs Docker, mounts `/data`, and sets up two systemd units. `afterclass-app` runs the image from ECR, and `afterclass-caddy` runs the pinned Caddy image as the reverse proxy on ports 80 and 443. Caddy's certificates live on `/data/caddy`. The app keeps its database in `/data/db` and its config folder in `/data/config`.
+- Cloud-init (`user_data`) installs Docker, mounts `/data`, and sets up two systemd units. `afterclass-app` runs the image from ECR, and `afterclass-caddy` runs the pinned Caddy image as the reverse proxy on ports 80 and 443. Both containers join one Docker bridge network, `afterclass`, and Caddy proxies to `afterclass-app:8080`. Neither uses host networking, so the instance metadata hop limit of 1 keeps both away from the instance role's credentials. Both drop every capability, Caddy keeps only `NET_BIND_SERVICE`, both set `no-new-privileges`, and Caddy's root file system is read-only. Caddy's certificates live on `/data/caddy`. The app keeps its database in `/data/db` and its config folder in `/data/config`.
 - A deploy role for `deploy-beta.yml`, a Systems Manager document that runs the deploy script with a commit hash, and an SSM parameter that holds the current instance id.
 - With `domain` set, an A record for the apex in the existing Route 53 hosted zone.
 
@@ -52,7 +52,7 @@ Nothing here has been planned or applied. Derek runs every command below, with `
 
 - `ingress_cidrs` is required and has no default. Use `["<your public IP>/32"]` until sign-in lands, then `["0.0.0.0/0"]`.
 - `sslip_https` defaults to `false`. Set it to `true` with no domain to serve HTTPS on `<elastic-ip-with-dashes>.sslip.io`, a free public name that resolves to the Elastic IP, so the beta has a real certificate before a domain is bought. Like `domain`, it needs `ingress_cidrs` to include `0.0.0.0/0`.
-- `domain` defaults to `null`: no DNS record, HTTP only on the Elastic IP. Set it to the apex domain, whose Route 53 hosted zone must exist, to turn on automatic HTTPS. Caddy gets its certificate from Let's Encrypt, which validates from the internet, so Terraform refuses a `domain` unless `ingress_cidrs` includes `0.0.0.0/0`.
+- `domain` defaults to `null`: no DNS record, HTTP only on the Elastic IP. Set it to the apex domain, whose Route 53 hosted zone must exist, to turn on automatic HTTPS. Caddy gets its certificate from Let's Encrypt, which validates from the internet, so Terraform refuses a `domain` unless `ingress_cidrs` includes `0.0.0.0/0`. The exact apply is in "Turning on HTTPS" below.
 - `availability_zone` defaults to `us-east-2a` and is pinned, so a change in the zone offerings never replaces the data volume. A precondition checks that the instance type is offered there.
 - `caddy_image` is pinned by version and digest. To update it, read the new index digest from the registry and change both.
 
@@ -100,19 +100,45 @@ Derek's first beta setup.
    - `ECR_REPOSITORY` from the `ecr_repository_name` output of `shared/`
    - `BETA_PUBLIC_CHECK` set to `false`, until `ingress_cidrs` includes `0.0.0.0/0`. A GitHub runner cannot reach the server while only Derek's address is allowed. The server's own check of `/health` still gates the deploy.
 
-5. Run the `deploy-beta` workflow from `master` and approve it. It builds the arm64 image, pushes it to the shared repository by commit hash, and has the server pull it and restart the app. The server checks `/health` itself and rolls back to the previous image if the new one does not turn healthy. From the allowed address, `curl <public_url>/health` returns `{"ok":true}`.
+5. Run the `deploy-beta` workflow from `master` and approve it. It builds the arm64 image, pushes it to the shared repository by commit hash, and has the server pull it and restart the app. The server checks `/health` itself and rolls back to the previous image if the new one does not turn healthy. A healthy image then gets its `live-<commit>` tag. From the allowed address, `curl <public_url>/health` returns `{"ok":true}`.
 
 6. To open a shell, run `aws ssm start-session --target <instance_id output>`. This needs the Session Manager plugin for the AWS CLI on Derek's machine. The container logs are in the CloudWatch log group `/afterclass-beta`, in the streams `app` and `caddy`.
 
 When sign-in lands and the domain exists, run `terraform apply` in `beta/` again with `ingress_cidrs=["0.0.0.0/0"]` and `domain=<apex domain>`, then delete the `BETA_PUBLIC_CHECK` variable and set `BETA_URL` again from the new `public_url`. The change replaces the instance, because the Caddyfile is part of `user_data`. The Elastic IP, the data volume and the certificates stay, and the new instance starts the last deployed image by itself.
 
+## Turning on HTTPS
+
+Run these in `infra/beta` after the first setup. Each apply changes the Caddyfile, which is part of `user_data`, so it replaces the instance. The Elastic IP, the data volume and the certificates on it stay, the new instance starts the last deployed image by itself, and the beta is down for a few minutes. Keep the variables in `infra/beta/terraform.tfvars`, which git ignores, or repeat them on every later plan. A plan without them turns HTTPS off again.
+
+For `useafterclass.com`, once the domain is registered and its public Route 53 hosted zone exists. A domain registered through Route 53 creates the zone. A domain registered elsewhere needs the zone created and its name servers set at the registrar first.
+
+```
+cd infra/beta
+terraform plan -var='ingress_cidrs=["0.0.0.0/0"]' -var='domain=useafterclass.com' -out=beta.tfplan
+terraform apply beta.tfplan
+```
+
+Terraform adds an A record for the apex that points at the Elastic IP, and Caddy asks Let's Encrypt for `useafterclass.com`. The `www` name is not served. `terraform output public_url` prints `https://useafterclass.com`. Set `BETA_URL` to it and delete `BETA_PUBLIC_CHECK`.
+
+To get HTTPS before the domain exists, use `sslip_https`. It serves `https://<elastic-ip-with-dashes>.sslip.io`, for example `https://203-0-113-7.sslip.io`, with a real certificate. `domain` stays `null`, and `domain` wins when both are set.
+
+```
+cd infra/beta
+terraform plan -var='ingress_cidrs=["0.0.0.0/0"]' -var='sslip_https=true' -out=beta.tfplan
+terraform apply beta.tfplan
+```
+
+`terraform output public_url` prints the address. Set `BETA_URL` to it and delete `BETA_PUBLIC_CHECK`. Moving from sslip.io to the domain later is the first command above, and the sslip.io name stops being served.
+
+Caddy passes the client's `Host` header to the app unchanged and adds `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host`. It replaces any of those that a client sends, because no `trusted_proxies` is set. The app can check the public origin from these headers. Today the app still applies its localhost Host check, so a public name answers `/health` and nothing else until the hosted sign-in change replaces that check with the public origin.
+
 ## How the beta behaves on reboot, replacement and failure
 
 - A reboot needs no script. `/etc/fstab` mounts `/data` by label with `nofail`, and both units are enabled. The app unit refuses to start without the mount.
-- Cloud-init runs `afterclass-bootstrap` once per instance. Every step reads the current state first, so running it again by hand through Session Manager changes nothing that is already right. It formats the data volume only when the device has no filesystem, and refuses a device that holds anything but xfs.
+- Cloud-init runs `afterclass-bootstrap` once per instance. Every step reads the current state first, so running it again by hand through Session Manager changes nothing that is already right. It formats the data volume only when `blkid` reports no signature at all (exit status 2). It refuses a device that holds anything but xfs, and it refuses to format when `blkid` itself fails.
 - A change to the settings, the units, the scripts or the Caddyfile changes `user_data` and replaces the instance, with a few minutes of downtime. A new Amazon Linux release does not, because the AMI is ignored. Replace it on purpose with `terraform apply -replace=aws_instance.beta`.
 - On replacement Terraform stops the old instance, detaches the data volume, creates the new instance, and attaches the volume again. The new instance's bootstrap waits up to 5 minutes for the device. The current image tag is stored on `/data`, so the app comes back by itself.
-- A deploy that does not turn healthy within 90 seconds is rolled back to the previous tag, and the workflow fails.
+- A deploy that does not turn healthy within 90 seconds, or whose restart fails, is rolled back to the previous tag, and the workflow fails. A failed cleanup of old images after a healthy deploy is ignored.
 - To restore a snapshot, create an encrypted gp3 volume from it in the same zone. Then run `terraform state rm aws_volume_attachment.data aws_ebs_volume.data` and `terraform import aws_ebs_volume.data <new volume id>`, and apply. The apply replaces the instance, because the volume id is in `user_data`. The new instance mounts the restored volume. This procedure is written down and was not tested.
 - The snapshots are crash-consistent. SQLite recovers from that. A snapshot taken during a write is not a clean backup.
 
@@ -148,7 +174,8 @@ Add the `AWS_ROLE_ARN`, `ECS_CLUSTER` and `ECS_SERVICE` environment variables fr
 | ECR storage, about 2 GB of images | about $0.20 | unverified |
 | Route 53 hosted zone, only with a domain | about $0.50 | unverified |
 | Domain registration | a yearly charge, not monthly | not read |
-| Beta total | about $19 to $22 a month | sum of the rows above |
+| Beta total, low-change case | about $19 to $22 a month | sum of the rows above, with snapshots near $1, no logs and no domain |
+| Beta total, upper case | about $27 a month | the same rows with snapshots at $7, logs at $1 and Route 53 at $0.50 |
 
 For comparison, the `main/` skeleton without the database is about $35 a month, with the figures in `docs/architecture/decision.md`. Data transfer out and the AWS free plan or credits were not checked.
 
