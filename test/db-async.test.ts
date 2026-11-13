@@ -390,16 +390,20 @@ describe("async Db: a transaction body awaits only the database", () => {
     const { sync, db } = setup();
     const before = sync.nextSeq();
     let other = before;
-    setTimeout(() => {
-      other = sync.nextSeq();
-      sync.sql.run("INSERT INTO scratch (k, v) VALUES ('sync', 1)");
-    }, 2);
+    const ran = new Promise<void>((resolve) =>
+      setTimeout(() => {
+        other = sync.nextSeq();
+        sync.sql.run("INSERT INTO scratch (k, v) VALUES ('sync', 1)");
+        resolve();
+      }, 2),
+    );
     await expect(
       db.tx(async (t) => {
         await t.nextSeq();
         await delay(20);
       }),
     ).rejects.toThrow(/awaited something other than the database/);
+    await ran;
     expect(other).toBe((before + 1) as typeof before);
     expect(await keys(db)).toEqual(["sync"]);
     expect(sync.nextSeq()).toBe((other + 1) as typeof other);
@@ -544,10 +548,27 @@ describe("the raw connection during an async transaction", () => {
     expect(wrapped()).toBe(1);
     for (const mode of ["immediate", "deferred", "exclusive"] as const) expect(typeof wrapped[mode]).toBe("function");
     expect(sync.sql.transaction(() => 7).immediate()).toBe(7);
+    const database = (wrapped as unknown as { database: typeof sync.sql }).database;
     await db.tx(async () => {
       for (const mode of ["immediate", "deferred", "exclusive"] as const) expect(() => wrapped[mode]()).toThrow(ConnectionBusyError);
       expect(() => wrapped()).toThrow(ConnectionBusyError);
+      // The walk below enumerates the guard's own shell, not the original function, so `.database` is checked here.
+      expect(() => database.run("INSERT INTO scratch (k, v) VALUES ('via-database', 1)")).toThrow(ConnectionBusyError);
     });
+    expect(await keys(db)).not.toContain("via-database");
+  });
+
+  test("a guarded object whose prototype is swapped still never hands back the raw connection or statement", async () => {
+    const { sync, db } = setup();
+    const stmt = sync.sql.query("INSERT INTO scratch (k, v) VALUES ('swapped', 1)");
+    expect(Reflect.setPrototypeOf(sync.sql, Object.prototype)).toBe(false);
+    expect(Reflect.setPrototypeOf(stmt, Object.prototype)).toBe(false);
+    expect(sync.sql.valueOf()).toBe(sync.sql);
+    await db.tx(async () => {
+      expect(() => (sync.sql.valueOf() as typeof sync.sql).run("INSERT INTO scratch (k, v) VALUES ('swapped', 1)")).toThrow(ConnectionBusyError);
+      expect(() => stmt.run()).toThrow(ConnectionBusyError);
+    });
+    expect(await keys(db)).not.toContain("swapped");
   });
 
   test("every own and prototype property of Database, Statement, an iterator and a transaction function is guarded or returns no raw object", async () => {

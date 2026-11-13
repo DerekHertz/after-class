@@ -206,6 +206,8 @@ function guardObject<T extends object>(target: T, check: () => void, cache = new
   const known = cache.get(target);
   if (known) return known as T;
   const proxy = new Proxy(target, {
+    // Swapping the prototype would make a guarded object look plain to `wrapResult` and hand back the raw target.
+    setPrototypeOf: () => false,
     get(t, p) {
       const value = Reflect.get(t, p, t);
       if (typeof value !== "function") return wrapResult(value, check, cache);
@@ -221,6 +223,8 @@ function guardObject<T extends object>(target: T, check: () => void, cache = new
 
 function wrapResult(result: unknown, check: () => void, cache: WeakMap<object, object>): unknown {
   if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
+  const known = cache.get(result);
+  if (known) return known;
   if (typeof result === "function") return guardFunction(result as (...args: unknown[]) => unknown, check, cache);
   if (Array.isArray(result) || ArrayBuffer.isView(result)) return result;
   const proto = Object.getPrototypeOf(result);
