@@ -45,7 +45,7 @@ const SRC: readonly SourceFile[] = [...new Glob("src/**/*.{ts,tsx}").scanSync(RO
 const under = (dir: string) => (p: string) => p.startsWith(dir);
 const MODULES = ["evidence", "segmentation", "preparation", "review", "record"] as const;
 const DOMAIN_MODULE_DIRS = [...MODULES.map((m) => `src/backend/${m}/`), "src/backend/providers/"];
-const TRANSPORT = ["src/backend/providers/jev.ts", "src/backend/providers/claude.ts"];
+const TRANSPORT = ["src/backend/providers/jev.ts", "src/backend/providers/claude.ts", "src/backend/providers/claude-api.ts"];
 
 type Rule = { readonly name: string; readonly check: (f: SourceFile) => string | null };
 

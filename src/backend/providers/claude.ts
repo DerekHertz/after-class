@@ -29,7 +29,9 @@
  *
  * Stateless: every call is a fresh process with the full context built from
  * our DB. No --resume, so Claude's session store is never a second copy of a review.
- * No @anthropic-ai/sdk: the CLI is the only path to Claude.
+ * No @anthropic-ai/sdk here: this file is the subscription path to Claude. The other path, the Messages
+ * API through the SDK, is claude-api.ts, and main.ts routes only the tutor turn and the wrap-up to it,
+ * and only when AFTERCLASS_CLAUDE_BACKEND=api. It reuses this file's request type, limiter and abort error.
  */
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -96,9 +98,9 @@ export type SpawnFn = (argv: readonly string[], opts: { readonly cwd: string; re
 const bunSpawn: SpawnFn = (argv, opts) =>
   Bun.spawn([...argv], { cwd: opts.cwd, env: opts.env, stdin: "pipe", stdout: "pipe", stderr: "pipe" }) as unknown as ClaudeProcess;
 
-type Limiter = { acquire(signal: AbortSignal): Promise<() => void> };
+export type Limiter = { acquire(signal: AbortSignal): Promise<() => void> };
 
-function createLimiter(max: number): Limiter {
+export function createLimiter(max: number): Limiter {
   if (!Number.isInteger(max) || max < 1) throw new RangeError(`maxConcurrent must be a positive integer, got ${max}`);
   let active = 0;
   const waiting: { grant: () => void }[] = [];
@@ -133,7 +135,7 @@ function createLimiter(max: number): Limiter {
   };
 }
 
-function abortError(): Error {
+export function abortError(): Error {
   return new DOMException("aborted", "AbortError");
 }
 
