@@ -470,7 +470,7 @@ describe("preparation", () => {
     const r1 = w.close(0, 0, 20);
     w.script.interpret = () => ok(output([{ label: "A", claims: [draft("c", [P[0]!])] }]));
     const before = w.prep.demand(w.captureId).map((i) => i.key);
-    w.db.sql.query(`INSERT INTO invite_answers (seq, capture_id, answer, watched_s, at_ms) VALUES (?, ?, 'later', 20, 0)`).run(w.db.nextSeq(), w.captureId);
+    w.db.sql.query(`INSERT INTO invite_answers (seq, user_id, capture_id, answer, watched_s, at_ms) VALUES (?, ?, ?, 'later', 20, 0)`).run(w.db.nextSeq(), w.db.userId, w.captureId);
     expect(w.prep.demand(w.captureId).map((i) => i.key)).toEqual(before);
     await w.drain();
     expect(w.prep.prep(r1.id)).toMatchObject({ finished: true, supportedCount: 1 });

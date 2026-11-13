@@ -539,8 +539,8 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
              HAVING MAX(received_ms) < ?
                AND NOT EXISTS (
                  SELECT 1 FROM reviews r
-                 WHERE r.capture_id = capture_facts.capture_id
-                   AND NOT EXISTS (SELECT 1 FROM saved_reviews s WHERE s.review_id = r.id))`,
+                 WHERE r.user_id = capture_facts.user_id AND r.capture_id = capture_facts.capture_id
+                   AND NOT EXISTS (SELECT 1 FROM saved_reviews s WHERE s.user_id = r.user_id AND s.review_id = r.id))`,
           )
           .all(userId, cutoff);
         for (const { capture_id } of expired) {
@@ -556,8 +556,8 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
              WHERE user_id = ? AND created_ms < ?
                AND NOT EXISTS (
                  SELECT 1 FROM note_evidence ne
-                 WHERE ne.evidence_id = evidence_snapshots.evidence_id
-                   AND NOT EXISTS (SELECT 1 FROM note_deletions nd WHERE nd.note_id = ne.note_id))
+                 WHERE ne.user_id = evidence_snapshots.user_id AND ne.evidence_id = evidence_snapshots.evidence_id
+                   AND NOT EXISTS (SELECT 1 FROM note_deletions nd WHERE nd.user_id = ne.user_id AND nd.note_id = ne.note_id))
              RETURNING frame_path`,
           )
           .all(userId, cutoff);

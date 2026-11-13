@@ -530,7 +530,7 @@ describe("TLC counterexamples from docs/flows/model/out-record/report.md", () =>
   test("R16: end with a failed save, expiry is refused while pending, retry saves, cited evidence is held until the user deletes the note", async () => {
     const db = testDb();
     ensureLocalUser(db);
-    db.sql.run(`INSERT INTO reviews (id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, 'prepared_only', '{}', 1, 0)`, [REVIEW, CAPTURE]);
+    db.sql.run(`INSERT INTO reviews (id, user_id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, ?, 'prepared_only', '{}', 1, 0)`, [REVIEW, LOCAL_USER, CAPTURE]);
     db.sql.run(`INSERT INTO capture_facts (user_id, seq, capture_id, client_seq, wall_ms, kind, body_json, received_ms) VALUES (?, 2, ?, 0, 0, 'span', '{}', 0)`, [LOCAL_USER, CAPTURE]);
     const h = harness({ db });
     const expireRaw = () => db.sql.run(`DELETE FROM capture_facts WHERE capture_id = ?`, [CAPTURE]);

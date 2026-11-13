@@ -437,6 +437,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
         return replyWire("reviewOptions", wireOptions(reviews.options(captureId!)), cors);
       case "startReview": {
         const body = parseStartReviewRequest(await readJson(req));
+        if (reviews.heldByAnotherUser(body.reviewId)) return failure(404, "unknown review", cors);
         const existing = reviewOf(reviews, body.reviewId);
         if (existing && existing.captureId !== captureId) return failure(409, "that review belongs to another capture", cors);
         return replyWire("startReview", wireStart(reviews.start(captureId!, body.choice, body.reviewId)), cors);
@@ -493,6 +494,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
       case "record": {
         if (!record) return null;
         const { reviewId: only } = parseQuery("record", new URL(req.url)) as { reviewId?: ReviewId };
+        if (only !== undefined && reviews.heldByAnotherUser(only)) return failure(404, "unknown review", cors);
         return reply("record", record.view(only === undefined ? {} : { reviewId: only }), cors);
       }
       case "editNote": {

@@ -133,8 +133,17 @@ for (const table of ["capture_facts", "frames", "evidence_snapshots", "evidence_
 /** segmentation/002-user-id and preparation/003-user-id rebuild their tables to add user_id, so migrations.ts copies rows into them. */
 for (const table of ["chunk_revisions", "claim_index", "concept_index", "prep_controls", "prep_inputs"]) REBUILT_BY_MIGRATION.add(table);
 
+/** review/002-user-id rebuilds its three tables to add user_id, so migrations.ts copies rows into them. */
+for (const table of ["invite_answers", "reviews", "review_turns"]) REBUILT_BY_MIGRATION.add(table);
+
+/** record/004-user-id rebuilds its ten tables to add user_id, so its migration copies rows into them. */
+for (const table of ["notes", "note_edits", "note_deletions", "note_evidence", "observations", "observation_decisions", "link_suggestions", "link_decisions", "saved_reviews", "save_failures"]) REBUILT_BY_MIGRATION.add(table);
+
+/** The kernel files that hold schema text; migrations-record.ts holds the record's last migration because migrations.ts is at the line limit. */
+const MIGRATION_FILES = new Set(["src/backend/db.ts", "src/backend/migrations.ts", "src/backend/migrations-record.ts"]);
+
 function ownerOfFile(path: string): Owner | "none" {
-  if (path === "src/backend/db.ts" || path === "src/backend/migrations.ts") return "kernel";
+  if (MIGRATION_FILES.has(path)) return "kernel";
   const dir = path.match(/^src\/backend\/(\w+)\//)?.[1];
   return dir !== undefined && ((MODULES as readonly string[]).includes(dir) || dir === "providers") ? (dir as Owner) : "none";
 }
@@ -172,7 +181,7 @@ describe("module boundaries", () => {
       writtenTables(f.code).flatMap((table) => {
         const owner = OWNERS.get(table);
         const writer = ownerOfFile(f.path);
-        if (f.path === "src/backend/migrations.ts" && REBUILT_BY_MIGRATION.has(table)) return [];
+        if (MIGRATION_FILES.has(f.path) && REBUILT_BY_MIGRATION.has(table)) return [];
         return owner !== undefined && owner === writer ? [] : [`${f.path} writes ${table} (owner ${owner ?? "unknown"})`];
       }),
     );
