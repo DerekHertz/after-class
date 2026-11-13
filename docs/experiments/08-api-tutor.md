@@ -29,7 +29,18 @@ Derek, 2026-11-12:
 
 Derek, 2026-11-12: "$5, which leaves room for one optional Sonnet 5.5 arm on the same cases".
 
-The runner takes `--cap-usd` with a default of 5. Before every call it assumes a worst case for that call, which prices every input byte as a token written to the 1 hour cache and spends the whole output limit. If the cost so far plus that worst case could pass the cap, the run stops before the call and says so. A call that fails without a usage report counts at its worst case, because it may have been billed. The optional Sonnet arm is the same command with `--model sonnet`.
+The runner takes `--cap-usd` with a default of 5. Before every call it reserves a worst case for that call. The worst case prices every byte of the system text, the prompt and the serialized output schema as a token written to the 1 hour cache. It adds a fixed allowance of 4,096 input tokens for the request framing and spends the whole output limit. The assumptions behind that bound are written in the comment on `worstCaseUsd` in `claude-api.ts`. If the measured cost so far, plus what is reserved for calls that may have been billed, plus the worst case for the next call could pass the cap, the run stops before the call and says so.
+
+After each call the runner checks the bound. If a finished call cost more than it was reserved at, the runner records an overrun, stops at once, prints both figures and exits with code 4. The computed total may then be above the cap, and Derek's console is the check.
+
+What a failed call counts depends on whether the API could have billed it.
+
+- An authentication or permission error (HTTP 401 or 403) stops the run at once with a clear message and exit code 3, because no later call can succeed. The call was not billed.
+- A call that fails with an error the API does not bill counts as $0 toward the cap and is labelled "failed, not billed". These are an invalid request, a missing model, a rate limit, a server error answered with an HTTP status, and any failure before a request was sent. The run goes on to the next call.
+- A call that may have been billed keeps its worst-case reservation and is labelled "failed, may have been billed (reserved)". These are a timeout, a connection that broke after the request was sent, and a stream that broke partway through a response.
+- A call that returned usage is measured from that usage, even when it ended in a refusal or a stop that is not a finished answer.
+
+The results show two separate totals, the measured cost and the amount reserved for calls that may have been billed. They are never added into one figure, and the reserved amount is not a cost. The runner also refuses to start when the database copy is inside the output folder, and refuses to overwrite a results file from an earlier run. The optional Sonnet arm is the same command with `--model sonnet`.
 
 ## What this tests
 

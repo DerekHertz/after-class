@@ -299,8 +299,9 @@ describe("a live run on a fake client", () => {
     const results = JSON.parse(readFileSync(join(out, "results.json"), "utf8")) as Results;
     expect(results.rows).toHaveLength(1);
     expect(results.stoppedAtCap).toMatchObject({ beforeCall: 2, capUsd: cap });
-    expect(results.stoppedAtCap!.cumulativeUsd).toBeCloseTo(0.4, 9);
-    expect(results.stoppedAtCap!.cumulativeUsd + results.stoppedAtCap!.worstCaseUsd).toBeGreaterThan(cap);
+    expect(results.stoppedAtCap!.measuredUsd).toBeCloseTo(0.4, 9);
+    expect(results.stoppedAtCap!.reservedUnknownUsd).toBe(0);
+    expect(results.stoppedAtCap!.measuredUsd + results.stoppedAtCap!.reservedUnknownUsd + results.stoppedAtCap!.worstCaseUsd).toBeGreaterThan(cap);
     expect(logs.join("\n")).toContain("stopping before call 2");
     expect(readFileSync(join(out, "results.md"), "utf8")).toContain("STOPPED before call 2");
   });
@@ -327,7 +328,8 @@ describe("a live run on a fake client", () => {
     const results = JSON.parse(readFileSync(join(out, "results.json"), "utf8")) as Results;
     expect(results.rows[0]!.error).not.toBeNull();
     expect(results.rows[0]!.costUsd).toBeNull();
-    expect(results.totals.callsWithUnknownCost).toBe(1);
+    expect(results.rows[0]!.billing).toBe("failed, may have been billed (reserved)");
+    expect(results.totals.callsReserved).toBe(1);
     expect(results.stoppedAtCap).toMatchObject({ beforeCall: 2 });
   });
 });
@@ -512,5 +514,106 @@ describe("the input database and earlier results are never overwritten", () => {
     const { code } = await run([...args(seeded(), out), "--dry-run"]);
     expect(code).toBe(0);
     expect(readFileSync(join(out, "results.json"), "utf8")).toBe("earlier\n");
+  });
+});
+
+describe("failed calls and the cap", () => {
+  const seeds: Seed[] = [
+    { key: "t1", purpose: "tutor_turn", atMs: T0 },
+    { key: "t2", purpose: "tutor_turn", atMs: T0 + 1000 },
+    { key: "wrap", purpose: "wrap_up", atMs: T0 + 2000 },
+  ];
+  const headers = new Headers();
+  const body = { type: "error", error: { type: "x", message: "invalid x-api-key" } };
+  const worstTutor = worstCaseUsd("claude-opus-5-5", Buffer.byteLength(SYSTEM) + Buffer.byteLength(TUTOR_PROMPT), STREAM_MAX_TOKENS, 0)!;
+  const results = (out: string) => JSON.parse(readFileSync(join(out, "results.json"), "utf8")) as Results;
+  const ok = { text: `{"kind":"wrap_up"}\nok`, input: 10, output: 10 };
+
+  test.each([
+    ["401", new Anthropic.AuthenticationError(401, body, undefined, headers)],
+    ["403", new Anthropic.PermissionDeniedError(403, body, undefined, headers)],
+  ])("a %s stops the run at once with a clear message, a distinct exit code and no spend", async (_name, fail) => {
+    const out = join(dir(), "out");
+    const api = fakeApi([{ text: "", fail }, ok, ok]);
+    // The cap is large, so the stop is the error's and not the cap's.
+    const { code, errors } = await run(["--db", fixtureDb(seeds), "--since", "2026-11-11", "--out", out, "--cap-usd", "5"], api.client);
+    expect(code).toBe(3);
+    expect(api.calls()).toBe(1);
+    const text = errors.join("\n");
+    expect(text).toContain("authentication or permission error");
+    expect(text).toContain("No later call can succeed");
+    expect(text).toContain("not billed");
+    const r = results(out);
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0]).toMatchObject({ billing: "failed, not billed", costUsd: 0, reservedUsd: 0 });
+    expect(r.totals).toMatchObject({ measuredUsd: 0, reservedUnknownUsd: 0, callsNotBilled: 1 });
+    expect(r.stoppedAtCap).toBeNull();
+    expect(r.stoppedByError).toMatchObject({ atCall: 1, status: expect.any(Number) });
+    expect(readFileSync(join(out, "results.md"), "utf8")).toContain("failed, not billed");
+  });
+
+  test.each([
+    ["400", new Anthropic.BadRequestError(400, body, undefined, headers)],
+    ["404", new Anthropic.NotFoundError(404, body, undefined, headers)],
+    ["413", new Anthropic.ContentTooLargeError(413, body, undefined, headers)],
+    ["422", new Anthropic.UnprocessableEntityError(422, body, undefined, headers)],
+    ["429", new Anthropic.RateLimitError(429, body, undefined, headers)],
+    ["500", new Anthropic.InternalServerError(500, body, undefined, headers)],
+    ["529", new Anthropic.OverloadedError(529, body, undefined, headers)],
+  ])("a %s is failed, not billed: it counts $0 and the next call is still allowed", async (_name, fail) => {
+    const out = join(dir(), "out");
+    // A cap that holds one reservation and a half. Counting the failed call at its worst case would stop the run before call 2.
+    const api = fakeApi([{ text: "", fail }, ok, { text: WRAP }]);
+    const { code } = await run(["--db", fixtureDb(seeds), "--since", "2026-11-11", "--out", out, "--cap-usd", String(worstTutor * 1.5)], api.client);
+    expect(code).toBe(0);
+    expect(api.calls()).toBe(3);
+    const r = results(out);
+    expect(r.rows[0]).toMatchObject({ billing: "failed, not billed", costUsd: 0, reservedUsd: 0 });
+    expect(r.rows[1]).toMatchObject({ billing: "measured" });
+    expect(r.totals.reservedUnknownUsd).toBe(0);
+    expect(r.stoppedAtCap).toBeNull();
+    expect(r.stoppedByError).toBeNull();
+  });
+
+  test.each([
+    ["a connection error", new Anthropic.APIConnectionError({ message: "socket closed" })],
+    ["a connection timeout", new Anthropic.APIConnectionTimeoutError()],
+    ["an error inside a stream that had started", new Anthropic.APIError(undefined as never, body as never, undefined as never, headers)],
+    ["a stream that ended without a message", new Anthropic.AnthropicError("stream ended without producing a Message")],
+  ])("%s may have been billed: it keeps the worst-case reservation, labelled, and counts toward the cap", async (_name, fail) => {
+    const out = join(dir(), "out");
+    const api = fakeApi([{ text: "", fail }, ok]);
+    await run(["--db", fixtureDb(seeds), "--since", "2026-11-11", "--out", out, "--cap-usd", String(worstTutor * 1.5)], api.client);
+    expect(api.calls()).toBe(1);
+    const r = results(out);
+    expect(r.rows[0]).toMatchObject({ billing: "failed, may have been billed (reserved)", costUsd: null });
+    expect(r.rows[0]!.reservedUsd).toBeCloseTo(worstTutor, 12);
+    expect(r.totals.measuredUsd).toBe(0);
+    expect(r.totals.reservedUnknownUsd).toBeCloseTo(worstTutor, 12);
+    expect(r.stoppedAtCap).toMatchObject({ beforeCall: 2, measuredUsd: 0 });
+    expect(r.stoppedAtCap!.reservedUnknownUsd).toBeCloseTo(worstTutor, 12);
+    expect(readFileSync(join(out, "results.md"), "utf8")).toContain("may have been billed");
+  });
+
+  test("totals keep measured cost and reserved-for-unknown cost as two numbers", async () => {
+    const out = join(dir(), "out");
+    const api = fakeApi([{ ...ok, input: 0, output: 20_000 }, { text: "", fail: new Anthropic.APIConnectionError({ message: "x" }) }, { text: "", fail: new Anthropic.BadRequestError(400, body, undefined, headers) }]);
+    await run(["--db", fixtureDb(seeds), "--since", "2026-11-11", "--out", out, "--cap-usd", "5"], api.client);
+    const r = results(out);
+    expect(r.totals.measuredUsd).toBeCloseTo(0.4, 9);
+    expect(r.totals.reservedUnknownUsd).toBeGreaterThan(0.6);
+    expect(r.totals).toMatchObject({ callsMeasured: 1, callsReserved: 1, callsNotBilled: 1 });
+    expect(r.totals).not.toHaveProperty("costUsd");
+    const md = readFileSync(join(out, "results.md"), "utf8");
+    expect(md).toContain("Measured cost");
+    expect(md).toContain("Reserved for calls that may have been billed");
+  });
+
+  test("a refusal reported usage, so its cost is measured, not reserved", async () => {
+    const out = join(dir(), "out");
+    await run(["--db", fixtureDb(seeds), "--since", "2026-11-11", "--out", out], fakeApi([{ text: "no", stop: "refusal", input: 0, output: 1000 }, ok, { text: WRAP }]).client);
+    const r = results(out);
+    expect(r.rows[0]).toMatchObject({ billing: "measured" });
+    expect(r.rows[0]!.costUsd).toBeCloseTo(0.02, 9);
   });
 });

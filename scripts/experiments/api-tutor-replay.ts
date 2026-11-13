@@ -28,15 +28,18 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { z } from "zod";
 import { readKeys } from "../../src/backend/main";
 import type { ApiCallDetail, ApiClient } from "../../src/backend/providers/claude-api";
-import { API_MODELS, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, createClaudeApi, outputFormatOf, redactThenClip, worstCaseUsd } from "../../src/backend/providers/claude-api";
+import { API_MODELS, ApiCallError, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, createClaudeApi, outputFormatOf, redactThenClip, worstCaseUsd } from "../../src/backend/providers/claude-api";
 import type { ClaudeCli, ClaudeRequest, Effort } from "../../src/backend/providers/claude";
 import { ProviderError } from "../../src/backend/providers/memo";
 import { parseMoveHeader, wrapUpSchema } from "../../src/backend/review/tutor";
 
 export const DEFAULT_KEYS_PATH = join(homedir(), ".config", "afterclass", "keys.env");
 export const DEFAULT_CAP_USD = 5;
-/** Exit codes: 0 done or stopped at the cap, 1 refused to start, 2 bad arguments, 4 a finished call cost more than its reservation. */
-const EXIT = { overrun: 4 } as const;
+/**
+ * Exit codes: 0 done or stopped at the cap, 1 refused to start, 2 bad arguments, 3 an authentication or permission error
+ * stopped the run, 4 a finished call cost more than its reservation.
+ */
+const EXIT = { authentication: 3, overrun: 4 } as const;
 /** The key a run with an injected fake client hands the adapter. */
 const FAKE_CLIENT_KEY = "fake-client-key";
 
@@ -158,6 +161,9 @@ export function allowedFromPrompt(prompt: string): readonly string[] | null {
 
 // ───────────────────────────── results ─────────────────────────────
 
+/** The label on every row's cost. Only a measured cost or a reservation ever counts toward the cap. */
+export type Billing = "measured" | "failed, not billed" | "failed, may have been billed (reserved)" | "cost unknown (reserved)";
+
 export type Row = {
   /** Every row is a live Messages API call. */
   readonly data: "live";
@@ -172,7 +178,12 @@ export type Row = {
   /** First tutor turn seen with this system prompt (the review's lecture context), so a cache read is not expected on it. */
   readonly firstOfContext: boolean;
   readonly tokens: { readonly fresh: number; readonly cacheCreation: number; readonly cacheRead: number; readonly output: number } | null;
+  /** What the cost was and how it counts toward the cap. See `Billing`. */
+  readonly billing: Billing;
+  /** Measured from the response's usage and the price table. 0 for a call that failed, not billed. Null when it is not known. */
   readonly costUsd: number | null;
+  /** The worst-case amount counted toward the cap for a call whose cost is not known. 0 otherwise. */
+  readonly reservedUsd: number;
   readonly cliNotionalUsd: number | null;
   readonly firstTextMs: number | null;
   readonly totalMs: number;
@@ -187,7 +198,10 @@ export type Row = {
 /** A finished call whose measured cost was above what it was reserved at. The cap may be exceeded by the difference. */
 export type Overrun = { readonly atCall: number; readonly reservedUsd: number; readonly actualUsd: number; readonly totalUsd: number; readonly capUsd: number };
 
-export type Stop = { readonly beforeCall: number; readonly cumulativeUsd: number; readonly worstCaseUsd: number; readonly capUsd: number };
+export type Stop = { readonly beforeCall: number; readonly measuredUsd: number; readonly reservedUnknownUsd: number; readonly worstCaseUsd: number; readonly capUsd: number };
+
+/** An authentication or permission error, after which no later call can succeed. */
+export type ErrorStop = { readonly atCall: number; readonly status: number; readonly message: string };
 
 const median = (xs: readonly number[]): number | null => {
   if (xs.length === 0) return null;
@@ -199,9 +213,9 @@ const median = (xs: readonly number[]): number | null => {
 export function totalsOf(rows: readonly Row[]) {
   const tutor = rows.filter((r) => r.purpose === "tutor_turn");
   const later = tutor.filter((r) => !r.firstOfContext && r.error === null);
-  const known = rows.filter((r) => r.costUsd !== null);
+  const measured = rows.filter((r) => r.billing === "measured");
   const cli = rows.filter((r) => r.cliNotionalUsd !== null);
-  const apiCost = known.reduce((sum, r) => sum + r.costUsd!, 0);
+  const apiCost = measured.reduce((sum, r) => sum + r.costUsd!, 0);
   const cliCost = cli.reduce((sum, r) => sum + r.cliNotionalUsd!, 0);
   const first = tutor.map((r) => r.firstTextMs).filter((x): x is number => x !== null);
   return {
@@ -214,8 +228,13 @@ export function totalsOf(rows: readonly Row[]) {
       cacheRead: rows.reduce((s, r) => s + (r.tokens?.cacheRead ?? 0), 0),
       output: rows.reduce((s, r) => s + (r.tokens?.output ?? 0), 0),
     },
-    costUsd: apiCost,
-    callsWithUnknownCost: rows.length - known.length,
+    /** Measured cost only. A failed, not billed call adds nothing, and nothing reserved is in it. */
+    measuredUsd: apiCost,
+    /** What the run holds back against the cap for calls that may have been billed. It is not a cost. */
+    reservedUnknownUsd: rows.reduce((sum, r) => sum + r.reservedUsd, 0),
+    callsMeasured: measured.length,
+    callsNotBilled: rows.filter((r) => r.billing === "failed, not billed").length,
+    callsReserved: rows.filter((r) => r.reservedUsd > 0).length,
     headerChecks: {
       tutorTurns: tutor.length,
       headerParsed: tutor.filter((r) => r.header?.parsed === true).length,
@@ -225,7 +244,7 @@ export function totalsOf(rows: readonly Row[]) {
     cacheReadFromTurn2: { tutorTurnsAfterFirst: later.length, withCacheRead: later.filter((r) => (r.tokens?.cacheRead ?? 0) > 0).length },
     wrapUpSchemaValid: rows.filter((r) => r.purpose === "wrap_up" && r.schemaValid === true).length,
     cliNotional: { usd: cliCost, callsWithFigure: cli.length, allCallsHaveFigure: cli.length === rows.length && rows.length > 0 },
-    apiAtOrBelowCliNotional: cli.length === rows.length && rows.length > 0 && rows.every((r) => r.costUsd !== null) ? apiCost <= cliCost : null,
+    apiAtOrBelowCliNotional: cli.length === rows.length && rows.length > 0 && rows.every((r) => r.billing === "measured") ? apiCost <= cliCost : null,
     firstTextDeltaMs: { tutorTurnMedian: median(first), tutorTurnMax: first.length === 0 ? null : Math.max(...first) },
   };
 }
@@ -243,11 +262,18 @@ export type Results = {
   readonly checkNote: "tutor turns: the header parses and its move kind is among the allowed moves the stored prompt names (weaker than validateMove)";
   readonly stoppedAtCap: Stop | null;
   readonly overrun: Overrun | null;
+  readonly stoppedByError: ErrorStop | null;
   readonly totals: ReturnType<typeof totalsOf>;
   readonly rows: readonly Row[];
 };
 
 const usd = (x: number | null) => (x === null ? "unknown" : `$${x.toFixed(4)}`);
+/** The cost cell: what it was, or what it is held at, in words that never read as a bill for a call that may not have been one. */
+const costCell = (row: Row): string => {
+  if (row.billing === "measured") return usd(row.costUsd);
+  if (row.billing === "failed, not billed") return "failed, not billed ($0.0000)";
+  return `${row.billing}: ${usd(row.reservedUsd)} held`;
+};
 const ms = (x: number | null) => (x === null ? "-" : String(Math.round(x)));
 
 export function markdownOf(r: Results): string {
@@ -262,26 +288,31 @@ export function markdownOf(r: Results): string {
     ...r.rows.map((row) => {
       const tk = row.tokens;
       const header = row.header === null ? (row.schemaValid === null ? "-" : row.schemaValid ? "schema ok" : "schema fail") : row.header.parsed && row.header.kindAllowedByPrompt === true ? "pass" : `fail${row.header.why ? ` (${row.header.why})` : ""}`;
-      return `| ${row.n} | ${row.data} | ${row.purpose}${row.repair ? " (repair)" : ""} | ${row.originalAt} | ${tk?.fresh ?? "-"} | ${tk?.cacheCreation ?? "-"} | ${tk?.cacheRead ?? "-"} | ${tk?.output ?? "-"} | ${usd(row.costUsd)} | ${ms(row.firstTextMs)} | ${ms(row.totalMs)} | ${row.stopReason ?? "-"} | ${row.error === null ? header : `error: ${row.error.replace(/\|/g, "/").slice(0, 120)}`} | ${row.header?.moveKind ?? "-"} | ${usd(row.cliNotionalUsd)} |`;
+      return `| ${row.n} | ${row.data} | ${row.purpose}${row.repair ? " (repair)" : ""} | ${row.originalAt} | ${tk?.fresh ?? "-"} | ${tk?.cacheCreation ?? "-"} | ${tk?.cacheRead ?? "-"} | ${tk?.output ?? "-"} | ${costCell(row)} | ${ms(row.firstTextMs)} | ${ms(row.totalMs)} | ${row.stopReason ?? "-"} | ${row.error === null ? header : `error: ${row.error.replace(/\|/g, "/").slice(0, 120)}`} | ${row.header?.moveKind ?? "-"} | ${usd(row.cliNotionalUsd)} |`;
     }),
     "",
     "## Totals",
     "",
     `- Calls: ${t.calls}, completed ${t.callsCompleted}, failed ${t.callsFailed}.`,
     `- Tokens: ${t.tokens.fresh} input, ${t.tokens.cacheCreation} cache write, ${t.tokens.cacheRead} cache read, ${t.tokens.output} output.`,
-    `- Estimated cost: ${usd(t.costUsd)} (${t.callsWithUnknownCost} calls with unknown cost). Cap ${usd(r.capUsd)}.`,
+    `- Measured cost: ${usd(t.measuredUsd)} over ${t.callsMeasured} calls. ${t.callsNotBilled} calls failed, not billed, and count as $0.`,
+    `- Reserved for calls that may have been billed: ${usd(t.reservedUnknownUsd)} over ${t.callsReserved} calls. This is held against the cap of ${usd(r.capUsd)} and is not a measured cost.`,
     `- The CLI's notional cost for the same inputs: ${usd(t.cliNotional.usd)}${t.cliNotional.allCallsHaveFigure ? "" : ` (only ${t.cliNotional.callsWithFigure} of ${t.calls} calls have a figure)`}. API at or below it: ${t.apiAtOrBelowCliNotional === null ? "not comparable" : t.apiAtOrBelowCliNotional ? "yes" : "no"}.`,
     `- Header checks passed: ${t.headerChecks.bothPassed} of ${t.headerChecks.tutorTurns} tutor turns (header parsed ${t.headerChecks.headerParsed}, kind allowed by prompt ${t.headerChecks.kindAllowedByPrompt}). Wrap-ups that passed the schema: ${t.wrapUpSchemaValid}.`,
     `- Cache read from the second turn of a context on: ${t.cacheReadFromTurn2.withCacheRead} of ${t.cacheReadFromTurn2.tutorTurnsAfterFirst} tutor turns.`,
     `- Time to first text delta on tutor turns, in ms: median ${ms(t.firstTextDeltaMs.tutorTurnMedian)}, max ${ms(t.firstTextDeltaMs.tutorTurnMax)}. This is the first streamed text, which is not the first sentence.`,
   ];
+  if (r.stoppedByError !== null) {
+    const e = r.stoppedByError;
+    lines.push(`- STOPPED at call ${e.atCall} by an authentication or permission error (HTTP ${e.status}). No later call can succeed, so none was made. That call was not billed.`);
+  }
   if (r.overrun !== null) {
     const o = r.overrun;
     lines.push(`- OVERRUN at call ${o.atCall}: it cost ${usd(o.actualUsd)}, more than the ${usd(o.reservedUsd)} it was reserved at, so the computed total ${usd(o.totalUsd)} may be above the cap of ${usd(o.capUsd)}. The run stopped there and made no later call.`);
   }
   if (r.stoppedAtCap !== null) {
     const s = r.stoppedAtCap;
-    lines.push(`- STOPPED before call ${s.beforeCall}: cumulative ${usd(s.cumulativeUsd)} plus a worst case of ${usd(s.worstCaseUsd)} for it could pass the cap of ${usd(s.capUsd)}. Later calls were not made.`);
+    lines.push(`- STOPPED before call ${s.beforeCall}: measured ${usd(s.measuredUsd)} plus reserved ${usd(s.reservedUnknownUsd)} plus a worst case of ${usd(s.worstCaseUsd)} for it could pass the cap of ${usd(s.capUsd)}. Later calls were not made.`);
   }
   return `${lines.join("\n")}\n`;
 }
@@ -461,10 +492,12 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
 
   const rows: Row[] = [];
   const seenContexts = new Set<string>();
-  /** Cost counted against the cap: known cost, or the worst case for a call that left none. */
-  let committed = 0;
+  /** Measured cost, kept apart from `reserved`, the worst case held for calls that may have been billed. Both count against the cap, and only these two ever do. */
+  let measured = 0;
+  let reserved = 0;
   let stoppedAtCap: Stop | null = null;
   let overrun: Overrun | null = null;
+  let stoppedByError: ErrorStop | null = null;
   const snapshot = (): Results => ({
     label: "live",
     experiment: "08-api-tutor",
@@ -478,15 +511,16 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
     checkNote: "tutor turns: the header parses and its move kind is among the allowed moves the stored prompt names (weaker than validateMove)",
     stoppedAtCap,
     overrun,
+    stoppedByError,
     totals: totalsOf(rows),
     rows,
   });
 
   for (const [i, call] of calls.entries()) {
     const worst = worstOf(options.model, call);
-    if (committed + worst > options.capUsd) {
-      stoppedAtCap = { beforeCall: i + 1, cumulativeUsd: committed, worstCaseUsd: worst, capUsd: options.capUsd };
-      log(`stopping before call ${i + 1}: cumulative ${usd(committed)} plus a worst case of ${usd(worst)} could pass the cap of ${usd(options.capUsd)}`);
+    if (measured + reserved + worst > options.capUsd) {
+      stoppedAtCap = { beforeCall: i + 1, measuredUsd: measured, reservedUnknownUsd: reserved, worstCaseUsd: worst, capUsd: options.capUsd };
+      log(`stopping before call ${i + 1}: measured ${usd(measured)} plus reserved ${usd(reserved)} plus a worst case of ${usd(worst)} could pass the cap of ${usd(options.capUsd)}`);
       break;
     }
 
@@ -498,6 +532,9 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
     let schemaValid: boolean | null = null;
     let failure: string | null = null;
     let usageCost: number | null = null;
+    /** The API turned the call away before doing any work, so nothing was billed. Set only for an error the adapter classified so. */
+    let notBilled = false;
+    let fatalStatus: number | null = null;
     try {
       if (call.purpose === "tutor_turn") {
         const result = await claude.streamText(req, () => {
@@ -517,14 +554,37 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
         usageCost = e.usage?.cost.kind === "estimated" ? e.usage.cost.usd : null;
         if (call.purpose === "wrap_up" && e.usage !== null) schemaValid = false;
       }
+      if (e instanceof ApiCallError) {
+        notBilled = e.billing === "not_billed";
+        // No later call can succeed with a key or a permission the API has refused.
+        if (e.status === 401 || e.status === 403) fatalStatus = e.status;
+      }
     }
     const totalMs = now() - started;
     const detail = last as ApiCallDetail | null;
-    const costUsd = usageCost ?? detail?.costUsd ?? null;
-    committed += costUsd ?? worst;
+    const measuredUsd = usageCost ?? detail?.costUsd ?? null;
+    // A response with usage is measured, even when it failed (a refusal, a bad stop). With none, only an error the API does not bill counts as $0.
+    // Anything else may have been billed and is held at its worst case: a timeout, a connection that broke, a stream cut off midway, an unknown error.
+    let billing: Billing;
+    let costUsd: number | null;
+    let reservedUsd = 0;
+    if (measuredUsd !== null) {
+      billing = "measured";
+      costUsd = measuredUsd;
+      measured += measuredUsd;
+    } else if (notBilled && detail === null) {
+      billing = "failed, not billed";
+      costUsd = 0;
+    } else {
+      billing = failure === null ? "cost unknown (reserved)" : "failed, may have been billed (reserved)";
+      costUsd = null;
+      reservedUsd = worst;
+      reserved += worst;
+    }
     // The second guard. The reservation fits under the cap, so a call that costs no more than its reservation cannot take the
     // total over it. A call that does cost more has broken that, so it is recorded and the run stops here.
-    if (costUsd !== null && costUsd > worst) overrun = { atCall: i + 1, reservedUsd: worst, actualUsd: costUsd, totalUsd: committed, capUsd: options.capUsd };
+    if (measuredUsd !== null && measuredUsd > worst) overrun = { atCall: i + 1, reservedUsd: worst, actualUsd: measuredUsd, totalUsd: measured + reserved, capUsd: options.capUsd };
+    if (fatalStatus !== null) stoppedByError = { atCall: i + 1, status: fatalStatus, message: redactThenClip(failure ?? "", secret, 200) };
 
     let header: Row["header"] = null;
     if (call.purpose === "tutor_turn" && text !== null) {
@@ -554,7 +614,9 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
       repair: /Your previous reply was rejected/.test(call.prompt),
       firstOfContext,
       tokens: detail === null ? null : { fresh: detail.fresh, cacheCreation: detail.creation5m + detail.creation1h, cacheRead: detail.read, output: detail.output },
+      billing,
       costUsd,
+      reservedUsd,
       cliNotionalUsd: call.cliNotionalUsd,
       firstTextMs,
       totalMs,
@@ -565,7 +627,11 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
     });
     // Written after every call, so an interrupted run keeps what it paid for.
     writeResults(paths!, snapshot());
-    log(`call ${i + 1} of ${calls.length} ${call.purpose}: ${failure === null ? "ok" : `failed (${redactThenClip(failure, secret, 120)})`}, ${usd(costUsd)}, cumulative ${usd(committed)}`);
+    log(`call ${i + 1} of ${calls.length} ${call.purpose}: ${failure === null ? "ok" : `failed (${redactThenClip(failure, secret, 120)})`}, ${costCell(rows.at(-1)!)}. Measured ${usd(measured)}, reserved for unknown ${usd(reserved)}`);
+    if (stoppedByError !== null) {
+      error(`call ${i + 1} failed with HTTP ${stoppedByError.status}, an authentication or permission error: ${stoppedByError.message}. No later call can succeed, so the run stopped and made no further call. That call was not billed. Check AFTERCLASS_ANTHROPIC_API_KEY in ${options.keys}.`);
+      break;
+    }
     if (overrun !== null) {
       error(`call ${i + 1} cost ${usd(overrun.actualUsd)}, more than the ${usd(overrun.reservedUsd)} it was reserved at. The computed total is ${usd(overrun.totalUsd)} against a cap of ${usd(overrun.capUsd)}. The run stopped and made no further call. Check the cost in the console.`);
       break;
@@ -575,7 +641,7 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
 
   writeResults(paths!, snapshot());
   log(`wrote ${paths!.resultsJson} and ${paths!.resultsMd}`);
-  return overrun === null ? 0 : EXIT.overrun;
+  return stoppedByError !== null ? EXIT.authentication : overrun !== null ? EXIT.overrun : 0;
 }
 
 if (import.meta.main) {

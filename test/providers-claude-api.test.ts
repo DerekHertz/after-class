@@ -9,7 +9,7 @@ import type { Message, MessageCreateParamsNonStreaming } from "@anthropic-ai/sdk
 import { z } from "zod";
 import type { ClaudeRequest } from "../src/backend/providers/claude";
 import {
-  API_MODELS, REQUEST_OVERHEAD_TOKENS, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, clientOptions, createClaudeApi, outputFormatOf, priceUsage, worstCaseUsd,
+  API_MODELS, REQUEST_OVERHEAD_TOKENS, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, ApiCallError, clientOptions, createClaudeApi, outputFormatOf, priceUsage, worstCaseUsd,
 } from "../src/backend/providers/claude-api";
 import type { ApiCallDetail, ApiClient, ApiStream } from "../src/backend/providers/claude-api";
 import { ProviderError } from "../src/backend/providers/memo";
@@ -395,6 +395,52 @@ describe("errors", () => {
     const err = await api({ fail: new Anthropic.BadRequestError(400, body(long), undefined, headers) }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
     expect(err.message).toContain("400");
     expect(err.message.length).toBeLessThan(700);
+  });
+});
+
+describe("which failures may have been billed", () => {
+  const headers = new Headers();
+  const http = (Class: new (status: never, error: never, message: string, headers: Headers) => Error, code: number) => new Class(code as never, {} as never, `http ${code}`, headers);
+  const notBilled: readonly [string, unknown, number][] = [
+    ["400", http(Anthropic.BadRequestError as never, 400), 400],
+    ["401", http(Anthropic.AuthenticationError as never, 401), 401],
+    ["403", http(Anthropic.PermissionDeniedError as never, 403), 403],
+    ["404", http(Anthropic.NotFoundError as never, 404), 404],
+    ["413", http(Anthropic.ContentTooLargeError as never, 413), 413],
+    ["422", http(Anthropic.UnprocessableEntityError as never, 422), 422],
+    ["429", http(Anthropic.RateLimitError as never, 429), 429],
+    ["500", http(Anthropic.InternalServerError as never, 500), 500],
+    ["529", http(Anthropic.OverloadedError as never, 529), 529],
+  ];
+  const maybeBilled: readonly [string, unknown][] = [
+    ["408", http(Anthropic.RequestTimeoutError as never, 408)],
+    ["connection error", new Anthropic.APIConnectionError({ message: "closed" })],
+    ["SDK timeout", new Anthropic.APIConnectionTimeoutError()],
+    ["an error event inside an open stream", new Anthropic.APIError(undefined as never, body("overloaded") as never, undefined as never, headers)],
+    ["a stream with no message", new Anthropic.AnthropicError("stream ended without producing a Message")],
+    ["an unknown error", new TypeError("bug")],
+  ];
+
+  test.each(notBilled)("HTTP %s is not billed and carries its status", async (_name, fail, status) => {
+    const err = await api({ fail }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiCallError);
+    expect(err.billing).toBe("not_billed");
+    expect(err.status).toBe(status);
+  });
+
+  test.each(maybeBilled)("%s may have been billed", async (_name, fail) => {
+    for (const run of [(c: ReturnType<typeof api>["claude"]) => c.streamText(req(), () => {}, NEVER), (c: ReturnType<typeof api>["claude"]) => c.structured(req(), Out, NEVER)]) {
+      const err = await run(api({ fail }).claude).catch((e) => e);
+      expect(err).toBeInstanceOf(ApiCallError);
+      expect(err.billing).toBe("maybe_billed");
+    }
+  });
+
+  test("our own timeout may have been billed, and a refusal to send anything is not billed", async () => {
+    const timedOut = await api({ hold: true }).claude.streamText(req({ timeoutMs: 20 }), () => {}, NEVER).catch((e) => e);
+    expect(timedOut.billing).toBe("maybe_billed");
+    const refused = await api({ deltas: ["x"] }).claude.streamText(req({ model: "haiku" }), () => {}, NEVER).catch((e) => e);
+    expect(refused.billing).toBe("not_billed");
   });
 });
 
