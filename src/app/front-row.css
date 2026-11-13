@@ -6,12 +6,27 @@
 :is(.scene-shell[data-scene="study-bench"], .front-row-scene[data-room="study-bench"]) { --fr-plate: url('./assets/front-row/study-bench.png'); }
 :is(.scene-shell[data-scene="projection-booth"], .front-row-scene[data-room="projection-booth"]) { --fr-plate: url('./assets/front-row/projection-booth.png'); }
 
+/* The review's layers, one set per room: the background, then the board, desk and mat as nine-slices, then the extras. The
+   plates above stay for the room picker and for every page that has no review scene. */
+.scene-shell[data-scene="last-desk"] { --fr-bg: url('./assets/front-row-v2/rail-background.png'); --fr-board-art: url('./assets/front-row-v2/rail-board.png'); --fr-desk-art: url('./assets/front-row-v2/rail-desk.png'); --fr-mat-art: url('./assets/front-row-v2/rail-mat.png'); }
+.scene-shell[data-scene="study-bench"] { --fr-bg: url('./assets/front-row-v2/harbor-background.png'); --fr-board-art: url('./assets/front-row-v2/harbor-board.png'); --fr-desk-art: url('./assets/front-row-v2/harbor-desk.png'); --fr-mat-art: url('./assets/front-row-v2/harbor-mat.png'); }
+.scene-shell[data-scene="projection-booth"] { --fr-bg: url('./assets/front-row-v2/canal-background.png'); --fr-board-art: url('./assets/front-row-v2/canal-board.png'); --fr-desk-art: url('./assets/front-row-v2/canal-desk.png'); --fr-mat-art: url('./assets/front-row-v2/canal-mat.png'); }
+.front-row-art [data-extra="ledge-items"] { background-image: url('./assets/front-row-v2/rail-ledge-items.png'); }
+.front-row-art [data-extra="vine"] { background-image: url('./assets/front-row-v2/rail-vine.png'); }
+.front-row-art [data-extra="lamp"] { background-image: url('./assets/front-row-v2/harbor-lamp.png'); }
+.front-row-art [data-extra="awning"] { background-image: url('./assets/front-row-v2/harbor-awning.png'); }
+.front-row-art [data-extra="cushion"] { background-image: url('./assets/front-row-v2/harbor-cushion.png'); }
+.front-row-art [data-extra="pull-tab"] { background-image: url('./assets/front-row-v2/canal-pull-tab.png'); }
+.front-row-art [data-extra="projector"] { background-image: url('./assets/front-row-v2/canal-projector.png'); }
+
 /* On every page the selected room is the backdrop and the navigation sits over the art as small chips, each with its own
    backing for legibility. There is no bar behind them. */
 .scene-shell { --fr-chip: color-mix(in srgb, var(--fr-bar) 86%, transparent); --fr-chip-line: color-mix(in srgb, var(--fr-bar-ink) 45%, transparent); background: none; }
-/* The plate stays fixed behind the whole page, so paper scrolls over artwork, never a flat wall colour. It is crisp,
+/* The backdrop stays fixed behind the whole page, so paper scrolls over artwork, never a flat wall colour. It is the review's
+   background while a review loads or shows, and the room's plate on every other page. It is crisp,
    ignores the pointer and sits under the shell's content (the shell isolates). */
 .scene-shell::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--fr-plate) 50% 100% / cover no-repeat; }
+.scene-shell:has(:is(.front-row, .review-loading))::before { background: var(--fr-bg) var(--fr-phone-x) 0 / cover no-repeat; }
 .scene-shell .scene-masthead { height: auto; max-width: none; margin: 0; padding: 8px 12px; gap: 8px; background: none; border: 0; color: var(--fr-bar-ink); }
 .scene-shell :is(.scene-masthead > a, .appearance-picker > summary) { display: flex; align-items: center; min-height: 44px; padding: 0 12px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); color: var(--fr-bar-ink); box-shadow: 0 3px 0 #00000040; }
 .scene-shell .scene-masthead > a { gap: 8px; font: 600 1.3rem/1 'After Class Pixel', var(--font); }
@@ -231,39 +246,62 @@
 .scene-shell .review .room-object :is(code, pre, a) { overflow-wrap: anywhere; }
 .scene-shell .review .room-object a { color: var(--obj-link); }
 
-/* Full scene: the art fills the window edge to edge. The stage is the plate below its painted top bar, at the size that
-   covers the window within CROP_LIMIT, anchored to the bottom so the desk stays whole. Every control sits in stage
-   percentages, so it stays on its surface whatever the window's shape. Past the crop limits a dimmed, unblurred copy of the plate
-   fills the rest of the window. The scene clips overflow rather than hiding it, so it is never a scroll container that
-   focus or a resize could offset; only the board and desk scroll. */
+/* Full scene: the room is built from layers that fill the window, back to front. The background covers the window and is
+   anchored per room; the board, the desk and the mat are nine-slices, so their corners keep their size and their plain
+   middles stretch; the extras sit on them. The text areas, the companion and the objects are placed from the same
+   measures, so each stays on its art whatever the window's shape. Two scales apply, both screen pixels per plate pixel.
+   --fr-b covers the window's width and reaches down behind the desk. --fr-u sizes everything else, and is the smaller of
+   --fr-b and --fr-u0 so a tall or very wide window does not magnify the desk and the objects. The scene clips overflow
+   rather than hiding it, so it is never a scroll container that focus or a resize could offset; only the board and desk
+   scroll. */
 @media (min-width: 900px) and (min-height: 560px) {
+  .scene-shell {
+    --fr-u0: min(calc(1.12 * 100cqh / 992), calc(1.25 * 100cqw / 1586));
+    --fr-b: max(calc(100cqw / 1586), calc((100cqh - var(--fr-u0) * 170) / 992));
+    --fr-u: min(var(--fr-b), var(--fr-u0));
+  }
   .scene-shell:has(.front-row) .scene-masthead { position: absolute; inset: 0 0 auto; pointer-events: none; }
   .scene-shell:has(.front-row) .scene-masthead > * { pointer-events: auto; }
   .scene-shell .front-row .front-row-bar { position: absolute; z-index: 9; top: 8px; left: calc(12px + 13rem); right: calc(12px + 14rem); pointer-events: none; }
   .front-row .front-row-bar > * { pointer-events: auto; }
   .scene-shell .front-row .front-row-notices { position: absolute; z-index: 8; top: var(--fr-nav-reserve); left: 50%; translate: -50% 0; width: min(46rem, calc(100% - 32px)); max-height: calc(100dvh - var(--fr-nav-reserve) - 16px); overflow: auto; overscroll-behavior: contain; }
-  .front-row-scene {
-    --fr-stage-w: min(max(100cqw, 100cqh * var(--fr-ratio)), 100cqw / (1 - var(--fr-max-crop-x)), 100cqh * var(--fr-ratio) / (1 - var(--fr-max-crop-top)));
-    --fr-stage-h: calc(var(--fr-stage-w) / var(--fr-ratio));
-    --fr-inset-x: max(0px, (var(--fr-stage-w) - 100cqw) / 2);
-    --fr-inset-top: max(0px, var(--fr-stage-h) - 100cqh);
-    height: 100dvh; overflow: clip; container-type: size;
+  .front-row-scene { height: 100dvh; overflow: clip; container-type: size; }
+  .front-row-stage {
+    position: absolute; inset: 0;
+    --fr-bg-w: calc(var(--fr-b) * 1586); --fr-bg-h: calc(var(--fr-b) * 992);
+    --fr-bg-left: calc((100cqw - var(--fr-bg-w)) * var(--fr-bg-ax));
+    --fr-bg-top: min(0px, calc((100cqh - var(--fr-bg-h)) * var(--fr-bg-ay)));
+    --fr-wall-l: max(0px, calc(var(--fr-bg-left) + var(--fr-b) * var(--fr-wall-from)));
+    --fr-wall-r: min(100cqw, calc(var(--fr-bg-left) + var(--fr-b) * var(--fr-wall-to)));
+    --fr-desk-top: calc(100cqh - var(--fr-desk-reach));
+    --fr-board-h0: calc(var(--fr-desk-top) - var(--fr-board-gap) - var(--fr-board-top));
+    --fr-board-w: min(calc(var(--fr-wall-r) - var(--fr-wall-l) - var(--fr-board-margin)), calc(var(--fr-board-h0) * var(--fr-board-max-aspect)));
+    --fr-board-h: min(var(--fr-board-h0), calc(var(--fr-board-w) / max(var(--fr-board-min-aspect), .01)));
+    --fr-board-l: calc(var(--fr-wall-l) + (var(--fr-wall-r) - var(--fr-wall-l) - var(--fr-board-w)) / 2);
+    --fr-mat-w: min(calc(100cqw - var(--fr-mat-reserve)), var(--fr-mat-max));
+    --fr-mat-l: calc((100cqw - var(--fr-mat-w)) / 2);
   }
-  .front-row-scene::before { content: ""; position: absolute; inset: 0; background: var(--fr-plate) 50% 100% / cover no-repeat; filter: brightness(.8); }
-  .front-row-stage { position: absolute; bottom: 0; left: 50%; translate: -50% 0; width: var(--fr-stage-w); height: var(--fr-stage-h); background: var(--fr-plate) 0 100% / 100% var(--fr-plate-height) no-repeat; }
-  /* Where a wide window crops the top of the art, the board's text starts below the navigation. */
-  .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { position: absolute; left: var(--fr-board-left); width: var(--fr-board-width); top: max(var(--fr-board-top), calc(var(--fr-inset-top) + var(--fr-nav-reserve))); bottom: calc(100% - var(--fr-board-top) - var(--fr-board-height)); overflow: auto; overscroll-behavior: contain; }
-  .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { position: absolute; left: var(--fr-mat-left); top: var(--fr-mat-top); width: var(--fr-mat-width); height: var(--fr-mat-height); overflow: auto; overscroll-behavior: contain; }
+  .front-row-stage::before { content: ""; position: absolute; z-index: 0; left: var(--fr-bg-left); top: var(--fr-bg-top); width: var(--fr-bg-w); height: var(--fr-bg-h); background: var(--fr-bg) 0 0 / 100% 100% no-repeat; image-rendering: pixelated; }
+  .front-row-art { display: contents; }
+  .front-row-art > * { position: absolute; box-sizing: border-box; pointer-events: none; image-rendering: pixelated; background: no-repeat 0 0 / 100% 100%; }
+  .front-row-art > [data-layer="board"] { z-index: 2; left: var(--fr-board-l); top: var(--fr-board-top); width: var(--fr-board-w); height: var(--fr-board-h); border-style: solid; border-width: var(--fr-board-bw); border-image: var(--fr-board-art) var(--fr-board-slice) fill / var(--fr-board-bw) / 0 stretch; }
+  .front-row-art > [data-layer="desk"] { z-index: 5; left: 0; right: 0; top: var(--fr-desk-top); height: var(--fr-desk-h); border-style: solid; border-width: var(--fr-desk-bw); border-image: var(--fr-desk-art) var(--fr-desk-slice) fill / var(--fr-desk-bw) / 0 stretch; }
+  .front-row-art > [data-layer="mat"] { z-index: 6; left: var(--fr-mat-l); width: var(--fr-mat-w); top: calc(var(--fr-desk-top) + var(--fr-mat-top)); bottom: var(--fr-mat-bottom); border-style: solid; border-width: var(--fr-mat-bw); border-image: var(--fr-mat-art) var(--fr-mat-slice) fill / var(--fr-mat-bw) / 0 stretch; }
+  /* The board's text starts below the navigation where the board's own top would sit under it. */
+  .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { position: absolute; z-index: 4; left: calc(var(--fr-board-l) + var(--fr-board-il)); width: calc(var(--fr-board-w) - var(--fr-board-il) - var(--fr-board-ir)); top: max(calc(var(--fr-board-top) + var(--fr-board-it)), var(--fr-nav-reserve)); bottom: calc(100% - var(--fr-board-top) - var(--fr-board-h) + var(--fr-board-ib)); overflow: auto; overscroll-behavior: contain; }
+  .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { position: absolute; z-index: 7; left: calc(var(--fr-mat-l) + var(--fr-mat-il)); width: calc(var(--fr-mat-w) - var(--fr-mat-il) - var(--fr-mat-ir)); top: calc(var(--fr-desk-top) + var(--fr-mat-top) + var(--fr-mat-it)); bottom: calc(var(--fr-mat-bottom) + var(--fr-mat-ib)); overflow: auto; overscroll-behavior: contain; }
   .front-row-scene[data-board-align="center"] .front-row-area[data-area="board"] { display: flex; flex-direction: column; justify-content: safe center; }
-  /* The harbor mat is drawn in perspective and is narrower at the top than its box, so the top row's last control is inset. */
-  .front-row-scene[data-mat-actions="beside"] .composer .review-help { margin-right: 2cqw; }
-  .front-row-scene .front-row-buddy { position: absolute; left: max(var(--fr-buddy-left), var(--fr-inset-x)); top: var(--fr-buddy-top); width: var(--fr-buddy-width); height: var(--fr-buddy-height); }
-  /* The notebook button covers the painted book, so it draws no art of its own. The folio sits on the desk just above the
-     book in the same margin, at most 80% of its width, clear of the mat and the board in every room. */
-  .scene-shell .front-row-scene .front-row-object { --fr-book-x: min(var(--fr-book-left), calc(100% - var(--fr-inset-x) - var(--fr-book-width))); position: absolute; }
-  .front-row-scene .front-row-object[data-object="history"] { left: var(--fr-book-x); top: var(--fr-book-top); width: var(--fr-book-width); height: var(--fr-book-height); }
-  .front-row-scene .front-row-object[data-object="history"] .front-row-object-art { display: none; }
-  .front-row-scene .front-row-object[data-object="source"] { left: calc(var(--fr-book-x) + var(--fr-book-width) * .1); bottom: calc(100% - var(--fr-book-top)); width: calc(var(--fr-book-width) * .8); aspect-ratio: 1448 / 1086; }
+  /* The field takes the height the mat has left once the label and buttons are placed. */
+  .front-row-scene .front-row-area[data-area="desk"] > .composer { height: 100%; }
+  .front-row-scene[data-mat-actions="below"] .composer { grid-template-rows: auto auto minmax(4.6rem, 1fr) auto; }
+  .front-row-scene[data-mat-actions="beside"] .composer { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
+  .scene-shell .front-row-scene .composer textarea { height: 100%; }
+  .front-row-scene[data-mat-actions="beside"] .composer .assist-actions > * { flex: 1 1 auto; white-space: nowrap; }
+  .front-row-scene .front-row-buddy { position: absolute; z-index: 8; left: var(--fr-side-inset); bottom: var(--fr-buddy-bottom); width: var(--fr-buddy-size); height: var(--fr-buddy-size); }
+  /* The notebook sits on the desk at the far right, and the folio just above it at 80% of its width. Each is its own raster. */
+  .scene-shell .front-row-scene .front-row-object { position: absolute; z-index: 8; }
+  .front-row-scene .front-row-object[data-object="history"] { right: var(--fr-side-inset); bottom: var(--fr-book-bottom); width: var(--fr-book-w); height: var(--fr-book-h); }
+  .front-row-scene .front-row-object[data-object="source"] { right: calc(var(--fr-side-inset) + var(--fr-book-w) * .1); bottom: calc(var(--fr-book-bottom) + var(--fr-book-h) + var(--fr-u) * 8); width: calc(var(--fr-book-w) * .8); aspect-ratio: 1448 / 1086; }
 }
 
 /* Mid-width windows: the review's navigation takes a second row under the masthead chips. */
@@ -272,14 +310,9 @@
   .scene-shell .front-row .front-row-bar { top: 60px; left: 12px; right: 12px; }
 }
 
-/* Phone and small windows: the room is recomposed, not shrunk. The plate fills the page behind everything, and the board,
+/* Phone and small windows: the room is recomposed, not shrunk. The background fills the page behind everything, and the board,
    the desk with Your thinking, and the companion with the notebook stack over it. Every text keeps a readable size. */
 @media (max-width: 899px), (max-height: 559px) {
-  .scene-shell:has(.front-row) {
-    --fr-phone-art-w: max(100vw, 100lvh * var(--fr-ratio));
-  }
-  /* The recomposed room scrolls with the page over the fixed backdrop; below its image the backdrop shows, not a wall colour. */
-  .scene-shell:has(.front-row)::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--fr-plate) var(--fr-phone-x) calc(var(--fr-phone-art-w) * var(--fr-plate-tall) * var(--fr-crop-top) * -1) / var(--fr-phone-art-w) auto no-repeat; }
   .scene-shell .scene-masthead { min-height: 0; padding: 8px 8px 6px; flex-wrap: nowrap; }
   .scene-shell :is(.scene-masthead > a, .appearance-picker > summary) { padding: 0 10px; }
   .scene-shell .scene-masthead > a { font-size: 1.15rem; }
