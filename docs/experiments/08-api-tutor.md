@@ -74,3 +74,38 @@ Every row in both files is labelled live. Nothing in this experiment is a mock o
 
 ## Results
 
+
+Run by the agent on 2026-11-12 with Derek's key, after Derek said "Key is in, run it" and then "key is replaced, rerun the trial". Every row below is a live Messages API call. Cost is estimated from response usage at list prices and is not a bill.
+
+A first attempt made no model call. The key then in `keys.env` was rejected with HTTP 401 on two requests, and Derek replaced it.
+
+Both arms ran the runner at commit `38b22f1`, before the fix round that changed the cap accounting, key redaction and path checks. The request the adapter sends is the same at both commits. The results files from that commit have a single cumulative cost, and every call in both arms completed, so that figure is measured cost.
+
+| | CLI on 2026-11-11, notional | API on `claude-opus-5-5` | API on `claude-sonnet-5-5` |
+| --- | --- | --- | --- |
+| Calls completed | 11 | 11 of 11 | 11 of 11 |
+| Estimated cost of all 11 | $1.2677 | $0.9993 | $0.4707 |
+| First tutor turn | $0.5739 | $0.5575 | $0.2784 |
+| Tutor turns 2 to 10, each | $0.0294 to $0.0466 | $0.0201 to $0.0379 | $0.0091 to $0.0148 |
+| Wrap-up | $0.3313 | $0.1688 | $0.0831 |
+| Header checks passed | not measured | 10 of 10 | 10 of 10 |
+| Tutor turns after the first that read cache | not measured | 9 of 9 | 9 of 9 |
+| Time to first text delta, median and max | not measured | 4442 ms and 12090 ms | 1334 ms and 3633 ms |
+
+The first tutor turn wrote 69,251 tokens to the 1 hour cache on each arm. Each later tutor turn read 69,251 tokens from it.
+
+Against the bars:
+
+- "All 10 moves pass `validateMove` with no repair attempt." The weaker check passed 10 of 10 on both arms. Full `validateMove` was not run, for the reason in item 1 above.
+- "From turn 2 on, the lecture context is read from cache." PASS on both arms, 9 of 9, and each read equals the first turn's write.
+- "Actual cost is at or below the CLI's notional $1.27 for the same calls." PASS on both arms as an estimate. Derek's Console usage page holds the billed amount.
+- "Time to first sentence is reported with no target." Reported above as time to first text delta, which is a lower bound.
+
+Total estimated spend was $1.4700 of the $5 cap.
+
+What the runs do not show:
+
+- Tutoring quality on either model. The Sonnet arm chose `close_thread` on turns 4, 7 and 9 where the Opus arm chose `ask_followup`, `diagnose` and `close_thread`. The runner did not keep the reply text, so the wording cannot be compared.
+- A Sonnet-led review. Every turn replayed the stored Opus conversation up to that point.
+- Anything about lectures outside the one CS lecture of 2026-11-11.
+- Whether the 1 hour cache is the right lifetime. The first-turn write costs 2 times the input price. No gap between turns in this review passed 5 minutes, so the 5 minute cache at 1.25 times would have cost less here.
