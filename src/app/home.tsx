@@ -23,10 +23,11 @@ export const FIRST_CAPTURE_STEPS = [
 
 const CAPTURE_LABEL = (s: Lecture["status"]): string => (s.state === "capturing" ? "Capturing" : s.state === "paused" ? "Capture paused" : "Capture stopped");
 
-/** Where a review in the list leads: open it while it can continue, the record once saved, nowhere when ended unsaved. */
+/** Where a review in the list leads: open it while it can continue, the record once saved, the review screen's Retry save when the save failed, nowhere when ended unsaved. */
 export function reviewTarget(r: Pick<LectureReview, "reviewId" | "phase" | "saved">): Route | null {
   if (r.phase !== "ended") return { page: "review", id: r.reviewId };
-  return r.saved === "saved" ? { page: "record", reviewId: r.reviewId } : null;
+  if (r.saved === "saved") return { page: "record", reviewId: r.reviewId };
+  return r.saved === "save_pending" ? { page: "review", id: r.reviewId } : null;
 }
 
 /** What a review row offers, named for the action rather than the date. The destination always comes from `reviewTarget`. */
@@ -34,7 +35,7 @@ export function reviewAction(r: Pick<LectureReview, "reviewId" | "phase" | "save
   const target = reviewTarget(r);
   if (r.phase !== "ended") return { label: "Continue review", target };
   if (r.saved === "saved") return { label: "Open saved notes", target };
-  if (r.saved === "save_pending") return { label: target ? "Retry saving notes" : "Notes not saved yet", target };
+  if (r.saved === "save_pending") return { label: "Retry saving notes", target };
   return { label: "Ended, not saved", target };
 }
 
