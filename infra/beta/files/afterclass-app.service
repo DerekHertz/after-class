@@ -1,0 +1,21 @@
+[Unit]
+Description=After Class app container
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+RequiresMountsFor=/data
+# The first deploy writes this file. Until then there is no image to run, and the unit is skipped, not failed.
+ConditionPathExists=/data/afterclass/current-tag
+StartLimitIntervalSec=0
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=300
+TimeoutStopSec=130
+ExecStartPre=-/usr/bin/docker rm -f afterclass-app
+ExecStart=/usr/local/sbin/afterclass-app-start
+ExecStop=/usr/bin/docker stop -t 120 afterclass-app
+
+[Install]
+WantedBy=multi-user.target

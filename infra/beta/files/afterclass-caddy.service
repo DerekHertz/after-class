@@ -1,0 +1,27 @@
+[Unit]
+Description=Caddy reverse proxy for After Class
+After=docker.service network-online.target afterclass-app.service
+Wants=network-online.target
+Requires=docker.service
+# Certificates and the ACME account live on the data volume, so a replaced instance keeps them.
+RequiresMountsFor=/data
+StartLimitIntervalSec=0
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=300
+TimeoutStopSec=30
+ExecStartPre=-/usr/bin/docker rm -f afterclass-caddy
+ExecStartPre=/usr/bin/mkdir -p /data/caddy/data /data/caddy/config
+ExecStart=/usr/bin/docker run --rm --name afterclass-caddy --network host \
+  --log-driver awslogs --log-opt awslogs-region=${AWS_REGION} --log-opt awslogs-group=${LOG_GROUP} \
+  --log-opt awslogs-stream=caddy --log-opt mode=non-blocking \
+  -v /etc/afterclass/Caddyfile:/etc/caddy/Caddyfile:ro \
+  -v /data/caddy/data:/data -v /data/caddy/config:/config \
+  ${CADDY_IMAGE}
+ExecStop=/usr/bin/docker stop -t 20 afterclass-caddy
+EnvironmentFile=/etc/afterclass/settings.env
+
+[Install]
+WantedBy=multi-user.target

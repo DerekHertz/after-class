@@ -1,0 +1,20 @@
+{
+	admin off
+	servers {
+		protocols h1 h2
+	}
+%{ if domain == "" ~}
+	auto_https off
+%{ endif ~}
+}
+
+%{ if domain != "" ~}
+${domain} {
+%{ else ~}
+:80 {
+%{ endif ~}
+	# The tutor turn streams NDJSON, so the proxy flushes every write instead of buffering.
+	reverse_proxy 127.0.0.1:${app_port} {
+		flush_interval -1
+	}
+}
