@@ -10,7 +10,7 @@ import { allowedMoves, nextThreadId, parseMoveHeader, reviewState, tutorPrompt, 
 import type { TutorInput, WrapUpOutput } from "../src/backend/review/tutor";
 import type { ClaudeCli, ClaudeRequest } from "../src/backend/providers/claude";
 import { createMemo } from "../src/backend/providers/memo";
-import { testDb, testSeq, usage } from "./fakes";
+import { testUserDb, testSeq, usage } from "./fakes";
 
 const REVIEW = stableId("rvw", "review-1") as ReviewId;
 const SRC = stableId("src", "youtube", "abcdefghijk") as SourceId;
@@ -381,7 +381,7 @@ describe("tutorTask", () => {
 
   test("streams the reply and stores the validated move with its prose", async () => {
     const { cli, requests } = fakeClaude([opening]);
-    const memo = createMemo(testDb(), "live", { retryDelayMs: () => 0 });
+    const memo = createMemo(testUserDb(), "live", { retryDelayMs: () => 0 });
     let streamed = "";
     const r = await memo.run(tutorTask(cli), inputFor([]), { streamTo: (d) => (streamed += d) });
     expect(r.kind).toBe("hit");
@@ -394,7 +394,7 @@ describe("tutorTask", () => {
 
   test("a resent turn at a later time hits the memo instead of calling again", async () => {
     const { cli, requests } = fakeClaude([opening, opening]);
-    const memo = createMemo(testDb(), "live", { retryDelayMs: () => 0 });
+    const memo = createMemo(testUserDb(), "live", { retryDelayMs: () => 0 });
     const l = log().learner({ kind: "resume" });
     const first = { ...inputFor(l.turns), state: stateOf(l.turns, [], 5_000) };
     const resent = { ...inputFor(l.turns), state: stateOf(l.turns, [], 90_000) };
@@ -410,7 +410,7 @@ describe("tutorTask", () => {
     ["an unusable claim", `${JSON.stringify(askMain(1, [claimId(3)]))}\nTell me about it.`],
   ])("%s is never stored as the tutor's move", async (_, reply) => {
     const { cli } = fakeClaude([reply]);
-    const db = testDb();
+    const db = testUserDb();
     const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
     const r = await memo.run(tutorTask(cli), inputFor([]));
     expect(r.kind).toBe("failed");
@@ -426,14 +426,14 @@ describe("wrapUpTask", () => {
       notes: [{ conceptId: concept(1), tutorSummary: "Rows meet at the solution.", evidence: [ev(1)] }],
     };
     const { cli } = fakeClaude([JSON.stringify(proposal)]);
-    const memo = createMemo(testDb(), "live", { retryDelayMs: () => 0 });
+    const memo = createMemo(testUserDb(), "live", { retryDelayMs: () => 0 });
     const r = await memo.run(wrapUpTask(cli), { turns: [], claims: [claim(1)], threads: [thread(1)] });
     expect(r.kind === "hit" && r.value).toEqual(proposal);
   });
 
   test("a proposal with a malformed thread id is rejected", async () => {
     const { cli } = fakeClaude([JSON.stringify({ observations: [{ threadId: "thread-1", proposed: "partial", rationale: "" }], notes: [] })]);
-    const memo = createMemo(testDb(), "live", { retryDelayMs: () => 0 });
+    const memo = createMemo(testUserDb(), "live", { retryDelayMs: () => 0 });
     expect((await memo.run(wrapUpTask(cli), { turns: [], claims: [claim(1)], threads: [thread(1)] })).kind).toBe("failed");
   });
 });

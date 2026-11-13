@@ -1,13 +1,14 @@
 /**
  * Usage ledger reads (W5). memo.ts is the only writer of usage_events, inside
- * each attempt's transaction; this file only reads.
+ * each attempt's transaction; this file only reads. A ledger belongs to one user
+ * and reads only that user's events.
  *
  * R17: "Every paid call records a usage event; unknown cost is stored as unknown, not zero."
  * Summaries total per cost kind and report unknown as a count with usd null, never as $0.
  */
 import type { MemoKey } from "../../shared/ids";
 import type { Cost, Provider, Purpose, UsageEvent, UsageSummary } from "../../shared/domain";
-import type { Db } from "../db";
+import type { UserDb } from "../db";
 
 type Filter = { readonly sinceMs?: number; readonly purpose?: Purpose };
 
@@ -61,10 +62,10 @@ function costOf(r: Row): Cost {
   }
 }
 
-export function createLedger(db: Db): Ledger {
+export function createLedger(db: UserDb): Ledger {
   const where = (f: Filter | undefined) => {
-    const clauses: string[] = [];
-    const args: (string | number)[] = [];
+    const clauses: string[] = ["user_id = ?"];
+    const args: (string | number)[] = [db.userId];
     if (f?.sinceMs !== undefined) {
       clauses.push("started_ms >= ?");
       args.push(f.sinceMs);
@@ -73,7 +74,7 @@ export function createLedger(db: Db): Ledger {
       clauses.push("purpose = ?");
       args.push(f.purpose);
     }
-    return { sql: clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "", args };
+    return { sql: `WHERE ${clauses.join(" AND ")}`, args };
   };
 
   function summary(filter?: Filter): UsageSummary {
@@ -85,7 +86,7 @@ export function createLedger(db: Db): Ledger {
       .all(...w.args);
     const purposes = db.sql
       .query<{ purpose: Purpose; calls: number; errors: number; unknown_cost: number }, (string | number)[]>(
-        `SELECT purpose, COUNT(*) AS calls, SUM(outcome = 'error') AS errors, SUM(cost_kind = 'unknown') AS unknown_cost
+        `SELECT purpose, COUNT(*) AS calls, COUNT(*) FILTER (WHERE outcome = 'error') AS errors, COUNT(*) FILTER (WHERE cost_kind = 'unknown') AS unknown_cost
          FROM usage_events ${w.sql} GROUP BY purpose`,
       )
       .all(...w.args);
@@ -116,7 +117,7 @@ export function createLedger(db: Db): Ledger {
         (string | number)[]
       >(
         `SELECT purpose, provider, cost_kind, COUNT(*) AS calls,
-                SUM(outcome = 'error') AS errors, SUM(outcome = 'aborted') AS aborted, SUM(cost_usd) AS usd,
+                COUNT(*) FILTER (WHERE outcome = 'error') AS errors, COUNT(*) FILTER (WHERE outcome = 'aborted') AS aborted, SUM(cost_usd) AS usd,
                 SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(cache_read_tokens) AS cache_read_tokens
          FROM usage_events ${w.sql} GROUP BY purpose, provider, cost_kind`,
       )
@@ -141,9 +142,15 @@ export function createLedger(db: Db): Ledger {
   }
 
   function list(filter: { readonly memoKey?: MemoKey; readonly limit: number }): readonly UsageEvent[] {
+    const columns = `id, memo_key, attempt_no, provider, model, purpose, outcome, input_tokens, output_tokens, cache_read_tokens,
+      cost_kind, cost_usd, cost_basis, cost_reason, started_ms, duration_ms`;
     const rows = filter.memoKey
-      ? db.sql.query<Row, [string, number]>(`SELECT * FROM usage_events WHERE memo_key = ? ORDER BY started_ms DESC, attempt_no DESC LIMIT ?`).all(filter.memoKey, filter.limit)
-      : db.sql.query<Row, [number]>(`SELECT * FROM usage_events ORDER BY started_ms DESC, id DESC LIMIT ?`).all(filter.limit);
+      ? db.sql
+          .query<Row, [string, string, number]>(`SELECT ${columns} FROM usage_events WHERE user_id = ? AND memo_key = ? ORDER BY started_ms DESC, attempt_no DESC LIMIT ?`)
+          .all(db.userId, filter.memoKey, filter.limit)
+      : db.sql
+          .query<Row, [string, number]>(`SELECT ${columns} FROM usage_events WHERE user_id = ? ORDER BY started_ms DESC, id DESC LIMIT ?`)
+          .all(db.userId, filter.limit);
     return rows.map((r) => ({
       id: r.id as UsageEvent["id"],
       provider: r.provider,

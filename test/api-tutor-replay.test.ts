@@ -8,7 +8,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, symlinkSy
 import { join } from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages";
-import { openDb } from "../src/backend/db";
+import { LOCAL_USER, ensureLocalUser, openDb } from "../src/backend/db";
 import type { ApiClient } from "../src/backend/providers/claude-api";
 import { ApiCallError, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, worstCaseUsd } from "../src/backend/providers/claude-api";
 import { ProviderError } from "../src/backend/providers/memo";
@@ -29,16 +29,17 @@ type Seed = { key: string; purpose: string; atMs: number; input?: unknown };
 function fixtureDb(seeds: readonly Seed[], cli: Readonly<Record<string, number>> = {}): string {
   const path = join(dir(), "afterclass.sqlite");
   const db = openDb(path);
+  ensureLocalUser(db);
   for (const s of seeds) {
     const input = s.input ?? { system: s.purpose === "wrap_up" ? "You close a review." : SYSTEM, prompt: s.purpose === "wrap_up" ? "Threads: thr_a" : TUTOR_PROMPT, effort: "medium" };
-    db.sql.run(`INSERT INTO memo_inputs (key, provider, purpose, version, model, input_json, first_seen_ms) VALUES (?, 'claude', ?, 'v', 'opus', ?, ?)`, [s.key, s.purpose, JSON.stringify(input), s.atMs]);
+    db.sql.run(`INSERT INTO memo_inputs (user_id, key, provider, purpose, version, model, input_json, first_seen_ms) VALUES (?, ?, 'claude', ?, 'v', 'opus', ?, ?)`, [LOCAL_USER, s.key, s.purpose, JSON.stringify(input), s.atMs]);
   }
   for (const [key, usd] of Object.entries(cli)) {
     const purpose = seeds.find((s) => s.key === key)!.purpose;
     db.sql.run(
-      `INSERT INTO usage_events (id, memo_key, attempt_no, provider, model, purpose, outcome, input_tokens, output_tokens, cache_read_tokens, cost_kind, cost_usd, cost_basis, cost_reason, started_ms, duration_ms)
-       VALUES (?, ?, 1, 'claude', 'claude-opus-5-5', ?, 'ok', 1, 1, 0, 'notional', ?, 'claude_subscription', NULL, 1, 1)`,
-      [`use_${key}`, key, purpose, usd],
+      `INSERT INTO usage_events (id, user_id, memo_key, attempt_no, provider, model, purpose, outcome, input_tokens, output_tokens, cache_read_tokens, cost_kind, cost_usd, cost_basis, cost_reason, started_ms, duration_ms)
+       VALUES (?, ?, ?, 1, 'claude', 'claude-opus-5-5', ?, 'ok', 1, 1, 0, 'notional', ?, 'claude_subscription', NULL, 1, 1)`,
+      [`use_${key}`, LOCAL_USER, key, purpose, usd],
     );
   }
   db.close();

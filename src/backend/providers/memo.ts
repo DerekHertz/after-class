@@ -15,15 +15,19 @@
  *    result or the failure. No other module calls `Task.attempt`.
  *  - Replay mode: lookups work, a miss throws `ReplayMiss`, so a recorded
  *    database is a labelled replay sample with no provider constructed.
+ *  - Per user: a memo is built on a `UserDb` and reads and writes only that user's rows, which are keyed by
+ *    (user_id, key). The key itself stays a hash of the call alone, so it does not change when a user is added and
+ *    the later shared cache of lecture-only rows can use it as it is. A `MemoKey` is therefore unique only within one
+ *    user: never look one up without the user.
  *
  *   const r = memo.lookup(boundaryTask, input);          // sync, for derivations
  *   if (r.kind === "missing") await memo.run(boundaryTask, input, { signal });
  */
 import { canonicalJson, stableId } from "../../shared/ids";
-import type { IdPart, MemoKey } from "../../shared/ids";
+import type { CaptureId, IdPart, MemoKey } from "../../shared/ids";
 import type { Cost, Provider, Purpose, Seq, UsageEvent, UsageOutcome } from "../../shared/domain";
 import { asSeq } from "../db";
-import type { Db } from "../db";
+import type { UserDb } from "../db";
 
 /** What a provider adapter reports for one attempt. Numbers it doesn't know stay null. */
 export type UsageReport = {
@@ -108,6 +112,14 @@ export type MemoInspection = {
 
 export type MemoMode = "live" | "replay";
 
+export type MemoRunOptions = {
+  readonly signal?: AbortSignal;
+  readonly streamTo?: (delta: string) => void;
+  readonly onRetry?: () => void;
+  /** The capture this call is for, stored on its usage events. Leave it out when the caller has none. */
+  readonly captureId?: CaptureId;
+};
+
 export type Memo = {
   readonly mode: MemoMode;
   key<I>(task: Task<I, unknown>, input: I): MemoKey;
@@ -120,7 +132,7 @@ export type Memo = {
    * `onRetry` runs after a retryable failure and before the next attempt, so a caller that
    * has been given the failed attempt's `streamTo` deltas can drop them.
    */
-  run<I, O>(task: Task<I, O>, input: I, opts?: { readonly signal?: AbortSignal; readonly streamTo?: (delta: string) => void; readonly onRetry?: () => void }): Promise<Lookup<O>>;
+  run<I, O>(task: Task<I, O>, input: I, opts?: MemoRunOptions): Promise<Lookup<O>>;
   /** User retry: forget terminal failures so demand re-runs them. Never deletes hits. */
   clearFailures(keys: readonly MemoKey[]): void;
   /** Exact input, output and usage for a key (PRD acceptance: inspectable preprocessing). */
@@ -186,32 +198,38 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-export function createMemo(db: Db, mode: MemoMode, opts: MemoOptions = {}): Memo {
+export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): Memo {
   const now = opts.now ?? Date.now;
   const retryDelayMs = opts.retryDelayMs ?? ((n: number) => Math.min(30_000, 1000 * 2 ** (n - 1)));
   const inflight = new Map<MemoKey, Promise<Lookup<unknown>>>();
+  const userId = db.userId;
 
   const q = {
     insertInput: db.sql.query(
-      `INSERT OR IGNORE INTO memo_inputs (key, provider, purpose, version, model, input_json, first_seen_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO memo_inputs (user_id, key, provider, purpose, version, model, input_json, first_seen_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (user_id, key) DO NOTHING`,
     ),
-    input: db.sql.query<InputRow, [string]>(`SELECT provider, purpose, version, model, input_json FROM memo_inputs WHERE key = ?`),
-    hit: db.sql.query<{ output_json: string; seq: number }, [string]>(`SELECT output_json, seq FROM memo WHERE key = ?`),
-    insertHit: db.sql.query(`INSERT INTO memo (key, output_json, seq, stored_ms) VALUES (?, ?, ?, ?)`),
-    failure: db.sql.query<FailureRow, [string]>(`SELECT attempts, last_error, seq, terminal FROM memo_failures WHERE key = ?`),
-    upsertFailure: db.sql.query<{ attempts: number }, [string, string, number, number]>(
-      `INSERT INTO memo_failures (key, attempts, last_error, seq, terminal) VALUES (?1, 1, ?2, ?3, ?4)
-       ON CONFLICT (key) DO UPDATE SET attempts = attempts + 1, last_error = ?2, seq = ?3, terminal = ?4
+    input: db.sql.query<InputRow, [string, string]>(`SELECT provider, purpose, version, model, input_json FROM memo_inputs WHERE user_id = ? AND key = ?`),
+    hit: db.sql.query<{ output_json: string; seq: number }, [string, string]>(`SELECT output_json, seq FROM memo WHERE user_id = ? AND key = ?`),
+    insertHit: db.sql.query(`INSERT INTO memo (user_id, key, output_json, seq, stored_ms) VALUES (?, ?, ?, ?, ?)`),
+    failure: db.sql.query<FailureRow, [string, string]>(`SELECT attempts, last_error, seq, terminal FROM memo_failures WHERE user_id = ? AND key = ?`),
+    upsertFailure: db.sql.query<{ attempts: number }, [string, string, string, number, number]>(
+      `INSERT INTO memo_failures (user_id, key, attempts, last_error, seq, terminal) VALUES (?1, ?2, 1, ?3, ?4, ?5)
+       ON CONFLICT (user_id, key) DO UPDATE SET attempts = memo_failures.attempts + 1, last_error = ?3, seq = ?4, terminal = ?5
        RETURNING attempts`,
     ),
-    deleteFailure: db.sql.query(`DELETE FROM memo_failures WHERE key = ?`),
-    nextAttempt: db.sql.query<{ n: number }, [string]>(`SELECT COALESCE(MAX(attempt_no), 0) + 1 AS n FROM usage_events WHERE memo_key = ?`),
+    deleteFailure: db.sql.query(`DELETE FROM memo_failures WHERE user_id = ? AND key = ?`),
+    nextAttempt: db.sql.query<{ n: number }, [string, string]>(`SELECT COALESCE(MAX(attempt_no), 0) + 1 AS n FROM usage_events WHERE user_id = ? AND memo_key = ?`),
     insertUsage: db.sql.query(
-      `INSERT INTO usage_events (id, memo_key, attempt_no, provider, model, purpose, outcome, input_tokens, output_tokens,
+      `INSERT INTO usage_events (id, user_id, memo_key, capture_id, attempt_no, provider, model, purpose, outcome, input_tokens, output_tokens,
          cache_read_tokens, cost_kind, cost_usd, cost_basis, cost_reason, started_ms, duration_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
-    usage: db.sql.query<UsageRow, [string]>(`SELECT * FROM usage_events WHERE memo_key = ? ORDER BY attempt_no`),
+    usage: db.sql.query<UsageRow, [string, string]>(
+      `SELECT id, memo_key, attempt_no, provider, model, purpose, outcome, input_tokens, output_tokens, cache_read_tokens,
+              cost_kind, cost_usd, cost_basis, cost_reason, started_ms, duration_ms
+       FROM usage_events WHERE user_id = ? AND memo_key = ? ORDER BY attempt_no`,
+    ),
   };
 
   function keyOf<I>(task: Task<I, unknown>, input: I): MemoKey {
@@ -219,9 +237,9 @@ export function createMemo(db: Db, mode: MemoMode, opts: MemoOptions = {}): Memo
   }
 
   function settled<O>(task: Task<unknown, O>, key: MemoKey): Lookup<O> {
-    const hit = q.hit.get(key);
+    const hit = q.hit.get(userId, key);
     if (hit) return { kind: "hit", key, value: task.decode(JSON.parse(hit.output_json)), atSeq: asSeq(hit.seq) };
-    const f = q.failure.get(key);
+    const f = q.failure.get(userId, key);
     if (f && f.terminal === 1) return { kind: "failed", key, attempts: f.attempts, lastError: f.last_error, atSeq: asSeq(f.seq) };
     return { kind: "missing", key };
   }
@@ -233,19 +251,19 @@ export function createMemo(db: Db, mode: MemoMode, opts: MemoOptions = {}): Memo
   }
 
   /** Must run inside a transaction: the attempt number and the event commit together. */
-  function recordUsage<I, O>(task: Task<I, O>, key: MemoKey, outcome: UsageOutcome, usage: UsageReport | null, startedMs: number, why: string): void {
-    const attemptNo = q.nextAttempt.get(key)!.n;
+  function recordUsage<I, O>(task: Task<I, O>, key: MemoKey, captureId: CaptureId | null, outcome: UsageOutcome, usage: UsageReport | null, startedMs: number, why: string): void {
+    const attemptNo = q.nextAttempt.get(userId, key)!.n;
     const cost = costColumns(usage?.cost ?? { kind: "unknown", reason: `no usage reported (${why})` });
     q.insertUsage.run(
-      stableId("use", key, attemptNo), key, attemptNo, task.provider, usage?.model ?? task.model, task.purpose, outcome,
+      stableId("use", userId, key, attemptNo), userId, key, captureId, attemptNo, task.provider, usage?.model ?? task.model, task.purpose, outcome,
       usage?.inputTokens ?? null, usage?.outputTokens ?? null, usage?.cacheReadTokens ?? null,
       cost.kind, cost.usd, cost.basis, cost.reason, Math.round(startedMs), Math.max(0, Math.round(now() - startedMs)),
     );
   }
 
-  async function attemptLoop<I, O>(task: Task<I, O>, input: I, key: MemoKey, signal: AbortSignal, streamTo: ((d: string) => void) | null, onRetry: (() => void) | null): Promise<Lookup<O>> {
-    q.insertInput.run(key, task.provider, task.purpose, task.version, task.model, canonicalJson(task.canonicalInput(input)), Math.round(now()));
-    let failures = q.failure.get(key)?.attempts ?? 0;
+  async function attemptLoop<I, O>(task: Task<I, O>, input: I, key: MemoKey, signal: AbortSignal, streamTo: ((d: string) => void) | null, onRetry: (() => void) | null, captureId: CaptureId | null): Promise<Lookup<O>> {
+    q.insertInput.run(userId, key, task.provider, task.purpose, task.version, task.model, canonicalJson(task.canonicalInput(input)), Math.round(now()));
+    let failures = q.failure.get(userId, key)?.attempts ?? 0;
     while (true) {
       if (signal.aborted) return { kind: "missing", key };
       const startedMs = now();
@@ -271,21 +289,21 @@ export function createMemo(db: Db, mode: MemoMode, opts: MemoOptions = {}): Memo
         const { usage, encoded, value } = outcome;
         return db.tx(() => {
           const atSeq = db.nextSeq();
-          q.insertHit.run(key, encoded, atSeq, Math.round(now()));
-          q.deleteFailure.run(key);
-          recordUsage(task, key, "ok", usage, startedMs, "ok");
+          q.insertHit.run(userId, key, encoded, atSeq, Math.round(now()));
+          q.deleteFailure.run(userId, key);
+          recordUsage(task, key, captureId, "ok", usage, startedMs, "ok");
           return { kind: "hit", key, value, atSeq } as const;
         });
       }
       const { usage, message, retryable } = outcome;
       if (signal.aborted) {
-        db.tx(() => recordUsage(task, key, "aborted", usage, startedMs, "aborted"));
+        db.tx(() => recordUsage(task, key, captureId, "aborted", usage, startedMs, "aborted"));
         return { kind: "missing", key };
       }
       const terminal = !retryable || failures + 1 >= task.maxAttempts;
       db.tx(() => {
-        recordUsage(task, key, "error", usage, startedMs, message);
-        failures = q.upsertFailure.get(key, message, db.nextSeq(), terminal ? 1 : 0)!.attempts;
+        recordUsage(task, key, captureId, "error", usage, startedMs, message);
+        failures = q.upsertFailure.get(userId, key, message, db.nextSeq(), terminal ? 1 : 0)!.attempts;
       });
       if (terminal) return settled(task as Task<unknown, O>, key);
       onRetry?.();
@@ -293,29 +311,29 @@ export function createMemo(db: Db, mode: MemoMode, opts: MemoOptions = {}): Memo
     }
   }
 
-  function run<I, O>(task: Task<I, O>, input: I, runOpts: { signal?: AbortSignal; streamTo?: (delta: string) => void; onRetry?: () => void } = {}): Promise<Lookup<O>> {
+  function run<I, O>(task: Task<I, O>, input: I, runOpts: MemoRunOptions = {}): Promise<Lookup<O>> {
     const key = keyOf(task, input);
     const flying = inflight.get(key);
     if (flying) return flying as Promise<Lookup<O>>;
     const done = settled(task as Task<unknown, O>, key);
     if (done.kind !== "missing") return Promise.resolve(done);
     if (mode === "replay") return Promise.reject(new ReplayMiss(task.purpose, key));
-    const p = attemptLoop(task, input, key, runOpts.signal ?? NEVER, runOpts.streamTo ?? null, runOpts.onRetry ?? null).finally(() => inflight.delete(key));
+    const p = attemptLoop(task, input, key, runOpts.signal ?? NEVER, runOpts.streamTo ?? null, runOpts.onRetry ?? null, runOpts.captureId ?? null).finally(() => inflight.delete(key));
     inflight.set(key, p);
     return p;
   }
 
   function clearFailures(keys: readonly MemoKey[]): void {
     db.tx(() => {
-      for (const k of keys) q.deleteFailure.run(k);
+      for (const k of keys) q.deleteFailure.run(userId, k);
     });
   }
 
   function inspect(key: MemoKey): MemoInspection | null {
-    const input = q.input.get(key);
+    const input = q.input.get(userId, key);
     if (!input) return null;
-    const hit = q.hit.get(key);
-    const f = q.failure.get(key);
+    const hit = q.hit.get(userId, key);
+    const f = q.failure.get(userId, key);
     return {
       key,
       provider: input.provider,
@@ -325,7 +343,7 @@ export function createMemo(db: Db, mode: MemoMode, opts: MemoOptions = {}): Memo
       input: JSON.parse(input.input_json),
       output: hit ? JSON.parse(hit.output_json) : null,
       failure: f ? { attempts: f.attempts, lastError: f.last_error, terminal: f.terminal === 1 } : null,
-      usage: q.usage.all(key).map((r) => ({
+      usage: q.usage.all(userId, key).map((r) => ({
         id: r.id as UsageEvent["id"],
         provider: r.provider,
         model: r.model,

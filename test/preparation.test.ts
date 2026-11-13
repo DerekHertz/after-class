@@ -13,7 +13,7 @@ import { assessable, deriveClaimStatus, validateDraft } from "../src/backend/pre
 import type { Check } from "../src/backend/preparation/core";
 import { canonicalInterpretation, canonicalResourceSearch, canonicalRevision, interpretTask } from "../src/backend/preparation/tasks";
 import type { InterpretationInput, InterpretationOutput, ResourceSearchInput, RevisionInput } from "../src/backend/preparation/tasks";
-import { deferred, fail, fakeTask, ok, testDb, testSeq, usage } from "./fakes";
+import { deferred, fail, fakeTask, ok, testUserDb, testSeq, usage } from "./fakes";
 import type { FakeStep, FakeTask } from "./fakes";
 
 // ───────────────────────────── evidence fixtures ─────────────────────────────
@@ -65,7 +65,7 @@ const checkCanonical = (i: ClaimSupportInput): IdPart => ({
 });
 
 function world(opts: { readonly interpret?: Task<InterpretationInput, InterpretationOutput> } = {}) {
-  const db = testDb();
+  const db = testUserDb();
   const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
   const captureId = randomId("cap") as CaptureId;
   const revisions = new Map<ChunkRevisionId, ChunkRevision>();

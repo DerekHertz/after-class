@@ -1,18 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { appliesBefore, createMemo, ReplayMiss } from "../src/backend/providers/memo";
 import type { Memo } from "../src/backend/providers/memo";
-import type { Db } from "../src/backend/db";
-import { deferred, fail, fakeTask, ok, testDb, usage } from "./fakes";
+import type { UserDb } from "../src/backend/db";
+import { deferred, fail, fakeTask, ok, testUserDb, usage } from "./fakes";
 import type { FakeStep } from "./fakes";
 
 type In = { readonly window: string };
 
-function setup(): { db: Db; memo: Memo } {
-  const db = testDb();
+function setup(): { db: UserDb; memo: Memo } {
+  const db = testUserDb();
   return { db, memo: createMemo(db, "live", { retryDelayMs: () => 0, now: () => 1000 }) };
 }
 
-function usageRows(db: Db) {
+function usageRows(db: UserDb) {
   return db.sql
     .query<{ attempt_no: number; outcome: string; cost_kind: string; cost_usd: number | null }, []>(
       "SELECT attempt_no, outcome, cost_kind, cost_usd FROM usage_events ORDER BY attempt_no",

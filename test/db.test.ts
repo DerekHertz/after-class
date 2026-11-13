@@ -66,13 +66,15 @@ describe("nextSeq", () => {
 });
 
 function insertUsage(db: Db, cost: { kind: string; usd: number | null; basis: string | null; reason: string | null }, n = 1) {
+  ensureLocalUser(db);
   db.sql.run(
-    "INSERT OR IGNORE INTO memo_inputs (key, provider, purpose, version, model, input_json, first_seen_ms) VALUES ('key_x', 'jev', 'boundary', 'v1', 'jev-1.13', '{}', 0)",
+    `INSERT INTO memo_inputs (user_id, key, provider, purpose, version, model, input_json, first_seen_ms) VALUES ('${LOCAL_USER}', 'key_x', 'jev', 'boundary', 'v1', 'jev-1.13', '{}', 0)
+     ON CONFLICT (user_id, key) DO NOTHING`,
   );
   db.sql
     .query(
-      `INSERT INTO usage_events (id, memo_key, attempt_no, provider, model, purpose, outcome, cost_kind, cost_usd, cost_basis, cost_reason, started_ms, duration_ms)
-       VALUES (?, 'key_x', ?, 'jev', 'jev-1.13', 'boundary', 'ok', ?, ?, ?, ?, 0, 0)`,
+      `INSERT INTO usage_events (id, user_id, memo_key, attempt_no, provider, model, purpose, outcome, cost_kind, cost_usd, cost_basis, cost_reason, started_ms, duration_ms)
+       VALUES (?, '${LOCAL_USER}', 'key_x', ?, 'jev', 'jev-1.13', 'boundary', 'ok', ?, ?, ?, ?, 0, 0)`,
     )
     .run(`use_${n}`, n, cost.kind, cost.usd, cost.basis, cost.reason);
 }
@@ -236,7 +238,7 @@ describe("users", () => {
 
   test("a database from before the users migration gains the table and one user, and keeps its data", () => {
     withFile((path) => {
-      const old = { ...MIGRATIONS, kernel: MIGRATIONS.kernel.filter((m) => m.id !== "002-users") };
+      const old = { ...MIGRATIONS, kernel: MIGRATIONS.kernel.filter((m) => m.id !== "002-users"), providers: MIGRATIONS.providers.filter((m) => m.id !== "004-user-id") };
       const a = openDb(path, old);
       const seq = a.nextSeq();
       expect(a.sql.query("SELECT name FROM sqlite_master WHERE name = 'users'").all()).toEqual([]);
