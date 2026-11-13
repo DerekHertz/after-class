@@ -105,7 +105,7 @@ Total estimated spend was $1.4700 of the $5 cap.
 
 What the runs do not show:
 
-- Tutoring quality on either model. The Sonnet arm chose `close_thread` on turns 4, 7 and 9 where the Opus arm chose `ask_followup`, `diagnose` and `close_thread`. The runner did not keep the reply text, so the wording cannot be compared.
+- Tutoring quality on either model. The two arms chose a different move on turns 4, 6, 7 and 8. Opus chose `ask_followup`, `diagnose`, `diagnose` and `diagnose`. Sonnet chose `close_thread`, `ask_followup`, `close_thread` and `ask_followup`. The other six moves match. The runner did not keep the reply text, so the wording cannot be compared.
 - A Sonnet-led review. Every turn replayed the stored Opus conversation up to that point.
 - Anything about lectures outside the one CS lecture of 2026-11-11.
 - Whether the 1 hour cache is the right lifetime. The first-turn write costs 2 times the input price. No gap between turns in this review passed 5 minutes, so the 5 minute cache at 1.25 times would have cost less here.
