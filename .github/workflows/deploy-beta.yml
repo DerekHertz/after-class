@@ -1,0 +1,122 @@
+name: deploy-beta
+
+# Manual only. The job runs in the protected `production` environment, so Derek approves each run, and the AWS role's
+# trust policy accepts only that environment's token. The environment must allow deployments from master only, because
+# the token's subject carries no branch. It never runs on pull requests.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-beta
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: aws
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars.BETA_ROLE_ARN }}
+
+      - name: Build and push the arm64 image, tagged by commit
+        env:
+          ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          registry="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          image="${registry}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          # Tags are immutable, so a rerun of the same commit reuses the image it already pushed.
+          if out=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=${IMAGE_TAG}" 2>&1); then
+            echo "image ${image} already exists, not rebuilding"
+            exit 0
+          elif ! grep -q ImageNotFoundException <<<"$out"; then
+            echo "$out"
+            exit 1
+          fi
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
+          docker build --platform linux/arm64 --tag "$image" .
+          docker push "$image"
+
+      - name: Pull the image on the server and restart the app
+        env:
+          BETA_INSTANCE_PARAMETER: ${{ vars.BETA_INSTANCE_PARAMETER }}
+          BETA_DEPLOY_DOCUMENT: ${{ vars.BETA_DEPLOY_DOCUMENT }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          instance_id=$(aws ssm get-parameter --name "$BETA_INSTANCE_PARAMETER" --query Parameter.Value --output text)
+          command_id=$(aws ssm send-command \
+            --instance-ids "$instance_id" \
+            --document-name "$BETA_DEPLOY_DOCUMENT" \
+            --parameters "tag=${IMAGE_TAG}" \
+            --comment "deploy ${IMAGE_TAG}" \
+            --query Command.CommandId --output text)
+          echo "command ${command_id} on ${instance_id}"
+          # The server pulls the image, restarts the app and waits for its own /health, then rolls back on failure. It
+          # saves a healthy image to its data volume and prints a WARNING line when that fails.
+          # Poll for up to 15 minutes. The result is not there for the first few seconds after the send.
+          for _ in $(seq 1 90); do
+            sleep 10
+            status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance_id" --query Status --output text 2>/dev/null || echo Pending)
+            case "$status" in
+              Success)
+                out=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance_id" --query StandardOutputContent --output text)
+                echo "$out"
+                # The deploy worked, but a failed safety copy of the image to the data volume must not go unseen.
+                if grep -q WARNING <<<"$out"; then
+                  echo "::warning title=Beta server::$(grep WARNING <<<"$out" | head -n 1)"
+                fi
+                exit 0
+                ;;
+              Pending | InProgress | Delayed)
+                continue
+                ;;
+              *)
+                echo "deploy command ended as ${status}"
+                aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance_id" --query '[StandardOutputContent,StandardErrorContent]' --output text
+                exit 1
+                ;;
+            esac
+          done
+          echo "deploy command still running after 15 minutes"
+          exit 1
+
+      # While ingress_cidrs holds only Derek's address, a GitHub runner cannot reach the server. Set the environment
+      # variable BETA_PUBLIC_CHECK to false until ingress opens. The server's own /health check above still gates the deploy.
+      - name: Poll /health through the public address
+        if: ${{ vars.BETA_PUBLIC_CHECK != 'false' }}
+        env:
+          BETA_URL: ${{ vars.BETA_URL }}
+        run: |
+          set -euo pipefail
+          # A first deploy with a domain also waits here for Caddy to obtain its certificate.
+          for attempt in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "${BETA_URL%/}/health" || true)
+            echo "attempt ${attempt}: HTTP ${code}"
+            if [ "$code" = "200" ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "${BETA_URL%/}/health did not return 200 within 5 minutes"
+          exit 1

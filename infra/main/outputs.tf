@@ -5,7 +5,7 @@ output "alb_dns_name" {
 
 output "ecr_repository_url" {
   description = "Registry URL for the API image."
-  value       = aws_ecr_repository.api.repository_url
+  value       = local.ecr_repository_url
 }
 
 output "deploy_role_arn" {
@@ -15,7 +15,7 @@ output "deploy_role_arn" {
 
 output "ecr_repository_name" {
   description = "Set as the ECR_REPOSITORY variable of the production environment."
-  value       = aws_ecr_repository.api.name
+  value       = local.ecr_repository_name
 }
 
 output "ecs_cluster_name" {

@@ -1,0 +1,24 @@
+{
+	admin off
+	servers {
+		protocols h1 h2
+	}
+%{ if domain == "" ~}
+	auto_https off
+%{ endif ~}
+}
+
+%{ if domain != "" ~}
+${domain} {
+%{ else ~}
+:80 {
+%{ endif ~}
+	# The upstream is the app container on the shared docker network, so Caddy needs no host networking.
+	# reverse_proxy passes the client's Host header through unchanged and adds X-Forwarded-For, X-Forwarded-Proto and
+	# X-Forwarded-Host. With no trusted_proxies set, Caddy replaces any of those the client sent, so the app can read
+	# the public origin and the client address from them.
+	# The tutor turn streams NDJSON, so the proxy flushes every write instead of buffering.
+	reverse_proxy afterclass-app:${app_port} {
+		flush_interval -1
+	}
+}

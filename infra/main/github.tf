@@ -1,17 +1,12 @@
 # The deploy workflow signs in with a short-lived GitHub OIDC token. No AWS key is stored in GitHub.
-# AWS validates the token against GitHub's published keys, so no thumbprint is set.
-resource "aws_iam_openid_connect_provider" "github" {
-  url            = "https://token.actions.githubusercontent.com"
-  client_id_list = ["sts.amazonaws.com"]
-}
-
+# The OIDC provider belongs to infra/shared.
 data "aws_iam_policy_document" "github_assume" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
 
     principals {
       type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github.arn]
+      identifiers = [local.github_oidc_provider_arn]
     }
 
     condition {
@@ -55,7 +50,7 @@ data "aws_iam_policy_document" "deploy" {
       "ecr:PutImage",
       "ecr:UploadLayerPart",
     ]
-    resources = [aws_ecr_repository.api.arn]
+    resources = [local.ecr_repository_arn]
   }
 
   # These two ECS actions do not support resource-level permissions.
