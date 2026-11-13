@@ -38,13 +38,22 @@ function readLog(host: Host): string[] {
   return readFileSync(host.log, "utf8").split("\n").filter(Boolean);
 }
 
-/** Copies a real script into the host with every absolute path of the real server pointed into the temp tree. */
-function installScript(host: Host, name: string): string {
+/**
+ * Copies a real script into the host with every absolute path of the real server pointed into the temp tree. One pass
+ * replaces every key, longest first, so a replacement is never rewritten by a later key.
+ */
+function installScript(host: Host, name: string, extra: Record<string, string> = {}): string {
+  const paths: Record<string, string> = {
+    "/etc/afterclass/settings.env": join(host.root, "settings.env"),
+    "/run/afterclass-deploy.lock": join(host.root, "lock"),
+    "/data/afterclass": join(host.root, "data/afterclass"),
+    ...extra,
+  };
+  const keys = Object.keys(paths).sort((a, b) => b.length - a.length);
+  const pattern = new RegExp(keys.map((key) => key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g");
   const text = readFileSync(join(FILES, `${name}.sh`), "utf8")
-    .replaceAll("/etc/afterclass/settings.env", join(host.root, "settings.env"))
-    .replaceAll("/run/afterclass-deploy.lock", join(host.root, "lock"))
-    .replaceAll("/data/afterclass", join(host.root, "data/afterclass"))
-    .replace(/\/usr\/local\/sbin\/(afterclass-[a-z-]+)/g, join(host.root, "$1"));
+    .replace(/\/usr\/local\/sbin\/(afterclass-[a-z-]+)/g, join(host.root, "$1"))
+    .replace(pattern, (key) => paths[key]!);
   expect(text).not.toContain("/usr/local/sbin");
   const path = join(host.root, name);
   writeFileSync(path, text);
@@ -174,45 +183,58 @@ describe("afterclass-deploy", () => {
     expect(run.stdout).toContain(`WARNING ${OLD} is not saved on /data`);
   });
 });
-
 const imageName = (tag: string): string => `registry.test/afterclass-api:${tag}`;
 const storeKey = (tag: string): string => imageName(tag).replace(/[/:]/g, "_");
 
 /**
+ * Writes an archive in the shape docker save produces: manifest.json naming a config file and a layer tarball, and both
+ * of those files. The fake docker load below refuses an archive that is unreadable or misses a file its manifest names.
+ */
+const MAKE_ARCHIVE = String.raw`image=$1; out=$2
+d=$(mktemp -d); mkdir "$d/l1" "$d/src"
+echo "$image" > "$d/src/content"
+tar -cf "$d/l1/layer.tar" -C "$d/src" content
+printf '{"image":"%s"}' "$image" > "$d/cfg.json"
+printf '[{"Config":"cfg.json","RepoTags":["%s"],"Layers":["l1/layer.tar"]}]' "$image" > "$d/manifest.json"
+tar -cf "$out" -C "$d" manifest.json cfg.json l1/layer.tar; status=$?
+rm -rf "$d"; exit $status`;
+
+/**
  * A stand-in for the docker CLI. Its image store is a folder of marker files, so a save on one host followed by a load on
- * another behaves like the real round trip. A saved tarball is a real tar archive whose manifest.json lists the image, and a
- * load reads that manifest, so an archive that is not a tar fails to load and an archive of another image loads that image.
- * `pullFails` stands for an image ECR no longer holds, `saveFails` leaves a half file and exits 1, and `size` is what
- * `image inspect --format` reports.
+ * another behaves like the real round trip. `pullFails` stands for an image ECR no longer holds. `saveFails` writes part
+ * of an archive and exits 1, as docker save does when the disk fills. `size` is what `image inspect --format` reports.
  */
 function fakeDocker(host: Host, opts: { store: string; pullFails?: boolean | undefined; saveFails?: boolean | undefined; size?: number }): void {
   mkdirSync(opts.store, { recursive: true });
+  stub(host.bin, "make-image-archive", MAKE_ARCHIVE);
   stub(
     host.bin,
     "docker",
-    `echo "docker $*" >> ${host.log}
+    `store=${opts.store}; log=${host.log}; size=${opts.size ?? 1000}; pull_fails=${opts.pullFails ? 1 : 0}; save_fails=${opts.saveFails ? 1 : 0}\n` +
+      String.raw`echo "docker $*" >> "$log"
 key() { echo "$1" | tr '/:' '__'; }
+for last; do :; done
 case "$1 $2" in
   "image inspect")
-    image="\${@: -1}"
-    [ -e "${opts.store}/$(key "$image")" ] || exit 1
-    [ "$3" = --format ] && echo ${opts.size ?? 1000}
+    [ -e "$store/$(key "$last")" ] || { echo "Error: No such image: $last" >&2; exit 1; }
+    [ "$3" = --format ] && echo "$size"
     exit 0;;
   "save --output")
-    echo partial > "$3"
-    ${opts.saveFails ? "exit 1" : ""}
-    [ -e "${opts.store}/$(key "$4")" ] || exit 1
-    d=$(mktemp -d)
-    printf '[{"Config":"c.json","RepoTags":["%s"],"Layers":[]}]' "$4" > "$d/manifest.json"
-    tar -cf "$3" -C "$d" manifest.json; rm -rf "$d"; exit 0;;
+    if [ "$save_fails" = 1 ]; then head -c 700 /dev/urandom > "$3"; echo "write $3: no space left on device" >&2; exit 1; fi
+    [ -e "$store/$(key "$4")" ] || exit 1
+    make-image-archive "$4" "$3"; exit $?;;
   "load --input")
-    manifest=$(tar -xOf "$3" manifest.json) || exit 1
-    loaded=$(echo "$manifest" | sed -n 's/.*"RepoTags":\\["\\([^"]*\\)".*/\\1/p')
-    [ -n "$loaded" ] || exit 1
-    touch "${opts.store}/$(key "$loaded")"; exit 0;;
+    members=$(tar -tf "$3" 2>/dev/null) || { echo "Error: unexpected EOF" >&2; exit 1; }
+    manifest=$(tar -xOf "$3" manifest.json 2>/dev/null) || { echo "Error: no manifest.json" >&2; exit 1; }
+    loaded=$(sed -n 's/.*"RepoTags":\["\([^"]*\)".*/\1/p' <<<"$manifest")
+    [ -n "$loaded" ] || { echo "Error: no image name in manifest.json" >&2; exit 1; }
+    for member in $(sed -n 's/.*"Config":"\([^"]*\)".*"Layers":\["\([^"]*\)".*/\1 \2/p' <<<"$manifest"); do
+      grep -qxF "$member" <<<"$members" || { echo "Error: open $member: no such file" >&2; exit 1; }
+    done
+    touch "$store/$(key "$loaded")"; exit 0;;
   "pull "*)
-    ${opts.pullFails ? "exit 1" : ""}
-    touch "${opts.store}/$(key "$2")"; exit 0;;
+    [ "$pull_fails" = 1 ] && { echo "manifest unknown" >&2; exit 1; }
+    touch "$store/$(key "$2")"; exit 0;;
   "login "*) cat >/dev/null; exit 0;;
 esac
 exit 0`,
@@ -227,24 +249,26 @@ function addLocalImage(store: string, tag: string): void {
 
 type TarballKind = "good" | "not-a-tar" | "truncated" | "wrong-image";
 
-/** Writes the file docker save leaves for `tag`, or a damaged one. A wrong-image tarball is a good archive of the OLDEST image. */
-function writeTarball(path: string, tag: string, kind: TarballKind = "good"): void {
+/** Writes a tarball the way docker save would for `tag`, or a damaged one. A wrong-image tarball holds the OLDEST image. */
+function writeTarball(host: Host, path: string, tag: string, kind: TarballKind = "good"): void {
   if (kind === "not-a-tar") {
     writeFileSync(path, "corrupt\n");
     return;
   }
-  const work = tmpDir("afterclass-tar-");
+  stub(host.bin, "make-image-archive", MAKE_ARCHIVE);
   const listed = kind === "wrong-image" ? OLDEST : tag;
-  writeFileSync(join(work, "manifest.json"), JSON.stringify([{ Config: "c.json", RepoTags: [imageName(listed)], Layers: [] }]));
-  expect(Bun.spawnSync(["tar", "-cf", path, "-C", work, "manifest.json"]).exitCode).toBe(0);
-  if (kind === "truncated") writeFileSync(path, readFileSync(path).subarray(0, 520));
+  expect(Bun.spawnSync(["bash", join(host.bin, "make-image-archive"), imageName(listed), path]).exitCode).toBe(0);
+  if (kind === "truncated") writeFileSync(path, readFileSync(path).subarray(0, 1536));
 }
 
-/** The image names in a tarball's manifest.json, or null when the file is not a readable archive. */
-function tarballImages(path: string): string[] | null {
-  const run = Bun.spawnSync(["tar", "-xOf", path, "manifest.json"]);
-  if (run.exitCode !== 0) return null;
-  return (JSON.parse(run.stdout.toString()) as { RepoTags: string[] }[]).flatMap((entry) => entry.RepoTags);
+/** Loads a tarball into an empty store with the fake docker and returns the images it holds afterwards. */
+function loadedImages(path: string): string[] {
+  const host = makeHost("afterclass-load-check-");
+  const store = join(host.root, "store");
+  fakeDocker(host, { store });
+  const load = Bun.spawnSync(["bash", join(host.bin, "docker"), "load", "--input", path], { env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` } });
+  if (load.exitCode !== 0) return [];
+  return readdirSync(store);
 }
 
 function runSave(opts: {
@@ -255,33 +279,27 @@ function runSave(opts: {
   strays?: string[];
   freeBytes?: number;
   saveFails?: boolean;
-}): { status: number; stderr: string; files: string[]; log: string[]; host: Host; images: (tag: string) => string[] | null } {
+}): { status: number; stderr: string; files: string[]; log: string[]; dir: string } {
   const host = makeHost("afterclass-save-test-");
   const store = join(host.root, "store");
   fakeDocker(host, { store, saveFails: opts.saveFails });
   for (const tag of opts.have ?? [opts.keep[0]!]) addLocalImage(store, tag);
   const dir = join(host.root, "data/afterclass/images");
-  for (const tag of opts.tarballs ?? []) writeTarball(join(dir, `${tag}.tar`), tag);
-  for (const [tag, kind] of Object.entries(opts.damaged ?? {})) writeTarball(join(dir, `${tag}.tar`), tag, kind);
+  for (const tag of opts.tarballs ?? []) writeTarball(host, join(dir, `${tag}.tar`), tag);
+  for (const [tag, kind] of Object.entries(opts.damaged ?? {})) writeTarball(host, join(dir, `${tag}.tar`), tag, kind);
   for (const name of opts.strays ?? []) writeFileSync(join(dir, name), "stray");
   stub(host.bin, "df", `printf 'Avail\\n%s\\n' ${opts.freeBytes ?? 10_000_000_000}`);
 
   const run = runScript(host, "afterclass-save-image", opts.keep);
-  return {
-    status: run.status,
-    stderr: run.stderr,
-    files: readdirSync(dir).sort(),
-    log: readLog(host),
-    host,
-    images: (tag) => tarballImages(join(dir, `${tag}.tar`)),
-  };
+  return { status: run.status, stderr: run.stderr, files: readdirSync(dir).sort(), log: readLog(host), dir };
 }
 
 describe("afterclass-save-image", () => {
-  test("saves the running image as <tag>.tar and leaves no temporary file", () => {
+  test("saves the running image as <tag>.tar that docker load accepts, and leaves no temporary file", () => {
     const run = runSave({ keep: [NEW] });
     expect(run.status).toBe(0);
     expect(run.files).toEqual([`${NEW}.tar`]);
+    expect(loadedImages(join(run.dir, `${NEW}.tar`))).toEqual([storeKey(NEW)]);
   });
 
   test("keeps the two named tarballs and prunes every other one, a crashed save's temporary file included", () => {
@@ -290,10 +308,35 @@ describe("afterclass-save-image", () => {
     expect(run.files).toEqual([`${NEW}.tar`, `${OLD}.tar`].sort());
   });
 
-  test("a save that fails part way leaves the kept tarball, no half file, and a nonzero status", () => {
-    const run = runSave({ keep: [NEW, OLD], tarballs: [OLD, OLDER], saveFails: true });
+  test("an existing tarball is never trusted, the running image is saved over it every time", () => {
+    for (const kind of ["good", "not-a-tar", "truncated", "wrong-image"] as const) {
+      const run = runSave({ keep: [NEW], damaged: { [NEW]: kind } });
+      expect(run.status).toBe(0);
+      expect(run.log.filter((line) => line.startsWith("docker save"))).toHaveLength(1);
+      expect(loadedImages(join(run.dir, `${NEW}.tar`))).toEqual([storeKey(NEW)]);
+    }
+  });
+
+  test("a docker save that fails part way fails the run and leaves the previous tarball byte for byte", () => {
+    const host = makeHost("afterclass-save-fails-");
+    const store = join(host.root, "store");
+    fakeDocker(host, { store, saveFails: true });
+    addLocalImage(store, NEW);
+    stub(host.bin, "df", "printf 'Avail\\n10000000000\\n'");
+    const dir = join(host.root, "data/afterclass/images");
+    writeTarball(host, join(dir, `${NEW}.tar`), NEW);
+    const before = readFileSync(join(dir, `${NEW}.tar`));
+
+    const run = runScript(host, "afterclass-save-image", [NEW]);
     expect(run.status).not.toBe(0);
-    expect(run.files).toEqual([`${OLD}.tar`]);
+    expect(readdirSync(dir)).toEqual([`${NEW}.tar`]);
+    expect(readFileSync(join(dir, `${NEW}.tar`)).equals(before)).toBe(true);
+  });
+
+  test("a docker save that fails part way with no earlier tarball leaves no file at all", () => {
+    const run = runSave({ keep: [NEW], saveFails: true });
+    expect(run.status).not.toBe(0);
+    expect(run.files).toEqual([]);
   });
 
   test("a disk with too little room is refused without writing anything, so the database keeps its space", () => {
@@ -304,38 +347,10 @@ describe("afterclass-save-image", () => {
     expect(run.files).toEqual([`${OLD}.tar`]);
   });
 
-  test("a tarball that already holds the image is not written again", () => {
-    const run = runSave({ keep: [NEW], tarballs: [NEW] });
-    expect(run.status).toBe(0);
-    expect(run.log.some((line) => line.startsWith("docker save"))).toBe(false);
-  });
-
-  for (const kind of ["not-a-tar", "truncated", "wrong-image"] as const) {
-    test(`an existing ${kind} tarball is replaced from the running image`, () => {
-      const run = runSave({ keep: [NEW], damaged: { [NEW]: kind } });
-      expect(run.status).toBe(0);
-      expect(run.log.some((line) => line.startsWith("docker save"))).toBe(true);
-      expect(run.images(NEW)).toEqual([imageName(NEW)]);
-      expect(run.files).toEqual([`${NEW}.tar`]);
-    });
-  }
-
-  test("a damaged tarball is left in place when the replacement cannot be written, never half replaced", () => {
-    const run = runSave({ keep: [NEW], damaged: { [NEW]: "not-a-tar" }, saveFails: true });
+  test("an image that is not on the host is an error, and every tarball stays, since it may be the only copy", () => {
+    const run = runSave({ keep: [NEW, OLD], have: [], tarballs: [NEW, OLDER] });
     expect(run.status).not.toBe(0);
-    expect(run.files).toEqual([`${NEW}.tar`]);
-  });
-
-  test("a tarball a pull set aside as .bad is removed", () => {
-    const run = runSave({ keep: [NEW], tarballs: [NEW], strays: [`${NEW}.tar.bad`] });
-    expect(run.status).toBe(0);
-    expect(run.files).toEqual([`${NEW}.tar`]);
-  });
-
-  test("an image that is not on the host is an error, not an empty tarball", () => {
-    const run = runSave({ keep: [NEW], have: [] });
-    expect(run.status).not.toBe(0);
-    expect(run.files).toEqual([]);
+    expect(run.files).toEqual([`${NEW}.tar`, `${OLDER}.tar`].sort());
   });
 
   test("anything but a full commit hash is refused, so a tag cannot name a path", () => {
@@ -348,23 +363,15 @@ function runPull(opts: { tag: string; have?: string[]; tarball?: TarballKind; pu
   status: number;
   log: string[];
   hasImage: boolean;
-  files: string[];
   stderr: string;
 } {
   const host = makeHost("afterclass-pull-test-");
   const store = join(host.root, "store");
   fakeDocker(host, { store, pullFails: opts.pullFails });
   for (const tag of opts.have ?? []) addLocalImage(store, tag);
-  const dir = join(host.root, "data/afterclass/images");
-  if (opts.tarball) writeTarball(join(dir, `${opts.tag}.tar`), opts.tag, opts.tarball);
+  if (opts.tarball) writeTarball(host, join(host.root, "data/afterclass/images", `${opts.tag}.tar`), opts.tag, opts.tarball);
   const run = runScript(host, "afterclass-pull", [opts.tag]);
-  return {
-    status: run.status,
-    log: readLog(host),
-    hasImage: existsSync(join(store, storeKey(opts.tag))),
-    files: readdirSync(dir).sort(),
-    stderr: run.stderr,
-  };
+  return { status: run.status, log: readLog(host), hasImage: existsSync(join(store, storeKey(opts.tag))), stderr: run.stderr };
 }
 
 describe("afterclass-pull", () => {
@@ -379,7 +386,6 @@ describe("afterclass-pull", () => {
     expect(run.status).toBe(0);
     expect(run.hasImage).toBe(true);
     expect(run.log.some((line) => line.startsWith("docker pull"))).toBe(false);
-    expect(run.files).toEqual([`${NEW}.tar`]);
   });
 
   test("an expired image with no tarball fails, rather than starting something else", () => {
@@ -389,18 +395,18 @@ describe("afterclass-pull", () => {
   });
 
   for (const kind of ["not-a-tar", "truncated", "wrong-image"] as const) {
-    test(`a ${kind} tarball is set aside and the image comes from ECR`, () => {
+    test(`a ${kind} tarball is reported as an error and the image comes from ECR`, () => {
       const run = runPull({ tag: NEW, tarball: kind });
       expect(run.status).toBe(0);
       expect(run.hasImage).toBe(true);
+      expect(run.stderr).toContain("ERROR");
       expect(run.log.some((line) => line.startsWith("docker pull"))).toBe(true);
-      expect(run.files).toEqual([`${NEW}.tar.bad`]);
     });
 
-    test(`a ${kind} tarball with ECR expired fails the pull and keeps the file as .bad`, () => {
+    test(`a ${kind} tarball with ECR expired fails the pull`, () => {
       const run = runPull({ tag: NEW, tarball: kind, pullFails: true });
       expect(run.status).not.toBe(0);
-      expect(run.files).toEqual([`${NEW}.tar.bad`]);
+      expect(run.hasImage).toBe(false);
     });
   }
 
@@ -433,90 +439,62 @@ describe("a replaced instance", () => {
     expect(existsSync(join(fresh.root, "store", storeKey(NEW)))).toBe(true);
   });
 
-  test("a corrupt tarball does not stop a healthy deploy, the next save repairs it, and a replacement survives ECR expiry", () => {
+  test("a corrupt tarball does not stop a healthy deploy, the next save overwrites it, and a replacement survives ECR expiry", () => {
     const host = makeHost("afterclass-repair-");
     const store = join(host.root, "store");
     const dir = join(host.root, "data/afterclass/images");
     fakeDocker(host, { store });
     stub(host.bin, "df", "printf 'Avail\\n10000000000\\n'");
-    writeTarball(join(dir, `${NEW}.tar`), NEW, "not-a-tar");
+    writeTarball(host, join(dir, `${NEW}.tar`), NEW, "truncated");
 
     expect(runScript(host, "afterclass-pull", [NEW]).status).toBe(0);
     expect(existsSync(join(store, storeKey(NEW)))).toBe(true);
-    expect(readdirSync(dir)).toEqual([`${NEW}.tar.bad`]);
-
     expect(runScript(host, "afterclass-save-image", [NEW]).status).toBe(0);
-    expect(readdirSync(dir)).toEqual([`${NEW}.tar`]);
-    expect(tarballImages(join(dir, `${NEW}.tar`))).toEqual([imageName(NEW)]);
 
     const fresh = replaceHost(host);
     expect(runScript(fresh, "afterclass-pull", [NEW]).status).toBe(0);
     expect(existsSync(join(fresh.root, "store", storeKey(NEW)))).toBe(true);
   });
-
-  test("a wrong-image tarball that deploy never pulled is still replaced by the save", () => {
-    const host = makeHost("afterclass-repair-wrong-");
-    fakeDocker(host, { store: join(host.root, "store") });
-    addLocalImage(join(host.root, "store"), NEW);
-    stub(host.bin, "df", "printf 'Avail\\n10000000000\\n'");
-    const dir = join(host.root, "data/afterclass/images");
-    writeTarball(join(dir, `${NEW}.tar`), NEW, "wrong-image");
-
-    expect(runScript(host, "afterclass-save-image", [NEW]).status).toBe(0);
-    expect(tarballImages(join(dir, `${NEW}.tar`))).toEqual([imageName(NEW)]);
-    expect(runScript(replaceHost(host), "afterclass-pull", [NEW]).status).toBe(0);
-  });
 });
 
-/** The named functions of afterclass-bootstrap, so a test can run them alone against stubbed disk tools. */
-function bootstrapFunctions(names: string[]): string {
-  const source = readFileSync(join(FILES, "afterclass-bootstrap.sh"), "utf8");
-  return names
-    .map((name) => {
-      const match = new RegExp(`^${name}\\(\\) \\{(?: .*\\}\\n|\\n[\\s\\S]*?\\n\\}\\n)`, "m").exec(source);
-      expect(match).not.toBeNull();
-      return match![0];
-    })
-    .join("\n");
-}
-
-type Filesystem = "empty" | "xfs" | "ext4";
-
-interface BootOptions {
-  /** Replacement stub bodies for the disk tools. `dd` receives the real dd arguments. */
-  readonly dd?: string;
-  readonly wipefs?: string;
-  readonly blockdev?: string;
-  /** Leaves dd and wipefs unstubbed and points the script at this image file instead of /dev/test. */
-  readonly realProbesOn?: string;
-  /** Every EC2 API read of the tag fails, as when the role lacks the permission or the network is down. */
-  readonly describeFails?: boolean;
-  /** Every CreateTags call fails. */
-  readonly tagWriteFails?: boolean;
-}
+const VOLUME_ID = "vol-0123456789abcdef0";
+const DEVICE = "/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${DATA_VOLUME_ID//-/}";
+const XFS_MAGIC = "XFSB";
 
 /**
- * One data volume and the instance it is attached to, across reboots. The disk, the volume tag and the root volume's
- * marker directory persist between boots. The stub tools work from them. wipefs and blkid report the disk's real
- * filesystem unless a test replaces wipefs, mkfs.xfs writes xfs, mount succeeds only for xfs, and the stubbed aws reads and
- * writes the tag.
+ * One server and its data volume. The volume is a 4 MiB file of zeros, as a new EBS volume reads. The stubbed mkfs.xfs
+ * writes the xfs magic at its start, and the stubbed mount succeeds only on a file that starts with it. mountpoint reports
+ * /data mounted after a mount of /data. head, tr, wc and flock are the real tools.
  */
-class VolumeHost {
-  readonly host = makeHost("afterclass-bootstrap-test-");
-  private readonly disk = join(this.host.root, "disk-fs");
-  private readonly tagFile = join(this.host.root, "volume-tag");
+class DataVolume {
+  readonly host = makeHost("afterclass-volume-test-");
+  readonly disk = join(this.host.root, "disk.img");
+  private readonly mounted = join(this.host.root, "mounted");
 
-  constructor(opts: { filesystem: Filesystem; tag: string | null }) {
-    writeFileSync(this.disk, opts.filesystem === "empty" ? "" : opts.filesystem);
-    if (opts.tag !== null) writeFileSync(this.tagFile, opts.tag);
-  }
-
-  get filesystem(): string {
-    return readFileSync(this.disk, "utf8");
-  }
-
-  get tag(): string | null {
-    return existsSync(this.tagFile) ? readFileSync(this.tagFile, "utf8") : null;
+  constructor(opts: { contents?: Buffer; mkfsSeconds?: number } = {}) {
+    const { host, disk, mounted } = this;
+    writeFileSync(disk, opts.contents ?? Buffer.alloc(4 * 1024 * 1024));
+    writeFileSync(join(host.root, "settings.env"), `AWS_REGION=us-east-2\nDATA_VOLUME_ID=${VOLUME_ID}\n`);
+    writeFileSync(join(host.root, "fstab"), "UUID=root / xfs defaults 0 1\n");
+    stub(host.bin, "sleep", "exit 0");
+    stub(host.bin, "wipefs", "exit 0");
+    stub(
+      host.bin,
+      "mkfs.xfs",
+      `echo "mkfs.xfs $*" >> ${host.log}\n/bin/sleep ${opts.mkfsSeconds ?? 0}\nprintf ${XFS_MAGIC} | dd of=${disk} conv=notrunc status=none`,
+    );
+    stub(
+      host.bin,
+      "mount",
+      `echo "mount $*" >> ${host.log}
+[ "$(head -c 4 ${disk})" = ${XFS_MAGIC} ] || { echo "mount: wrong fs type, bad option, bad superblock" >&2; exit 32; }
+[ "$1" = ${join(host.root, "data")} ] && touch ${mounted}
+exit 0`,
+    );
+    stub(host.bin, "umount", `echo "umount $*" >> ${host.log}`);
+    stub(host.bin, "mountpoint", `[ -e ${mounted} ]`);
+    stub(host.bin, "systemctl", `echo "systemctl $*" >> ${host.log}`);
+    stub(host.bin, "docker", `echo "docker $*" >> ${host.log}`);
   }
 
   get log(): string[] {
@@ -527,213 +505,147 @@ class VolumeHost {
     return this.log.filter((line) => line.startsWith(prefix)).length;
   }
 
-  formatted(): boolean {
-    return this.count("mkfs.xfs") > 0;
+  appStarted(): boolean {
+    return this.log.some((line) => /^systemctl (start|restart|enable) afterclass-/.test(line));
   }
 
-  /** Boots the instance once and runs provision_data_volume the way afterclass-bootstrap does. */
-  boot(opts: BootOptions = {}): { status: number; output: string } {
-    const { host, disk, tagFile } = this;
-    const mounted = join(host.root, "mounted");
-    rmSync(mounted, { force: true });
-    writeFileSync(join(host.root, "fstab"), "UUID=root / xfs defaults 0 1\n");
-    stub(host.bin, "sleep", "exit 0");
-    stub(host.bin, "blockdev", opts.blockdev ?? "echo 21474836480");
-    if (!opts.realProbesOn) {
-      stub(host.bin, "dd", opts.dd ?? "exit 0");
-      stub(host.bin, "wipefs", opts.wipefs ?? `cat ${disk}`);
-    }
-    stub(host.bin, "mkfs.xfs", `echo "mkfs.xfs $*" >> ${host.log}\nprintf xfs > ${disk}`);
-    stub(host.bin, "blkid", `case "$*" in *LABEL*) [ "$(cat ${disk})" = xfs ] && echo afterclass-data;; *TYPE*) cat ${disk};; esac; exit 0`);
-    stub(host.bin, "xfs_admin", `echo "xfs_admin $*" >> ${host.log}`);
-    stub(host.bin, "systemctl", "exit 0");
-    stub(host.bin, "mountpoint", `[ -e ${mounted} ]`);
-    stub(
-      host.bin,
-      "mount",
-      `if [ "$(cat ${disk})" = xfs ]; then echo "mount $*" >> ${host.log}; touch ${mounted}; exit 0; fi
-echo "mount: wrong fs type, bad option, bad superblock" >&2; exit 32`,
-    );
-    stub(
-      host.bin,
-      "aws",
-      `echo "aws $*" >> ${host.log}
-case "$2" in
-  describe-volumes)
-    ${opts.describeFails ? "echo 'UnauthorizedOperation' >&2; exit 254" : ""}
-    if [ -e ${tagFile} ]; then cat ${tagFile}; echo; else echo None; fi;;
-  create-tags)
-    ${opts.tagWriteFails ? "echo 'UnauthorizedOperation' >&2; exit 254" : ""}
-    echo "$*" | sed -n 's/.*Value=\\([a-z]*\\).*/\\1/p' | tr -d '\\n' > ${tagFile};;
-esac`,
-    );
+  markMounted(): void {
+    writeFileSync(this.mounted, "");
+  }
 
-    const functions = bootstrapFunctions(["say", "retry", "disk_signature", "format_tag", "record_formatted", "provision_data_volume"])
-      .replaceAll("/etc/fstab", join(host.root, "fstab"))
-      .replaceAll("/var/lib/afterclass", join(host.root, "var"))
-      .replaceAll("/data", join(host.root, "data"));
-    const script = `set -euo pipefail\nAWS_REGION=us-east-2\nDATA_VOLUME_ID=vol-0123456789abcdef0\n${functions}\nprovision_data_volume ${opts.realProbesOn ?? "/dev/test"}`;
-    const result = Bun.spawnSync(["bash", "-c", script], { env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` } });
+  /** The real script, with the device, the lock, fstab and /data pointed into the temp tree. */
+  private install(name: string): string {
+    return installScript(this.host, name, {
+      [DEVICE]: this.disk,
+      "[ -b ": "[ -e ",
+      "[ ! -b ": "[ ! -e ",
+      "/run/afterclass-format-data.lock": join(this.host.root, "format.lock"),
+      "/etc/fstab": join(this.host.root, "fstab"),
+      "/data": join(this.host.root, "data"),
+    });
+  }
+
+  private env(): Record<string, string | undefined> {
+    return { ...process.env, PATH: `${this.host.bin}:${process.env.PATH}` };
+  }
+
+  run(name: string, args: string[] = []): { status: number; output: string } {
+    const result = Bun.spawnSync(["bash", this.install(name), ...args], { env: this.env() });
     return { status: result.exitCode, output: result.stdout.toString() + result.stderr.toString() };
+  }
+
+  /** Starts the script without waiting, for runs that must overlap. */
+  start(name: string, args: string[] = []): Promise<number> {
+    return Bun.spawn(["bash", this.install(name), ...args], { env: this.env(), stdout: "ignore", stderr: "ignore" }).exited;
+  }
+
+  format(confirm: string = VOLUME_ID): { status: number; output: string } {
+    return this.run("afterclass-format-data", [confirm]);
   }
 }
 
-describe("afterclass-bootstrap data volume", () => {
-  test("an empty volume tagged allowed is formatted and mounted, and only then tagged done", () => {
-    const volume = new VolumeHost({ filesystem: "empty", tag: "allowed" });
-    const run = volume.boot();
-    expect(run.status).toBe(0);
-    expect(volume.tag).toBe("done");
-    const at = (prefix: string): number => volume.log.findIndex((line) => line.startsWith(prefix));
-    expect(at("mkfs.xfs")).toBeGreaterThan(-1);
-    expect(at("mount ")).toBeGreaterThan(at("mkfs.xfs"));
-    expect(at("aws ec2 create-tags")).toBeGreaterThan(at("mount "));
-    expect(volume.log[at("aws ec2 create-tags")]).toContain("--resources vol-0123456789abcdef0 --tags Key=afterclass-format,Value=done");
+describe("afterclass-bootstrap", () => {
+  test("a blank volume is not formatted, bootstrap fails, and neither unit is started or enabled", () => {
+    const volume = new DataVolume();
+    const run = volume.run("afterclass-bootstrap");
+    expect(run.status).not.toBe(0);
+    expect(run.output).toContain(`afterclass-format-data ${VOLUME_ID}`);
+    expect(volume.count("mkfs.xfs")).toBe(0);
+    expect(volume.appStarted()).toBe(false);
+    expect(volume.count("mount ")).toBe(1);
   });
 
-  test("a volume tagged done is never formatted, even when the probe reports its ext4 or xfs disk empty", () => {
-    for (const filesystem of ["xfs", "ext4"] as const) {
-      const volume = new VolumeHost({ filesystem, tag: "done" });
-      const run = volume.boot({ wipefs: "exit 0" });
-      expect(volume.formatted()).toBe(false);
-      expect(volume.filesystem).toBe(filesystem);
-      expect(run.status).toBe(filesystem === "xfs" ? 0 : 1);
-      expect(volume.tag).toBe("done");
+  test("a volume that holds a filesystem is mounted by its volume id and the units start", () => {
+    const volume = new DataVolume({ contents: Buffer.from(XFS_MAGIC) });
+    const run = volume.run("afterclass-bootstrap");
+    expect(run.status).toBe(0);
+    expect(volume.count("mkfs.xfs")).toBe(0);
+    expect(volume.log).toContain("systemctl start afterclass-app.service");
+    expect(readFileSync(join(volume.host.root, "fstab"), "utf8")).toContain(`${volume.disk} ${join(volume.host.root, "data")} xfs defaults,nofail`);
+  });
+
+  test("a rerun on a mounted volume does not mount again and still ends with the units up", () => {
+    const volume = new DataVolume({ contents: Buffer.from(XFS_MAGIC) });
+    expect(volume.run("afterclass-bootstrap").status).toBe(0);
+    expect(volume.run("afterclass-bootstrap").status).toBe(0);
+    expect(volume.count("mount ")).toBe(1);
+    expect(readFileSync(join(volume.host.root, "fstab"), "utf8").match(/ xfs defaults,nofail/g)).toHaveLength(1);
+  });
+
+  test("a device that never appears fails without touching fstab", () => {
+    const volume = new DataVolume();
+    rmSync(volume.disk);
+    const run = volume.run("afterclass-bootstrap");
+    expect(run.status).not.toBe(0);
+    expect(run.output).toContain("did not appear");
+    expect(volume.appStarted()).toBe(false);
+  });
+});
+
+describe("afterclass-format-data", () => {
+  test("formats a blank volume once, and bootstrap then mounts it and starts the app", () => {
+    const volume = new DataVolume();
+    const run = volume.format();
+    expect(run.status).toBe(0);
+    expect(volume.log).toContain(`mkfs.xfs -L afterclass-data ${volume.disk}`);
+    expect(volume.run("afterclass-bootstrap").status).toBe(0);
+    expect(volume.log).toContain("systemctl start afterclass-app.service");
+  });
+
+  test("without the matching volume id it formats nothing", () => {
+    for (const confirm of ["", "vol-0000000000000000", `${VOLUME_ID} `, "yes"]) {
+      const volume = new DataVolume();
+      const run = volume.format(confirm);
+      expect(run.status).toBe(2);
+      expect(volume.count("mkfs.xfs")).toBe(0);
     }
   });
 
-  test("a used xfs volume tagged done mounts without a probe or a tag write", () => {
-    const volume = new VolumeHost({ filesystem: "xfs", tag: "done" });
-    const run = volume.boot({ wipefs: "echo probe ran >&2; exit 2", dd: "echo probe ran >&2; exit 1" });
-    expect(run.status).toBe(0);
-    expect(volume.count("aws ec2 create-tags")).toBe(0);
-    expect(run.output).not.toContain("probe ran");
-  });
-
-  test("a blank volume tagged done stops with an error that names the tag, and formats nothing", () => {
-    const volume = new VolumeHost({ filesystem: "empty", tag: "done" });
-    const run = volume.boot();
-    expect(run.status).not.toBe(0);
-    expect(run.output).toContain("afterclass-format tag is 'done'");
-    expect(volume.formatted()).toBe(false);
-  });
-
-  test("any tag value but allowed, or no tag, formats nothing", () => {
-    for (const tag of ["Allowed", "allowed ", "yes", "true", "", null]) {
-      const volume = new VolumeHost({ filesystem: "empty", tag });
-      const run = volume.boot();
-      expect(run.status).not.toBe(0);
-      expect(volume.formatted()).toBe(false);
-    }
-  });
-
-  test("a failed tag read formats nothing, and a blank volume stops the run", () => {
-    const volume = new VolumeHost({ filesystem: "empty", tag: "allowed" });
-    const run = volume.boot({ describeFails: true });
-    expect(run.status).not.toBe(0);
-    expect(run.output).toContain("cannot read the afterclass-format tag");
-    expect(volume.formatted()).toBe(false);
-    expect(volume.tag).toBe("allowed");
-  });
-
-  test("a failed tag read still mounts a volume that already holds xfs", () => {
-    const volume = new VolumeHost({ filesystem: "xfs", tag: "done" });
-    const run = volume.boot({ describeFails: true });
-    expect(run.status).toBe(0);
-    expect(volume.formatted()).toBe(false);
-  });
-
-  test("a tag that cannot be written after the format fails the run, and the next boot mounts the xfs without formatting", () => {
-    const volume = new VolumeHost({ filesystem: "empty", tag: "allowed" });
-    const first = volume.boot({ tagWriteFails: true });
-    expect(first.status).not.toBe(0);
-    expect(first.output).toContain("could not set afterclass-format=done");
-    expect(volume.filesystem).toBe("xfs");
-    expect(volume.tag).toBe("allowed");
-
-    const second = volume.boot();
-    expect(second.status).toBe(0);
-    expect(volume.count("mkfs.xfs")).toBe(1);
-    expect(volume.tag).toBe("done");
-  });
-
-  test("a tag still allowed after a format never reaches a second mkfs, even when the next probe reports the disk empty", () => {
-    const volume = new VolumeHost({ filesystem: "empty", tag: "allowed" });
-    expect(volume.boot({ tagWriteFails: true }).status).not.toBe(0);
-
-    const second = volume.boot({ wipefs: "exit 0", tagWriteFails: true });
+  test("a second format of the same volume is refused", () => {
+    const volume = new DataVolume();
+    expect(volume.format().status).toBe(0);
+    const second = volume.format();
     expect(second.status).not.toBe(0);
     expect(volume.count("mkfs.xfs")).toBe(1);
-    expect(volume.filesystem).toBe("xfs");
   });
 
-  test("a rerun of bootstrap on a mounted, tagged volume changes nothing", () => {
-    const volume = new VolumeHost({ filesystem: "empty", tag: "allowed" });
-    expect(volume.boot().status).toBe(0);
-    expect(volume.boot().status).toBe(0);
+  test("two formats started together run mkfs once", async () => {
+    const volume = new DataVolume({ mkfsSeconds: 1 });
+    const statuses = await Promise.all([volume.start("afterclass-format-data", [VOLUME_ID]), volume.start("afterclass-format-data", [VOLUME_ID])]);
+    expect(statuses.sort()).toEqual([0, 1]);
     expect(volume.count("mkfs.xfs")).toBe(1);
-    expect(volume.count("aws ec2 create-tags")).toBe(1);
   });
 
-  test("xfs on a volume still tagged allowed is kept and the tag is closed", () => {
-    const volume = new VolumeHost({ filesystem: "xfs", tag: "allowed" });
-    const run = volume.boot();
-    expect(run.status).toBe(0);
-    expect(volume.formatted()).toBe(false);
-    expect(volume.tag).toBe("done");
-  });
-
-  test("any other signature on a volume tagged allowed, a partition table included, is refused and not formatted", () => {
-    for (const found of ["ext4", "gpt", "gpt\\nPMBR", "LVM2_member", "xfs\\next4"]) {
-      const volume = new VolumeHost({ filesystem: "ext4", tag: "allowed" });
-      const run = volume.boot({ wipefs: `printf '${found}\\n'` });
+  const refusals: [string, (volume: DataVolume) => void][] = [
+    ["/data is mounted", (volume) => volume.markMounted()],
+    ["the device cannot be read", (volume) => rmSync(volume.disk)],
+    ["one nonzero byte sits in the first MiB, with every probe silent", (volume) => writeFileSync(volume.disk, Buffer.concat([Buffer.alloc(700_000), Buffer.from([1]), Buffer.alloc(3_000_000)]))],
+    ["wipefs finds a signature past the first MiB", (volume) => stub(volume.host.bin, "wipefs", "echo gpt")],
+    ["wipefs fails", (volume) => stub(volume.host.bin, "wipefs", "echo 'wipefs: Input/output error' >&2; exit 1")],
+    ["mount finds a filesystem the other checks missed", (volume) => stub(volume.host.bin, "mount", "exit 0")],
+  ];
+  for (const [name, arrange] of refusals) {
+    test(`refuses when ${name}`, () => {
+      const volume = new DataVolume();
+      arrange(volume);
+      const run = volume.format();
       expect(run.status).not.toBe(0);
-      expect(volume.formatted()).toBe(false);
-      expect(volume.tag).toBe("allowed");
-    }
-  });
+      expect(run.output).toContain("nothing was formatted");
+      expect(volume.count("mkfs.xfs")).toBe(0);
+    });
+  }
 
-  describe("the probes stay a second guard while the tag says allowed", () => {
-    const cases: [string, BootOptions][] = [
-      [
-        "a read error that the probe reports with the exit status for nothing found",
-        {
-          dd: "echo 'dd: error reading /dev/test: Input/output error' >&2; exit 1",
-          wipefs: "echo 'wipefs: error: /dev/test: probing initialization failed: Input/output error' >&2; exit 2",
-        },
-      ],
-      ["a probe that prints an I/O error and exits 2, with dd able to read", { wipefs: "echo 'Input/output error' >&2; exit 2" }],
-      ["a probe that prints to stderr and exits 0", { wipefs: "echo 'warning: something' >&2; exit 0" }],
-      ["an unreadable last MiB", { dd: 'case "$*" in *skip=*) echo "dd: Input/output error" >&2; exit 1;; esac; exit 0' }],
-      ["an unreadable first MiB", { dd: 'case "$*" in *skip=*) exit 0;; esac; echo "dd: Input/output error" >&2; exit 1' }],
-      ...[1, 2, 4, 8, 127].map((code): [string, BootOptions] => [`a probe that exits ${code}`, { wipefs: `exit ${code}` }]),
-      ...["exit 1", "echo 0", "echo notanumber"].map((blockdev): [string, BootOptions] => [`a size of '${blockdev}'`, { blockdev }]),
-    ];
-    for (const [name, tools] of cases) {
-      test(`${name} does not format`, () => {
-        const volume = new VolumeHost({ filesystem: "empty", tag: "allowed" });
-        const run = volume.boot(tools);
-        expect(run.status).not.toBe(0);
-        expect(volume.formatted()).toBe(false);
-        expect(volume.tag).toBe("allowed");
-      });
-    }
-  });
+  const haveTools = Bun.which("wipefs") !== null && Bun.which("mkfs.ext4") !== null;
+  test.skipIf(!haveTools)("the real wipefs and head refuse an ext4 image and pass a blank one", () => {
+    const used = new DataVolume();
+    expect(Bun.spawnSync(["mkfs.ext4", "-q", "-F", used.disk]).exitCode).toBe(0);
+    rmSync(join(used.host.bin, "wipefs"));
+    expect(used.format().status).not.toBe(0);
+    expect(used.count("mkfs.xfs")).toBe(0);
 
-  const haveTools = Bun.which("wipefs") !== null && Bun.which("mkfs.ext4") !== null && Bun.which("truncate") !== null;
-  test.skipIf(!haveTools)("the real dd and wipefs tell a blank image from an ext4 one, with the volume tagged allowed", () => {
-    const blank = new VolumeHost({ filesystem: "empty", tag: "allowed" });
-    const blankImage = join(blank.host.root, "disk.img");
-    expect(Bun.spawnSync(["truncate", "-s", "8M", blankImage]).exitCode).toBe(0);
-    expect(blank.boot({ realProbesOn: blankImage, blockdev: "echo 8388608" }).status).toBe(0);
-    expect(blank.formatted()).toBe(true);
-
-    const used = new VolumeHost({ filesystem: "empty", tag: "allowed" });
-    const usedImage = join(used.host.root, "disk.img");
-    expect(Bun.spawnSync(["truncate", "-s", "8M", usedImage]).exitCode).toBe(0);
-    expect(Bun.spawnSync(["mkfs.ext4", "-q", usedImage]).exitCode).toBe(0);
-    expect(used.boot({ realProbesOn: usedImage, blockdev: "echo 8388608" }).status).not.toBe(0);
-    expect(used.formatted()).toBe(false);
+    const blank = new DataVolume();
+    rmSync(join(blank.host.bin, "wipefs"));
+    expect(blank.format().status).toBe(0);
   });
 });
 
