@@ -87,9 +87,12 @@
 .front-row-scene[data-board-align="center"] .front-row-heading::before { content: "Show diagram"; grid-column: 1; grid-row: 1; visibility: hidden; white-space: nowrap; padding: 6px 12px; border: 2px solid transparent; font: 500 1rem/1.15 'After Class Pixel', var(--font); }
 .front-row-scene[data-board-align="center"] .front-row-heading .front-row-eyebrow { grid-column: 2; grid-row: 1; min-width: 0; overflow-wrap: anywhere; text-align: center; }
 .front-row-scene[data-board-align="center"] .front-row-heading .show-diagram { grid-column: 3; grid-row: 1; justify-self: end; }
-/* A board too narrow for the label between two button-wide columns puts the label on its own centred line and Show diagram under it. */
-.front-row-scene[data-board-align="center"] .current-exchange { container: exchange / inline-size; }
-@container exchange (max-width: 32rem) {
+/* A board too narrow for the label between two button-wide columns puts the label on its own centred line and Show diagram under it.
+   Only the heading's box is the container, so the board's other text keeps sizing against the scene. The box takes the label's
+   size from the scene, where its own font-size resolves, and the label inherits it. */
+.front-row-scene .front-row-heading-box { container: heading / inline-size; font-size: clamp(.9rem, 1.25cqw, 1.2rem); }
+.front-row-scene .front-row-heading-box .front-row-eyebrow { font-size: 1em; }
+@container heading (max-width: 32rem) {
   .front-row-scene[data-board-align="center"] .front-row-heading { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 8px; }
   .front-row-scene[data-board-align="center"] .front-row-heading::before { display: none; }
   .front-row-scene[data-board-align="center"] .front-row-heading :is(.front-row-eyebrow, .show-diagram) { grid-column: 1; grid-row: auto; justify-self: center; }
@@ -304,6 +307,8 @@
   .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { position: absolute; z-index: 7; left: calc(var(--fr-mat-l) + var(--fr-mat-il)); width: calc(var(--fr-mat-w) - var(--fr-mat-il) - var(--fr-mat-ir)); top: calc(var(--fr-desk-top) + var(--fr-mat-top) + var(--fr-mat-it)); bottom: calc(var(--fr-mat-bottom) + var(--fr-mat-ib)); overflow: auto; overscroll-behavior: contain; }
   /* Board type follows the room scale, so the text keeps its share of the board when the window is wide or tall. */
   .front-row-scene .front-row-eyebrow { font-size: clamp(.9rem, calc(var(--fr-u) * 15), 1.2rem); }
+  .front-row-scene .front-row-heading-box { font-size: clamp(.9rem, calc(var(--fr-u) * 15), 1.2rem); }
+  .front-row-scene .front-row-heading-box .front-row-eyebrow { font-size: 1em; }
   .scene-shell .front-row-scene .current-exchange .line p { font-size: clamp(1.05rem, calc(var(--fr-u) * 19), 1.35rem); }
   .scene-shell .front-row-scene .current-exchange .line[data-question] p { font-size: clamp(1.4rem, calc(var(--fr-u) * 34), 2.7rem); }
   .front-row-scene[data-board-align="center"] .front-row-area[data-area="board"] { display: flex; flex-direction: column; justify-content: safe center; }

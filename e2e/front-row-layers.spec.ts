@@ -108,3 +108,20 @@ for (const scene of Object.keys(SCENES)) {
     });
   }
 }
+
+for (const scene of Object.keys(SCENES)) {
+  test(`in ${scene} the board's text sizes against the scene, not against a container inside the board`, async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene } });
+    await page.goto("/?scenario=review&clean=1");
+    await expect(page.locator(".current-exchange [data-question] p")).toBeVisible();
+    const containers = await page.evaluate(() => {
+      const found: string[] = [];
+      for (let el = document.querySelector(".current-exchange [data-question] p")!.parentElement; el && !el.classList.contains("front-row-scene"); el = el.parentElement) {
+        if (getComputedStyle(el).containerType !== "normal") found.push(el.className);
+      }
+      return found;
+    });
+    expect(containers).toEqual([]);
+  });
+}
