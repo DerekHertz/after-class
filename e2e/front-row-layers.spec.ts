@@ -26,6 +26,12 @@ for (const scene of Object.keys(SCENES)) {
         return {
           boardArt: one('.front-row-art [data-layer="board"]'), boardText: one('.front-row-area[data-area="board"]'),
           heading: one(".front-row-heading"), showDiagram: one(".front-row-heading .show-diagram"), question: one(".current-exchange .line[data-question]"),
+          headingLines: (() => {
+            const text = document.querySelector(".front-row-eyebrow")!.lastChild!;
+            const range = document.createRange();
+            range.selectNodeContents(text);
+            return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size;
+          })(),
           overflow: (({ scrollHeight, clientHeight }) => scrollHeight - clientHeight)(document.querySelector('.front-row-area[data-area="board"]')!),
           matArt: one('.front-row-art [data-layer="mat"]'), deskText: one('.front-row-area[data-area="desk"]'), field: one(".composer textarea"),
           buddy: one(".front-row-buddy"), notebook: one('.front-row-object[data-object="history"]'), folio: one('.front-row-object[data-object="source"]'),
@@ -35,6 +41,7 @@ for (const scene of Object.keys(SCENES)) {
       expect(boxes.navigation.length).toBeGreaterThan(3);
       expect(within(boxes.boardText, boxes.boardArt)).toBe(true);
       expect(boxes.overflow).toBeLessThanOrEqual(1);
+      expect({ scene, size, headingLines: boxes.headingLines }).toEqual({ scene, size, headingLines: 1 });
       for (const part of [boxes.heading, boxes.showDiagram, boxes.question]) expect(within(part, boxes.boardText)).toBe(true);
       expect(within(boxes.deskText, boxes.matArt)).toBe(true);
       expect(within(boxes.field, boxes.deskText)).toBe(true);
