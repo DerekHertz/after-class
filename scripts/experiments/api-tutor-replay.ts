@@ -267,7 +267,7 @@ export type Results = {
   readonly rows: readonly Row[];
 };
 
-const usd = (x: number | null) => (x === null ? "unknown" : `$${x.toFixed(4)}`);
+const usd = (x: number | null) => (x === null || !Number.isFinite(x) ? "unknown" : `$${x.toFixed(4)}`);
 /** The cost cell: what it was, or what it is held at, in words that never read as a bill for a call that may not have been one. */
 const costCell = (row: Row): string => {
   if (row.billing === "measured") return usd(row.costUsd);
@@ -315,6 +315,45 @@ export function markdownOf(r: Results): string {
     lines.push(`- STOPPED before call ${s.beforeCall}: measured ${usd(s.measuredUsd)} plus reserved ${usd(s.reservedUnknownUsd)} plus a worst case of ${usd(s.worstCaseUsd)} for it could pass the cap of ${usd(s.capUsd)}. Later calls were not made.`);
   }
   return `${lines.join("\n")}\n`;
+}
+
+// ───────────────────────────── cap arithmetic ─────────────────────────────
+
+/** A figure that may be added to a total: a finite number, not below zero. The adapter yields only these or null, and this is the check again where the money is counted. */
+export const isCost = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x) && x >= 0;
+
+/** Whether `added` on top of `spent` stays within the cap. Anything not finite does not fit, so a bad number stops the run instead of slipping past a comparison NaN would lose. */
+export const fitsUnderCap = (spent: number, added: number, cap: number): boolean => {
+  const total = spent + added;
+  return Number.isFinite(total) && Number.isFinite(cap) && total <= cap;
+};
+
+/**
+ * What the run has counted against the cap, in two parts: cost measured from a response's usage, and the worst case held for
+ * calls that may have been billed. The only way to change either is to add a cost, so neither can go down or become NaN.
+ */
+export class Spend {
+  #measured = 0;
+  #reserved = 0;
+  get measured(): number {
+    return this.#measured;
+  }
+  get reserved(): number {
+    return this.#reserved;
+  }
+  get total(): number {
+    return this.#measured + this.#reserved;
+  }
+  addMeasured(usd: number): void {
+    this.#measured += Spend.#valid(usd);
+  }
+  hold(usd: number): void {
+    this.#reserved += Spend.#valid(usd);
+  }
+  static #valid(usd: number): number {
+    if (!isCost(usd)) throw new Error(`${String(usd)} is not a finite non-negative cost`);
+    return usd;
+  }
 }
 
 // ───────────────────────────── the run ─────────────────────────────
@@ -492,9 +531,8 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
 
   const rows: Row[] = [];
   const seenContexts = new Set<string>();
-  /** Measured cost, kept apart from `reserved`, the worst case held for calls that may have been billed. Both count against the cap, and only these two ever do. */
-  let measured = 0;
-  let reserved = 0;
+  /** Measured cost, kept apart from the worst case held for calls that may have been billed. Both count against the cap, and only these two ever do. */
+  const spend = new Spend();
   let stoppedAtCap: Stop | null = null;
   let overrun: Overrun | null = null;
   let stoppedByError: ErrorStop | null = null;
@@ -518,9 +556,9 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
 
   for (const [i, call] of calls.entries()) {
     const worst = worstOf(options.model, call);
-    if (measured + reserved + worst > options.capUsd) {
-      stoppedAtCap = { beforeCall: i + 1, measuredUsd: measured, reservedUnknownUsd: reserved, worstCaseUsd: worst, capUsd: options.capUsd };
-      log(`stopping before call ${i + 1}: measured ${usd(measured)} plus reserved ${usd(reserved)} plus a worst case of ${usd(worst)} could pass the cap of ${usd(options.capUsd)}`);
+    if (!fitsUnderCap(spend.total, worst, options.capUsd)) {
+      stoppedAtCap = { beforeCall: i + 1, measuredUsd: spend.measured, reservedUnknownUsd: spend.reserved, worstCaseUsd: worst, capUsd: options.capUsd };
+      log(`stopping before call ${i + 1}: measured ${usd(spend.measured)} plus reserved ${usd(spend.reserved)} plus a worst case of ${usd(worst)} could pass the cap of ${usd(options.capUsd)}`);
       break;
     }
 
@@ -562,28 +600,30 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
     }
     const totalMs = now() - started;
     const detail = last as ApiCallDetail | null;
-    const measuredUsd = usageCost ?? detail?.costUsd ?? null;
-    // A response with usage is measured, even when it failed (a refusal, a bad stop). With none, only an error the API does not bill counts as $0.
-    // Anything else may have been billed and is held at its worst case: a timeout, a connection that broke, a stream cut off midway, an unknown error.
+    const costs = [usageCost, detail?.costUsd];
+    const measuredUsd = costs.find(isCost) ?? null;
+    // A response with valid usage is measured, even when it failed (a refusal, a bad stop). With none, only an error the API does not bill counts as $0.
+    // Anything else may have been billed and is held at its worst case: a response whose usage failed to parse, a timeout, a connection that broke,
+    // a stream cut off midway, an unknown error. A response that arrived with no usable usage is labelled cost unknown, whether or not it also failed.
     let billing: Billing;
     let costUsd: number | null;
     let reservedUsd = 0;
     if (measuredUsd !== null) {
       billing = "measured";
       costUsd = measuredUsd;
-      measured += measuredUsd;
+      spend.addMeasured(measuredUsd);
     } else if (notBilled && detail === null) {
       billing = "failed, not billed";
       costUsd = 0;
     } else {
-      billing = failure === null ? "cost unknown (reserved)" : "failed, may have been billed (reserved)";
+      billing = detail !== null || failure === null ? "cost unknown (reserved)" : "failed, may have been billed (reserved)";
       costUsd = null;
       reservedUsd = worst;
-      reserved += worst;
+      spend.hold(worst);
     }
     // The second guard. The reservation fits under the cap, so a call that costs no more than its reservation cannot take the
     // total over it. A call that does cost more has broken that, so it is recorded and the run stops here.
-    if (measuredUsd !== null && measuredUsd > worst) overrun = { atCall: i + 1, reservedUsd: worst, actualUsd: measuredUsd, totalUsd: measured + reserved, capUsd: options.capUsd };
+    if (measuredUsd !== null && !(measuredUsd <= worst)) overrun = { atCall: i + 1, reservedUsd: worst, actualUsd: measuredUsd, totalUsd: spend.total, capUsd: options.capUsd };
     if (fatalStatus !== null) stoppedByError = { atCall: i + 1, status: fatalStatus, message: redactThenClip(failure ?? "", secret, 200) };
 
     let header: Row["header"] = null;
@@ -595,7 +635,8 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
         parsed: parsed.kind === "header",
         moveKind: kind,
         kindAllowedByPrompt: kind === null ? null : allowed === null ? null : allowed.includes(kind),
-        why: parsed.kind === "invalid" ? parsed.why : parsed.kind === "pending" ? "empty reply" : null,
+        // The reason can quote the reply, so it is clipped and redacted like any other text that came from the network.
+        why: parsed.kind === "invalid" ? redactThenClip(parsed.why, secret, 200) : parsed.kind === "pending" ? "empty reply" : null,
       };
     }
     const context = `${call.purpose}\n${call.system}`;
@@ -627,7 +668,7 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
     });
     // Written after every call, so an interrupted run keeps what it paid for.
     writeResults(paths!, snapshot());
-    log(`call ${i + 1} of ${calls.length} ${call.purpose}: ${failure === null ? "ok" : `failed (${redactThenClip(failure, secret, 120)})`}, ${costCell(rows.at(-1)!)}. Measured ${usd(measured)}, reserved for unknown ${usd(reserved)}`);
+    log(`call ${i + 1} of ${calls.length} ${call.purpose}: ${failure === null ? "ok" : `failed (${redactThenClip(failure, secret, 120)})`}, ${costCell(rows.at(-1)!)}. Measured ${usd(spend.measured)}, reserved for unknown ${usd(spend.reserved)}`);
     if (stoppedByError !== null) {
       error(`call ${i + 1} failed with HTTP ${stoppedByError.status}, an authentication or permission error: ${stoppedByError.message}. No later call can succeed, so the run stopped and made no further call. That call was not billed. Check AFTERCLASS_ANTHROPIC_API_KEY in ${options.keys}.`);
       break;

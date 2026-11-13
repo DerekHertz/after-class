@@ -12,7 +12,7 @@ import type { Message } from "@anthropic-ai/sdk/resources/messages";
 import { openDb } from "../src/backend/db";
 import type { ApiClient } from "../src/backend/providers/claude-api";
 import { STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, worstCaseUsd } from "../src/backend/providers/claude-api";
-import { allowedFromPrompt, loadCalls, main, parseArgs, reservationUsd } from "../scripts/experiments/api-tutor-replay";
+import { Spend, allowedFromPrompt, fitsUnderCap, isCost, loadCalls, main, parseArgs, reservationUsd } from "../scripts/experiments/api-tutor-replay";
 import type { Results } from "../scripts/experiments/api-tutor-replay";
 
 const scratch: string[] = [];
@@ -54,14 +54,14 @@ function fixtureDb(seeds: readonly Seed[], cli: Readonly<Record<string, number>>
 
 const sha = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
 
-type Reply = { readonly text: string; readonly stop?: string; readonly input?: number; readonly creation?: number; readonly read?: number; readonly output?: number; readonly fail?: unknown };
+type Reply = { readonly text: string; readonly usage?: unknown; readonly stop?: string; readonly input?: number; readonly creation?: number; readonly read?: number; readonly output?: number; readonly fail?: unknown };
 
 function msg(r: Reply): Message {
   return {
     id: "m", type: "message", role: "assistant", model: "claude-opus-5-5", stop_sequence: null, stop_details: null,
     content: [{ type: "text", text: r.text, citations: null }],
     stop_reason: r.stop ?? "end_turn",
-    usage: { input_tokens: r.input ?? 100, output_tokens: r.output ?? 50, cache_creation_input_tokens: r.creation ?? 0, cache_read_input_tokens: r.read ?? 0, cache_creation: null },
+    usage: "usage" in r ? r.usage : { input_tokens: r.input ?? 100, output_tokens: r.output ?? 50, cache_creation_input_tokens: r.creation ?? 0, cache_read_input_tokens: r.read ?? 0, cache_creation: null },
   } as unknown as Message;
 }
 
@@ -620,5 +620,183 @@ describe("failed calls and the cap", () => {
     const r = results(out);
     expect(r.rows[0]).toMatchObject({ billing: "measured" });
     expect(r.rows[0]!.costUsd).toBeCloseTo(0.02, 9);
+  });
+});
+
+describe("usage the API sends that is not a measurement", () => {
+  const seeds: Seed[] = [
+    { key: "t1", purpose: "tutor_turn", atMs: T0 },
+    { key: "t2", purpose: "tutor_turn", atMs: T0 + 1000 },
+    { key: "t3", purpose: "tutor_turn", atMs: T0 + 2000 },
+  ];
+  const worstTutor = worstCaseUsd("claude-opus-5-5", Buffer.byteLength(SYSTEM) + Buffer.byteLength(TUTOR_PROMPT), STREAM_MAX_TOKENS, 0)!;
+  const results = (out: string) => JSON.parse(readFileSync(join(out, "results.json"), "utf8")) as Results;
+  const ok = { text: `{"kind":"wrap_up"}\nok`, input: 10, output: 10 };
+  const argv = (out: string, cap: string) => ["--db", fixtureDb(seeds), "--since", "2026-11-11", "--out", out, "--cap-usd", cap];
+
+  test("the reviewer's case: input_tokens missing and a billion output tokens is unknown cost, held at its worst case, and the $0.70 cap stops the next call", async () => {
+    const out = join(dir(), "out");
+    const api = fakeApi([{ ...ok, usage: { output_tokens: 1_000_000_000 } }, ok, ok]);
+    const { code } = await run(argv(out, "0.70"), api.client);
+    expect(code).toBe(0);
+    expect(api.calls()).toBe(1);
+    const r = results(out);
+    expect(r.rows[0]).toMatchObject({ billing: "cost unknown (reserved)", costUsd: null, tokens: null });
+    expect(r.rows[0]!.reservedUsd).toBeCloseTo(worstTutor, 12);
+    expect(r.totals.measuredUsd).toBe(0);
+    expect(r.totals.reservedUnknownUsd).toBeCloseTo(worstTutor, 12);
+    expect(r.stoppedAtCap).toMatchObject({ beforeCall: 2 });
+    expect(r.overrun).toBeNull();
+    expect(readFileSync(join(out, "results.md"), "utf8")).toContain("cost unknown (reserved)");
+  });
+
+  test.each([
+    ["negative input and output", { input_tokens: -1_000_000, output_tokens: -50 }],
+    ["NaN", { input_tokens: Number.NaN, output_tokens: 5 }],
+    ["fractional", { input_tokens: 1.5, output_tokens: 5 }],
+    ["a string", { input_tokens: "10", output_tokens: 5 }],
+    ["usage missing", undefined],
+  ])("%s: the running totals never go down, the call is held at its worst case and the run goes on under the cap", async (_name, usage) => {
+    const out = join(dir(), "out");
+    // The first call is measured. The bad second call must not lower that, and the third must see both totals.
+    const api = fakeApi([{ ...ok, input: 0, output: 20_000 }, { ...ok, usage }, ok]);
+    await run(argv(out, String(worstTutor * 2.5)), api.client);
+    const r = results(out);
+    expect(r.rows[0]).toMatchObject({ billing: "measured" });
+    expect(r.rows[1]).toMatchObject({ billing: "cost unknown (reserved)", costUsd: null });
+    expect(r.totals.measuredUsd).toBeCloseTo(0.4, 9);
+    expect(r.totals.reservedUnknownUsd).toBeCloseTo(worstTutor, 12);
+    expect(api.calls()).toBe(2);
+    expect(r.stoppedAtCap).toMatchObject({ beforeCall: 3 });
+    expect(readFileSync(join(out, "results.json"), "utf8")).not.toMatch(/NaN|Infinity/);
+  });
+
+  test("a refusal whose usage is invalid is unknown cost too, not a measured zero", async () => {
+    const out = join(dir(), "out");
+    await run(argv(out, "5"), fakeApi([{ text: "no", stop: "refusal", usage: { input_tokens: -1, output_tokens: 3 } }, ok, ok]).client);
+    expect(results(out).rows[0]).toMatchObject({ billing: "cost unknown (reserved)", costUsd: null, stopReason: "refusal" });
+  });
+
+  test("a valid response above its reservation is still an overrun, and an absurd one is not trusted as a cost", async () => {
+    const out = join(dir(), "out");
+    const { code } = await run(argv(out, "5"), fakeApi([{ ...ok, usage: { input_tokens: 1_000_000, output_tokens: 100 } }, ok]).client);
+    expect(code).toBe(4);
+    expect(results(out).overrun).toMatchObject({ atCall: 1 });
+  });
+});
+
+describe("the cap arithmetic fails closed", () => {
+  test("a comparison with a value that is not finite does not fit", () => {
+    expect(fitsUnderCap(1, 2, 5)).toBe(true);
+    expect(fitsUnderCap(1, 4, 5)).toBe(true);
+    expect(fitsUnderCap(1, 4.01, 5)).toBe(false);
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(fitsUnderCap(bad, 1, 5)).toBe(false);
+      expect(fitsUnderCap(1, bad, 5)).toBe(false);
+      expect(fitsUnderCap(1, 1, bad)).toBe(false);
+    }
+  });
+
+  test("only a finite non-negative number is a cost", () => {
+    expect([0, 0.5, 1e6].every(isCost)).toBe(true);
+    expect([-1, -0, Number.NaN, Number.POSITIVE_INFINITY, "1", null, undefined].map(isCost)).toEqual([false, true, false, false, false, false, false]);
+  });
+
+  test("the running totals accept only costs, so neither can go down or become NaN", () => {
+    const spend = new Spend();
+    spend.addMeasured(0.5);
+    spend.hold(0.25);
+    for (const bad of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => spend.addMeasured(bad)).toThrow();
+      expect(() => spend.hold(bad)).toThrow();
+    }
+    expect([spend.measured, spend.reserved, spend.total]).toEqual([0.5, 0.25, 0.75]);
+    spend.addMeasured(0);
+    expect(spend.total).toBe(0.75);
+  });
+});
+
+describe("a planted key never reaches an output", () => {
+  const KEY = "fake-client-key";
+  const REPLY = "REPLY-MARKER-7";
+  const leaks = (text: string) => Array.from({ length: KEY.length - 5 }, (_, i) => KEY.slice(0, i + 6)).some((prefix) => text.includes(prefix));
+  const header = `{"kind":"${KEY}","${KEY}":1}\n${REPLY} ${KEY}`;
+  /** A response with the key in every string field the SDK gives, including ones the adapter does not read. */
+  const planted = (over: Record<string, unknown> = {}) => ({
+    id: `msg_${KEY}`, type: "message", role: "assistant", model: `claude-opus-5-5-${KEY}`, stop_reason: KEY, stop_sequence: KEY,
+    stop_details: { type: "refusal", category: KEY, explanation: `explained ${KEY}` },
+    content: [{ type: "thinking", thinking: KEY, signature: KEY }, { type: "text", text: header, citations: null }],
+    usage: { input_tokens: 10, output_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, cache_creation: null, service_tier: KEY },
+    ...over,
+  });
+  const apiError = (status: number) => {
+    const err = Anthropic.APIError.generate(status, { type: "error", error: { type: KEY, message: `body ${KEY}` }, request_id: KEY } as never, `message ${KEY}`, new Headers({ "x-echo": KEY, "request-id": KEY }));
+    (err as { cause?: unknown }).cause = new Error(`nested cause ${KEY}`, { cause: new Error(`deeper ${KEY}`) });
+    return err;
+  };
+  type Step = { readonly message?: unknown; readonly error?: unknown };
+
+  function scripted(steps: readonly Step[]): { client: ApiClient; calls: () => number } {
+    let n = 0;
+    const next = (): Promise<Message> => {
+      const step = steps[n++]!;
+      return step.error !== undefined ? Promise.reject(step.error) : Promise.resolve(step.message as Message);
+    };
+    const client: ApiClient = {
+      messages: {
+        stream: () => {
+          let listener: (d: string) => void = () => {};
+          return {
+            on: (_e, l) => {
+              listener = l;
+              return {};
+            },
+            abort: () => {},
+            finalMessage: async () => {
+              for (const piece of [`${REPLY} ${KEY.slice(0, 4)}`, KEY.slice(4), ` ${KEY}`]) listener(piece);
+              return next();
+            },
+          };
+        },
+        create: () => next(),
+      },
+    };
+    return { client, calls: () => n };
+  }
+
+  test("a synthetic key in every string of a response and of an error is in no stdout, stderr, results.json or results.md", async () => {
+    const seeds: Seed[] = [
+      { key: "t1", purpose: "tutor_turn", atMs: T0 },
+      { key: "t2", purpose: "tutor_turn", atMs: T0 + 1000 },
+      { key: "t3", purpose: "tutor_turn", atMs: T0 + 2000 },
+      { key: "t4", purpose: "tutor_turn", atMs: T0 + 3000 },
+      { key: "w1", purpose: "wrap_up", atMs: T0 + 4000 },
+      { key: "w2", purpose: "wrap_up", atMs: T0 + 5000 },
+      { key: "w3", purpose: "wrap_up", atMs: T0 + 6000 },
+    ];
+    const api = scripted([
+      { message: planted() },
+      { message: planted({ stop_reason: "refusal" }) },
+      { error: apiError(400) },
+      { message: planted({ stop_reason: "end_turn" }) },
+      { message: planted({ stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify({ observations: [], notes: [], [KEY]: KEY }), citations: null }] }) },
+      { error: new Anthropic.APIConnectionError({ message: `connect ${KEY}`, cause: new Error(`socket ${KEY}`) }) },
+      { error: Object.assign(new TypeError(`odd ${KEY}`), { status: KEY, cause: KEY }) },
+    ]);
+    const out = join(dir(), "out");
+    const { code, logs, errors } = await run(["--db", fixtureDb(seeds), "--since", "2026-11-11", "--out", out, "--cap-usd", "50"], api.client);
+    expect(code).toBe(0);
+    expect(api.calls()).toBe(7);
+    const json = readFileSync(join(out, "results.json"), "utf8");
+    const md = readFileSync(join(out, "results.md"), "utf8");
+    const r = JSON.parse(json) as Results;
+    expect(r.rows).toHaveLength(7);
+    expect(r.rows[0]).toMatchObject({ stopReason: "unknown", billing: "measured" });
+    expect(r.rows[3]).toMatchObject({ header: { parsed: false } });
+    for (const [where, text] of [["stdout", logs.join("\n")], ["stderr", errors.join("\n")], ["results.json", json], ["results.md", md]] as const) {
+      expect([where, leaks(text)]).toEqual([where, false]);
+    }
+    // The reply is not recorded, so it is in none of them either.
+    for (const text of [json, md, logs.join("\n"), errors.join("\n")]) expect(text).not.toContain(REPLY);
   });
 });

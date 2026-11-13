@@ -392,7 +392,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
       try {
         format = outputFormatOf(schema);
       } catch (err) {
-        throw new ApiCallError(`output schema cannot be expressed as JSON Schema: ${safe(err instanceof Error ? err.message : String(err))}`, null, false, "not_billed", null);
+        throw new ApiCallError(`output schema cannot be expressed as JSON Schema: ${safe(textOfError(err))}`, null, false, "not_billed", null);
       }
       return call(req, signal, async (callSignal) => {
         const message = await client.messages.create(
