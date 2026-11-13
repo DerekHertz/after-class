@@ -39,6 +39,21 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      # Same image and digest as scripts/dev/pg.sh. The PostgreSQL test files skip without AFTERCLASS_TEST_PG_URL.
+      pg:
+        image: postgres:17.6@sha256:00bc86618629af00d2937fdc5a5d63db3ff8450acf52f0636ec813c7f4902929
+        env:
+          POSTGRES_PASSWORD: afterclass
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -h 127.0.0.1"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      AFTERCLASS_TEST_PG_URL: postgres://postgres:afterclass@127.0.0.1:55432/postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
