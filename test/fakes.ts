@@ -23,7 +23,7 @@ export function testSeq(n: number): Seq {
 
 export type FakeStep<O> =
   | { readonly kind: "ok"; readonly output: O; readonly usage: UsageReport; readonly deltas: readonly string[] }
-  | { readonly kind: "error"; readonly message: string; readonly retryable: boolean; readonly usage: UsageReport | null };
+  | { readonly kind: "error"; readonly message: string; readonly retryable: boolean; readonly usage: UsageReport | null; readonly deltas?: readonly string[] };
 
 export const UNKNOWN_COST: Cost = { kind: "unknown", reason: "fake provider" };
 
@@ -35,8 +35,9 @@ export function ok<O>(output: O, opts: { usage?: UsageReport; deltas?: readonly 
   return { kind: "ok", output, usage: opts.usage ?? usage(), deltas: opts.deltas ?? [] };
 }
 
-export function fail(message: string, opts: { retryable?: boolean; usage?: UsageReport | null } = {}): FakeStep<never> {
-  return { kind: "error", message, retryable: opts.retryable ?? false, usage: opts.usage ?? null };
+/** `deltas` are streamed before the attempt throws, as a call that dies mid-reply does. */
+export function fail(message: string, opts: { retryable?: boolean; usage?: UsageReport | null; deltas?: readonly string[] } = {}): FakeStep<never> {
+  return { kind: "error", message, retryable: opts.retryable ?? false, usage: opts.usage ?? null, deltas: opts.deltas ?? [] };
 }
 
 export type FakeTask<I, O> = Task<I, O> & {
@@ -76,8 +77,8 @@ export function fakeTask<I extends IdPart, O>(opts: {
       });
       aborted.catch(() => {});
       const step = await Promise.race([Promise.resolve(opts.answer(input, calls.length)), aborted]);
+      for (const d of step.deltas ?? []) ctx.streamTo?.(d);
       if (step.kind === "error") throw new ProviderError(step.message, step.usage, step.retryable);
-      for (const d of step.deltas) ctx.streamTo?.(d);
       return { output: step.output, usage: step.usage };
     },
   };

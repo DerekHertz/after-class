@@ -330,7 +330,7 @@ export function reviewRig(script: Script = pick, extra: { turnDeadlineMs?: numbe
   };
   const reviews = createReviews(db, {
     ...world.deps,
-    runTutor: (input, streamTo, signal) => memo.run(task, input, { signal, streamTo }),
+    runTutor: (input, streamTo, signal, onRetry) => memo.run(task, input, { signal, streamTo, onRetry }),
     clearFailures: memo.clearFailures,
     endedInTx: (reviewId) => record.markEndedInTx(reviewId),
   });
