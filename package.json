@@ -12,6 +12,7 @@
     "test:browser": "playwright test --config scripts/playwright.config.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "1.5.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "zod": "4.6.7"
