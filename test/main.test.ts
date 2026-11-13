@@ -12,9 +12,13 @@ import type { CaptureId, IdPart, WindowId } from "../src/shared/ids";
 import { stableId } from "../src/shared/ids";
 import { captureResponse, ingestAckResponse } from "../src/shared/wire";
 import { PRODUCT_JEV_SETUP } from "../src/backend/jev-setup";
-import { loadPairingToken, main, readKeys, resolveMode } from "../src/backend/main";
+import { buildTasks, loadPairingToken, main, readKeys, resolveClaudeBackend, resolveMode } from "../src/backend/main";
 import type { MainOptions, Running, TaskSet } from "../src/backend/main";
-import type { SpawnFn } from "../src/backend/providers/claude";
+import type { ClaudeCli, SpawnFn } from "../src/backend/providers/claude";
+import type { ApiClient } from "../src/backend/providers/claude-api";
+import { ProviderError } from "../src/backend/providers/memo";
+import { reviewState } from "../src/backend/review/tutor";
+import type { TutorInput } from "../src/backend/review/tutor";
 import type { ClaimSupportInput, BoundaryInput, FrameChangeInput } from "../src/backend/providers/jev-tasks";
 import { canonicalInterpretation, canonicalResourceSearch, canonicalRevision } from "../src/backend/preparation/tasks";
 import type { InterpretationInput, InterpretationOutput } from "../src/backend/preparation/tasks";
@@ -511,5 +515,153 @@ describe("main, live mode", () => {
 
     const usage = await (await fetch(`${b.base}/usage`, { headers: authed(b.r.token) })).text();
     for (const text of [usage, b.logs.join("\n"), b.errors.join("\n")]) expect(text).not.toContain(KEY);
+  }, 30_000);
+});
+
+// ───────────────────────────── the Claude backend switch ─────────────────────────────
+
+describe("AFTERCLASS_CLAUDE_BACKEND", () => {
+  const MESSAGES_KEY = "sk-ant-api03-wiring-0123456789";
+  const JEV_KEY = "sk-jev-wiring-0123456789";
+
+  const jevFake = (): typeof fetch =>
+    (async () =>
+      new Response(JSON.stringify({ model: "jev-1.13", answers: { new_concept: { type: "noul", noul: 0.1 }, stopping_point: { type: "noul", noul: 0.1 }, lesson_framing: { type: "noul", noul: 0.1 }, teaching_change: { type: "noul", noul: 0.1 } }, usage: { input_tokens: 5, output_tokens: 1 } }), { status: 200 })) as unknown as typeof fetch;
+
+  /** A Messages API client that records each call and refuses it, so the test sees which task reached it. */
+  const apiFake = () => {
+    const calls: { via: string; system: string }[] = [];
+    const refuse = (via: string, params: { system?: unknown }) => {
+      calls.push({ via, system: JSON.stringify(params.system) });
+      return new ProviderError("fake api: refused", null, false);
+    };
+    const client: ApiClient = {
+      messages: {
+        stream: (params) => ({ on: () => ({}), abort: () => undefined, finalMessage: () => Promise.reject(refuse("stream", params)) }),
+        create: (params) => Promise.reject(refuse("create", params)),
+      },
+    };
+    return { client, calls };
+  };
+
+  const closedSpawn = (spawned: { argv: readonly string[]; env: Record<string, string> }[]): SpawnFn => (argv, opts) => {
+    spawned.push({ argv, env: opts.env });
+    const closed = () => new ReadableStream<Uint8Array>({ start: (c) => c.close() });
+    return { stdin: { write: () => undefined, end: () => undefined }, stdout: closed(), stderr: closed(), exited: Promise.resolve(1), kill: () => undefined };
+  };
+
+  const keysFile = (lines: string): string => {
+    const configDir = dir("afterclass-config-");
+    writeFileSync(join(configDir, "keys.env"), lines, { mode: 0o600 });
+    return configDir;
+  };
+
+  test("unset, empty and cli all mean the CLI, api means api, and anything else refuses", () => {
+    expect(resolveClaudeBackend(undefined)).toBe("cli");
+    expect(resolveClaudeBackend("")).toBe("cli");
+    expect(resolveClaudeBackend("cli")).toBe("cli");
+    expect(resolveClaudeBackend("api")).toBe("api");
+    expect(() => resolveClaudeBackend("paid")).toThrow('AFTERCLASS_CLAUDE_BACKEND must be "cli" or "api"');
+  });
+
+  test("readKeys reads the Messages API key and still ignores every other name", () => {
+    const configDir = keysFile(`TYPESAFE_API_KEY=a\nAFTERCLASS_ANTHROPIC_API_KEY=${MESSAGES_KEY}\nANTHROPIC_API_KEY=nope\n`);
+    expect(readKeys(join(configDir, "keys.env"))).toEqual({ TYPESAFE_API_KEY: "a", AFTERCLASS_ANTHROPIC_API_KEY: MESSAGES_KEY });
+  });
+
+  test("api without a key refuses to start before anything is created, and the message holds no key", async () => {
+    const configDir = keysFile(`TYPESAFE_API_KEY=${JEV_KEY}\n`);
+    const error = await boot({ configDir }, { AFTERCLASS_CLAUDE_BACKEND: "api" }).then(() => null, (e: Error) => e);
+    expect(error?.message).toContain("AFTERCLASS_ANTHROPIC_API_KEY");
+    expect(error?.message).toContain("refusing to start");
+    expect(error?.message).not.toContain(JEV_KEY);
+    expect(existsSync(join(configDir, "pairing-token"))).toBe(false);
+    // An exported variable is not a key: only keys.env supplies it.
+    const viaEnv = await boot({ configDir }, { AFTERCLASS_CLAUDE_BACKEND: "api", AFTERCLASS_ANTHROPIC_API_KEY: MESSAGES_KEY }).then(() => null, (e: Error) => e);
+    expect(viaEnv?.message).toContain("AFTERCLASS_ANTHROPIC_API_KEY");
+    expect(viaEnv?.message).not.toContain(MESSAGES_KEY);
+  });
+
+  test("a bad backend name refuses to start", async () => {
+    const configDir = keysFile(`TYPESAFE_API_KEY=${JEV_KEY}\nAFTERCLASS_ANTHROPIC_API_KEY=${MESSAGES_KEY}\n`);
+    await expect(boot({ configDir }, { AFTERCLASS_CLAUDE_BACKEND: "paid" })).rejects.toThrow("AFTERCLASS_CLAUDE_BACKEND");
+  });
+
+  test("buildTasks sends only the tutor turn and the wrap-up to the API adapter", async () => {
+    const seen: { who: "cli" | "api"; call: string }[] = [];
+    const adapter = (who: "cli" | "api"): ClaudeCli => ({
+      structured: (req) => {
+        seen.push({ who, call: `structured:${req.system.slice(0, 24)}` });
+        return Promise.reject(new ProviderError(`${who} stub`, null, false));
+      },
+      streamText: (req) => {
+        seen.push({ who, call: `stream:${req.system.slice(0, 24)}` });
+        return Promise.reject(new ProviderError(`${who} stub`, null, false));
+      },
+    });
+    const jev = { ask: () => Promise.reject(new Error("no Jev call in this test")) };
+    const ctx = { signal: new AbortController().signal, streamTo: null };
+    const empty = { passages: [], frames: [], gaps: [] };
+    const attemptAll = async (tasks: TaskSet) => {
+      const calls: Promise<unknown>[] = [
+        tasks.tutor.attempt({ state: reviewState("rev_aaaaaaaaaaaaaaaaaaaaaaaaaa" as never, [], [], 0, 0), allowed: ["wrap_up"], claims: [], evidence: empty, turns: [], priorObservations: [], repairNote: null, scope: {} } as unknown as TutorInput, ctx),
+        tasks.wrapUp.attempt({ turns: [], claims: [], threads: [] }, ctx),
+        tasks.preparation.interpret.attempt({ chunkRevisionId: "chr_x", newMaterial: empty, existingClaims: [], gaps: [] } as never, ctx),
+        tasks.preparation.revise.attempt({ original: { text: "t", evidence: [], assumptions: [] }, check: { verdict: "unsupported", p: null }, evidence: empty } as never, ctx),
+        tasks.preparation.searchResources.attempt({ concept: { id: "cpt_x", label: "topic" }, supportedClaims: [] } as never, ctx),
+        tasks.diagramSummary.attempt({ topic: { id: "cpt_x", label: "topic" }, claims: [], passages: [], frames: [] } as never, ctx),
+      ];
+      await Promise.allSettled(calls);
+    };
+
+    await attemptAll(buildTasks(jev, adapter("cli"), () => null, adapter("api")));
+    expect(seen.filter((s) => s.who === "api")).toHaveLength(2);
+    expect(seen.filter((s) => s.who === "cli")).toHaveLength(4);
+    const viaApi = seen.filter((s) => s.who === "api").map((s) => s.call).sort();
+    expect(viaApi[0]).toStartWith("stream:You are the tutor in ");
+    expect(viaApi[1]).toStartWith("structured:You close a lecture ");
+
+    // Without a fourth argument every task keeps the one adapter: today's wiring.
+    seen.length = 0;
+    await attemptAll(buildTasks(jev, adapter("cli"), () => null));
+    expect(seen).toHaveLength(6);
+    expect(seen.every((s) => s.who === "cli")).toBe(true);
+  });
+
+  test("the default backend leaves the API client untouched and logs no backend line, even with a key on file", async () => {
+    const configDir = keysFile(`TYPESAFE_API_KEY=${JEV_KEY}\nAFTERCLASS_ANTHROPIC_API_KEY=${MESSAGES_KEY}\n`);
+    const api = apiFake();
+    const spawned: { argv: readonly string[]; env: Record<string, string> }[] = [];
+    const b = await boot({ configDir, fetch: jevFake(), spawn: closedSpawn(spawned), anthropic: api.client }, { PATH: "/usr/bin" });
+    expect(b.r.mode).toBe("live");
+    expect(b.logs.join("\n")).not.toContain("claude backend");
+    await ingest(b, fixture({ frames: false }));
+    await until(() => spawned.length > 0, 15_000);
+    expect(spawned[0]!.argv[0]).toBe("claude");
+    expect(api.calls).toEqual([]);
+    for (const child of spawned) expect(JSON.stringify(child.env)).not.toContain(MESSAGES_KEY);
+  }, 30_000);
+
+  test("api keeps preparation on the CLI, logs the choice, and the child never sees the Messages API key", async () => {
+    const configDir = keysFile(`TYPESAFE_API_KEY=${JEV_KEY}\nAFTERCLASS_ANTHROPIC_API_KEY=${MESSAGES_KEY}\n`);
+    const api = apiFake();
+    const spawned: { argv: readonly string[]; env: Record<string, string> }[] = [];
+    const b = await boot(
+      { configDir, fetch: jevFake(), spawn: closedSpawn(spawned), anthropic: api.client },
+      { AFTERCLASS_CLAUDE_BACKEND: "api", AFTERCLASS_ANTHROPIC_API_KEY: MESSAGES_KEY, ANTHROPIC_API_KEY: "ak-billing", PATH: "/usr/bin" },
+    );
+    expect(b.r.mode).toBe("live");
+    expect(b.logs.join("\n")).toContain("claude backend: api for the tutor turn and the wrap-up");
+    await ingest(b, fixture({ frames: false }));
+    await until(() => spawned.length > 0, 15_000);
+    // Interpretation is not the tutor: it spawned the CLI and made no API call.
+    expect(spawned[0]!.argv[0]).toBe("claude");
+    expect(api.calls).toEqual([]);
+    for (const child of spawned) {
+      for (const name of ["AFTERCLASS_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY", "TYPESAFE_API_KEY"]) expect(child.env[name]).toBeUndefined();
+      expect(JSON.stringify(child.env)).not.toContain(MESSAGES_KEY);
+    }
+    const usage = await (await fetch(`${b.base}/usage`, { headers: authed(b.r.token) })).text();
+    for (const text of [usage, b.logs.join("\n"), b.errors.join("\n")]) expect(text).not.toContain(MESSAGES_KEY);
   }, 30_000);
 });

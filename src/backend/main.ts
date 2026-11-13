@@ -4,6 +4,11 @@
  *   keys     ~/.config/afterclass/keys.env, mode 0600 or the backend refuses to start. Only this file reads it; the
  *            value of TYPESAFE_API_KEY goes to the Jev client and nowhere else (not a log line, not a response, not a child env).
  *            ELEVENLABS_API_KEY (optional) goes to the ElevenLabs voice and nowhere else, the same way.
+ *            AFTERCLASS_ANTHROPIC_API_KEY (optional) goes to the Claude Messages API adapter and nowhere else, the same way. It is
+ *            read only when AFTERCLASS_CLAUDE_BACKEND=api, and it never reaches the `claude` child.
+ *   claude   AFTERCLASS_CLAUDE_BACKEND=cli | api. Default cli: every Claude task runs through `claude -p` on the subscription.
+ *            api: ONLY the tutor turn and the wrap-up call the Messages API (paid, priced from usage); every other Claude task
+ *            keeps the CLI. api with no key refuses to start. Replay mode builds no Claude adapter, so the setting does nothing there.
  *   voice    Tutor speech from ElevenLabs through POST /voice/speech, live mode with a key only; otherwise GET /voice says
  *            unavailable and the app speaks with Chrome's voice. AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL.
  *   token    ~/.config/afterclass/pairing-token (0600), created on first boot, printed with "listening on 127.0.0.1:<port>".
@@ -35,6 +40,8 @@ import { createJevClient } from "./providers/jev";
 import type { JevClient } from "./providers/jev";
 import { createClaudeCli } from "./providers/claude";
 import type { ClaudeCli, SpawnFn } from "./providers/claude";
+import { createClaudeApi } from "./providers/claude-api";
+import type { ApiClient } from "./providers/claude-api";
 import { claimSupportTask, productBoundaryTask, productFrameChangeTask } from "./providers/jev-tasks";
 import type { BoundaryInput, FrameChangeInput } from "./providers/jev-tasks";
 import { createEvidence } from "./evidence";
@@ -79,7 +86,7 @@ export type TaskSet = {
 export type Env = Readonly<Record<string, string | undefined>>;
 
 export type MainOptions = {
-  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_EXTENSION_ID, AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL. */
+  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_CLAUDE_BACKEND, AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_EXTENSION_ID, AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL. */
   readonly env?: Env;
   /** Holds keys.env and pairing-token. Defaults to ~/.config/afterclass. */
   readonly configDir?: string;
@@ -95,7 +102,9 @@ export type MainOptions = {
   readonly fetch?: typeof fetch;
   readonly spawn?: SpawnFn;
   readonly claudeBin?: string;
-  readonly log?: (text: string) => void;
+  /** AFTERCLASS_CLAUDE_BACKEND=api only: a fake Messages API client, so a test makes no network call. */
+  readonly anthropic?: ApiClient;
+  readonly log?:(text: string) => void;
   readonly error?: (text: string) => void;
 };
 
@@ -131,9 +140,9 @@ function assertPrivateFile(path: string, what: string): void {
 }
 
 /** The secrets the backend reads from keys.env. Anything else in the file is ignored, never forwarded. */
-export type Keys = { readonly TYPESAFE_API_KEY?: string; readonly ELEVENLABS_API_KEY?: string };
+export type Keys = { readonly TYPESAFE_API_KEY?: string; readonly ELEVENLABS_API_KEY?: string; readonly AFTERCLASS_ANTHROPIC_API_KEY?: string };
 
-const KEY_NAMES = ["TYPESAFE_API_KEY", "ELEVENLABS_API_KEY"] as const;
+const KEY_NAMES = ["TYPESAFE_API_KEY", "ELEVENLABS_API_KEY", "AFTERCLASS_ANTHROPIC_API_KEY"] as const;
 
 export function readKeys(path: string): Keys {
   assertPrivateFile(path, "keys file");
@@ -184,7 +193,16 @@ const refusingClaude: ClaudeCli = {
   streamText: () => Promise.reject(refused("Claude")),
 };
 
-function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameBytes): TaskSet {
+export type ClaudeBackend = "cli" | "api";
+
+export function resolveClaudeBackend(requested: string | undefined): ClaudeBackend {
+  if (requested === undefined || requested === "") return "cli";
+  if (requested === "cli" || requested === "api") return requested;
+  throw new Error(`AFTERCLASS_CLAUDE_BACKEND must be "cli" or "api", got "${requested}"`);
+}
+
+/** `tutorClaude` backs the tutor turn and the wrap-up only. It is the same adapter as `claude` unless the api backend is chosen. */
+export function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameBytes, tutorClaude: ClaudeCli = claude): TaskSet {
   return {
     boundary: productBoundaryTask(jev),
     frameChange: productFrameChangeTask(jev),
@@ -194,8 +212,8 @@ function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameBytes): 
       checkClaim: claimSupportTask(jev),
       searchResources: resourceSearchTask(claude),
     },
-    tutor: tutorTask(claude),
-    wrapUp: wrapUpTask(claude),
+    tutor: tutorTask(tutorClaude),
+    wrapUp: wrapUpTask(tutorClaude),
     diagramSummary: diagramSummaryTask(claude, frameBytes),
   };
 }
@@ -228,6 +246,11 @@ export async function main(options: MainOptions = {}): Promise<Running> {
   const voiceModel = env.AFTERCLASS_ELEVENLABS_MODEL || DEFAULT_VOICE_MODEL;
   if (keys.ELEVENLABS_API_KEY !== undefined) checkVoiceSettings(voiceId, voiceModel);
   if (mode === "live" && apiKey === undefined) throw new Error(`${keysPath} has no TYPESAFE_API_KEY; refusing to start`);
+  const claudeBackend = resolveClaudeBackend(env.AFTERCLASS_CLAUDE_BACKEND);
+  const anthropicKey = keys.AFTERCLASS_ANTHROPIC_API_KEY;
+  if (mode === "live" && claudeBackend === "api" && anthropicKey === undefined) {
+    throw new Error(`AFTERCLASS_CLAUDE_BACKEND=api needs AFTERCLASS_ANTHROPIC_API_KEY in ${keysPath}; refusing to start`);
+  }
   const token = loadPairingToken(join(configDir, "pairing-token"));
   const port = options.port ?? parsePort(env.AFTERCLASS_PORT) ?? DEFAULT_PORT;
   const extensionId = env.AFTERCLASS_EXTENSION_ID ?? "";
@@ -241,13 +264,15 @@ export async function main(options: MainOptions = {}): Promise<Running> {
   const liveTasks = (): TaskSet => {
     const claudeCwd = join(dataDir, "claude-cwd");
     mkdirSync(claudeCwd, { recursive: true });
-    // Neither provider key may reach the child: claude -p bills the subscription login, and the Jev key is not its business.
-    const { TYPESAFE_API_KEY: _jevKey, ELEVENLABS_API_KEY: _voiceKey, ...childEnv } = env;
-    return buildTasks(
-      createJevClient({ apiKey: apiKey!, ...(options.fetch ? { fetch: options.fetch } : {}) }),
-      createClaudeCli({ bin: options.claudeBin ?? "claude", cwd: claudeCwd, maxConcurrent: DEFAULT_LIMITS.claude, env: childEnv, ...(options.spawn ? { spawn: options.spawn } : {}) }),
-      frameBytes,
-    );
+    // No provider key may reach the child: claude -p bills the subscription login, and the Jev, voice and Messages API keys are not its business.
+    const { TYPESAFE_API_KEY: _jevKey, ELEVENLABS_API_KEY: _voiceKey, AFTERCLASS_ANTHROPIC_API_KEY: _messagesKey, ...childEnv } = env;
+    const cli = createClaudeCli({ bin: options.claudeBin ?? "claude", cwd: claudeCwd, maxConcurrent: DEFAULT_LIMITS.claude, env: childEnv, ...(options.spawn ? { spawn: options.spawn } : {}) });
+    // Only the tutor turn and the wrap-up take the API backend. Every other task keeps the CLI.
+    const messagesApi = claudeBackend === "api"
+      ? createClaudeApi({ apiKey: anthropicKey!, maxConcurrent: DEFAULT_LIMITS.claude, ...(options.anthropic ? { client: options.anthropic } : {}) })
+      : cli;
+    if (claudeBackend === "api") log("claude backend: api for the tutor turn and the wrap-up (paid, priced from usage); every other Claude task uses the CLI");
+    return buildTasks(createJevClient({ apiKey: apiKey!, ...(options.fetch ? { fetch: options.fetch } : {}) }), cli, frameBytes, messagesApi);
   };
   const tasks: TaskSet = options.tasks ?? (mode === "live" ? liveTasks() : buildTasks(refusingJev, refusingClaude, frameBytes));
 
