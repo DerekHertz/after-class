@@ -4,7 +4,9 @@
  * what the ledger records, the default CLI argv, and the one thing the API adds that the CLI lacks: a per-search price.
  */
 import { describe, expect, test } from "bun:test";
+import Anthropic from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages";
+import { z } from "zod";
 import { stableId } from "../src/shared/ids";
 import { media } from "../src/shared/time";
 import type { ClaimId, ConceptId, EvidenceId, SourceId } from "../src/shared/ids";
@@ -13,12 +15,13 @@ import { diagramSummaryTask } from "../src/backend/diagram/tasks";
 import { interpretTask, resourceSearchTask, reviseTask } from "../src/backend/preparation/tasks";
 import { claudeArgs } from "../src/backend/providers/claude";
 import type { ClaudeCli, ClaudeRequest } from "../src/backend/providers/claude";
-import { COST_BASIS, MAX_PAUSE_CONTINUATIONS, WEB_SEARCH_USD, createClaudeApi, parseUsage, priceUsage } from "../src/backend/providers/claude-api";
+import { COST_BASIS, MAX_PAUSE_CONTINUATIONS, WEB_SEARCH_USD, ApiCallError, createClaudeApi, parseUsage, priceUsage } from "../src/backend/providers/claude-api";
 import type { ApiClient } from "../src/backend/providers/claude-api";
 import { createLedger } from "../src/backend/providers/ledger";
 import { createMemo } from "../src/backend/providers/memo";
 import type { Task } from "../src/backend/providers/memo";
 import { testDb } from "./fakes";
+import { NEVER } from "./providers-fixtures";
 
 const KEY = "sk-ant-api03-all-tasks-0123456789";
 const ev = (name: string) => stableId("ev", name) as EvidenceId;
@@ -188,7 +191,7 @@ describe("the default cli path", () => {
 // ───────────────────────────── the web-tools request ─────────────────────────────
 
 /** A client that answers each create call from `script`, in order, and keeps the requests. */
-function scripted(script: readonly Message[]): { client: ApiClient; calls: Call[] } {
+function scripted(script: readonly (Message | Error)[]): { client: ApiClient; calls: Call[] } {
   const calls: Call[] = [];
   const client: ApiClient = {
     messages: {
@@ -198,18 +201,18 @@ function scripted(script: readonly Message[]): { client: ApiClient; calls: Call[
       create: (params) => {
         calls.push({ params: JSON.parse(JSON.stringify(params)) as Record<string, unknown>, via: "create" });
         const next = script[Math.min(calls.length - 1, script.length - 1)]!;
-        return Promise.resolve(next);
+        return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
       },
     },
   };
   return { client, calls };
 }
 
-const reply = (blocks: unknown[], o: { stop?: string; input?: number; output?: number; searches?: number } = {}): Message =>
+const reply = (blocks: unknown[], o: { stop?: string; input?: number; output?: number; searches?: number; model?: string; serverTool?: unknown } = {}): Message =>
   ({
-    id: "msg_x", type: "message", role: "assistant", model: "claude-opus-5-5", stop_reason: o.stop ?? "end_turn", stop_sequence: null, stop_details: null,
+    id: "msg_x", type: "message", role: "assistant", model: o.model ?? "claude-opus-5-5", stop_reason: o.stop ?? "end_turn", stop_sequence: null, stop_details: null,
     content: blocks,
-    usage: { input_tokens: o.input ?? 1_000, output_tokens: o.output ?? 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: { web_search_requests: o.searches ?? 0, web_fetch_requests: 0 } },
+    usage: { input_tokens: o.input ?? 1_000, output_tokens: o.output ?? 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: "serverTool" in o ? o.serverTool : { web_search_requests: o.searches ?? 0, web_fetch_requests: 0 } },
   }) as unknown as Message;
 
 const text = (t: string) => ({ type: "text", text: t, citations: null });
@@ -217,7 +220,7 @@ const searchBlocks = [{ type: "server_tool_use", id: "srv_1", name: "web_search"
 
 describe("resource search without output_config.format", () => {
   const c = CASES[2]!;
-  const run = async (script: readonly Message[]) => {
+  const run = async (script: readonly (Message | Error)[]) => {
     const { client, calls } = scripted(script);
     const db = testDb();
     const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
@@ -274,5 +277,47 @@ describe("resource search without output_config.format", () => {
     const { result, calls } = await run([reply(searchBlocks, { stop: "pause_turn" })]);
     expect(result.kind).toBe("failed");
     expect(calls).toHaveLength(MAX_PAUSE_CONTINUATIONS + 1);
+  });
+  test("a server_tool_use object with a missing or null search count is unknown cost, not zero searches", async () => {
+    for (const serverTool of [{ web_fetch_requests: 0 }, { web_search_requests: null, web_fetch_requests: 0 }, { web_search_requests: 1 }]) {
+      const { result, events } = await run([reply([text(good)], { serverTool })]);
+      expect(result.kind).toBe("hit");
+      expect(events[0]!.cost.kind).toBe("unknown");
+    }
+    const { events } = await run([reply([text(good)], { serverTool: null })]);
+    expect(events[0]!.cost.kind).toBe("estimated");
+  });
+
+  test("a continuation that fails keeps the usage of the responses already billed, and is not reported as not billed", async () => {
+    const paused = reply(searchBlocks, { stop: "pause_turn", input: 500, output: 50, searches: 1 });
+    const failure = new Anthropic.BadRequestError(400, {}, "bad continuation", new Headers());
+    const { client } = scripted([paused, failure]);
+    const err = await createClaudeApi({ apiKey: KEY, maxConcurrent: 1, client }).structured(
+      { model: "opus", effort: "high", system: "s", prompt: "p", images: [], webTools: true, timeoutMs: 5_000 }, z.object({ resources: z.array(z.string()) }), NEVER,
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiCallError);
+    const failed = err as ApiCallError;
+    expect(failed.billing).toBe("maybe_billed");
+    expect(failed.usage?.cost.kind).toBe("estimated");
+    const { result, events } = await run([paused, failure]);
+    expect(result.kind).toBe("failed");
+    expect(events).toHaveLength(1);
+    expect(events[0]!.outcome).toBe("error");
+    expect(events[0]!.inputTokens).toBe(500);
+    const cost = events[0]!.cost;
+    expect(cost.kind).toBe("estimated");
+    if (cost.kind === "estimated") expect(cost.usd).toBeCloseTo((500 * 4 + 50 * 20) / 1_000_000 + WEB_SEARCH_USD, 10);
+  });
+
+  test("each response of a continued turn is priced with its own model, and an unpriced one makes the total unknown", async () => {
+    const first = reply(searchBlocks, { stop: "pause_turn", input: 1_000, output: 100, model: "claude-sonnet-5-5" });
+    const second = reply([text(good)], { input: 2_000, output: 200, model: "claude-opus-5-5" });
+    const { events } = await run([first, second]);
+    const cost = events[0]!.cost;
+    expect(cost.kind).toBe("estimated");
+    if (cost.kind === "estimated") expect(cost.usd).toBeCloseTo((1_000 * 2 + 100 * 10 + 2_000 * 4 + 200 * 20) / 1_000_000, 10);
+    const odd = reply(searchBlocks, { stop: "pause_turn", model: "claude-mystery-9" });
+    const { events: unknown } = await run([odd, second]);
+    expect(unknown[0]!.cost.kind).toBe("unknown");
   });
 });

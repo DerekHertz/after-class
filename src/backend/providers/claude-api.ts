@@ -315,8 +315,9 @@ export function parseUsage(raw: unknown): UsageParts | null {
   let webSearches = 0;
   if (tools !== undefined && tools !== null) {
     if (!isRecord(tools)) return null;
-    const n = optionalCountOf(tools.web_search_requests);
-    if (n === null || optionalCountOf(tools.web_fetch_requests) === null) return null;
+    // The SDK types both counts as numbers, so inside a server_tool_use object a missing or null one is malformed, not zero.
+    const n = countOf(tools.web_search_requests);
+    if (n === null || countOf(tools.web_fetch_requests) === null) return null;
     webSearches = n;
   }
   const parts = { fresh, creation5m, creation1h, read, output };
@@ -527,8 +528,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
   }
 
   /** Check the stop reason: only a finished answer is an answer. Runs after the client call, outside its `try`. */
-  function judge(parsed: Parsed): { readonly parsed: Parsed; readonly usage: UsageReport } {
-    const usage = usageOf(parsed);
+  function judge(parsed: Parsed, usage: UsageReport = usageOf(parsed)): { readonly parsed: Parsed; readonly usage: UsageReport } {
     if (parsed.stop === "end_turn" || parsed.stop === "stop_sequence") return { parsed, usage };
     if (parsed.stop === "refusal") throw new ProviderError(`claude refused the request${parsed.refusal ? ` (${parsed.refusal})` : ""}`, usage, false);
     throw new ProviderError(`claude stopped with ${parsed.stop === null ? "no stop reason" : parsed.stop}, not a finished answer`, usage, false);
@@ -536,31 +536,66 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
 
   const settle = (raw: unknown) => judge(read1(raw));
 
-  /** The sum of two calls' usage. Unknown if either is unknown, because a cost with a missing part is not a cost. */
-  function addUsage(a: UsageParts | null, b: UsageParts | null): UsageParts | null {
-    if (a === null || b === null) return null;
-    const searches = (a.webSearches ?? 0) + (b.webSearches ?? 0);
-    return { fresh: a.fresh + b.fresh, creation5m: a.creation5m + b.creation5m, creation1h: a.creation1h + b.creation1h, read: a.read + b.read, output: a.output + b.output, ...(searches > 0 ? { webSearches: searches } : {}) };
+  /**
+   * The usage of several responses of one logical call as one report. Each was priced with its own model by `usageOf`, so the cost is
+   * the sum of those and is unknown when any response's cost is unknown, because a total with a missing part is not a total.
+   */
+  function combine(reports: readonly UsageReport[]): UsageReport {
+    const last = reports[reports.length - 1]!;
+    const sum = (pick: (r: UsageReport) => number | null): number | null => {
+      let total = 0;
+      for (const r of reports) {
+        const n = pick(r);
+        if (n === null) return null;
+        total += n;
+      }
+      return total;
+    };
+    let usd = 0;
+    let unknown: string | null = null;
+    for (const r of reports) {
+      if (r.cost.kind === "estimated") usd += r.cost.usd;
+      else unknown ??= r.cost.kind === "unknown" ? r.cost.reason : "a response had a cost of another kind";
+    }
+    return {
+      model: last.model,
+      inputTokens: sum((r) => r.inputTokens),
+      outputTokens: sum((r) => r.outputTokens),
+      cacheReadTokens: sum((r) => r.cacheReadTokens),
+      cost: unknown !== null ? { kind: "unknown", reason: unknown } : Number.isFinite(usd) ? { kind: "estimated", usd, basis: COST_BASIS } : { kind: "unknown", reason: "the summed cost was not a finite number" },
+    };
   }
 
   /**
-   * The call with web tools. A paused turn is sent back, up to MAX_PAUSE_CONTINUATIONS times, and every call's usage is added up so the
-   * ledger sees the whole cost. The paused response's blocks go back unchanged and are never read for anything else.
+   * The call with web tools. A paused turn is sent back, up to MAX_PAUSE_CONTINUATIONS times, and the usage of every response is combined so
+   * the ledger sees the whole cost. The paused response's blocks go back unchanged and are never read for anything else. A failure after
+   * a response was billed carries the usage so far and is maybe billed, because that response was billed whatever the failure says.
    */
   async function structuredWithTools(req: ClaudeRequest, model: string, system: TextBlockParam[], first: readonly MessageParam[], tools: ToolUnion[], signal: AbortSignal): Promise<{ readonly parsed: Parsed; readonly usage: UsageReport }> {
     let messages: MessageParam[] = [...first];
-    let total: UsageParts | null = { fresh: 0, creation5m: 0, creation1h: 0, read: 0, output: 0 };
+    const reports: UsageReport[] = [];
+    /** The failure as the ledger should see it: the adapter's own error, with what was already spent. */
+    const afterBilled = (err: unknown): unknown => {
+      if (reports.length === 0 || !(err instanceof ApiCallError)) return err;
+      return new ApiCallError(err.message, combine(reports), err.retryable, "maybe_billed", err.status);
+    };
     for (let n = 0; ; n++) {
       const sent = messages;
-      const { value } = await call(req, signal, async (callSignal) =>
-        client.messages.create({ model, max_tokens: STRUCTURED_MAX_TOKENS, system, messages: sent, tools, output_config: { effort: req.effort } }, { signal: callSignal }),
-      );
-      const parsed = read1(value);
-      total = addUsage(total, parsed.usage);
-      const whole = { ...parsed, usage: total };
-      if (parsed.stop !== "pause_turn" || n >= MAX_PAUSE_CONTINUATIONS) return judge(whole);
+      let parsed: Parsed;
+      let value: unknown;
+      try {
+        ({ value } = await call(req, signal, async (callSignal) =>
+          client.messages.create({ model, max_tokens: STRUCTURED_MAX_TOKENS, system, messages: sent, tools, output_config: { effort: req.effort } }, { signal: callSignal }),
+        ));
+        parsed = read1(value);
+      } catch (err) {
+        throw afterBilled(err);
+      }
+      reports.push(usageOf(parsed));
+      const total = combine(reports);
+      if (parsed.stop !== "pause_turn" || n >= MAX_PAUSE_CONTINUATIONS) return judge(parsed, total);
       const content = read(value, "content");
-      if (!Array.isArray(content)) return judge(whole);
+      if (!Array.isArray(content)) return judge(parsed, total);
       messages = [...sent, { role: "assistant", content: content as ContentBlockParam[] }];
     }
   }
