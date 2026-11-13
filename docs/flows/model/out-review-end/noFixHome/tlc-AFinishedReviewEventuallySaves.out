@@ -1,0 +1,129 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 0 and seed -8923805667570946605 with 1 worker on 8 cores with 1986MB heap and 64MB offheap memory [pid: 819711] (Linux 6.18.58.1-microsoft-standard-WSL2 amd64, Ubuntu 21.0.13.0.3 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /tmp/statechart-gnAMPb/statechart-EP2PbN/ChartBound.tla
+Parsing file /tmp/claude-1000/-home-dhertzell-AfterClass/1b6258b4-8d3e-4695-97ec-c79a545656cb/scratchpad/wt-model/docs/flows/model/ReviewEnd.tla
+Parsing file /tmp/statechart-gnAMPb/statechart-EP2PbN/tmp-verdict-2/TLC.tla
+Parsing file /tmp/statechart-gnAMPb/statechart-EP2PbN/tmp-verdict-2/Naturals.tla
+Parsing file /tmp/statechart-gnAMPb/statechart-EP2PbN/tmp-verdict-2/Sequences.tla
+Parsing file /tmp/statechart-gnAMPb/statechart-EP2PbN/tmp-verdict-2/FiniteSets.tla
+Semantic processing of module ReviewEnd
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module ChartBound
+Starting... (2026-11-13 07:38:16)
+Warning: Declaring state or action constraints during liveness checking is dangerous: Please read section 14.3.5 on page 247 of Specifying Systems (https://lamport.azurewebsites.net/tla/book.html) and optionally the discussion at https://discuss.tlapl.us/msg00994.html for more details.
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Computed 2 initial states...
+Finished computing initial states: 4 distinct states generated at 2026-11-13 07:38:17.
+Progress(8) at 2026-11-13 07:38:17: 88 states generated, 32 distinct states found, 0 states left on queue.
+Checking temporal properties for the complete state space with 32 total distinct states at (2026-11-13 07:38:17)
+Error: Temporal properties were violated.
+
+Error: The following behavior constitutes a counter-example:
+
+State 1: <Initial predicate>
+/\ endTurn = "none"
+/\ trouble = FALSE
+/\ saveError = FALSE
+/\ wrapMemo = "missing"
+/\ dropped = FALSE
+/\ screen = "review"
+/\ settling = FALSE
+/\ saving = FALSE
+/\ live = "none"
+/\ saved = "unsaved"
+
+State 2: <YouConfirmFinish line 72, col 5 to line 76, col 82 of module ReviewEnd>
+/\ endTurn = "unsent"
+/\ trouble = FALSE
+/\ saveError = FALSE
+/\ wrapMemo = "missing"
+/\ dropped = FALSE
+/\ screen = "review"
+/\ settling = FALSE
+/\ saving = FALSE
+/\ live = "streaming"
+/\ saved = "unsaved"
+
+State 3: <TheBackendStoresYourEnd line 86, col 5 to line 88, col 97 of module ReviewEnd>
+/\ endTurn = "stored"
+/\ trouble = FALSE
+/\ saveError = FALSE
+/\ wrapMemo = "missing"
+/\ dropped = FALSE
+/\ screen = "review"
+/\ settling = FALSE
+/\ saving = FALSE
+/\ live = "streaming"
+/\ saved = "unsaved"
+
+State 4: <TheTutorWrapsUp line 99, col 5 to line 102, col 76 of module ReviewEnd>
+/\ endTurn = "wrapped"
+/\ trouble = FALSE
+/\ saveError = FALSE
+/\ wrapMemo = "missing"
+/\ dropped = FALSE
+/\ screen = "review"
+/\ settling = FALSE
+/\ saving = TRUE
+/\ live = "none"
+/\ saved = "save_pending"
+
+State 5: <TroubleStarts line 63, col 18 to line 63, col 157 of module ReviewEnd>
+/\ endTurn = "wrapped"
+/\ trouble = TRUE
+/\ saveError = FALSE
+/\ wrapMemo = "missing"
+/\ dropped = FALSE
+/\ screen = "review"
+/\ settling = FALSE
+/\ saving = TRUE
+/\ live = "none"
+/\ saved = "save_pending"
+
+State 6: <TheSaveRuns line 121, col 8 to line 129, col 73 of module ReviewEnd>
+/\ endTurn = "wrapped"
+/\ trouble = TRUE
+/\ saveError = TRUE
+/\ wrapMemo = "terminal"
+/\ dropped = FALSE
+/\ screen = "review"
+/\ settling = FALSE
+/\ saving = FALSE
+/\ live = "none"
+/\ saved = "save_pending"
+
+State 7: <YouGoHome line 140, col 5 to line 142, col 81 of module ReviewEnd>
+/\ endTurn = "wrapped"
+/\ trouble = TRUE
+/\ saveError = FALSE
+/\ wrapMemo = "terminal"
+/\ dropped = FALSE
+/\ screen = "home"
+/\ settling = FALSE
+/\ saving = FALSE
+/\ live = "none"
+/\ saved = "save_pending"
+
+State 8: <TroubleClears line 60, col 18 to line 60, col 138 of module ReviewEnd>
+/\ endTurn = "wrapped"
+/\ trouble = FALSE
+/\ saveError = FALSE
+/\ wrapMemo = "terminal"
+/\ dropped = FALSE
+/\ screen = "home"
+/\ settling = FALSE
+/\ saving = FALSE
+/\ live = "none"
+/\ saved = "save_pending"
+
+State 9: Stuttering
+Finished checking temporal properties in 00s at 2026-11-13 07:38:17
+88 states generated, 32 distinct states found, 0 states left on queue.
+Finished in 00s at (2026-11-13 07:38:17)
+

@@ -1,0 +1,102 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 0 and seed -400336431109367386 with 1 worker on 8 cores with 1986MB heap and 64MB offheap memory [pid: 819675] (Linux 6.18.58.1-microsoft-standard-WSL2 amd64, Ubuntu 21.0.13.0.3 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /tmp/claude-1000/-home-dhertzell-AfterClass/1b6258b4-8d3e-4695-97ec-c79a545656cb/scratchpad/wt-model/docs/flows/model/ReviewEnd.tla
+Semantic processing of module ReviewEnd
+Starting... (2026-11-13 07:38:16)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Computed 2 initial states...
+Finished computing initial states: 4 distinct states generated at 2026-11-13 07:38:16.
+Error: Invariant EndedUnsavedIsReachableFromHome is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ live = "none"
+/\ wrapMemo = "missing"
+/\ endTurn = "none"
+/\ saveError = FALSE
+/\ dropped = FALSE
+/\ saved = "unsaved"
+/\ screen = "review"
+/\ trouble = FALSE
+/\ saving = FALSE
+/\ settling = FALSE
+
+State 2: <YouConfirmFinish line 72, col 5 to line 76, col 82 of module ReviewEnd>
+/\ live = "streaming"
+/\ wrapMemo = "missing"
+/\ endTurn = "unsent"
+/\ saveError = FALSE
+/\ dropped = FALSE
+/\ saved = "unsaved"
+/\ screen = "review"
+/\ trouble = FALSE
+/\ saving = FALSE
+/\ settling = FALSE
+
+State 3: <TheBackendStoresYourEnd line 86, col 5 to line 88, col 97 of module ReviewEnd>
+/\ live = "streaming"
+/\ wrapMemo = "missing"
+/\ endTurn = "stored"
+/\ saveError = FALSE
+/\ dropped = FALSE
+/\ saved = "unsaved"
+/\ screen = "review"
+/\ trouble = FALSE
+/\ saving = FALSE
+/\ settling = FALSE
+
+State 4: <TheTutorWrapsUp line 99, col 5 to line 102, col 76 of module ReviewEnd>
+/\ live = "none"
+/\ wrapMemo = "missing"
+/\ endTurn = "wrapped"
+/\ saveError = FALSE
+/\ dropped = FALSE
+/\ saved = "save_pending"
+/\ screen = "review"
+/\ trouble = FALSE
+/\ saving = TRUE
+/\ settling = FALSE
+
+State 5: <TroubleStarts line 63, col 18 to line 63, col 157 of module ReviewEnd>
+/\ live = "none"
+/\ wrapMemo = "missing"
+/\ endTurn = "wrapped"
+/\ saveError = FALSE
+/\ dropped = FALSE
+/\ saved = "save_pending"
+/\ screen = "review"
+/\ trouble = TRUE
+/\ saving = TRUE
+/\ settling = FALSE
+
+State 6: <TheSaveRuns line 121, col 8 to line 129, col 73 of module ReviewEnd>
+/\ live = "none"
+/\ wrapMemo = "terminal"
+/\ endTurn = "wrapped"
+/\ saveError = TRUE
+/\ dropped = FALSE
+/\ saved = "save_pending"
+/\ screen = "review"
+/\ trouble = TRUE
+/\ saving = FALSE
+/\ settling = FALSE
+
+State 7: <YouGoHome line 140, col 5 to line 142, col 81 of module ReviewEnd>
+/\ live = "none"
+/\ wrapMemo = "terminal"
+/\ endTurn = "wrapped"
+/\ saveError = FALSE
+/\ dropped = FALSE
+/\ saved = "save_pending"
+/\ screen = "home"
+/\ trouble = TRUE
+/\ saving = FALSE
+/\ settling = FALSE
+
+64 states generated, 29 distinct states found, 6 states left on queue.
+The depth of the complete state graph search is 7.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 2 and the 95th percentile is 2).
+Finished in 00s at (2026-11-13 07:38:16)
+

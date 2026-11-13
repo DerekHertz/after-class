@@ -1,0 +1,53 @@
+---
+title: "Finishing and saving a review (code, not flow)"
+---
+stateDiagram-v2
+  direction LR
+  state "At the same time" as all {
+    state "Finish" as r0 {
+      s0: Reviewing
+      s1: Reviewing, last reply settling
+      s2: Finishing
+      s3: Finish failed, not delivered
+      s4: Finish failed after delivery
+      s5: Finish not delivered
+      s6: Review ended
+      s7: Finish delivered, no wrap-up
+      [*] --> s0
+      [*] --> s1
+      s0 --> s2: you confirm Finish [when Screen is Review screen]
+      s1 --> s0: the last reply settles
+      s2 --> s3: the request fails
+      s2 --> s6: the tutor wraps up
+      s2 --> s4: the tutor's wrap-up fails
+      s3 --> s2: you press Retry
+      s3 --> s5: you go home
+      s4 --> s2: you press Finish again or you press Retry
+      s4 --> s7: you go home
+      s5 --> s2: you press Retry [when Screen is Review screen]
+      s7 --> s2: you press Finish again or you press Retry [when Screen is Review screen]
+    }
+    --
+    state "Save" as r1 {
+      s8: Not saved
+      s9: Saving
+      s10: Saved
+      s11: Save failed, failure cached
+      s12: Saving, failure cached
+      [*] --> s8
+      s8 --> s9: the tutor wraps up [when Finish is Finishing and Screen is Review screen]
+      s9 --> s10: the save succeeds
+      s9 --> s11: the save fails
+      s11 --> s12: you press Retry save [when Screen is Review screen]
+      s12 --> s11: the save returns the cached failure
+      s12 --> s10: the save succeeds
+    }
+    --
+    state "Screen" as r2 {
+      s13: Review screen
+      s14: Home
+      [*] --> s13
+      s13 --> s14: you go home [when Finish is none of Finishing, Reviewing, last reply settling and Save is none of Saving, Saving, failure cached]
+      s14 --> s13: you open the review from home [when Save is not Saved]
+    }
+  }
