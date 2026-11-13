@@ -12,7 +12,7 @@ retry() {
   local attempt
   for attempt in 1 2 3 4 5; do
     "$@" && return 0
-    say "attempt ${attempt} of '$*' failed"
+    say "attempt ${attempt} of '$*' failed" >&2
     sleep $((attempt * 5))
   done
   return 1
@@ -36,9 +36,9 @@ if [ ! -b "$device" ]; then
 fi
 
 # Prints "empty" when the device is readable and carries no signature at all, otherwise the name of what it holds. Any
-# failure returns 1, and the caller refuses to format. The probe tools report some read errors with the same exit status
-# they use for "nothing found", so the first and last MiB must read cleanly before an empty answer counts, and a probe
-# that prints anything on stderr or exits nonzero is an error.
+# failure returns 1, and the caller refuses to format. This is the second guard. The probe tools report some read errors
+# with the same exit status they use for "nothing found", and wipefs can print nothing and exit 0 when a read fails inside
+# it, so an "empty" answer alone never authorizes a format. The tag on the volume does (see provision_data_volume).
 disk_signature() {
   local device=$1 err size_mib found rc=0
   size_mib=$(( $(blockdev --getsize64 "$device") / 1048576 ))
@@ -63,35 +63,82 @@ disk_signature() {
   echo "${found:-empty}"
 }
 
-# Format only a device that is readable and has no signature. A volume that holds anything but xfs is left alone and the
-# run fails.
-prepare_filesystem() {
-  local device=$1 signature
-  signature=$(disk_signature "$device") || {
-    say "cannot prove ${device} is empty, refusing to format it"
+# Prints the value of the afterclass-format tag on the data volume, or "none" when it has no such tag. Returns 1 when the
+# EC2 API cannot be asked. Terraform creates the volume with the value "allowed" and never changes it again.
+format_tag() {
+  local value
+  value=$(retry aws ec2 describe-volumes --region "$AWS_REGION" --volume-ids "$DATA_VOLUME_ID" \
+    --query "Volumes[0].Tags[?Key=='afterclass-format'].Value | [0]" --output text) || return 1
+  if [ -z "$value" ] || [ "$value" = None ]; then
+    value=none
+  fi
+  echo "$value"
+}
+
+# Writes the tag that ends the authorization to format. The instance role may write only this key with only this value.
+record_formatted() {
+  retry aws ec2 create-tags --region "$AWS_REGION" --resources "$DATA_VOLUME_ID" --tags Key=afterclass-format,Value=done
+}
+
+# Formatting is allowed once in the life of the volume, by durable state outside the disk. The volume carries the tag
+# afterclass-format=allowed from the moment Terraform creates it until this function has mounted a filesystem on it, and
+# then the tag is done. Reading the disk cannot grant that permission, because a probe can misreport a used disk as empty.
+# With any other tag value, or when the tag cannot be read, the function formats nothing, and the mount must succeed.
+# The marker file on the root volume covers a failed tag write, so a rerun or a reboot never formats a volume this
+# instance has already formatted.
+provision_data_volume() {
+  local device=$1 tag signature marker=/var/lib/afterclass/formatted-${DATA_VOLUME_ID}
+  mkdir -p "$(dirname "$marker")"
+
+  if ! tag=$(format_tag); then
+    say "cannot read the afterclass-format tag of ${DATA_VOLUME_ID}, so nothing will be formatted"
+    tag=unknown
+  fi
+
+  if [ "$tag" = allowed ] && [ ! -e "$marker" ]; then
+    signature=$(disk_signature "$device") || {
+      say "cannot prove ${device} is empty, refusing to format it"
+      return 1
+    }
+    case "$signature" in
+      empty)
+        say "formatting ${device}"
+        mkfs.xfs -L afterclass-data "$device"
+        touch "$marker"
+        ;;
+      xfs) ;;
+      *)
+        say "${device} holds ${signature}, refusing to touch it"
+        return 1
+        ;;
+    esac
+  fi
+
+  # A restored snapshot keeps its label. Repair a mismatch only while the filesystem is unmounted.
+  if ! mountpoint -q /data && [ "$(blkid -p -o value -s LABEL "$device" || true)" != "afterclass-data" ] \
+    && [ "$(blkid -p -o value -s TYPE "$device" || true)" = xfs ]; then
+    xfs_admin -L afterclass-data "$device"
+  fi
+
+  mkdir -p /data
+  grep -v -E '[[:space:]]/data[[:space:]]' /etc/fstab > /etc/fstab.new || true
+  echo 'LABEL=afterclass-data /data xfs defaults,nofail,x-systemd.device-timeout=60s 0 2' >> /etc/fstab.new
+  mv /etc/fstab.new /etc/fstab
+  systemctl daemon-reload
+  mountpoint -q /data || mount /data || {
+    say "cannot mount an xfs filesystem labelled afterclass-data from ${device}. The afterclass-format tag is '${tag}', so it will not be formatted. Restore the volume by hand (infra/README.md)."
     return 1
   }
-  if [ "$signature" = empty ]; then
-    say "formatting ${device}"
-    mkfs.xfs -L afterclass-data "$device"
-  elif [ "$signature" != xfs ]; then
-    say "${device} holds ${signature}, refusing to touch it"
-    return 1
+
+  if [ "$tag" = allowed ]; then
+    record_formatted || {
+      say "mounted ${device} but could not set afterclass-format=done on ${DATA_VOLUME_ID}. Fix the instance role, run: aws ec2 create-tags --resources ${DATA_VOLUME_ID} --tags Key=afterclass-format,Value=done, then run afterclass-bootstrap again."
+      return 1
+    }
+    say "set afterclass-format=done on ${DATA_VOLUME_ID}"
   fi
 }
-prepare_filesystem "$device"
-
-# A restored snapshot keeps its label. Repair a mismatch only while the filesystem is unmounted.
-if ! mountpoint -q /data && [ "$(blkid -p -o value -s LABEL "$device")" != "afterclass-data" ]; then
-  xfs_admin -L afterclass-data "$device"
-fi
-
-mkdir -p /data
-grep -v -E '[[:space:]]/data[[:space:]]' /etc/fstab > /etc/fstab.new || true
-echo 'LABEL=afterclass-data /data xfs defaults,nofail,x-systemd.device-timeout=60s 0 2' >> /etc/fstab.new
-mv /etc/fstab.new /etc/fstab
-systemctl daemon-reload
-mountpoint -q /data || mount /data
+provision_data_volume "$device"
 
 # One bridge network for Caddy and the app, so Caddy reaches the app by name and neither runs on the host network.
 docker network inspect afterclass >/dev/null 2>&1 || docker network create afterclass

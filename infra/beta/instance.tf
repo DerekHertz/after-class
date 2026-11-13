@@ -45,6 +45,33 @@ data "aws_iam_policy_document" "instance" {
     resources = ["*"]
   }
 
+  # Bootstrap reads the afterclass-format tag of the data volume. DescribeVolumes takes no resource-level permission.
+  statement {
+    sid       = "ReadDataVolumeTags"
+    actions   = ["ec2:DescribeVolumes"]
+    resources = ["*"]
+  }
+
+  # Bootstrap ends the authorization to format by setting the tag to done. The role can write this one key with this one
+  # value on this one volume, so it can never set the tag back to allowed.
+  statement {
+    sid       = "MarkDataVolumeFormatted"
+    actions   = ["ec2:CreateTags"]
+    resources = [aws_ebs_volume.data.arn]
+
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "aws:TagKeys"
+      values   = ["afterclass-format"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/afterclass-format"
+      values   = ["done"]
+    }
+  }
+
   statement {
     sid       = "EcrPull"
     actions   = ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
@@ -90,6 +117,10 @@ resource "aws_eip" "beta" {
 
 # The data volume is its own resource, so it survives an instance replacement. The instance can start before the
 # attachment finishes, so the bootstrap script waits for the device.
+#
+# The afterclass-format tag authorizes formatting, once. A volume Terraform creates starts with "allowed". Bootstrap sets
+# "done" right after it formats and mounts, and Terraform never writes the tag again, so a later apply cannot re-open it.
+# To restore a snapshot, create the replacement volume with the tag already set to "done" (infra/README.md).
 resource "aws_ebs_volume" "data" {
   availability_zone = var.availability_zone
   size              = var.data_volume_gb
@@ -99,10 +130,12 @@ resource "aws_ebs_volume" "data" {
   tags = {
     Name                = "${var.name}-data"
     afterclass-snapshot = "daily"
+    afterclass-format   = "allowed"
   }
 
   lifecycle {
     prevent_destroy = true
+    ignore_changes  = [tags["afterclass-format"], tags_all["afterclass-format"]]
   }
 }
 

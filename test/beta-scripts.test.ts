@@ -364,111 +364,260 @@ function bootstrapFunctions(names: string[]): string {
     .join("\n");
 }
 
-/** Stub bodies for the disk tools. `dd` receives the real dd arguments. */
-interface DiskTools {
+type Filesystem = "empty" | "xfs" | "ext4";
+
+interface BootOptions {
+  /** Replacement stub bodies for the disk tools. `dd` receives the real dd arguments. */
   readonly dd?: string;
   readonly wipefs?: string;
   readonly blockdev?: string;
+  /** Leaves dd and wipefs unstubbed and points the script at this image file instead of /dev/test. */
+  readonly realProbesOn?: string;
+  /** Every EC2 API read of the tag fails, as when the role lacks the permission or the network is down. */
+  readonly describeFails?: boolean;
+  /** Every CreateTags call fails. */
+  readonly tagWriteFails?: boolean;
 }
 
-function prepareDisk(tools: DiskTools): { status: number; formatted: boolean } {
-  const host = makeHost("afterclass-bootstrap-test-");
-  stub(host.bin, "blockdev", tools.blockdev ?? "echo 21474836480");
-  stub(host.bin, "dd", tools.dd ?? "exit 0");
-  stub(host.bin, "wipefs", tools.wipefs ?? "exit 0");
-  stub(host.bin, "mkfs.xfs", `echo "mkfs.xfs $*" >> ${host.log}`);
-  const script = `set -euo pipefail\n${bootstrapFunctions(["say", "disk_signature", "prepare_filesystem"])}\nprepare_filesystem /dev/test`;
-  const result = Bun.spawnSync(["bash", "-c", script], { env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` } });
-  return { status: result.exitCode, formatted: readLog(host).some((line) => line.startsWith("mkfs.xfs")) };
+/**
+ * One data volume and the instance it is attached to, across reboots. The disk, the volume tag and the root volume's
+ * marker directory persist between boots. The stub tools work from them. wipefs and blkid report the disk's real
+ * filesystem unless a test replaces wipefs, mkfs.xfs writes xfs, mount succeeds only for xfs, and the stubbed aws reads and
+ * writes the tag.
+ */
+class VolumeHost {
+  readonly host = makeHost("afterclass-bootstrap-test-");
+  private readonly disk = join(this.host.root, "disk-fs");
+  private readonly tagFile = join(this.host.root, "volume-tag");
+
+  constructor(opts: { filesystem: Filesystem; tag: string | null }) {
+    writeFileSync(this.disk, opts.filesystem === "empty" ? "" : opts.filesystem);
+    if (opts.tag !== null) writeFileSync(this.tagFile, opts.tag);
+  }
+
+  get filesystem(): string {
+    return readFileSync(this.disk, "utf8");
+  }
+
+  get tag(): string | null {
+    return existsSync(this.tagFile) ? readFileSync(this.tagFile, "utf8") : null;
+  }
+
+  get log(): string[] {
+    return readLog(this.host);
+  }
+
+  count(prefix: string): number {
+    return this.log.filter((line) => line.startsWith(prefix)).length;
+  }
+
+  formatted(): boolean {
+    return this.count("mkfs.xfs") > 0;
+  }
+
+  /** Boots the instance once and runs provision_data_volume the way afterclass-bootstrap does. */
+  boot(opts: BootOptions = {}): { status: number; output: string } {
+    const { host, disk, tagFile } = this;
+    const mounted = join(host.root, "mounted");
+    rmSync(mounted, { force: true });
+    writeFileSync(join(host.root, "fstab"), "UUID=root / xfs defaults 0 1\n");
+    stub(host.bin, "sleep", "exit 0");
+    stub(host.bin, "blockdev", opts.blockdev ?? "echo 21474836480");
+    if (!opts.realProbesOn) {
+      stub(host.bin, "dd", opts.dd ?? "exit 0");
+      stub(host.bin, "wipefs", opts.wipefs ?? `cat ${disk}`);
+    }
+    stub(host.bin, "mkfs.xfs", `echo "mkfs.xfs $*" >> ${host.log}\nprintf xfs > ${disk}`);
+    stub(host.bin, "blkid", `case "$*" in *LABEL*) [ "$(cat ${disk})" = xfs ] && echo afterclass-data;; *TYPE*) cat ${disk};; esac; exit 0`);
+    stub(host.bin, "xfs_admin", `echo "xfs_admin $*" >> ${host.log}`);
+    stub(host.bin, "systemctl", "exit 0");
+    stub(host.bin, "mountpoint", `[ -e ${mounted} ]`);
+    stub(
+      host.bin,
+      "mount",
+      `if [ "$(cat ${disk})" = xfs ]; then echo "mount $*" >> ${host.log}; touch ${mounted}; exit 0; fi
+echo "mount: wrong fs type, bad option, bad superblock" >&2; exit 32`,
+    );
+    stub(
+      host.bin,
+      "aws",
+      `echo "aws $*" >> ${host.log}
+case "$2" in
+  describe-volumes)
+    ${opts.describeFails ? "echo 'UnauthorizedOperation' >&2; exit 254" : ""}
+    if [ -e ${tagFile} ]; then cat ${tagFile}; echo; else echo None; fi;;
+  create-tags)
+    ${opts.tagWriteFails ? "echo 'UnauthorizedOperation' >&2; exit 254" : ""}
+    echo "$*" | sed -n 's/.*Value=\\([a-z]*\\).*/\\1/p' | tr -d '\\n' > ${tagFile};;
+esac`,
+    );
+
+    const functions = bootstrapFunctions(["say", "retry", "disk_signature", "format_tag", "record_formatted", "provision_data_volume"])
+      .replaceAll("/etc/fstab", join(host.root, "fstab"))
+      .replaceAll("/var/lib/afterclass", join(host.root, "var"))
+      .replaceAll("/data", join(host.root, "data"));
+    const script = `set -euo pipefail\nAWS_REGION=us-east-2\nDATA_VOLUME_ID=vol-0123456789abcdef0\n${functions}\nprovision_data_volume ${opts.realProbesOn ?? "/dev/test"}`;
+    const result = Bun.spawnSync(["bash", "-c", script], { env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` } });
+    return { status: result.exitCode, output: result.stdout.toString() + result.stderr.toString() };
+  }
 }
 
 describe("afterclass-bootstrap data volume", () => {
-  test("a readable disk with no signature is formatted", () => {
-    const run = prepareDisk({});
+  test("an empty volume tagged allowed is formatted and mounted, and only then tagged done", () => {
+    const volume = new VolumeHost({ filesystem: "empty", tag: "allowed" });
+    const run = volume.boot();
     expect(run.status).toBe(0);
-    expect(run.formatted).toBe(true);
+    expect(volume.tag).toBe("done");
+    const at = (prefix: string): number => volume.log.findIndex((line) => line.startsWith(prefix));
+    expect(at("mkfs.xfs")).toBeGreaterThan(-1);
+    expect(at("mount ")).toBeGreaterThan(at("mkfs.xfs"));
+    expect(at("aws ec2 create-tags")).toBeGreaterThan(at("mount "));
+    expect(volume.log[at("aws ec2 create-tags")]).toContain("--resources vol-0123456789abcdef0 --tags Key=afterclass-format,Value=done");
   });
 
-  test("a read error that the probe reports with the exit status for nothing found is not an empty disk", () => {
-    const run = prepareDisk({
-      dd: "echo 'dd: error reading /dev/test: Input/output error' >&2; exit 1",
-      wipefs: "echo 'wipefs: error: /dev/test: probing initialization failed: Input/output error' >&2; exit 2",
-    });
-    expect(run.status).not.toBe(0);
-    expect(run.formatted).toBe(false);
-  });
-
-  test("a probe that prints an I/O error and exits 2 does not format, even when dd could read", () => {
-    const run = prepareDisk({ wipefs: "echo 'Input/output error' >&2; exit 2" });
-    expect(run.status).not.toBe(0);
-    expect(run.formatted).toBe(false);
-  });
-
-  test("a probe that prints to stderr and still exits 0 does not format", () => {
-    const run = prepareDisk({ wipefs: "echo 'warning: something' >&2; exit 0" });
-    expect(run.status).not.toBe(0);
-    expect(run.formatted).toBe(false);
-  });
-
-  test("a probe error of any exit status does not format", () => {
-    for (const code of [1, 2, 4, 8, 127]) {
-      const run = prepareDisk({ wipefs: `exit ${code}` });
-      expect(run.status).not.toBe(0);
-      expect(run.formatted).toBe(false);
+  test("a volume tagged done is never formatted, even when the probe reports its ext4 or xfs disk empty", () => {
+    for (const filesystem of ["xfs", "ext4"] as const) {
+      const volume = new VolumeHost({ filesystem, tag: "done" });
+      const run = volume.boot({ wipefs: "exit 0" });
+      expect(volume.formatted()).toBe(false);
+      expect(volume.filesystem).toBe(filesystem);
+      expect(run.status).toBe(filesystem === "xfs" ? 0 : 1);
+      expect(volume.tag).toBe("done");
     }
   });
 
-  test("an unreadable last MiB does not format", () => {
-    const run = prepareDisk({ dd: 'case "$*" in *skip=*) echo "dd: Input/output error" >&2; exit 1;; esac; exit 0' });
-    expect(run.status).not.toBe(0);
-    expect(run.formatted).toBe(false);
+  test("a used xfs volume tagged done mounts without a probe or a tag write", () => {
+    const volume = new VolumeHost({ filesystem: "xfs", tag: "done" });
+    const run = volume.boot({ wipefs: "echo probe ran >&2; exit 2", dd: "echo probe ran >&2; exit 1" });
+    expect(run.status).toBe(0);
+    expect(volume.count("aws ec2 create-tags")).toBe(0);
+    expect(run.output).not.toContain("probe ran");
   });
 
-  test("an unreadable first MiB does not format", () => {
-    const run = prepareDisk({ dd: 'case "$*" in *skip=*) exit 0;; esac; echo "dd: Input/output error" >&2; exit 1' });
+  test("a blank volume tagged done stops with an error that names the tag, and formats nothing", () => {
+    const volume = new VolumeHost({ filesystem: "empty", tag: "done" });
+    const run = volume.boot();
     expect(run.status).not.toBe(0);
-    expect(run.formatted).toBe(false);
+    expect(run.output).toContain("afterclass-format tag is 'done'");
+    expect(volume.formatted()).toBe(false);
   });
 
-  test("a device whose size cannot be read does not format", () => {
-    for (const blockdev of ["exit 1", "echo 0", "echo notanumber"]) {
-      const run = prepareDisk({ blockdev });
+  test("any tag value but allowed, or no tag, formats nothing", () => {
+    for (const tag of ["Allowed", "allowed ", "yes", "true", "", null]) {
+      const volume = new VolumeHost({ filesystem: "empty", tag });
+      const run = volume.boot();
       expect(run.status).not.toBe(0);
-      expect(run.formatted).toBe(false);
+      expect(volume.formatted()).toBe(false);
     }
   });
 
-  test("an xfs filesystem is kept, not formatted", () => {
-    const run = prepareDisk({ wipefs: "echo xfs" });
-    expect(run.status).toBe(0);
-    expect(run.formatted).toBe(false);
+  test("a failed tag read formats nothing, and a blank volume stops the run", () => {
+    const volume = new VolumeHost({ filesystem: "empty", tag: "allowed" });
+    const run = volume.boot({ describeFails: true });
+    expect(run.status).not.toBe(0);
+    expect(run.output).toContain("cannot read the afterclass-format tag");
+    expect(volume.formatted()).toBe(false);
+    expect(volume.tag).toBe("allowed");
   });
 
-  test("any other signature, a partition table included, is refused and not formatted", () => {
+  test("a failed tag read still mounts a volume that already holds xfs", () => {
+    const volume = new VolumeHost({ filesystem: "xfs", tag: "done" });
+    const run = volume.boot({ describeFails: true });
+    expect(run.status).toBe(0);
+    expect(volume.formatted()).toBe(false);
+  });
+
+  test("a tag that cannot be written after the format fails the run, and the next boot mounts the xfs without formatting", () => {
+    const volume = new VolumeHost({ filesystem: "empty", tag: "allowed" });
+    const first = volume.boot({ tagWriteFails: true });
+    expect(first.status).not.toBe(0);
+    expect(first.output).toContain("could not set afterclass-format=done");
+    expect(volume.filesystem).toBe("xfs");
+    expect(volume.tag).toBe("allowed");
+
+    const second = volume.boot();
+    expect(second.status).toBe(0);
+    expect(volume.count("mkfs.xfs")).toBe(1);
+    expect(volume.tag).toBe("done");
+  });
+
+  test("a tag still allowed after a format never reaches a second mkfs, even when the next probe reports the disk empty", () => {
+    const volume = new VolumeHost({ filesystem: "empty", tag: "allowed" });
+    expect(volume.boot({ tagWriteFails: true }).status).not.toBe(0);
+
+    const second = volume.boot({ wipefs: "exit 0", tagWriteFails: true });
+    expect(second.status).not.toBe(0);
+    expect(volume.count("mkfs.xfs")).toBe(1);
+    expect(volume.filesystem).toBe("xfs");
+  });
+
+  test("a rerun of bootstrap on a mounted, tagged volume changes nothing", () => {
+    const volume = new VolumeHost({ filesystem: "empty", tag: "allowed" });
+    expect(volume.boot().status).toBe(0);
+    expect(volume.boot().status).toBe(0);
+    expect(volume.count("mkfs.xfs")).toBe(1);
+    expect(volume.count("aws ec2 create-tags")).toBe(1);
+  });
+
+  test("xfs on a volume still tagged allowed is kept and the tag is closed", () => {
+    const volume = new VolumeHost({ filesystem: "xfs", tag: "allowed" });
+    const run = volume.boot();
+    expect(run.status).toBe(0);
+    expect(volume.formatted()).toBe(false);
+    expect(volume.tag).toBe("done");
+  });
+
+  test("any other signature on a volume tagged allowed, a partition table included, is refused and not formatted", () => {
     for (const found of ["ext4", "gpt", "gpt\\nPMBR", "LVM2_member", "xfs\\next4"]) {
-      const run = prepareDisk({ wipefs: `printf '${found}\\n'` });
+      const volume = new VolumeHost({ filesystem: "ext4", tag: "allowed" });
+      const run = volume.boot({ wipefs: `printf '${found}\\n'` });
       expect(run.status).not.toBe(0);
-      expect(run.formatted).toBe(false);
+      expect(volume.formatted()).toBe(false);
+      expect(volume.tag).toBe("allowed");
+    }
+  });
+
+  describe("the probes stay a second guard while the tag says allowed", () => {
+    const cases: [string, BootOptions][] = [
+      [
+        "a read error that the probe reports with the exit status for nothing found",
+        {
+          dd: "echo 'dd: error reading /dev/test: Input/output error' >&2; exit 1",
+          wipefs: "echo 'wipefs: error: /dev/test: probing initialization failed: Input/output error' >&2; exit 2",
+        },
+      ],
+      ["a probe that prints an I/O error and exits 2, with dd able to read", { wipefs: "echo 'Input/output error' >&2; exit 2" }],
+      ["a probe that prints to stderr and exits 0", { wipefs: "echo 'warning: something' >&2; exit 0" }],
+      ["an unreadable last MiB", { dd: 'case "$*" in *skip=*) echo "dd: Input/output error" >&2; exit 1;; esac; exit 0' }],
+      ["an unreadable first MiB", { dd: 'case "$*" in *skip=*) exit 0;; esac; echo "dd: Input/output error" >&2; exit 1' }],
+      ...[1, 2, 4, 8, 127].map((code): [string, BootOptions] => [`a probe that exits ${code}`, { wipefs: `exit ${code}` }]),
+      ...["exit 1", "echo 0", "echo notanumber"].map((blockdev): [string, BootOptions] => [`a size of '${blockdev}'`, { blockdev }]),
+    ];
+    for (const [name, tools] of cases) {
+      test(`${name} does not format`, () => {
+        const volume = new VolumeHost({ filesystem: "empty", tag: "allowed" });
+        const run = volume.boot(tools);
+        expect(run.status).not.toBe(0);
+        expect(volume.formatted()).toBe(false);
+        expect(volume.tag).toBe("allowed");
+      });
     }
   });
 
   const haveTools = Bun.which("wipefs") !== null && Bun.which("mkfs.ext4") !== null && Bun.which("truncate") !== null;
-  test.skipIf(!haveTools)("the real dd and wipefs tell a blank image from an ext4 one", () => {
-    const host = makeHost("afterclass-bootstrap-real-");
-    const image = join(host.root, "disk.img");
-    expect(Bun.spawnSync(["truncate", "-s", "8M", image]).exitCode).toBe(0);
-    stub(host.bin, "blockdev", "echo 8388608");
-    stub(host.bin, "mkfs.xfs", `echo "mkfs.xfs $*" >> ${host.log}`);
-    const script = `set -euo pipefail\n${bootstrapFunctions(["say", "disk_signature", "prepare_filesystem"])}\nprepare_filesystem ${image}`;
-    const run = () => Bun.spawnSync(["bash", "-c", script], { env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` } });
+  test.skipIf(!haveTools)("the real dd and wipefs tell a blank image from an ext4 one, with the volume tagged allowed", () => {
+    const blank = new VolumeHost({ filesystem: "empty", tag: "allowed" });
+    const blankImage = join(blank.host.root, "disk.img");
+    expect(Bun.spawnSync(["truncate", "-s", "8M", blankImage]).exitCode).toBe(0);
+    expect(blank.boot({ realProbesOn: blankImage, blockdev: "echo 8388608" }).status).toBe(0);
+    expect(blank.formatted()).toBe(true);
 
-    expect(run().exitCode).toBe(0);
-    expect(readLog(host).some((line) => line.startsWith("mkfs.xfs"))).toBe(true);
-
-    writeFileSync(host.log, "");
-    expect(Bun.spawnSync(["mkfs.ext4", "-q", image]).exitCode).toBe(0);
-    expect(run().exitCode).not.toBe(0);
-    expect(readLog(host).some((line) => line.startsWith("mkfs.xfs"))).toBe(false);
+    const used = new VolumeHost({ filesystem: "empty", tag: "allowed" });
+    const usedImage = join(used.host.root, "disk.img");
+    expect(Bun.spawnSync(["truncate", "-s", "8M", usedImage]).exitCode).toBe(0);
+    expect(Bun.spawnSync(["mkfs.ext4", "-q", usedImage]).exitCode).toBe(0);
+    expect(used.boot({ realProbesOn: usedImage, blockdev: "echo 8388608" }).status).not.toBe(0);
+    expect(used.formatted()).toBe(false);
   });
 });
 
