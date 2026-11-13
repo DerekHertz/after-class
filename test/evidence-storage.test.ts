@@ -124,7 +124,7 @@ describe("capture probe bundle", () => {
     expect(bundle.watched).toEqual([{ sourceId: SRC, intervals: [[0, 10]] }]);
     expect(bundle.passages).toHaveLength(1);
     expect(bundle.frames).toHaveLength(1);
-    expect(bundle.frames[0]!.file).toBe(join(h.dir, "frames", SRC, `${stableId("ev", s.captureId, "f1")}.jpg`));
+    expect(bundle.frames[0]!.file).toBe(join(h.dir, "frames", h.db.userId, SRC, `${stableId("ev", s.captureId, "f1")}.jpg`));
     expect(exceptStalls(bundle.gaps).map((g) => g.reason)).toEqual(["partially_watched_segment"]);
     expect(bundle.ads).toHaveLength(1);
   });
@@ -136,12 +136,12 @@ describe("R16: cited evidence is deleted only by the user, never by expiry", () 
     const passage = h.evidence.watchOrder(s.captureId).passages[0]!.passage;
     const frame = stableId("ev", s.captureId, "f1");
     const reviewId = "rvw_x";
-    h.db.sql.run("INSERT INTO reviews (id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, 'prepared_only', '{}', ?, 0)", [reviewId, s.captureId, h.db.nextSeq()]);
+    h.db.sql.run("INSERT INTO reviews (id, user_id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, ?, 'prepared_only', '{}', ?, 0)", [reviewId, h.db.userId, s.captureId, h.db.nextSeq()]);
     if (opts.save !== false) {
       h.evidence.snapshotInTx([passage.id, frame]);
-      h.db.sql.run("INSERT INTO saved_reviews (review_id, bundle_hash, saved_ms) VALUES (?, 'h', 0)", [reviewId]);
-      h.db.sql.run("INSERT INTO notes (id, review_id, concept_id, generated_json, saved_ms) VALUES ('note_1', ?, 'cpt_1', '{}', 0)", [reviewId]);
-      h.db.sql.run("INSERT INTO note_evidence (note_id, evidence_id) VALUES ('note_1', ?), ('note_1', ?)", [passage.id, frame]);
+      h.db.sql.run("INSERT INTO saved_reviews (user_id, review_id, bundle_hash, saved_ms) VALUES (?, ?, 'h', 0)", [h.db.userId, reviewId]);
+      h.db.sql.run("INSERT INTO notes (user_id, id, ord, review_id, concept_id, generated_json, saved_ms) VALUES (?, 'note_1', 1, ?, 'cpt_1', '{}', 0)", [h.db.userId, reviewId]);
+      h.db.sql.run("INSERT INTO note_evidence (user_id, note_id, evidence_id) VALUES (?1, 'note_1', ?2), (?1, 'note_1', ?3)", [h.db.userId, passage.id, frame]);
     }
     return { passage, frame, reviewId };
   }
@@ -198,7 +198,7 @@ describe("R16: cited evidence is deleted only by the user, never by expiry", () 
   test("once the user deletes the citing note, the snapshot expires", () => {
     const { h, s } = capture();
     const { passage } = cited(h, s);
-    h.db.sql.run("INSERT INTO note_deletions (note_id, deleted_ms) VALUES ('note_1', 5)");
+    h.db.sql.run("INSERT INTO note_deletions (user_id, note_id, deleted_ms) VALUES (?, 'note_1', 5)", [h.db.userId]);
     const swept = h.evidence.sweepExpired(1_000_000 + 60 * DAY, 30);
     expect(swept.snapshotsDeleted).toBe(2);
     expect(count(h, "evidence_snapshots")).toBe(0);
@@ -213,7 +213,7 @@ describe("R16: cited evidence is deleted only by the user, never by expiry", () 
     expect(count(h, "capture_facts")).toBe(6);
     expect(count(h, "frames")).toBe(1);
 
-    h.db.sql.run("INSERT INTO saved_reviews (review_id, bundle_hash, saved_ms) VALUES ('rvw_x', 'h', 0)");
+    h.db.sql.run("INSERT INTO saved_reviews (user_id, review_id, bundle_hash, saved_ms) VALUES (?, 'rvw_x', 'h', 0)", [h.db.userId]);
     expect(h.evidence.sweepExpired(1_000_000 + 90 * DAY, 30).factsDeleted).toBe(6);
   });
 
@@ -270,8 +270,8 @@ describe("R16: cited evidence is deleted only by the user, never by expiry", () 
 
   test("orphan frame files (a crash between the file write and the row commit) are swept", () => {
     const { h } = capture();
-    const orphan = join(h.dir, "frames", SRC, "ev_orphan.jpg");
-    mkdirSync(join(h.dir, "frames", SRC), { recursive: true });
+    const orphan = join(h.dir, "frames", h.db.userId, SRC, "ev_orphan.jpg");
+    mkdirSync(join(h.dir, "frames", h.db.userId, SRC), { recursive: true });
     writeFileSync(orphan, "x");
     writeFileSync(`${orphan}.tmp-1`, "x");
     expect(h.evidence.sweepExpired(1_000_000, 30).framesDeleted).toBe(2);

@@ -104,6 +104,13 @@ export type ServeOptions = {
   readonly maxBodyBytes?: number;
   /** How long a turn stream may run before it ends with `turn_failed` (retryable). Defaults to `TURN_DEADLINE_MS`; tests shorten it. */
   readonly turnDeadlineMs?: number;
+  /** Address to bind. Defaults to 127.0.0.1. A container binds 0.0.0.0 so the load balancer can reach it. */
+  readonly hostname?: string;
+  /**
+   * True lets GET /health skip the Host check, because a load balancer's health check carries the task's address as Host.
+   * Every other route keeps the localhost Host check, so a request through the load balancer's name is still a 403.
+   */
+  readonly healthAnyHost?: boolean;
 };
 
 export const DEFAULT_PORT = 4317;
@@ -388,11 +395,14 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
   const linkId = matched.params.linkId as LinkId | undefined;
   const observationId = matched.params.observationId as ObservationId | undefined;
   try {
+    // Another user's capture answers as one this caller cannot see. An id nobody has ingested keeps its empty view.
+    if (captureId !== undefined && evidence.capturedByAnotherUser(captureId)) return failure(404, "unknown capture", cors);
     switch (name) {
       case "ingest": {
         const raw = await readJson(req);
         assertNoForeignFacts(raw);
         const batch = parseIngestBatch(raw);
+        if (evidence.capturedByAnotherUser(batch.captureId)) return failure(404, "unknown capture", cors);
         let ackedThroughSeq: number;
         try {
           ({ ackedThroughSeq } = evidence.ingest(batch));
@@ -434,6 +444,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
         return replyWire("reviewOptions", wireOptions(reviews.options(captureId!)), cors);
       case "startReview": {
         const body = parseStartReviewRequest(await readJson(req));
+        if (reviews.heldByAnotherUser(body.reviewId)) return failure(404, "unknown review", cors);
         const existing = reviewOf(reviews, body.reviewId);
         if (existing && existing.captureId !== captureId) return failure(409, "that review belongs to another capture", cors);
         return replyWire("startReview", wireStart(reviews.start(captureId!, body.choice, body.reviewId)), cors);
@@ -478,6 +489,8 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
       }
       case "retryPreparation": {
         if (!preparation || !segmentation) return null;
+        // Chunks are per user: a capture only another user holds answers as unknown. A capture nobody holds stays a no-op 204.
+        if (segmentation.heldByAnotherUser(captureId!)) return failure(404, "unknown capture", cors);
         const stuck = segmentation.current(captureId!).filter((rev) => {
           const prep = preparation.prep(rev.id);
           return !prep.finished || prep.supportedCount === 0;
@@ -488,6 +501,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
       case "record": {
         if (!record) return null;
         const { reviewId: only } = parseQuery("record", new URL(req.url)) as { reviewId?: ReviewId };
+        if (only !== undefined && reviews.heldByAnotherUser(only)) return failure(404, "unknown review", cors);
         return reply("record", record.view(only === undefined ? {} : { reviewId: only }), cors);
       }
       case "editNote": {
@@ -526,6 +540,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
       }
       case "evidence": {
         const q = parseQuery("evidence", new URL(req.url)) as { material: Material } | { ids: EvidenceId[] } | { captureId: CaptureId };
+        if ("captureId" in q && evidence.capturedByAnotherUser(q.captureId)) return failure(404, "unknown capture", cors);
         const bundle =
           "material" in q ? evidence.bundle(q.material)
           : "ids" in q ? evidenceByIds(evidence, q.ids)
@@ -539,6 +554,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
       }
       case "deleteEvidence": {
         const { evidenceIds } = parseEvidenceDeleteRequest(await readJson(req));
+        if (evidence.heldByAnotherUser(evidenceIds)) return failure(404, "unknown evidence", cors);
         evidence.deleteByUser(evidenceIds, crypto.randomUUID());
         return noContent(cors);
       }
@@ -567,6 +583,7 @@ async function handle(req: Request, opts: ServeOptions, auth: AuthConfig, guard:
   if (req.method === "OPTIONS") return preflight(req, auth);
 
   if (req.method === "GET" && path === "/health") {
+    if (opts.healthAnyHost === true) return json(200, { ok: true });
     const v = authorize(req.headers, auth, { requireToken: false });
     return v.ok ? json(200, { ok: true }) : failure(v.status, "forbidden");
   }
@@ -596,7 +613,7 @@ export function serve(opts: ServeOptions): Bun.Server<undefined> {
   let auth = opts.auth;
   const guard: TurnGuard = { inFlight: new Map(), deadlineMs: opts.turnDeadlineMs ?? TURN_DEADLINE_MS };
   const server = Bun.serve({
-    hostname: "127.0.0.1",
+    hostname: opts.hostname ?? "127.0.0.1",
     port: opts.auth.port,
     // A tutor turn can be silent for a long while before its first word; Bun's default of 10 s would cut the stream.
     idleTimeout: 255,

@@ -36,6 +36,7 @@ export const ID_KINDS = [
   "res", // supplemental resource connection
   "use", // usage event
   "key", // provider memo key
+  "usr", // user (derived: the local app's one user is stableId("usr", "local"))
 ] as const;
 export type IdKind = (typeof ID_KINDS)[number];
 
@@ -57,6 +58,7 @@ export type TurnId = Id<"turn">;
 export type ResourceId = Id<"res">;
 export type UsageEventId = Id<"use">;
 export type MemoKey = Id<"key">;
+export type UserId = Id<"usr">;
 
 export type ClientMintedKind = "cap" | "rvw" | "turn";
 

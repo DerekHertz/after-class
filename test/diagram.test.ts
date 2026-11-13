@@ -9,7 +9,7 @@ import type { AssessableClaim, DiagramLine, EvidenceBundle, Frame, FrameTeaching
 import { stableId } from "../src/shared/ids";
 import type { CaptureId, ClaimId, ConceptId, EvidenceId, ReviewId, SourceId } from "../src/shared/ids";
 import { Material, interval, media } from "../src/shared/time";
-import { MIGRATIONS, openDb } from "../src/backend/db";
+import { LOCAL_USER, MIGRATIONS, openDb } from "../src/backend/db";
 import { createMemo, ProviderError } from "../src/backend/providers/memo";
 import type { Task } from "../src/backend/providers/memo";
 import { createLedger } from "../src/backend/providers/ledger";
@@ -19,7 +19,7 @@ import type { CitingClaim } from "../src/backend/diagram/core";
 import { createDiagrams } from "../src/backend/diagram";
 import { DIAGRAM_SYSTEM, diagramSummaryTask } from "../src/backend/diagram/tasks";
 import type { DiagramSummaryInput, DiagramSummaryOutput } from "../src/backend/diagram/tasks";
-import { testDb, usage } from "./fakes";
+import { testUserDb, usage } from "./fakes";
 
 // ───────────────────────────── builders ─────────────────────────────
 
@@ -193,7 +193,7 @@ describe("the diagram summary task", () => {
       ],
     }));
     const task = diagramSummaryTask(claude, () => null);
-    const memo = createMemo(testDb(), "live", { retryDelayMs: () => 0 });
+    const memo = createMemo(testUserDb(), "live", { retryDelayMs: () => 0 });
     const result = await memo.run(task, INPUT());
     expect(result.kind).toBe("hit");
     const value = (result as { value: DiagramSummaryOutput }).value;
@@ -206,7 +206,7 @@ describe("the diagram summary task", () => {
 
   test("when no line survives the call fails and is tried once more", async () => {
     const claude = fakeClaude(() => ({ title: "t", lines: [{ text: "Uncited.", evidence: [] }] }));
-    const memo = createMemo(testDb(), "live", { retryDelayMs: () => 0 });
+    const memo = createMemo(testUserDb(), "live", { retryDelayMs: () => 0 });
     const result = await memo.run(diagramSummaryTask(claude, () => null), INPUT());
     expect(result.kind).toBe("failed");
     expect(claude.requests).toHaveLength(2);
@@ -216,7 +216,7 @@ describe("the diagram summary task", () => {
     const claude = fakeClaude(() => ({ title: "t", lines: [{ text: "x", evidence: [ev("p1")] }] }));
     const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 1]);
     const task = diagramSummaryTask(claude, (id) => (id === ev("f1") ? jpeg : null));
-    await createMemo(testDb(), "live").run(task, INPUT());
+    await createMemo(testUserDb(), "live").run(task, INPUT());
     const req = claude.requests[0]!;
     expect(req.system).toBe(DIAGRAM_SYSTEM);
     expect(req.system).toContain("Never fill a gap");
@@ -231,7 +231,7 @@ describe("the diagram summary task", () => {
   test("memoized: the same topic and evidence set is one call, the second request makes none", async () => {
     const claude = fakeClaude(() => ({ title: "t", lines: [{ text: "x", evidence: [ev("p1")] }] }));
     const task = diagramSummaryTask(claude, () => null);
-    const memo = createMemo(testDb(), "live");
+    const memo = createMemo(testUserDb(), "live");
     await memo.run(task, INPUT());
     const again = await memo.run(task, INPUT());
     expect(again.kind).toBe("hit");
@@ -241,14 +241,14 @@ describe("the diagram summary task", () => {
   test("a different evidence set is a different call", async () => {
     const claude = fakeClaude(() => ({ title: "t", lines: [{ text: "x", evidence: [ev("p1")] }] }));
     const task = diagramSummaryTask(claude, () => null);
-    const memo = createMemo(testDb(), "live");
+    const memo = createMemo(testUserDb(), "live");
     await memo.run(task, INPUT());
     await memo.run(task, { ...INPUT(), passages: [passage("p1", 10, 20)] });
     expect(claude.requests).toHaveLength(2);
   });
 
   test("R17: each call records a usage event under the diagram_summary purpose, unknown cost stored as unknown", async () => {
-    const db = testDb();
+    const db = testUserDb();
     const claude = fakeClaude((_r, n) => (n === 1 ? new Error("flaky") : { title: "t", lines: [{ text: "x", evidence: [ev("p1")] }] }));
     const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
     const task = diagramSummaryTask(claude, () => null);
@@ -286,7 +286,7 @@ function world(opts: { frames?: Frame[]; claimsFor?: (topic: ConceptId) => Asses
 function setup(opts: Parameters<typeof world>[0] = {}, reply?: (n: number) => Reply | Error) {
   const claude = fakeClaude((_r, n) => reply?.(n) ?? { title: "What changes?", lines: [{ text: "Clock A: 5 to 6.", evidence: [ev("p1")] }, { text: "Rule: receive follows send.", evidence: [ev("p2"), ev("board")] }] });
   const task = diagramSummaryTask(claude, () => null);
-  const db = testDb();
+  const db = testUserDb();
   const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
   const diagrams = createDiagrams({ ...world(opts), task, memo });
   return { claude, task, memo, db, diagrams };
@@ -386,7 +386,7 @@ describe("the diagram module", () => {
       attempt: async () => ({ output: bad, usage: usage() }),
       decode: (s) => s as DiagramSummaryOutput,
     };
-    const memo = createMemo(testDb(), "live");
+    const memo = createMemo(testUserDb(), "live");
     const diagrams = createDiagrams({ ...world(), task: stub, memo });
     return diagrams.request(REVIEW, TOPIC)!.settled.then(() => {
       const summary = diagrams.list(REVIEW)![0]!.summary;
@@ -402,7 +402,7 @@ describe("the diagram module", () => {
       attempt: async () => ({ output: { title: "t", lines: [{ text: "Uncited.", evidence: [] as unknown as DiagramLine["evidence"] }] }, usage: usage() }),
       decode: (s) => s as DiagramSummaryOutput,
     };
-    const diagrams = createDiagrams({ ...world(), task: stub, memo: createMemo(testDb(), "live") });
+    const diagrams = createDiagrams({ ...world(), task: stub, memo: createMemo(testUserDb(), "live") });
     await diagrams.request(REVIEW, TOPIC)!.settled;
     expect(diagrams.list(REVIEW)![0]!.summary.state).toBe("failed");
   });
@@ -410,7 +410,7 @@ describe("the diagram module", () => {
   test("replay mode: no model is called and nothing is stored", async () => {
     const claude = fakeClaude(() => new Error("must not be called"));
     const task = diagramSummaryTask(claude, () => null);
-    const diagrams = createDiagrams({ ...world(), task, memo: createMemo(testDb(), "replay") });
+    const diagrams = createDiagrams({ ...world(), task, memo: createMemo(testUserDb(), "replay") });
     await diagrams.request(REVIEW, TOPIC)!.settled;
     expect(claude.requests).toHaveLength(0);
     expect(diagrams.list(REVIEW)![0]!.summary.state).toBe("not_requested");
@@ -422,7 +422,7 @@ describe("the diagram module", () => {
 describe("migration 003-diagram-purpose", () => {
   test("keeps every memo and usage row, still enforces its checks and triggers, and now accepts diagram_summary", () => {
     const path = `${process.env.TMPDIR ?? "/tmp"}/afterclass-migration-${crypto.randomUUID()}.sqlite`;
-    const old = { ...MIGRATIONS, providers: MIGRATIONS.providers.filter((m) => !m.id.startsWith("003")) };
+    const old = { ...MIGRATIONS, providers: MIGRATIONS.providers.filter((m) => !m.id.startsWith("003") && !m.id.startsWith("004")) };
     let db = openDb(path, old);
     db.sql.run("INSERT INTO memo_inputs VALUES ('k1','claude','tutor_turn','v','m','{}',1)");
     db.sql.run("INSERT INTO memo VALUES ('k1','{}',1,1)");
@@ -437,13 +437,17 @@ describe("migration 003-diagram-purpose", () => {
     expect(db.sql.query("SELECT COUNT(*) AS n FROM memo_failures").get()).toEqual({ n: 1 });
     expect(db.sql.query("SELECT COUNT(*) AS n FROM usage_events").get()).toEqual({ n: 1 });
     expect(db.sql.query("PRAGMA foreign_key_check").all()).toEqual([]);
-    db.sql.run("INSERT INTO memo_inputs VALUES ('k2','claude','diagram_summary','v','m','{}',1)");
-    db.sql.run(`INSERT INTO usage_events VALUES ('u2','k2',1,'claude','m','diagram_summary','ok',1,1,1,'unknown',NULL,NULL,'x',1,1)`);
+    db.sql.run(`INSERT INTO memo_inputs (user_id, key, provider, purpose, version, model, input_json, first_seen_ms) VALUES ('${LOCAL_USER}','k2','claude','diagram_summary','v','m','{}',1)`);
+    db.sql.run(`INSERT INTO usage_events (id, user_id, memo_key, attempt_no, provider, model, purpose, outcome, input_tokens, output_tokens, cache_read_tokens, cost_kind, cost_usd, cost_basis, cost_reason, started_ms, duration_ms)
+      VALUES ('u2','${LOCAL_USER}','k2',1,'claude','m','diagram_summary','ok',1,1,1,'unknown',NULL,NULL,'x',1,1)`);
     expect(() => db.sql.run("UPDATE usage_events SET model = 'y'")).toThrow(/R17/);
     expect(() => db.sql.run("DELETE FROM usage_events")).toThrow(/R17/);
     expect(() => db.sql.run("UPDATE memo SET output_json = '1'")).toThrow(/R8/);
-    expect(() => db.sql.run("INSERT INTO usage_events VALUES ('u3','missing-key',1,'claude','m','tutor_turn','ok',1,1,1,'unknown',NULL,NULL,'x',1,1)")).toThrow();
-    expect(() => db.sql.run("INSERT INTO memo_inputs VALUES ('k3','claude','nonsense','v','m','{}',1)")).toThrow();
+    expect(() =>
+      db.sql.run(`INSERT INTO usage_events (id, user_id, memo_key, attempt_no, provider, model, purpose, outcome, input_tokens, output_tokens, cache_read_tokens, cost_kind, cost_usd, cost_basis, cost_reason, started_ms, duration_ms)
+        VALUES ('u3','${LOCAL_USER}','missing-key',1,'claude','m','tutor_turn','ok',1,1,1,'unknown',NULL,NULL,'x',1,1)`),
+    ).toThrow(/FOREIGN KEY/);
+    expect(() => db.sql.run(`INSERT INTO memo_inputs (user_id, key, provider, purpose, version, model, input_json, first_seen_ms) VALUES ('${LOCAL_USER}','k3','claude','nonsense','v','m','{}',1)`)).toThrow(/CHECK/);
     db.close();
   });
 });

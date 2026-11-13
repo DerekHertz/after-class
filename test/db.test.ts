@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MIGRATIONS, OWNERS, openDb, tableOwners } from "../src/backend/db";
+import { LOCAL_USER, MIGRATIONS, OWNERS, TABLE_SCOPES, ensureLocalUser, openDb, scopeDb, tableOwners } from "../src/backend/db";
 import type { Db } from "../src/backend/db";
 import { testDb } from "./fakes";
 
@@ -66,13 +66,15 @@ describe("nextSeq", () => {
 });
 
 function insertUsage(db: Db, cost: { kind: string; usd: number | null; basis: string | null; reason: string | null }, n = 1) {
+  ensureLocalUser(db);
   db.sql.run(
-    "INSERT OR IGNORE INTO memo_inputs (key, provider, purpose, version, model, input_json, first_seen_ms) VALUES ('key_x', 'jev', 'boundary', 'v1', 'jev-1.13', '{}', 0)",
+    `INSERT INTO memo_inputs (user_id, key, provider, purpose, version, model, input_json, first_seen_ms) VALUES ('${LOCAL_USER}', 'key_x', 'jev', 'boundary', 'v1', 'jev-1.13', '{}', 0)
+     ON CONFLICT (user_id, key) DO NOTHING`,
   );
   db.sql
     .query(
-      `INSERT INTO usage_events (id, memo_key, attempt_no, provider, model, purpose, outcome, cost_kind, cost_usd, cost_basis, cost_reason, started_ms, duration_ms)
-       VALUES (?, 'key_x', ?, 'jev', 'jev-1.13', 'boundary', 'ok', ?, ?, ?, ?, 0, 0)`,
+      `INSERT INTO usage_events (id, user_id, memo_key, attempt_no, provider, model, purpose, outcome, cost_kind, cost_usd, cost_basis, cost_reason, started_ms, duration_ms)
+       VALUES (?, '${LOCAL_USER}', 'key_x', ?, 'jev', 'jev-1.13', 'boundary', 'ok', ?, ?, ?, ?, 0, 0)`,
     )
     .run(`use_${n}`, n, cost.kind, cost.usd, cost.basis, cost.reason);
 }
@@ -100,27 +102,27 @@ describe("R17: Every paid call records a usage event; unknown cost is stored as 
 
 function seedCapture(db: Db, captureId: string) {
   db.sql
-    .query("INSERT INTO capture_facts (seq, capture_id, client_seq, wall_ms, kind, body_json, received_ms) VALUES (?, ?, 0, 0, 'span', '{}', 0)")
-    .run(db.nextSeq(), captureId);
+    .query("INSERT INTO capture_facts (user_id, seq, capture_id, client_seq, wall_ms, kind, body_json, received_ms) VALUES (?, ?, ?, 0, 0, 'span', '{}', 0)")
+    .run(ensureLocalUser(db), db.nextSeq(), captureId);
   db.sql
     .query(
-      "INSERT INTO frames (evidence_id, capture_id, source_id, frame_id, media_s, width, height, path, seq) VALUES ('ev_f', ?, 'src_1', 'f1', 1, 1280, 720, '/tmp/f.jpg', ?)",
+      "INSERT INTO frames (user_id, evidence_id, capture_id, source_id, frame_id, media_s, width, height, path, seq) VALUES (?, 'ev_f', ?, 'src_1', 'f1', 1, 1280, 720, '/tmp/f.jpg', ?)",
     )
-    .run(captureId, db.nextSeq());
+    .run(LOCAL_USER, captureId, db.nextSeq());
 }
 
 function startReview(db: Db, reviewId: string, captureId: string) {
   db.sql
-    .query("INSERT INTO reviews (id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, 'prepared_only', '{}', ?, 0)")
-    .run(reviewId, captureId, db.nextSeq());
+    .query("INSERT INTO reviews (id, user_id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, ?, 'prepared_only', '{}', ?, 0)")
+    .run(reviewId, ensureLocalUser(db), captureId, db.nextSeq());
 }
 
 describe("R16: Evidence cited by a saved note is only deleted when I delete it, never by expiry.", () => {
   function snapshotCitedBy(db: Db, noteId: string) {
-    db.sql.run(
-      "INSERT INTO evidence_snapshots (evidence_id, kind, source_id, start_s, end_s, text, created_ms) VALUES ('ev_p', 'passage', 'src_1', 1, 2, 'Ax = b', 0)",
-    );
-    db.sql.query("INSERT INTO note_evidence (note_id, evidence_id) VALUES (?, 'ev_p')").run(noteId);
+    db.sql
+      .query("INSERT INTO evidence_snapshots (user_id, evidence_id, kind, source_id, start_s, end_s, text, created_ms) VALUES (?, 'ev_p', 'passage', 'src_1', 1, 2, 'Ax = b', 0)")
+      .run(ensureLocalUser(db));
+    db.sql.query("INSERT INTO note_evidence (user_id, note_id, evidence_id) VALUES (?, ?, 'ev_p')").run(LOCAL_USER, noteId);
   }
 
   test("expiry cannot delete a snapshot a note cites", () => {
@@ -132,7 +134,7 @@ describe("R16: Evidence cited by a saved note is only deleted when I delete it, 
   test("deleting the citing note releases the snapshot", () => {
     const db = testDb();
     snapshotCitedBy(db, "note_1");
-    db.sql.run("INSERT INTO note_deletions (note_id, deleted_ms) VALUES ('note_1', 0)");
+    db.sql.run("INSERT INTO note_deletions (user_id, note_id, deleted_ms) VALUES (?, 'note_1', 0)", [LOCAL_USER]);
     db.sql.run("DELETE FROM evidence_snapshots");
     expect(db.sql.query("SELECT count(*) AS n FROM evidence_snapshots").get()).toEqual({ n: 0 });
   });
@@ -140,7 +142,7 @@ describe("R16: Evidence cited by a saved note is only deleted when I delete it, 
   test("the user deleting the evidence itself releases it", () => {
     const db = testDb();
     snapshotCitedBy(db, "note_1");
-    db.sql.query("INSERT INTO evidence_deletions (evidence_id, request_id, deleted_ms, seq) VALUES ('ev_p', 'req_1', 0, ?)").run(db.nextSeq());
+    db.sql.query("INSERT INTO evidence_deletions (user_id, evidence_id, request_id, deleted_ms, seq) VALUES (?, 'ev_p', 'req_1', 0, ?)").run(LOCAL_USER, db.nextSeq());
     db.sql.run("DELETE FROM evidence_snapshots");
     expect(db.sql.query("SELECT count(*) AS n FROM evidence_snapshots").get()).toEqual({ n: 0 });
   });
@@ -158,7 +160,7 @@ describe("R16: Evidence cited by a saved note is only deleted when I delete it, 
     expect(() => db.sql.run("DELETE FROM capture_facts")).toThrow(/R16/);
     expect(() => db.sql.run("DELETE FROM frames")).toThrow(/R16/);
 
-    db.sql.run("INSERT INTO saved_reviews (review_id, bundle_hash, saved_ms) VALUES ('rvw_1', 'h', 0)");
+    db.sql.run("INSERT INTO saved_reviews (user_id, review_id, bundle_hash, saved_ms) VALUES (?, 'rvw_1', 'h', 0)", [LOCAL_USER]);
     db.sql.run("DELETE FROM capture_facts");
     db.sql.run("DELETE FROM frames");
     expect(db.sql.query("SELECT count(*) AS n FROM capture_facts").get()).toEqual({ n: 0 });
@@ -184,27 +186,97 @@ describe("append-only facts and snapshots", () => {
     const db = testDb();
     startReview(db, "rvw_1", "cap_1");
     db.sql
-      .query("INSERT INTO review_turns (id, review_id, seq, actor, thread_id, body_json, at_ms) VALUES ('turn_1', 'rvw_1', ?, 'learner', NULL, '{}', 0)")
-      .run(db.nextSeq());
+      .query("INSERT INTO review_turns (user_id, id, review_id, seq, actor, thread_id, body_json, at_ms) VALUES (?, 'turn_1', 'rvw_1', ?, 'learner', NULL, '{}', 0)")
+      .run(LOCAL_USER, db.nextSeq());
     expect(() => db.sql.run("UPDATE review_turns SET body_json = '{}'")).toThrow(/append-only/);
     db.sql
       .query(
-        `INSERT INTO chunk_revisions (id, chunk_id, capture_id, ordinal, revision_no, material_json, windows_json, provenance, closed_at_seq, supersedes)
-         VALUES ('crv_1', 'chk_1', 'cap_1', 0, 1, '[]', '[]', 'boundary', ?, NULL)`,
+        `INSERT INTO chunk_revisions (user_id, id, chunk_id, capture_id, ordinal, revision_no, material_json, windows_json, provenance, closed_at_seq, supersedes)
+         VALUES (?, 'crv_1', 'chk_1', 'cap_1', 0, 1, '[]', '[]', 'boundary', ?, NULL)`,
       )
-      .run(db.nextSeq());
+      .run(ensureLocalUser(db), db.nextSeq());
     expect(() => db.sql.run("UPDATE chunk_revisions SET provenance = 'time'")).toThrow(/append-only/);
   });
 
   test("R14: the record refuses 'disputed' as a stored proposal or override", () => {
     const db = testDb();
-    expect(() =>
-      db.sql.run(
-        "INSERT INTO observations (id, review_id, thread_id, claim_ids_json, concept_ids_json, proposed, facts_json, saved_ms) VALUES ('obs_1', 'rvw_1', 'thr_1', '[]', '[]', 'disputed', '{}', 0)",
-      ),
-    ).toThrow();
-    expect(() =>
-      db.sql.run("INSERT INTO observation_decisions (observation_id, kind, value, decided_ms) VALUES ('obs_1', 'override', 'disputed', 0)"),
-    ).toThrow();
+    const user = ensureLocalUser(db);
+    const observation = (id: string, ord: number, thread: string, proposed: string) =>
+      db.sql
+        .query(
+          "INSERT INTO observations (user_id, id, ord, review_id, thread_id, claim_ids_json, concept_ids_json, proposed, facts_json, saved_ms) VALUES (?, ?, ?, 'rvw_1', ?, '[]', '[]', ?, '{}', 0)",
+        )
+        .run(user, id, ord, thread, proposed);
+    const override = (id: string, value: string) =>
+      db.sql
+        .query("INSERT INTO observation_decisions (user_id, observation_id, kind, value, decided_ms) VALUES (?, ?, 'override', ?, 0)")
+        .run(user, id, value);
+    observation("obs_ok", 1, "thr_ok", "independent");
+    override("obs_ok", "independent");
+    expect(() => observation("obs_1", 2, "thr_1", "disputed")).toThrow(/CHECK constraint failed/);
+    expect(() => override("obs_ok2", "disputed")).toThrow(/CHECK constraint failed/);
+  });
+});
+
+describe("users", () => {
+  const userRows = (db: Db) => db.sql.query<{ id: string }, []>("SELECT id FROM users").all();
+
+  test("first boot creates exactly one user", () => {
+    const db = testDb();
+    expect(userRows(db)).toEqual([]);
+    expect(ensureLocalUser(db)).toBe(LOCAL_USER);
+    expect(userRows(db)).toEqual([{ id: LOCAL_USER }]);
+  });
+
+  test("a reboot keeps the one user and its creation time", () => {
+    withFile((path) => {
+      const a = openDb(path);
+      ensureLocalUser(a);
+      const created = a.sql.query<{ created_ms: number }, []>("SELECT created_ms FROM users").get()!.created_ms;
+      a.close();
+      const b = openDb(path);
+      expect(ensureLocalUser(b)).toBe(LOCAL_USER);
+      expect(ensureLocalUser(b)).toBe(LOCAL_USER);
+      expect(userRows(b)).toHaveLength(1);
+      expect(b.sql.query<{ created_ms: number }, []>("SELECT created_ms FROM users").get()!.created_ms).toBe(created);
+      b.close();
+    });
+  });
+
+  test("a database from before the users migration gains the table and one user, and keeps its data", () => {
+    withFile((path) => {
+      const old = { ...MIGRATIONS, kernel: MIGRATIONS.kernel.filter((m) => m.id !== "002-users"), providers: MIGRATIONS.providers.filter((m) => m.id !== "004-user-id"), evidence: MIGRATIONS.evidence.filter((m) => m.id !== "003-user-id" && m.id !== "004-capture-owners"), segmentation: MIGRATIONS.segmentation.filter((m) => m.id !== "002-user-id"), preparation: MIGRATIONS.preparation.filter((m) => m.id !== "003-user-id"), review: MIGRATIONS.review.filter((m) => m.id !== "002-user-id"), record: MIGRATIONS.record.filter((m) => m.id !== "004-user-id") };
+      const a = openDb(path, old);
+      const seq = a.nextSeq();
+      expect(a.sql.query("SELECT name FROM sqlite_master WHERE name = 'users'").all()).toEqual([]);
+      a.close();
+      const b = openDb(path);
+      expect(userRows(b)).toEqual([]);
+      ensureLocalUser(b);
+      expect(userRows(b)).toEqual([{ id: LOCAL_USER }]);
+      expect(b.nextSeq()).toBe((seq + 1) as typeof seq);
+      b.close();
+    });
+  });
+
+  test("scopeDb binds the user, shares the Seq counter, and refuses an unknown user", () => {
+    const db = testDb();
+    expect(() => scopeDb(db, LOCAL_USER)).toThrow(/no such user/);
+    const scoped = scopeDb(db, ensureLocalUser(db));
+    expect(scoped.userId).toBe(LOCAL_USER);
+    const a = scoped.nextSeq();
+    expect(db.nextSeq()).toBe((a + 1) as typeof a);
+    expect(scoped.tx(() => 7)).toBe(7);
+  });
+
+  test("every table is classified as per-user, shared or identity, and nothing else is", () => {
+    const tables = testDb().sql.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
+    expect(Object.keys(TABLE_SCOPES).sort()).toEqual(tables.sort());
+    expect(Object.entries(TABLE_SCOPES).filter(([, s]) => s === "identity").map(([t]) => t)).toEqual(["users"]);
+  });
+
+  test("only tables that hold no learner's data are shared", () => {
+    const shared = Object.entries(TABLE_SCOPES).filter(([, s]) => s === "shared").map(([t]) => t).sort();
+    expect(shared).toEqual(["schema_migrations", "seq_counter"]);
   });
 });

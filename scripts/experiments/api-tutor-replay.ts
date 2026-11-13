@@ -21,6 +21,8 @@
  * header parses with `parseMoveHeader`, and its move kind is one of the allowed moves the stored prompt names.
  * It does not check thread ids, claim ids, evidence scope or the question counts that `validateMove` also checks.
  */
+import { LOCAL_USER } from "../../src/backend/db";
+import type { UserId } from "../../src/shared/ids";
 import { Database } from "bun:sqlite";
 import { existsSync, lstatSync, mkdirSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -110,20 +112,23 @@ export type StoredCall = {
   readonly cliAttempts: number;
 };
 
-/** The tutor and wrap-up inputs first seen at or after `sinceMs`, oldest first. The database is opened read-only. */
-export function loadCalls(dbPath: string, sinceMs: number): StoredCall[] {
+/**
+ * One user's tutor and wrap-up inputs first seen at or after `sinceMs`, oldest first. The database is opened read-only.
+ * Only that user's rows are read, and their CLI cost is matched by user and key, because a memo key is unique per user.
+ */
+export function loadCalls(dbPath: string, sinceMs: number, userId: UserId = LOCAL_USER): StoredCall[] {
   if (!existsSync(dbPath)) throw new Error(`--db ${dbPath} does not exist`);
   const sql = new Database(dbPath, { readonly: true });
   try {
     const rows = sql
-      .query<{ key: string; purpose: Purpose; version: string; input_json: string; first_seen_ms: number }, [number]>(
+      .query<{ key: string; purpose: Purpose; version: string; input_json: string; first_seen_ms: number }, [string, number]>(
         `SELECT key, purpose, version, input_json, first_seen_ms FROM memo_inputs
-         WHERE purpose IN ('tutor_turn', 'wrap_up') AND first_seen_ms >= ?
-         ORDER BY first_seen_ms, rowid`,
+         WHERE user_id = ? AND purpose IN ('tutor_turn', 'wrap_up') AND first_seen_ms >= ?
+         ORDER BY first_seen_ms, key`,
       )
-      .all(sinceMs);
-    const notional = sql.query<{ usd: number | null; n: number }, [string]>(
-      `SELECT SUM(cost_usd) AS usd, COUNT(*) AS n FROM usage_events WHERE memo_key = ? AND cost_kind = 'notional'`,
+      .all(userId, sinceMs);
+    const notional = sql.query<{ usd: number | null; n: number }, [string, string]>(
+      `SELECT SUM(cost_usd) AS usd, COUNT(*) AS n FROM usage_events WHERE user_id = ? AND memo_key = ? AND cost_kind = 'notional'`,
     );
     return rows.map((row) => {
       const parsed = storedInput.safeParse((() => {
@@ -134,7 +139,7 @@ export function loadCalls(dbPath: string, sinceMs: number): StoredCall[] {
         }
       })());
       if (!parsed.success) throw new Error(`memo input ${row.key} (${row.purpose}) is not a {system, prompt, effort} object: ${z.prettifyError(parsed.error)}`);
-      const cli = notional.get(row.key);
+      const cli = notional.get(userId, row.key);
       return {
         key: row.key,
         purpose: row.purpose,

@@ -1,4 +1,4 @@
-import type { Db } from "../src/backend/db";
+import type { UserDb } from "../src/backend/db";
 import { asSeq } from "../src/backend/db";
 import type { Task } from "../src/backend/providers/memo";
 import { createMemo } from "../src/backend/providers/memo";
@@ -11,7 +11,7 @@ import { randomId, stableId } from "../src/shared/ids";
 import type { Interval } from "../src/shared/time";
 import { Material, interval } from "../src/shared/time";
 import type { FakeStep } from "./fakes";
-import { fail, fakeTask, ok, testDb } from "./fakes";
+import { fail, fakeTask, ok, testUserDb } from "./fakes";
 
 export const SRC = stableId("src", "youtube", "lecture");
 
@@ -33,7 +33,7 @@ export class World {
   stops: (readonly ChunkRevisionId[])[] = [];
   captureState: "capturing" | "stopped" = "capturing";
 
-  constructor(readonly db: Db) {}
+  constructor(readonly db: UserDb) {}
 
   /** Closes chunk `ordinal`, or appends a new revision of it when it already closed. */
   close(ordinal: number, start: number, end: number, provenance: ChunkProvenance = "boundary"): ChunkRevision {
@@ -196,7 +196,7 @@ export function reply(move: TutorMove, say: string): FakeStep<TutorOutput> {
 
 export type Script = (input: TutorInput, call: number) => FakeStep<TutorOutput> | Promise<FakeStep<TutorOutput>>;
 
-export function tutorHarness(db: Db, script: Script) {
+export function tutorHarness(db: UserDb, script: Script) {
   const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
   const base = fakeTask<IdPart, TutorOutput>({ purpose: "tutor_turn", provider: "claude", answer: (i, n) => script(i as unknown as TutorInput, n) });
   const task: Task<TutorInput, TutorOutput> = {
@@ -214,7 +214,7 @@ export function tutorHarness(db: Db, script: Script) {
 
 
 export function rig(script: Script = () => fail("no tutor scripted"), config: { softTargetS?: number; estimateS?: (n: number) => number | null; timeInviteGapS?: number } = {}) {
-  const db = testDb();
+  const db = testUserDb();
   const world = new World(db);
   const tutor = tutorHarness(db, script);
   let t = 1_000_000;
@@ -223,9 +223,9 @@ export function rig(script: Script = () => fail("no tutor scripted"), config: { 
   return { db, world, tutor, reviews, clock, capture: world.captureId };
 }
 
-export const reviewRows = (db: Db) => db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM reviews").get()!.n;
+export const reviewRows = (db: UserDb) => db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM reviews").get()!.n;
 
-export const turnRows = (db: Db, actor: string) => db.sql.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM review_turns WHERE actor = ?").get(actor)!.n;
+export const turnRows = (db: UserDb, actor: string) => db.sql.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM review_turns WHERE actor = ?").get(actor)!.n;
 
 export async function collect(it: AsyncIterable<TurnEvent>): Promise<TurnEvent[]> {
   const out: TurnEvent[] = [];

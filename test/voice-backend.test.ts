@@ -12,9 +12,9 @@ import { serve } from "../src/backend/http";
 import { createLedger } from "../src/backend/providers/ledger";
 import { DEFAULT_VOICE_ID, DEFAULT_VOICE_MODEL, createVoice, unavailableVoice } from "../src/backend/providers/elevenlabs";
 import type { Voice } from "../src/backend/providers/elevenlabs";
-import type { Db } from "../src/backend/db";
+import type { UserDb } from "../src/backend/db";
 import { ROUTES, VOICE_TEXT_MAX, voiceStatusResponse } from "../src/shared/wire";
-import { testDb } from "./fakes";
+import { testUserDb } from "./fakes";
 
 const TOKEN = "tok-voice-test-77aa";
 const EL_KEY = "xi-secret-key-DO-NOT-LEAK-0123";
@@ -61,7 +61,7 @@ function hanging() {
   return { ...e, seen };
 }
 
-function rows(db: Db) {
+function rows(db: UserDb) {
   return db.sql.query<Record<string, unknown>, []>("SELECT * FROM voice_usage_events ORDER BY started_ms").all();
 }
 
@@ -73,7 +73,7 @@ const until = async (done: () => boolean, ms = 3000): Promise<void> => {
   }
 };
 
-function start(voice: Voice | undefined, db: Db = testDb()) {
+function start(voice: Voice | undefined, db: UserDb = testUserDb()) {
   const server = serve({
     modules: { ledger: createLedger(db), evidence: {} as never, reviews: {} as never, ...(voice ? { voice } : {}) },
     auth: { port: 0, extensionId: "abcdefghijklmnopabcdefghijklmnop", token: TOKEN }, appDir: dir("afterclass-app-"),
@@ -118,7 +118,7 @@ describe("keys.env", () => {
 });
 
 describe("POST /voice/speech", () => {
-  const make = (fetchFn: typeof fetch, extra: { timeoutMs?: number } = {}, db: Db = testDb()) =>
+  const make = (fetchFn: typeof fetch, extra: { timeoutMs?: number } = {}, db: UserDb = testUserDb()) =>
     start(createVoice({ apiKey: EL_KEY, voiceId: DEFAULT_VOICE_ID, model: DEFAULT_VOICE_MODEL, db, fetch: fetchFn, ...extra }), db);
 
   test("forwards the sentence with the key in xi-api-key, and streams the audio back as audio/mpeg", async () => {
@@ -138,7 +138,7 @@ describe("POST /voice/speech", () => {
 
   test("the configured voice and model go upstream", async () => {
     const e = fakeEleven();
-    const db = testDb();
+    const db = testUserDb();
     const s = start(createVoice({ apiKey: EL_KEY, voiceId: "AbCdEfGh1234", model: "eleven_multilingual_v2", db, fetch: e.fetchFn }), db);
     await (await s.post("Hi.")).arrayBuffer();
     expect(e.calls[0]!.url).toContain("/AbCdEfGh1234/stream");
@@ -146,8 +146,8 @@ describe("POST /voice/speech", () => {
   });
 
   test("a bad voice id or model is refused when the voice is built, not at the first sentence", () => {
-    expect(() => createVoice({ apiKey: EL_KEY, voiceId: "../x", model: DEFAULT_VOICE_MODEL, db: testDb() })).toThrow("VOICE_ID");
-    expect(() => createVoice({ apiKey: EL_KEY, voiceId: DEFAULT_VOICE_ID, model: "Bad Model", db: testDb() })).toThrow("MODEL");
+    expect(() => createVoice({ apiKey: EL_KEY, voiceId: "../x", model: DEFAULT_VOICE_MODEL, db: testUserDb() })).toThrow("VOICE_ID");
+    expect(() => createVoice({ apiKey: EL_KEY, voiceId: DEFAULT_VOICE_ID, model: "Bad Model", db: testUserDb() })).toThrow("MODEL");
   });
 
   test("refuses an unauthenticated request, empty text, a missing field and oversized text, and never calls upstream", async () => {
@@ -180,7 +180,7 @@ describe("POST /voice/speech", () => {
   });
 
   test("records one usage event per call: characters sent, cost unknown (R17), never zero", async () => {
-    const db = testDb();
+    const db = testUserDb();
     const s = make(fakeEleven().fetchFn, {}, db);
     await (await s.post("Héllo there.")).arrayBuffer();
     await until(() => rows(db).length === 1);
@@ -194,7 +194,7 @@ describe("POST /voice/speech", () => {
   });
 
   test("an upstream error is a 502 with no upstream text, and still a usage event with outcome error", async () => {
-    const db = testDb();
+    const db = testUserDb();
     const e = fakeEleven(() => new Response(`{"detail":"invalid key ${EL_KEY}"}`, { status: 401 }));
     const s = make(e.fetchFn, {}, db);
     const res = await s.post("Hello.");
@@ -206,14 +206,14 @@ describe("POST /voice/speech", () => {
   });
 
   test("a network failure upstream is a 502 and an error event", async () => {
-    const db = testDb();
+    const db = testUserDb();
     const s = make((() => Promise.reject(new Error("socket hang up"))) as unknown as typeof fetch, {}, db);
     expect((await s.post("Hello.")).status).toBe(502);
     expect(rows(db).map((r) => r.outcome)).toEqual(["error"]);
   });
 
   test("aborts the upstream call when the client disconnects, and records it as aborted", async () => {
-    const db = testDb();
+    const db = testUserDb();
     const h = hanging();
     const s = make(h.fetchFn, {}, db);
     const ctrl = new AbortController();
@@ -228,7 +228,7 @@ describe("POST /voice/speech", () => {
   });
 
   test("times out a stalled upstream and answers 504", async () => {
-    const db = testDb();
+    const db = testUserDb();
     const e = fakeEleven((call) => new Promise<Response>((_, reject) => call.init.signal?.addEventListener("abort", () => reject(new Error("aborted")))));
     const s = make(e.fetchFn, { timeoutMs: 50 }, db);
     const res = await s.post("Hello.");

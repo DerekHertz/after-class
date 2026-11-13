@@ -6,7 +6,7 @@ import type { AssessableClaim, ChunkPrep, ChunkProvenance, ChunkRevision, Gap } 
 import type { ClaimId, ConceptId, ReviewId } from "../src/shared/ids";
 import { randomId, stableId } from "../src/shared/ids";
 import { Material, interval } from "../src/shared/time";
-import { testDb } from "./fakes";
+import { testUserDb } from "./fakes";
 import { CONCEPT, SRC, World, kit, reviewRows, rig, seq, started, startedRig } from "./review-fixtures";
 
 // ───────────────────────────── core: invite fold ─────────────────────────────
@@ -73,7 +73,7 @@ describe("foldInvites (flow C invite policy)", () => {
 // ───────────────────────────── core: scope and corrections ─────────────────────────────
 
 describe("freezeScope", () => {
-  const world = new World(testDb());
+  const world = new World(testUserDb());
   const a = world.close(0, 0, 300);
   const b = world.close(1, 300, 600);
   world.claim(1, 10, 20);
@@ -102,7 +102,7 @@ describe("freezeScope", () => {
 });
 
 describe("corrections (R7)", () => {
-  const w = new World(testDb());
+  const w = new World(testUserDb());
   const scopeRev = w.close(0, 0, 100);
   const c1 = w.claim(1, 10, 20);
   const c2 = w.claim(2, 30, 40);
@@ -140,7 +140,7 @@ describe("corrections (R7)", () => {
   });
 
   test("a newly usable claim is a correction only when all its evidence is inside the scope material", () => {
-    const w2 = new World(testDb());
+    const w2 = new World(testUserDb());
     w2.claim(3, 50, 60);
     w2.claim(4, 500, 510);
     const fresh = w2.deps.assessableIn(w2.captureId, Material.of([[SRC, [interval(0, 1000)]]]));

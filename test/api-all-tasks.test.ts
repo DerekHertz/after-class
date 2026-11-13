@@ -20,7 +20,7 @@ import type { ApiClient } from "../src/backend/providers/claude-api";
 import { createLedger } from "../src/backend/providers/ledger";
 import { createMemo } from "../src/backend/providers/memo";
 import type { Task } from "../src/backend/providers/memo";
-import { testDb } from "./fakes";
+import { testUserDb } from "./fakes";
 import { NEVER } from "./providers-fixtures";
 
 const KEY = "sk-ant-api03-all-tasks-0123456789";
@@ -99,7 +99,7 @@ describe("every Claude task on the Messages API", () => {
   for (const c of CASES) {
     test(`${c.name}: frames become base64 image blocks and web tools appear only for resource search`, async () => {
       const { client, calls } = fakeApi(c.reply);
-      await createMemo(testDb(), "live", { retryDelayMs: () => 0 }).run(c.task(createClaudeApi({ apiKey: KEY, maxConcurrent: 1, client })), c.input as never);
+      await createMemo(testUserDb(), "live", { retryDelayMs: () => 0 }).run(c.task(createClaudeApi({ apiKey: KEY, maxConcurrent: 1, client })), c.input as never);
       expect(calls).toHaveLength(1);
       const params = calls[0]!.params as { messages: { role: string; content: unknown }[]; tools?: unknown; output_config: Record<string, unknown> };
       const content = params.messages[0]!.content;
@@ -125,7 +125,7 @@ describe("every Claude task on the Messages API", () => {
 
     test(`${c.name}: usage is recorded as an estimate at list prices`, async () => {
       const { client } = fakeApi(c.reply, c.web ? { server_tool_use: { web_search_requests: 3, web_fetch_requests: 1 } } : {});
-      const db = testDb();
+      const db = testUserDb();
       const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
       const task = c.task(createClaudeApi({ apiKey: KEY, maxConcurrent: 1, client }));
       const result = await memo.run(task, c.input as never);
@@ -167,7 +167,7 @@ describe("web search pricing", () => {
   test("a response whose server tool usage is invalid is recorded as unknown cost, not zero", async () => {
     const { client } = fakeApi(REPLIES.resources, { server_tool_use: { web_search_requests: "3" } });
     const c = CASES[2]!;
-    const db = testDb();
+    const db = testUserDb();
     const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
     const task = c.task(createClaudeApi({ apiKey: KEY, maxConcurrent: 1, client }));
     await memo.run(task, c.input as never);
@@ -222,7 +222,7 @@ describe("resource search without output_config.format", () => {
   const c = CASES[2]!;
   const run = async (script: readonly (Message | Error)[]) => {
     const { client, calls } = scripted(script);
-    const db = testDb();
+    const db = testUserDb();
     const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
     const task = c.task(createClaudeApi({ apiKey: KEY, maxConcurrent: 1, client }));
     const result = await memo.run(task, c.input as never);
@@ -340,7 +340,7 @@ describe("resource search without output_config.format", () => {
         },
       },
     };
-    const db = testDb();
+    const db = testUserDb();
     const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
     const task = c.task(createClaudeApi({ apiKey: KEY, maxConcurrent: 1, client }));
     const result = await memo.run(task, c.input as never, { signal: ctl.signal });

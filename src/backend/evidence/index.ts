@@ -1,6 +1,12 @@
 /**
  * Evidence store (W3). Owns: capture_facts, frames (bytes on disk at
- * <dataDir>/frames/<sourceId>/<evidenceId>.jpg), evidence_snapshots, evidence_deletions.
+ * <dataDir>/frames/<userId>/<sourceId>/<evidenceId>.jpg, snapshots at <dataDir>/snapshots/<userId>/<evidenceId>.jpg; rows written before
+ * per-user paths keep their old path), evidence_snapshots, evidence_deletions.
+ *
+ * One store serves one user (the `UserDb` it is built on): every query reads or writes with that user_id. A capture id
+ * belongs to the first user that ingests it (capture_owners, kept after expiry), and another user's batch for it is refused, so a frame's evidence id and its
+ * file path (both derived from the capture id) are unique across users. Passage evidence ids are derived from the transcript
+ * and are the same for two users who watch the same interval, so the tables that key by evidence id key by (user_id, evidence_id).
  *
  * Facts in, evidence out. The capture projection (watched material, gaps,
  * health, status) is a fold over this capture's facts (core.ts), rebuilt from
@@ -23,7 +29,7 @@ import type {
 import { Material } from "../../shared/time";
 import type { MediaSeconds } from "../../shared/time";
 import { asSeq } from "../db";
-import type { Db } from "../db";
+import type { UserDb } from "../db";
 import type { WorkItem } from "../scheduler";
 import type { Lookup } from "../providers/memo";
 import type { FrameChangeInput } from "../providers/jev-tasks";
@@ -46,13 +52,21 @@ export type EvidenceStore = {
    * Idempotent on (captureId, clientSeq). Frame bytes go to disk via
    * temp+rename BEFORE the row commits; a crash leaves an orphan file (swept),
    * never a row without bytes. Returns the highest contiguous clientSeq stored
-   * (counting from 0; -1 when clientSeq 0 has not arrived).
+   * (counting from 0; -1 when clientSeq 0 has not arrived). Throws RangeError,
+   * storing nothing, for a capture id another user already holds.
    */
   ingest(batch: { readonly captureId: CaptureId; readonly facts: readonly CaptureFact[] }): { readonly ackedThroughSeq: number };
   captureView(captureId: CaptureId): CaptureView;
   activeCaptures(): readonly CaptureId[];
-  /** Every capture that has stored facts, most recently captured first. Read-only. */
+  /** Every capture of this user that has stored facts, most recently captured first. Read-only. */
   captures(): readonly CaptureId[];
+  /** True when another user owns this capture id, which they keep after its facts expire. The HTTP layer answers 404, as for an id that is not the caller's. */
+  capturedByAnotherUser(captureId: CaptureId): boolean;
+  /**
+   * True when an id has a frame, snapshot or tombstone row for another user and nothing for this one. A passage id that this
+   * user also holds is theirs, whatever another user did with it. An id nobody stored (or only another user's raw passage) is false.
+   */
+  heldByAnotherUser(ids: readonly EvidenceId[]): boolean;
   watchOrder(captureId: CaptureId): WatchOrder;
   /** Watched passages + kept/uncertain frames + gaps + ads inside `material`. User-deleted evidence is left out. */
   bundle(material: Material): EvidenceBundle;
@@ -74,7 +88,7 @@ export type EvidenceStore = {
   deleteByUser(ids: readonly EvidenceId[], requestId: string): void;
   /**
    * R16: "Evidence cited by a saved note is only deleted when I delete it, never by expiry."
-   * Daily sweep: raw capture facts and frame files older than retentionDays (30).
+   * Daily sweep of this user's raw capture facts and frame files older than retentionDays (30).
    * The SQL says NOT EXISTS for live citations and for unsaved reviews of the
    * capture (pending saves count as citing); the db.ts triggers abort the
    * delete if this SQL is ever wrong. No route exposes it.
@@ -118,7 +132,7 @@ function unlinkQuiet(path: string): boolean {
 
 const isJpeg = (b: Uint8Array) => b.length > JPEG_MAGIC.length && JPEG_MAGIC.every((m, i) => b[i] === m);
 
-export function createEvidence(db: Db, dataDir: string, deps: {
+export function createEvidence(db: UserDb, dataDir: string, deps: {
   /** Frame.teaching derives from this lookup: yes→kept, no→dropped, uncertain/failed→uncertain (kept). */
   lookupFrameChange(input: FrameChangeInput): Lookup<Verdict>;
   runFrameChange(input: FrameChangeInput, signal: AbortSignal): Promise<unknown>;
@@ -128,6 +142,7 @@ export function createEvidence(db: Db, dataDir: string, deps: {
   now?: () => number;
 }): EvidenceStoreWithProbe {
   const now = deps.now ?? Date.now;
+  const userId = db.userId;
   const abs = (rel: string) => join(dataDir, rel);
 
   let projections = new Map<CaptureId, Projection>();
@@ -141,17 +156,17 @@ export function createEvidence(db: Db, dataDir: string, deps: {
 
   const loadFacts = db.sql.query<
     { seq: number; client_seq: number; wall_ms: number; body_json: string; has_bytes: number },
-    [string]
+    [string, string]
   >(
     `SELECT c.seq, c.client_seq, c.wall_ms, c.body_json,
-            EXISTS (SELECT 1 FROM frames f WHERE f.seq = c.seq) AS has_bytes
-     FROM capture_facts c WHERE c.capture_id = ? ORDER BY c.client_seq`,
+            CASE WHEN EXISTS (SELECT 1 FROM frames f WHERE f.user_id = c.user_id AND f.seq = c.seq) THEN 1 ELSE 0 END AS has_bytes
+     FROM capture_facts c WHERE c.user_id = ? AND c.capture_id = ? ORDER BY c.client_seq`,
   );
 
   function project(captureId: CaptureId): Projection {
     const hit = projections.get(captureId);
     if (hit) return hit;
-    const stored: StoredFact[] = loadFacts.all(captureId).map((r) => {
+    const stored: StoredFact[] = loadFacts.all(userId, captureId).map((r) => {
       const { jpegOk, ...body } = JSON.parse(r.body_json) as { kind: CaptureFact["kind"]; jpegOk?: boolean };
       const fact = { captureId, clientSeq: r.client_seq, wallMs: r.wall_ms, ...body, ...(body.kind === "frame" ? { jpegBase64: "" } : {}) } as CaptureFact;
       return { seq: asSeq(r.seq), fact, hasBytes: r.has_bytes === 1, jpeg: jpegOk === true };
@@ -162,14 +177,19 @@ export function createEvidence(db: Db, dataDir: string, deps: {
   }
 
   function allCaptureIds(): CaptureId[] {
-    captureIds ??= db.sql.query<{ capture_id: string }, []>("SELECT DISTINCT capture_id FROM capture_facts").all().map((r) => r.capture_id as CaptureId);
+    captureIds ??= db.sql.query<{ capture_id: string }, [string]>("SELECT DISTINCT capture_id FROM capture_facts WHERE user_id = ?").all(userId).map((r) => r.capture_id as CaptureId);
     return captureIds;
   }
 
   const allProjections = () => allCaptureIds().map(project);
 
   function deleted(): ReadonlyMap<string, number> {
-    return new Map(db.sql.query<{ evidence_id: string; deleted_ms: number }, []>("SELECT evidence_id, deleted_ms FROM evidence_deletions").all().map((r) => [r.evidence_id, r.deleted_ms]));
+    return new Map(
+      db.sql
+        .query<{ evidence_id: string; deleted_ms: number }, [string]>("SELECT evidence_id, deleted_ms FROM evidence_deletions WHERE user_id = ?")
+        .all(userId)
+        .map((r) => [r.evidence_id, r.deleted_ms]),
+    );
   }
 
   function raw(): Map<EvidenceId, Raw> {
@@ -201,13 +221,17 @@ export function createEvidence(db: Db, dataDir: string, deps: {
 
   const withTeaching = (e: FrameEntry): Frame => ({ ...e.frame, teaching: judge(e).teaching });
 
-  const frameRow = db.sql.query<{ path: string }, [string]>("SELECT path FROM frames WHERE evidence_id = ?");
-  const snapshotRow = db.sql.query<SnapshotRow, [string]>("SELECT * FROM evidence_snapshots WHERE evidence_id = ?");
+  const frameRow = db.sql.query<{ path: string }, [string, string]>("SELECT path FROM frames WHERE user_id = ? AND evidence_id = ?");
+  const snapshotRow = db.sql.query<SnapshotRow, [string, string]>(
+    `SELECT evidence_id, kind, source_id, start_s, end_s, text, frame_path, transcript_rev_id, origin, width, height
+     FROM evidence_snapshots WHERE user_id = ? AND evidence_id = ?`,
+  );
+  const frameOf = (id: string) => frameRow.get(userId, id);
+  const snapshotOf = (id: string) => snapshotRow.get(userId, id);
 
   function bytes(id: EvidenceId): Uint8Array | null {
     if (deleted().has(id)) return null;
-    const row = frameRow.get(id);
-    const path = row?.path ?? snapshotRow.get(id)?.frame_path ?? null;
+    const path = frameOf(id)?.path ?? snapshotOf(id)?.frame_path ?? null;
     if (path === null || !existsSync(abs(path))) return null;
     return new Uint8Array(readFileSync(abs(path)));
   }
@@ -226,24 +250,37 @@ export function createEvidence(db: Db, dataDir: string, deps: {
   }
 
   function ackedThrough(captureId: CaptureId): number {
-    const start = db.sql.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM capture_facts WHERE capture_id = ? AND client_seq = 0").get(captureId);
+    const start = db.sql
+      .query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM capture_facts WHERE user_id = ? AND capture_id = ? AND client_seq = 0")
+      .get(userId, captureId);
     if (!start || start.n === 0) return -1;
     const end = db.sql
-      .query<{ end: number }, [string]>(
+      .query<{ end: number }, [string, string]>(
         `SELECT MIN(a.client_seq) AS end FROM capture_facts a
-         WHERE a.capture_id = ?1
-           AND NOT EXISTS (SELECT 1 FROM capture_facts b WHERE b.capture_id = a.capture_id AND b.client_seq = a.client_seq + 1)`,
+         WHERE a.user_id = ? AND a.capture_id = ?
+           AND NOT EXISTS (SELECT 1 FROM capture_facts b WHERE b.user_id = a.user_id AND b.capture_id = a.capture_id AND b.client_seq = a.client_seq + 1)`,
       )
-      .get(captureId);
+      .get(userId, captureId);
     return end!.end;
   }
 
   const insertFact = db.sql.query(
-    "INSERT INTO capture_facts (seq, capture_id, client_seq, wall_ms, kind, body_json, received_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO capture_facts (user_id, seq, capture_id, client_seq, wall_ms, kind, body_json, received_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const insertFrame = db.sql.query(
-    `INSERT OR IGNORE INTO frames (evidence_id, capture_id, source_id, frame_id, media_s, width, height, path, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO frames (user_id, evidence_id, capture_id, source_id, frame_id, media_s, width, height, path, seq)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
   );
+  const otherOwner = db.sql.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM capture_owners WHERE capture_id = ? AND user_id <> ?");
+  const claimCapture = db.sql.query("INSERT INTO capture_owners (capture_id, user_id, claimed_ms) VALUES (?, ?, ?) ON CONFLICT DO NOTHING");
+
+  const pathInUse = db.sql.query<{ n: number }, [string, string]>(
+    "SELECT (SELECT COUNT(*) FROM frames WHERE path = ?) + (SELECT COUNT(*) FROM evidence_snapshots WHERE frame_path = ?) AS n",
+  );
+  /** Paths carry the user id, so two users never share one. This still refuses to unlink a file any row, of any user, points at. */
+  const unlinkUnreferenced = (paths: readonly string[]) => {
+    for (const p of paths) if (pathInUse.get(p, p)!.n === 0) unlinkQuiet(abs(p));
+  };
 
   const store: EvidenceStoreWithProbe = {
     ingest(batch) {
@@ -251,8 +288,13 @@ export function createEvidence(db: Db, dataDir: string, deps: {
       for (const f of batch.facts) {
         if (f.captureId !== captureId) throw new RangeError(`ingest: fact ${f.clientSeq} belongs to ${f.captureId}, not ${captureId}`);
       }
+      // A read-only early refusal so no file is written for a capture that is not this user's. The claim itself is in the transaction below.
+      if (store.capturedByAnotherUser(captureId)) throw new RangeError(`ingest: capture ${captureId} belongs to another user`);
       const have = new Set(
-        db.sql.query<{ client_seq: number }, [string]>("SELECT client_seq FROM capture_facts WHERE capture_id = ?").all(captureId).map((r) => r.client_seq),
+        db.sql
+          .query<{ client_seq: number }, [string, string]>("SELECT client_seq FROM capture_facts WHERE user_id = ? AND capture_id = ?")
+          .all(userId, captureId)
+          .map((r) => r.client_seq),
       );
       const fresh: CaptureFact[] = [];
       for (const f of batch.facts) {
@@ -268,11 +310,11 @@ export function createEvidence(db: Db, dataDir: string, deps: {
         if (f.kind !== "frame") continue;
         const sourceId = stableId("src", "youtube", f.videoId);
         const id = stableId("ev", captureId, f.frameId);
-        const path = join("frames", sourceId, `${id}.jpg`);
+        const path = join("frames", userId, sourceId, `${id}.jpg`);
         const decoded = new Uint8Array(Buffer.from(f.jpegBase64, "base64"));
         const jpeg = isJpeg(decoded);
         // A resent frameId keeps the first bytes: the file is written only for an id with no row yet.
-        const stored = jpeg && !dead.has(id) && !claimed.has(id) && frameRow.get(id) === null;
+        const stored = jpeg && !dead.has(id) && !claimed.has(id) && frameOf(id) === null;
         if (stored) {
           claimed.add(id);
           writeAtomic(abs(path), decoded);
@@ -282,6 +324,9 @@ export function createEvidence(db: Db, dataDir: string, deps: {
 
       const at = now();
       db.tx(() => {
+        // The claim commits or rolls back with the rows. It outlives the capture's facts, so expiry never frees a capture id.
+        claimCapture.run(captureId, userId, at);
+        if (store.capturedByAnotherUser(captureId)) throw new RangeError(`ingest: capture ${captureId} belongs to another user`);
         for (const f of fresh) {
           const body: Record<string, unknown> = { ...f };
           delete body.captureId;
@@ -290,10 +335,10 @@ export function createEvidence(db: Db, dataDir: string, deps: {
           delete body.jpegBase64;
           if (f.kind === "frame") body.jpegOk = frames.get(f.clientSeq)!.jpeg;
           const seq = db.nextSeq();
-          insertFact.run(seq, captureId, f.clientSeq, f.wallMs, f.kind, JSON.stringify(body), at);
+          insertFact.run(userId, seq, captureId, f.clientSeq, f.wallMs, f.kind, JSON.stringify(body), at);
           const frame = frames.get(f.clientSeq);
           if (f.kind === "frame" && frame?.stored) {
-            insertFrame.run(frame.id, captureId, stableId("src", "youtube", f.videoId), f.frameId, f.mediaS, f.width, f.height, frame.path, seq);
+            insertFrame.run(userId, frame.id, captureId, stableId("src", "youtube", f.videoId), f.frameId, f.mediaS, f.width, f.height, frame.path, seq);
           }
         }
       });
@@ -314,22 +359,35 @@ export function createEvidence(db: Db, dataDir: string, deps: {
 
     captures() {
       return db.sql
-        .query<{ capture_id: string }, []>("SELECT capture_id FROM capture_facts GROUP BY capture_id ORDER BY MAX(seq) DESC")
-        .all()
+        .query<{ capture_id: string }, [string]>("SELECT capture_id FROM capture_facts WHERE user_id = ? GROUP BY capture_id ORDER BY MAX(seq) DESC")
+        .all(userId)
         .map((r) => r.capture_id as CaptureId);
     },
 
     activeCaptures() {
       return db.sql
-        .query<{ capture_id: string }, []>(
-          `SELECT capture_id FROM capture_facts c
-           WHERE kind = 'control'
-             AND client_seq = (SELECT MAX(x.client_seq) FROM capture_facts x WHERE x.capture_id = c.capture_id AND x.kind = 'control')
-             AND json_extract(body_json, '$.action') <> 'stop'
+        .query<{ capture_id: string; body_json: string }, [string]>(
+          `SELECT capture_id, body_json FROM capture_facts c
+           WHERE user_id = ? AND kind = 'control'
+             AND client_seq = (SELECT MAX(x.client_seq) FROM capture_facts x WHERE x.user_id = c.user_id AND x.capture_id = c.capture_id AND x.kind = 'control')
            ORDER BY capture_id`,
         )
-        .all()
+        .all(userId)
+        .filter((r) => (JSON.parse(r.body_json) as { action?: string }).action !== "stop")
         .map((r) => r.capture_id as CaptureId);
+    },
+
+    capturedByAnotherUser: (captureId) => otherOwner.get(captureId, userId)!.n > 0,
+
+    heldByAnotherUser(ids) {
+      const held = (table: string, id: string, op: "=" | "<>") =>
+        db.sql.query<{ n: number }, [string, string]>(`SELECT COUNT(*) AS n FROM ${table} WHERE evidence_id = ? AND user_id ${op} ?`).get(id, userId)!.n > 0;
+      const index = raw();
+      return ids.some((id) => {
+        const others = held("frames", id, "<>") || held("evidence_snapshots", id, "<>") || held("evidence_deletions", id, "<>");
+        const mine = index.has(id) || held("frames", id, "=") || held("evidence_snapshots", id, "=") || held("evidence_deletions", id, "=");
+        return others && !mine;
+      });
     },
 
     watchOrder(captureId) {
@@ -387,7 +445,7 @@ export function createEvidence(db: Db, dataDir: string, deps: {
           out.set(id, hit.kind === "passage" ? hit.passage : withTeaching(hit.entry));
           continue;
         }
-        const snap = snapshotRow.get(id);
+        const snap = snapshotOf(id);
         if (snap) out.set(id, fromSnapshot(snap));
       }
       return out;
@@ -411,22 +469,22 @@ export function createEvidence(db: Db, dataDir: string, deps: {
       db.tx(() => {
         const dead = deleted();
         for (const id of ids) {
-          if (dead.has(id) || snapshotRow.get(id)) continue;
+          if (dead.has(id) || snapshotOf(id)) continue;
           const hit = raw().get(id);
           if (!hit) throw new RangeError(`snapshotInTx: no evidence ${id}`);
           if (hit.kind === "passage") {
             const p = hit.passage;
             db.sql.run(
-              `INSERT OR IGNORE INTO evidence_snapshots (evidence_id, kind, source_id, start_s, end_s, text, frame_path, created_ms, transcript_rev_id, origin)
-               VALUES (?, 'passage', ?, ?, ?, ?, NULL, ?, ?, ?)`,
-              [id, p.sourceId, p.interval.start, p.interval.end, p.text, now(), p.transcriptRevId, p.origin],
+              `INSERT INTO evidence_snapshots (user_id, evidence_id, kind, source_id, start_s, end_s, text, frame_path, created_ms, transcript_rev_id, origin)
+               VALUES (?, ?, 'passage', ?, ?, ?, ?, NULL, ?, ?, ?) ON CONFLICT DO NOTHING`,
+              [userId, id, p.sourceId, p.interval.start, p.interval.end, p.text, now(), p.transcriptRevId, p.origin],
             );
             continue;
           }
           const f = hit.entry.frame;
-          const source = frameRow.get(id)!.path;
-          const link = join("snapshots", `${id}.jpg`);
-          mkdirSync(abs("snapshots"), { recursive: true });
+          const source = frameOf(id)!.path;
+          const link = join("snapshots", userId, `${id}.jpg`);
+          mkdirSync(dirname(abs(link)), { recursive: true });
           if (!existsSync(abs(link))) {
             try {
               linkSync(abs(source), abs(link));
@@ -435,9 +493,9 @@ export function createEvidence(db: Db, dataDir: string, deps: {
             }
           }
           db.sql.run(
-            `INSERT OR IGNORE INTO evidence_snapshots (evidence_id, kind, source_id, start_s, end_s, text, frame_path, created_ms, width, height)
-             VALUES (?, 'frame', ?, ?, ?, NULL, ?, ?, ?, ?)`,
-            [id, f.sourceId, f.mediaS, f.mediaS, link, now(), f.width, f.height],
+            `INSERT INTO evidence_snapshots (user_id, evidence_id, kind, source_id, start_s, end_s, text, frame_path, created_ms, width, height)
+             VALUES (?, ?, 'frame', ?, ?, ?, NULL, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+            [userId, id, f.sourceId, f.mediaS, f.mediaS, link, now(), f.width, f.height],
           );
         }
       });
@@ -446,21 +504,22 @@ export function createEvidence(db: Db, dataDir: string, deps: {
     deleteByUser(ids, requestId) {
       const files: string[] = [];
       const index = raw();
-      const existing = new Set(ids.filter((id) => index.has(id) || frameRow.get(id) !== null || snapshotRow.get(id) !== null));
+      const existing = new Set(ids.filter((id) => index.has(id) || frameOf(id) !== null || snapshotOf(id) !== null));
       db.tx(() => {
-        const exists = db.sql.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM evidence_deletions WHERE evidence_id = ?");
+        const exists = db.sql.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM evidence_deletions WHERE user_id = ? AND evidence_id = ?");
         for (const id of ids) {
           if (!existing.has(id)) continue;
-          if (exists.get(id)!.n === 0) {
-            db.sql.run("INSERT INTO evidence_deletions (evidence_id, request_id, deleted_ms, seq) VALUES (?, ?, ?, ?)", [id, requestId, now(), db.nextSeq()]);
+          if (exists.get(userId, id)!.n === 0) {
+            db.sql.run("INSERT INTO evidence_deletions (user_id, evidence_id, request_id, deleted_ms, seq) VALUES (?, ?, ?, ?, ?)", [userId, id, requestId, now(), db.nextSeq()]);
           }
-          for (const r of db.sql.query<{ frame_path: string | null }, [string]>("DELETE FROM evidence_snapshots WHERE evidence_id = ? RETURNING frame_path").all(id)) {
+          const snapshots = db.sql.query<{ frame_path: string | null }, [string, string]>("DELETE FROM evidence_snapshots WHERE user_id = ? AND evidence_id = ? RETURNING frame_path");
+          for (const r of snapshots.all(userId, id)) {
             if (r.frame_path !== null) files.push(r.frame_path);
           }
-          for (const r of db.sql.query<{ path: string }, [string]>("DELETE FROM frames WHERE evidence_id = ? RETURNING path").all(id)) files.push(r.path);
+          for (const r of db.sql.query<{ path: string }, [string, string]>("DELETE FROM frames WHERE user_id = ? AND evidence_id = ? RETURNING path").all(userId, id)) files.push(r.path);
         }
       });
-      for (const f of files) unlinkQuiet(abs(f));
+      unlinkUnreferenced(files);
       invalidate();
       deps.onChange();
     },
@@ -473,39 +532,42 @@ export function createEvidence(db: Db, dataDir: string, deps: {
       let snapshotsDeleted = 0;
       db.tx(() => {
         const expired = db.sql
-          .query<{ capture_id: string }, [number]>(
+          .query<{ capture_id: string }, [string, number]>(
             `SELECT capture_id FROM capture_facts
+             WHERE user_id = ?
              GROUP BY capture_id
-             HAVING MAX(received_ms) < ?1
+             HAVING MAX(received_ms) < ?
                AND NOT EXISTS (
                  SELECT 1 FROM reviews r
-                 WHERE r.capture_id = capture_facts.capture_id
-                   AND NOT EXISTS (SELECT 1 FROM saved_reviews s WHERE s.review_id = r.id))`,
+                 WHERE r.user_id = capture_facts.user_id AND r.capture_id = capture_facts.capture_id
+                   AND NOT EXISTS (SELECT 1 FROM saved_reviews s WHERE s.user_id = r.user_id AND s.review_id = r.id))`,
           )
-          .all(cutoff);
+          .all(userId, cutoff);
         for (const { capture_id } of expired) {
-          for (const r of db.sql.query<{ path: string }, [string]>("DELETE FROM frames WHERE capture_id = ? RETURNING path").all(capture_id)) {
+          for (const r of db.sql.query<{ path: string }, [string, string]>("DELETE FROM frames WHERE user_id = ? AND capture_id = ? RETURNING path").all(userId, capture_id)) {
             files.push(r.path);
             framesDeleted++;
           }
-          factsDeleted += db.sql.query<{ seq: number }, [string]>("DELETE FROM capture_facts WHERE capture_id = ? RETURNING seq").all(capture_id).length;
+          factsDeleted += db.sql.query<{ seq: number }, [string, string]>("DELETE FROM capture_facts WHERE user_id = ? AND capture_id = ? RETURNING seq").all(userId, capture_id).length;
         }
         const gone = db.sql
-          .query<{ frame_path: string | null }, [number]>(
+          .query<{ frame_path: string | null }, [string, number]>(
             `DELETE FROM evidence_snapshots
-             WHERE created_ms < ?1
+             WHERE user_id = ? AND created_ms < ?
                AND NOT EXISTS (
                  SELECT 1 FROM note_evidence ne
-                 WHERE ne.evidence_id = evidence_snapshots.evidence_id
-                   AND NOT EXISTS (SELECT 1 FROM note_deletions nd WHERE nd.note_id = ne.note_id))
+                 WHERE ne.user_id = evidence_snapshots.user_id AND ne.evidence_id = evidence_snapshots.evidence_id
+                   AND NOT EXISTS (SELECT 1 FROM note_deletions nd WHERE nd.user_id = ne.user_id AND nd.note_id = ne.note_id))
              RETURNING frame_path`,
           )
-          .all(cutoff);
+          .all(userId, cutoff);
         snapshotsDeleted = gone.length;
         for (const r of gone) if (r.frame_path !== null) files.push(r.frame_path);
       });
-      for (const f of files) unlinkQuiet(abs(f));
+      unlinkUnreferenced(files);
 
+      // Files are one namespace for every user, so an orphan is a file no user's row points at. Filtering by this user
+      // here would delete the other users' frames.
       const referenced = new Set<string>([
         ...db.sql.query<{ path: string }, []>("SELECT path FROM frames").all().map((r) => r.path),
         ...db.sql.query<{ p: string }, []>("SELECT frame_path AS p FROM evidence_snapshots WHERE frame_path IS NOT NULL").all().map((r) => r.p),
@@ -534,7 +596,7 @@ export function createEvidence(db: Db, dataDir: string, deps: {
           gaps: p.gaps,
           ads: p.ads,
         },
-        { captureId, status: p.status, fileOf: (id) => (frameRow.get(id) ? abs(frameRow.get(id)!.path) : null) },
+        { captureId, status: p.status, fileOf: (id) => { const row = frameOf(id); return row ? abs(row.path) : null; } },
       );
     },
   };

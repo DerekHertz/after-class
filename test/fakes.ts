@@ -7,14 +7,28 @@
  *   await memo.run(t, { w: "a" });             // t.calls has one entry
  */
 import type { Cost, Provider, Purpose, Seq } from "../src/shared/domain";
+import { stableId } from "../src/shared/ids";
 import type { IdPart } from "../src/shared/ids";
-import { asSeq, openDb } from "../src/backend/db";
-import type { Db } from "../src/backend/db";
+import { asSeq, ensureLocalUser, openDb, scopeDb } from "../src/backend/db";
+import type { Db, UserDb } from "../src/backend/db";
 import { ProviderError } from "../src/backend/providers/memo";
 import type { AttemptContext, Task, UsageReport } from "../src/backend/providers/memo";
 
 export function testDb(): Db {
   return openDb(":memory:");
+}
+
+/** An in-memory database already scoped to the local user. */
+export function testUserDb(): UserDb {
+  const db = testDb();
+  return scopeDb(db, ensureLocalUser(db));
+}
+
+/** A second user in the same database as `db`: its own `users` row and a handle scoped to it. Idempotent per name. */
+export function otherUserDb(db: Db, name = "other"): UserDb {
+  const id = stableId("usr", name);
+  db.sql.query("INSERT INTO users (id, created_ms) SELECT ?, 0 WHERE NOT EXISTS (SELECT 1 FROM users WHERE id = ?)").run(id, id);
+  return scopeDb(db, id);
 }
 
 export function testSeq(n: number): Seq {

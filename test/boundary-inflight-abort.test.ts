@@ -8,7 +8,7 @@ import { createMemo } from "../src/backend/providers/memo";
 import { DEFAULT_LIMITS, createScheduler } from "../src/backend/scheduler";
 import type { WorkItem } from "../src/backend/scheduler";
 import { SEGMENTATION_DEFAULTS, createSegmentation } from "../src/backend/segmentation";
-import { fakeTask, ok, testDb } from "./fakes";
+import { fakeTask, ok, testUserDb } from "./fakes";
 
 const CAP = randomId("cap");
 const SRC = stableId("src", "youtube", "lecture");
@@ -34,7 +34,7 @@ const order = (): WatchOrder => {
 
 // Live wiring as in main.ts: segmentation demand feeds the scheduler, and a boundary call stays in flight for a while.
 test("a boundary call that is still in flight is not aborted by the next pump", async () => {
-  const db = testDb();
+  const db = testUserDb();
   const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
   let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));

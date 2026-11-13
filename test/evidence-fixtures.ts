@@ -7,7 +7,7 @@ import type { CaptureFact, CaptureFactBody, Verdict } from "../src/shared/domain
 import type { CaptureId, EvidenceId, MemoKey } from "../src/shared/ids";
 import { randomId, stableId } from "../src/shared/ids";
 import { media } from "../src/shared/time";
-import { testDb } from "./fakes";
+import { testUserDb } from "./fakes";
 import { tmpDir } from "./tmp";
 
 export const VIDEO = "aaaaaaaaaaa";
@@ -25,7 +25,7 @@ type Script = Map<EvidenceId, Lookup<Verdict>>;
 
 export function harness(opts: { clock?: { t: number } } = {}) {
   const dir = tmpDir("afterclass-evidence-");
-  const db = testDb();
+  const db = testUserDb();
   const script: Script = new Map();
   const changes = { n: 0 };
   const clock = opts.clock ?? { t: 1_000_000 };

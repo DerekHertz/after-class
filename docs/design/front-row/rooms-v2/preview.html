@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Rooms v2 preview</title>
+<style>
+@font-face { font-family: 'After Class Pixel'; src: url('../../../../src/app/assets/fonts-v2/pixelify-sans.ttf') format('truetype'); font-weight: 400 700; }
+body { margin: 0; padding: 24px; background: #15171c; color: #e8e4da; font: 16px/1.5 system-ui, sans-serif; }
+h1 { font-size: 22px; margin: 0 0 4px; } h2 { margin: 40px 0 8px; font-size: 18px; } p.note { max-width: 80ch; margin: 0 0 12px; color: #b9b3a6; }
+figure { margin: 0 0 28px; } figcaption { margin: 0 0 6px; color: #b9b3a6; }
+.frame { container-type: size; position: relative; overflow: hidden; background: #000; }
+/* b: background scale. u: object scale. Both are screen pixels per plate pixel; see manifest.json "units". */
+.room { position: absolute; inset: 0; overflow: hidden; font-family: 'After Class Pixel', system-ui, sans-serif;
+  --u0: min(calc(1.12 * 100cqh / 992), calc(1.25 * 100cqw / 1586));
+  --b: max(calc(100cqw / 1586), calc((100cqh - var(--u0) * 170) / 992));
+  --u: min(var(--b), var(--u0)); }
+.layer { position: absolute; box-sizing: border-box; image-rendering: pixelated; background-repeat: no-repeat; background-size: 100% 100%; }
+.bg { width: calc(var(--b) * 1586); height: calc(var(--b) * 992); }
+.board { position: absolute; left: var(--board-l); top: var(--board-top); width: var(--board-w); height: var(--board-h); z-index: 2; }
+.board-art { inset: 0; }
+.board-text { position: absolute; overflow: hidden; z-index: 4; }
+.board-text p { margin: 0; }
+.eyebrow { color: var(--soft); font: 600 clamp(.9rem, 1.25cqw, 1.2rem)/1.2 'After Class Pixel'; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 10px !important; }
+.question { font: 600 clamp(1.4rem, 2.7cqw, 2.7rem)/1.28 'After Class Pixel'; letter-spacing: .01em; }
+.line { color: var(--soft); font: 500 clamp(1.05rem, 1.45cqw, 1.35rem)/1.4 'After Class Pixel'; margin-top: .5em !important; }
+.desk { left: 0; right: 0; z-index: 5; }
+.mat { left: 50%; transform: translateX(-50%); z-index: 6; }
+.mat-text { position: absolute; inset: calc(var(--u) * 4) calc(var(--u) * 14); display: grid; grid-template-rows: auto 1fr auto; gap: 6px; }
+.mat-text p { margin: 0; }
+.label { font: 600 clamp(1.1rem, 1.7cqw, 1.6rem)/1.15 'After Class Pixel'; } .label span { color: var(--soft); font: 400 .9rem/1.3 'After Class Pixel'; margin-left: 12px; }
+.field { min-height: 0; overflow: hidden; padding: 8px 14px; border: 3px solid var(--field-border); background: var(--field); color: var(--field-ink); box-shadow: inset 3px 3px 0 #0000001a; font: 500 max(1rem, min(1.25cqw, 1.2rem))/1.5 'After Class Pixel'; }
+.buttons { display: flex; gap: 8px; } .buttons > * { padding: 7px 12px; border: 2px solid currentColor; font: 500 1rem/1.15 'After Class Pixel'; }
+.buttons b { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); } .buttons i { background: var(--quiet); color: var(--quiet-ink); font-style: normal; }
+.extra { z-index: 3; }
+.companion { z-index: 7; background-image: url('../../../../src/app/assets/companions-v3/pip.png'); background-size: 300% 100%; background-position: 0 0; }
+.notebook { z-index: 7; background-image: url('../../../../src/app/assets/room-objects/review-notebook.png'); }
+.folio { z-index: 7; background-image: url('../../../../src/app/assets/room-objects/source-folio.png'); }
+.chips { position: absolute; z-index: 9; left: 12px; right: 12px; top: 8px; display: flex; gap: 8px; }
+.chip { display: flex; align-items: center; min-height: 44px; padding: 0 12px; border: 2px solid; box-shadow: 0 3px 0 #00000040; font: 500 1.05rem/1 'After Class Pixel'; }
+.chip:last-child { margin-left: auto; }
+
+.room-rail { --wall-l: 0px; --wall-r: calc(100cqw - var(--b) * 358); --desk-top: calc(100cqh - var(--u) * 310);
+  --board-top: 12cqh; --board-h0: calc(var(--desk-top) - var(--u) * 64 - var(--board-top));
+  --board-w: min(calc(var(--wall-r) - var(--wall-l) - var(--u) * 72), calc(var(--board-h0) * 2.7));
+  --board-h: min(var(--board-h0), calc(var(--board-w) / 1.3));
+  --board-l: calc(var(--wall-l) + (var(--wall-r) - var(--wall-l) - var(--board-w)) / 2); }
+.room-rail .bg { background-image: url('rail-background.png'); right: 0; top: min(0px, calc((100cqh - var(--b) * 992) * 0.22)); }
+.room-rail .board-art { border-style: solid; border-width: calc(var(--u) * 44.0) calc(var(--u) * 64.0) calc(var(--u) * 62.0) calc(var(--u) * 64.0); border-image: url('rail-board.png') 88 128 124 128 fill / calc(var(--u) * 44.0) calc(var(--u) * 64.0) calc(var(--u) * 62.0) calc(var(--u) * 64.0) / 0 stretch; }
+.room-rail .desk { height: calc(var(--u) * 359.0); top: var(--desk-top); border-style: solid; border-width: calc(var(--u) * 0.0) calc(var(--u) * 150.0) calc(var(--u) * 0.0) calc(var(--u) * 150.0); border-image: url('rail-desk.png') 0 300 0 300 fill / calc(var(--u) * 0.0) calc(var(--u) * 150.0) calc(var(--u) * 0.0) calc(var(--u) * 150.0) / 0 stretch; }
+.room-rail .mat { width: min(calc(100cqw - var(--u) * 540), calc(var(--u) * 1000)); top: calc(var(--desk-top) + var(--u) * 26); bottom: calc(var(--u) * 14); border-style: solid; border-width: calc(var(--u) * 28.0) calc(var(--u) * 30.0) calc(var(--u) * 30.0) calc(var(--u) * 28.0); border-image: url('rail-mat.png') 56 60 60 56 fill / calc(var(--u) * 28.0) calc(var(--u) * 30.0) calc(var(--u) * 30.0) calc(var(--u) * 28.0) / 0 stretch; }
+.room-rail .board-text { color: #f6efd9; --soft: #c9e6cf; text-align: start; inset: calc(var(--u) * 58.0) calc(var(--u) * 78.0) calc(var(--u) * 76.0) calc(var(--u) * 78.0); }
+.room-rail .mat { color: #1e2b45; --soft: #4b5468; --field: #fffaf3; --field-ink: #1e2b45; --field-border: #2f4f86; --accent: #2d5aa8; --accent-ink: #ffffff; --quiet: #f4e8d2; --quiet-ink: #2a2620; }
+.room-rail .chip { background: color-mix(in srgb, #1a2b3b 86%, transparent); color: #f6ecd8; border-color: color-mix(in srgb, #f6ecd8 45%, transparent); }
+.room-rail .x-ledgeItems { background-image: url('rail-ledge-items.png'); width: calc(var(--u) * 548.0); height: calc(var(--u) * 55.0); left: 9%; bottom: calc(var(--u) * 33); z-index: 3; }
+.room-rail .x-vine { background-image: url('rail-vine.png'); width: calc(var(--u) * 261.0); height: calc(var(--u) * 395.0); left: calc(var(--u) * -150); top: calc(var(--u) * -62); z-index: 3; }
+.room-rail .companion { left: 1.5cqw; bottom: calc(var(--u) * 16); width: calc(var(--u) * 220); height: calc(var(--u) * 220); }
+.room-rail .notebook { right: 1.5cqw; bottom: calc(var(--u) * 20); width: calc(var(--u) * 200); height: calc(var(--u) * 150.0); }
+.room-rail .folio { right: calc(1.5cqw + var(--u) * 20.0); bottom: calc(var(--u) * 178.0); width: calc(var(--u) * 160.0); height: calc(var(--u) * 120.0); }
+
+.room-harbor { --wall-l: 0px; --wall-r: 100cqw; --desk-top: calc(100cqh - var(--u) * 310);
+  --board-top: 15cqh; --board-h0: calc(var(--desk-top) - var(--u) * -120 - var(--board-top));
+  --board-w: min(calc(var(--wall-r) - var(--wall-l) - var(--u) * 340), calc(var(--board-h0) * 2.7));
+  --board-h: var(--board-h0);
+  --board-l: calc(var(--wall-l) + (var(--wall-r) - var(--wall-l) - var(--board-w)) / 2); }
+.room-harbor .bg { background-image: url('harbor-background.png'); left: calc((100cqw - var(--b) * 1586) / 2); top: min(0px, calc((100cqh - var(--b) * 992) * 0.3)); }
+.room-harbor .board-art { border-style: solid; border-width: calc(var(--u) * 56.0) calc(var(--u) * 215.0) calc(var(--u) * 242.0) calc(var(--u) * 215.0); border-image: url('harbor-board.png') 112 430 484 430 fill / calc(var(--u) * 56.0) calc(var(--u) * 215.0) calc(var(--u) * 242.0) calc(var(--u) * 215.0) / 0 stretch; }
+.room-harbor .desk { height: calc(var(--u) * 362.0); top: var(--desk-top); border-style: solid; border-width: calc(var(--u) * 0.0) calc(var(--u) * 120.0) calc(var(--u) * 0.0) calc(var(--u) * 120.0); border-image: url('harbor-desk.png') 0 240 0 240 fill / calc(var(--u) * 0.0) calc(var(--u) * 120.0) calc(var(--u) * 0.0) calc(var(--u) * 120.0) / 0 stretch; }
+.room-harbor .mat { width: min(calc(100cqw - var(--u) * 540), calc(var(--u) * 1000)); top: calc(var(--desk-top) + var(--u) * 26); bottom: calc(var(--u) * 14); border-style: solid; border-width: calc(var(--u) * 44.0) calc(var(--u) * 44.0) calc(var(--u) * 44.0) calc(var(--u) * 44.0); border-image: url('harbor-mat.png') 88 88 88 88 fill / calc(var(--u) * 44.0) calc(var(--u) * 44.0) calc(var(--u) * 44.0) calc(var(--u) * 44.0) / 0 stretch; }
+.room-harbor .board-text { color: #fbf6e6; --soft: #dff3e6; text-align: center; inset: calc(var(--u) * 70.0) calc(var(--u) * 229.0) calc(var(--u) * 256.0) calc(var(--u) * 229.0); }
+.room-harbor .mat { color: #22252e; --soft: #4f4a40; --field: #fffaf0; --field-ink: #22252e; --field-border: #5b5240; --accent: #0f6b5d; --accent-ink: #ffffff; --quiet: #fbefd8; --quiet-ink: #2a2620; }
+.room-harbor .chip { background: color-mix(in srgb, #1d3f7a 86%, transparent); color: #fdf6e4; border-color: color-mix(in srgb, #fdf6e4 45%, transparent); }
+.room-harbor .x-lamp { background-image: url('harbor-lamp.png'); width: calc(var(--u) * 121.0); height: calc(var(--u) * 108.0); bottom: calc(100% - var(--u) * 14); z-index: 3; transform: translateX(-50%); }
+.room-harbor .x-awning { background-image: url('harbor-awning.png'); width: calc(var(--u) * 307.0); height: calc(var(--u) * 346.0); right: calc(var(--u) * 0); top: calc(var(--u) * 0); z-index: 1; }
+.room-harbor .x-cushion { background-image: url('harbor-cushion.png'); width: calc(var(--u) * 248.0); height: calc(var(--u) * 123.0); left: 0.6cqw; bottom: calc(var(--u) * 14); z-index: 6; }
+.room-harbor .companion { left: 1.5cqw; bottom: calc(var(--u) * 40); width: calc(var(--u) * 220); height: calc(var(--u) * 220); }
+.room-harbor .notebook { right: 1.5cqw; bottom: calc(var(--u) * 20); width: calc(var(--u) * 200); height: calc(var(--u) * 150.0); }
+.room-harbor .folio { right: calc(1.5cqw + var(--u) * 20.0); bottom: calc(var(--u) * 178.0); width: calc(var(--u) * 160.0); height: calc(var(--u) * 120.0); }
+
+.room-canal { --wall-l: calc(var(--b) * 376); --wall-r: 100cqw; --desk-top: calc(100cqh - var(--u) * 310);
+  --board-top: 12cqh; --board-h0: calc(var(--desk-top) - var(--u) * 78 - var(--board-top));
+  --board-w: min(calc(var(--wall-r) - var(--wall-l) - var(--u) * 72), calc(var(--board-h0) * 2.7));
+  --board-h: min(var(--board-h0), calc(var(--board-w) / 1.3));
+  --board-l: calc(var(--wall-l) + (var(--wall-r) - var(--wall-l) - var(--board-w)) / 2); }
+.room-canal .bg { background-image: url('canal-background.png'); left: 0; top: min(0px, calc((100cqh - var(--b) * 992) * 0.22)); }
+.room-canal .board-art { border-style: solid; border-width: calc(var(--u) * 104.0) calc(var(--u) * 100.0) calc(var(--u) * 50.0) calc(var(--u) * 100.0); border-image: url('canal-board.png') 208 200 100 200 fill / calc(var(--u) * 104.0) calc(var(--u) * 100.0) calc(var(--u) * 50.0) calc(var(--u) * 100.0) / 0 stretch; }
+.room-canal .desk { height: calc(var(--u) * 410.0); top: var(--desk-top); border-style: solid; border-width: calc(var(--u) * 0.0) calc(var(--u) * 110.0) calc(var(--u) * 0.0) calc(var(--u) * 110.0); border-image: url('canal-desk.png') 0 220 0 220 fill / calc(var(--u) * 0.0) calc(var(--u) * 110.0) calc(var(--u) * 0.0) calc(var(--u) * 110.0) / 0 stretch; }
+.room-canal .mat { width: min(calc(100cqw - var(--u) * 540), calc(var(--u) * 1000)); top: calc(var(--desk-top) + var(--u) * 26); bottom: calc(var(--u) * 14); border-style: solid; border-width: calc(var(--u) * 36.0) calc(var(--u) * 36.0) calc(var(--u) * 36.0) calc(var(--u) * 36.0); border-image: url('canal-mat.png') 72 72 72 72 fill / calc(var(--u) * 36.0) calc(var(--u) * 36.0) calc(var(--u) * 36.0) calc(var(--u) * 36.0) / 0 stretch; }
+.room-canal .board-text { color: #191d42; --soft: #3b3f63; text-align: start; inset: calc(var(--u) * 118.0) calc(var(--u) * 114.0) calc(var(--u) * 64.0) calc(var(--u) * 114.0); }
+.room-canal .mat { color: #f8ead0; --soft: #d9cdb5; --field: #1f2a4b; --field-ink: #f8ead0; --field-border: #d9cdb5; --accent: #f2b648; --accent-ink: #24180a; --quiet: #2c3a61; --quiet-ink: #f8ead0; }
+.room-canal .chip { background: color-mix(in srgb, #1f2340 86%, transparent); color: #f3e3c3; border-color: color-mix(in srgb, #f3e3c3 45%, transparent); }
+.room-canal .x-pullTab { background-image: url('canal-pull-tab.png'); width: calc(var(--u) * 49.0); height: calc(var(--u) * 52.0); left: 50%; top: calc(100% - var(--u) * 6); z-index: 3; transform: translateX(-50%); }
+.room-canal .x-projector { background-image: url('canal-projector.png'); width: calc(var(--u) * 237.0); height: calc(var(--u) * 254.0); left: calc(var(--u) * 24); bottom: calc(var(--u) * 250); z-index: 6; }
+.room-canal .companion { left: 1.5cqw; bottom: calc(var(--u) * 16); width: calc(var(--u) * 220); height: calc(var(--u) * 220); }
+.room-canal .notebook { right: 1.5cqw; bottom: calc(var(--u) * 20); width: calc(var(--u) * 200); height: calc(var(--u) * 150.0); }
+.room-canal .folio { right: calc(1.5cqw + var(--u) * 20.0); bottom: calc(var(--u) * 178.0); width: calc(var(--u) * 160.0); height: calc(var(--u) * 120.0); }
+</style></head>
+<body>
+<h1>Rooms v2: layered preview</h1>
+<p class="note">Static page. Each room is composed from its layers with CSS only, using the anchors in manifest.json. The companion (Pip, idle), the review notebook, the source folio and the font are today's app assets, read from src/app/assets, and are not part of this delivery. All text is sample text.</p><h2>Rail-side Classroom</h2>
+<figure id="rail-1440x900">
+  <figcaption>Rail-side Classroom at 1440x900</figcaption>
+  <div class="frame" style="width:1440px;height:900px"><div class="room room-rail">
+    <div class="layer bg"></div>
+    
+    <div class="board">
+      <div class="layer board-art"></div>
+      <div class="layer extra x-ledgeItems"></div><div class="layer extra x-vine"></div>
+      <div class="board-text"><p class="eyebrow">Sampling distributions</p><p class="question">Why does a larger sample give a narrower confidence interval, and what does not change when it does?</p><p class="line">Sample text, to judge the composition only.</p></div>
+    </div>
+    <div class="layer desk"></div>
+    
+    <div class="layer mat"><div class="mat-text"><p class="label">Your thinking <span>Ctrl+Enter to share</span></p><div class="field">The standard error shrinks as the sample grows, so the interval around the mean gets tighter.</div><p class="buttons"><b>Share my thinking</b><i>Hint</i><i>I don't know</i></p></div></div>
+    <div class="layer companion"></div><div class="layer folio"></div><div class="layer notebook"></div>
+    <div class="chips"><span class="chip">After Class</span><span class="chip">Lecture title · Review</span><span class="chip">Room &amp; companion</span></div>
+  </div></div>
+</figure>
+<figure id="rail-1470x1270">
+  <figcaption>Rail-side Classroom at 1470x1270</figcaption>
+  <div class="frame" style="width:1470px;height:1270px"><div class="room room-rail">
+    <div class="layer bg"></div>
+    
+    <div class="board">
+      <div class="layer board-art"></div>
+      <div class="layer extra x-ledgeItems"></div><div class="layer extra x-vine"></div>
+      <div class="board-text"><p class="eyebrow">Sampling distributions</p><p class="question">Why does a larger sample give a narrower confidence interval, and what does not change when it does?</p><p class="line">Sample text, to judge the composition only.</p></div>
+    </div>
+    <div class="layer desk"></div>
+    
+    <div class="layer mat"><div class="mat-text"><p class="label">Your thinking <span>Ctrl+Enter to share</span></p><div class="field">The standard error shrinks as the sample grows, so the interval around the mean gets tighter.</div><p class="buttons"><b>Share my thinking</b><i>Hint</i><i>I don't know</i></p></div></div>
+    <div class="layer companion"></div><div class="layer folio"></div><div class="layer notebook"></div>
+    <div class="chips"><span class="chip">After Class</span><span class="chip">Lecture title · Review</span><span class="chip">Room &amp; companion</span></div>
+  </div></div>
+</figure>
+<figure id="rail-1100x1300">
+  <figcaption>Rail-side Classroom at 1100x1300</figcaption>
+  <div class="frame" style="width:1100px;height:1300px"><div class="room room-rail">
+    <div class="layer bg"></div>
+    
+    <div class="board">
+      <div class="layer board-art"></div>
+      <div class="layer extra x-ledgeItems"></div><div class="layer extra x-vine"></div>
+      <div class="board-text"><p class="eyebrow">Sampling distributions</p><p class="question">Why does a larger sample give a narrower confidence interval, and what does not change when it does?</p><p class="line">Sample text, to judge the composition only.</p></div>
+    </div>
+    <div class="layer desk"></div>
+    
+    <div class="layer mat"><div class="mat-text"><p class="label">Your thinking <span>Ctrl+Enter to share</span></p><div class="field">The standard error shrinks as the sample grows, so the interval around the mean gets tighter.</div><p class="buttons"><b>Share my thinking</b><i>Hint</i><i>I don't know</i></p></div></div>
+    <div class="layer companion"></div><div class="layer folio"></div><div class="layer notebook"></div>
+    <div class="chips"><span class="chip">After Class</span><span class="chip">Lecture title · Review</span><span class="chip">Room &amp; companion</span></div>
+  </div></div>
+</figure>
+<figure id="rail-1920x1080">
+  <figcaption>Rail-side Classroom at 1920x1080</figcaption>
+  <div class="frame" style="width:1920px;height:1080px"><div class="room room-rail">
+    <div class="layer bg"></div>
+    
+    <div class="board">
+      <div class="layer board-art"></div>
+      <div class="layer extra x-ledgeItems"></div><div class="layer extra x-vine"></div>
+      <div class="board-text"><p class="eyebrow">Sampling distributions</p><p class="question">Why does a larger sample give a narrower confidence interval, and what does not change when it does?</p><p class="line">Sample text, to judge the composition only.</p></div>
+    </div>
+    <div class="layer desk"></div>
+    
+    <div class="layer mat"><div class="mat-text"><p class="label">Your thinking <span>Ctrl+Enter to share</span></p><div class="field">The standard error shrinks as the sample grows, so the interval around the mean gets tighter.</div><p class="buttons"><b>Share my thinking</b><i>Hint</i><i>I don't know</i></p></div></div>
+    <div class="layer companion"></div><div class="layer folio"></div><div class="layer notebook"></div>
+    <div class="chips"><span class="chip">After Class</span><span class="chip">Lecture title · Review</span><span class="chip">Room &amp; companion</span></div>
+  </div></div>
+</figure>
+<figure id="rail-2560x1080">
+  <figcaption>Rail-side Classroom at 2560x1080</figcaption>
+  <div class="frame" style="width:2560px;height:1080px"><div class="room room-rail">
+    <div class="layer bg"></div>
+    
+    <div class="board">
+      <div class="layer board-art"></div>
+      <div class="layer extra x-ledgeItems"></div><div class="layer extra x-vine"></div>
+      <div class="board-text"><p class="eyebrow">Sampling distributions</p><p class="question">Why does a larger sample give a narrower confidence interval, and what does not change when it does?</p><p class="line">Sample text, to judge the composition only.</p></div>
+    </div>
+    <div class="layer desk"></div>
+    
+    <div class="layer mat"><div class="mat-text"><p class="label">Your thinking <span>Ctrl+Enter to share</span></p><div class="field">The standard error shrinks as the sample grows, so the interval around the mean gets tighter.</div><p class="buttons"><b>Share my thinking</b><i>Hint</i><i>I don't know</i></p></div></div>
+    <div class="layer companion"></div><div class="layer folio"></div><div class="layer notebook"></div>
+    <div class="chips"><span class="chip">After Class</span><span class="chip">Lecture title · Review</span><span class="chip">Room &amp; companion</span></div>
+  </div></div>
+</figure><h2>Harbor Study Terrace</h2>
+<figure id="harbor-1440x900">
+  <figcaption>Harbor Study Terrace at 1440x900</figcaption>
+  <div class="frame" style="width:1440px;height:900px"><div class="room room-harbor">
+    <div class="layer bg"></div>
+    <div class="layer extra x-awning"></div>
+    <div class="board">
+      <div class="layer board-art"></div>
+      <div class="layer extra x-lamp" style="left:18%"></div><div class="layer extra x-lamp" style="left:50%"></div><div class="layer extra x-lamp" style="left:82%"></div>
+      <div class="board-text"><p class="eyebrow">Sampling distributions</p><p class="question">Why does a larger sample give a narrower confidence interval, and what does not change when it does?</p><p class="line">Sample text, to judge the composition only.</p></div>
+    </div>
+    <div class="layer desk"></div>
+    <div class="layer extra x-cushion"></div>
+    <div class="layer mat"><div class="mat-text"><p class="label">Your thinking <span>Ctrl+Enter to share</span></p><div class="field">The standard error shrinks as the sample grows, so the interval around the mean gets tighter.</div><p class="buttons"><b>Share my thinking</b><i>Hint</i><i>I don't know</i></p></div></div>
+    <div class="layer companion"></div><div class="layer folio"></div><div class="layer notebook"></div>
+    <div class="chips"><span class="chip">After Class</span><span class="chip">Lecture title · Review</span><span class="chip">Room &amp; companion</span></div>
+  </div></div>
+</figure>
+<figure id="harbor-1470x1270">
+  <figcaption>Harbor Study Terrace at 1470x1270</figcaption>
+  <div class="frame" style="width:1470px;height:1270px"><div class="room room-harbor">
+    <div class="layer bg"></div>
+    <div class="layer extra x-awning"></div>
+    <div class="board">
+      <div class="layer board-art"></div>
+      <div class="layer extra x-lamp" style="left:18%"></div><div class="layer extra x-lamp" style="left:50%"></div><div class="layer extra x-lamp" style="left:82%"></div>
+      <div class="board-text"><p class="eyebrow">Sampling distributions</p><p class="question">Why does a larger sample give a narrower confidence interval, and what does not change when it does?</p><p class="line">Sample text, to judge the composition only.</p></div>
+    </div>
+    <div class="layer desk"></div>
+    <div class="layer extra x-cushion"></div>
+    <div class="layer mat"><div class="mat-text"><p class="label">Your thinking <span>Ctrl+Enter to share</span></p><div class="field">The standard error shrinks as the sample grows, so the interval around the mean gets tighter.</div><p class="buttons"><b>Share my thinking</b><i>Hint</i><i>I don't know</i></p></div></div>
+    <div class="layer companion"></div><div class="layer folio"></div><div class="layer notebook"></div>
+    <div class="chips"><span class="chip">After Class</span><span class="chip">Lecture title · Review</span><span class="chip">Room &amp; companion</span></div>
+  </div></div>
+</figure>
+<figure id="harbor-1100x1300">
+  <figcaption>Harbor Study Terrace at 1100x1300</figcaption>
+  <div class="frame" style="width:1100px;height:1300px"><div class="room room-harbor">
+    <div class="layer bg"></div>
+    <div class="layer extra x-awning"></div>
+    <div class="board">
+      <div class="layer board-art"></div>
+      <div class="layer extra x-lamp" style="left:18%"></div><div class="layer extra x-lamp" style="left:50%"></div><div class="layer extra x-lamp" style="left:82%"></div>
+      <div class="board-text"><p class="eyebrow">Sampling distributions</p><p class="question">Why does a larger sample give a narrower confidence interval, and what does not change when it does?</p><p class="line">Sample text, to judge the composition only.</p></div>
+    </div>
+    <div class="layer desk"></div>
+    <div class="layer extra x-cushion"></div>
+    <div class="layer mat"><div class="mat-text"><p class="label">Your thinking <span>Ctrl+Enter to share</span></p><div class="field">The standard error shrinks as the sample grows, so the interval around the mean gets tighter.</div><p class="buttons"><b>Share my thinking</b><i>Hint</i><i>I don't know</i></p></div></div>
+    <div class="layer companion"></div><div class="layer folio"></div><div class="layer notebook"></div>
+    <div class="chips"><span class="chip">After Class</span><span class="chip">Lecture title · Review</span><span class="chip">Room &amp; companion</span></div>
+  </div></div>
+</figure>
+<figure id="harbor-1920x1080">
+  <figcaption>Harbor Study Terrace at 1920x1080</figcaption>
+  <div class="frame" style="width:1920px;height:1080px"><div class="room room-harbor">
+    <div class="layer bg"></div>
+    <div class="layer extra x-awning"></div>
+    <div class="board">
+      <div class="layer board-art"></div>
+      <div class="layer extra x-lamp" style="left:18%"></div><div class="layer extra x-lamp" style="left:50%"></div><div class="layer extra x-lamp" style="left:82%"></div>
+      <div class="board-text"><p class="eyebrow">Sampling distributions</p><p class="question">Why does a larger sample give a narrower confidence interval, and what does not change when it does?</p><p class="line">Sample text, to judge the composition only.</p></div>
+    </div>
+    <div class="layer desk"></div>
+    <div class="layer extra x-cushion"></div>
+    <div class="layer mat"><div class="mat-text"><p class="label">Your thinking <span>Ctrl+Enter to share</span></p><div class="field">The standard error shrinks as the sample grows, so the interval around the mean gets tighter.</div><p class="buttons"><b>Share my thinking</b><i>Hint</i><i>I don't know</i></p></div></div>
+    <div class="layer companion"></div><div class="layer folio"></div><div class="layer notebook"></div>
+    <div class="chips"><span class="chip">After Class</span><span class="chip">Lecture title · Review</span><span class="chip">Room &amp; companion</span></div>
+  </div></div>
+</figure>
+<figure id="harbor-2560x1080">
+  <figcaption>Harbor Study Terrace at 2560x1080</figcaption>
+  <div class="frame" style="width:2560px;height:1080px"><div class="room room-harbor">
+    <div class="layer bg"></div>
+    <div class="layer extra x-awning"></div>
+    <div class="board">
+      <div class="layer board-art"></div>
+      <div class="layer extra x-lamp" style="left:18%"></div><div class="layer extra x-lamp" style="left:50%"></div><div class="layer extra x-lamp" style="left:82%"></div>
+      <div class="board-text"><p class="eyebrow">Sampling distributions</p><p class="question">Why does a larger sample give a narrower confidence interval, and what does not change when it does?</p><p class="line">Sample text, to judge the composition only.</p></div>
+    </div>
+    <div class="layer desk"></div>
+    <div class="layer extra x-cushion"></div>
+    <div class="layer mat"><div class="mat-text"><p class="label">Your thinking <span>Ctrl+Enter to share</span></p><div class="field">The standard error shrinks as the sample grows, so the interval around the mean gets tighter.</div><p class="buttons"><b>Share my thinking</b><i>Hint</i><i>I don't know</i></p></div></div>
+    <div class="layer companion"></div><div class="layer folio"></div><div class="layer notebook"></div>
+    <div class="chips"><span class="chip">After Class</span><span class="chip">Lecture title · Review</span><span class="chip">Room &amp; companion</span></div>
+  </div></div>
+</figure><h2>Lantern Canal Film Club</h2>
+<figure id="canal-1440x900">
+  <figcaption>Lantern Canal Film Club at 1440x900</figcaption>
+  <div class="frame" style="width:1440px;height:900px"><div class="room room-canal">
+    <div class="layer bg"></div>
+    
+    <div class="board">
+      <div class="layer board-art"></div>
+      <div class="layer extra x-pullTab"></div>
+      <div class="board-text"><p class="eyebrow">Sampling distributions</p><p class="question">Why does a larger sample give a narrower confidence interval, and what does not change when it does?</p><p class="line">Sample text, to judge the composition only.</p></div>
+    </div>
+    <div class="layer desk"></div>
+    <div class="layer extra x-projector"></div>
+    <div class="layer mat"><div class="mat-text"><p class="label">Your thinking <span>Ctrl+Enter to share</span></p><div class="field">The standard error shrinks as the sample grows, so the interval around the mean gets tighter.</div><p class="buttons"><b>Share my thinking</b><i>Hint</i><i>I don't know</i></p></div></div>
+    <div class="layer companion"></div><div class="layer folio"></div><div class="layer notebook"></div>
+    <div class="chips"><span class="chip">After Class</span><span class="chip">Lecture title · Review</span><span class="chip">Room &amp; companion</span></div>
+  </div></div>
+</figure>
+<figure id="canal-1470x1270">
+  <figcaption>Lantern Canal Film Club at 1470x1270</figcaption>
+  <div class="frame" style="width:1470px;height:1270px"><div class="room room-canal">
+    <div class="layer bg"></div>
+    
+    <div class="board">
+      <div class="layer board-art"></div>
+      <div class="layer extra x-pullTab"></div>
+      <div class="board-text"><p class="eyebrow">Sampling distributions</p><p class="question">Why does a larger sample give a narrower confidence interval, and what does not change when it does?</p><p class="line">Sample text, to judge the composition only.</p></div>
+    </div>
+    <div class="layer desk"></div>
+    <div class="layer extra x-projector"></div>
+    <div class="layer mat"><div class="mat-text"><p class="label">Your thinking <span>Ctrl+Enter to share</span></p><div class="field">The standard error shrinks as the sample grows, so the interval around the mean gets tighter.</div><p class="buttons"><b>Share my thinking</b><i>Hint</i><i>I don't know</i></p></div></div>
+    <div class="layer companion"></div><div class="layer folio"></div><div class="layer notebook"></div>
+    <div class="chips"><span class="chip">After Class</span><span class="chip">Lecture title · Review</span><span class="chip">Room &amp; companion</span></div>
+  </div></div>
+</figure>
+<figure id="canal-1100x1300">
+  <figcaption>Lantern Canal Film Club at 1100x1300</figcaption>
+  <div class="frame" style="width:1100px;height:1300px"><div class="room room-canal">
+    <div class="layer bg"></div>
+    
+    <div class="board">
+      <div class="layer board-art"></div>
+      <div class="layer extra x-pullTab"></div>
+      <div class="board-text"><p class="eyebrow">Sampling distributions</p><p class="question">Why does a larger sample give a narrower confidence interval, and what does not change when it does?</p><p class="line">Sample text, to judge the composition only.</p></div>
+    </div>
+    <div class="layer desk"></div>
+    <div class="layer extra x-projector"></div>
+    <div class="layer mat"><div class="mat-text"><p class="label">Your thinking <span>Ctrl+Enter to share</span></p><div class="field">The standard error shrinks as the sample grows, so the interval around the mean gets tighter.</div><p class="buttons"><b>Share my thinking</b><i>Hint</i><i>I don't know</i></p></div></div>
+    <div class="layer companion"></div><div class="layer folio"></div><div class="layer notebook"></div>
+    <div class="chips"><span class="chip">After Class</span><span class="chip">Lecture title · Review</span><span class="chip">Room &amp; companion</span></div>
+  </div></div>
+</figure>
+<figure id="canal-1920x1080">
+  <figcaption>Lantern Canal Film Club at 1920x1080</figcaption>
+  <div class="frame" style="width:1920px;height:1080px"><div class="room room-canal">
+    <div class="layer bg"></div>
+    
+    <div class="board">
+      <div class="layer board-art"></div>
+      <div class="layer extra x-pullTab"></div>
+      <div class="board-text"><p class="eyebrow">Sampling distributions</p><p class="question">Why does a larger sample give a narrower confidence interval, and what does not change when it does?</p><p class="line">Sample text, to judge the composition only.</p></div>
+    </div>
+    <div class="layer desk"></div>
+    <div class="layer extra x-projector"></div>
+    <div class="layer mat"><div class="mat-text"><p class="label">Your thinking <span>Ctrl+Enter to share</span></p><div class="field">The standard error shrinks as the sample grows, so the interval around the mean gets tighter.</div><p class="buttons"><b>Share my thinking</b><i>Hint</i><i>I don't know</i></p></div></div>
+    <div class="layer companion"></div><div class="layer folio"></div><div class="layer notebook"></div>
+    <div class="chips"><span class="chip">After Class</span><span class="chip">Lecture title · Review</span><span class="chip">Room &amp; companion</span></div>
+  </div></div>
+</figure>
+<figure id="canal-2560x1080">
+  <figcaption>Lantern Canal Film Club at 2560x1080</figcaption>
+  <div class="frame" style="width:2560px;height:1080px"><div class="room room-canal">
+    <div class="layer bg"></div>
+    
+    <div class="board">
+      <div class="layer board-art"></div>
+      <div class="layer extra x-pullTab"></div>
+      <div class="board-text"><p class="eyebrow">Sampling distributions</p><p class="question">Why does a larger sample give a narrower confidence interval, and what does not change when it does?</p><p class="line">Sample text, to judge the composition only.</p></div>
+    </div>
+    <div class="layer desk"></div>
+    <div class="layer extra x-projector"></div>
+    <div class="layer mat"><div class="mat-text"><p class="label">Your thinking <span>Ctrl+Enter to share</span></p><div class="field">The standard error shrinks as the sample grows, so the interval around the mean gets tighter.</div><p class="buttons"><b>Share my thinking</b><i>Hint</i><i>I don't know</i></p></div></div>
+    <div class="layer companion"></div><div class="layer folio"></div><div class="layer notebook"></div>
+    <div class="chips"><span class="chip">After Class</span><span class="chip">Lecture title · Review</span><span class="chip">Room &amp; companion</span></div>
+  </div></div>
+</figure>
+</body></html>

@@ -2,6 +2,11 @@
  * Invites + reviews, flows C (bottom half) and D (W7). Owns: invite_answers,
  * reviews (FrozenScope snapshot, written once), review_turns (append-only).
  *
+ * One store serves one user (the `UserDb` it is built on): every query reads or writes with that user_id. A review id is
+ * minted by the app and belongs to the first user that starts it, for good (reviews are never deleted), so the turn ids and
+ * notes derived from it stay one user's. A turn id is minted by the app too and keys by (user_id, id), so another user's
+ * turn id never finds, replays or blocks this user's turn.
+ *
  * R9: "Starting a review doesn't stop capture, and stopping capture doesn't end a review."
  * A dependency fact: this module never imports evidence/, and evidence/ never
  * imports this module (test/boundaries.test.ts). Readers get capture data
@@ -19,7 +24,7 @@ import type {
 } from "../../shared/domain";
 import { Material } from "../../shared/time";
 import { asSeq } from "../db";
-import type { Db } from "../db";
+import type { UserDb } from "../db";
 import type { Lookup, Memo } from "../providers/memo";
 import { MAX_MAIN_QUESTIONS, allowedMoves, askedClaims, parseMoveHeader, reviewState, settledCorrections, validateMove, tutorOwesMove, waitsForLearner } from "./tutor";
 import type { TutorInput, TutorOutput, WrapUpInput, WrapUpOutput } from "./tutor";
@@ -59,6 +64,11 @@ export type Reviews = {
   view(reviewId: ReviewId): ReviewView;
   /** Read-only: the reviews started on a capture, newest first, for the home page's list. */
   list(captureId: CaptureId): readonly { readonly reviewId: ReviewId; readonly startedMs: number }[];
+  /**
+   * Whether another user's review has this id. A review id is unique across users, so `start` throws `RangeError` for one and
+   * `http.ts` answers 404 for it. An id nobody holds is false, and its routes keep their old answer (404 for a review that does not exist).
+   */
+  heldByAnotherUser(reviewId: ReviewId): boolean;
 };
 
 /** The W8 functions this module calls. Injectable so tests can run before the tutor lands. */
@@ -120,32 +130,37 @@ const NOTHING_TO_ASK_LINE = "Every statement I prepared for this part was withdr
 export const MAX_MOVES_PER_TURN = 4;
 const NON_TERMINAL = new Set(["awaiting_check", "awaiting_revision", "awaiting_recheck"]);
 
-export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions = {}): Reviews {
+export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOptions = {}): Reviews {
   const softTargetS = config.softTargetS ?? 600;
   const timeInviteGapS = config.timeInviteGapS ?? 900;
   const now = config.now ?? Date.now;
   const kit: TutorKit = config.tutor ?? { reviewState, allowedMoves, parseMoveHeader, validateMove };
 
+  const userId = db.userId;
+  const REVIEW_COLUMNS = "id, capture_id, choice, scope_json, frozen_at_seq, started_ms";
   const q = {
-    answers: db.sql.query<{ seq: number; answer: InviteAnswer; watched_s: number }, [string]>(
-      "SELECT seq, answer, watched_s FROM invite_answers WHERE capture_id = ?",
+    answers: db.sql.query<{ seq: number; answer: InviteAnswer; watched_s: number }, [string, string]>(
+      "SELECT seq, answer, watched_s FROM invite_answers WHERE user_id = ? AND capture_id = ?",
     ),
-    insertAnswer: db.sql.query("INSERT INTO invite_answers (seq, capture_id, answer, watched_s, at_ms) VALUES (?, ?, ?, ?, ?)"),
-    review: db.sql.query<ReviewRow, [string]>("SELECT * FROM reviews WHERE id = ?"),
-    reviewsOf: db.sql.query<ReviewRow, [string]>("SELECT * FROM reviews WHERE capture_id = ?"),
-    insertReview: db.sql.query("INSERT INTO reviews (id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, ?, ?, ?, ?)"),
-    turns: db.sql.query<TurnRow, [string]>("SELECT * FROM review_turns WHERE review_id = ? ORDER BY seq"),
-    turnExists: db.sql.query<{ n: number }, [string]>("SELECT 1 AS n FROM review_turns WHERE id = ?"),
-    insertTurn: db.sql.query("INSERT INTO review_turns (id, review_id, seq, actor, thread_id, body_json, at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)"),
+    insertAnswer: db.sql.query("INSERT INTO invite_answers (seq, user_id, capture_id, answer, watched_s, at_ms) VALUES (?, ?, ?, ?, ?, ?)"),
+    review: db.sql.query<ReviewRow, [string, string]>(`SELECT ${REVIEW_COLUMNS} FROM reviews WHERE user_id = ? AND id = ?`),
+    reviewHeldByOther: db.sql.query<{ n: number }, [string, string]>("SELECT 1 AS n FROM reviews WHERE id = ? AND user_id <> ?"),
+    reviewsOf: db.sql.query<ReviewRow, [string, string]>(`SELECT ${REVIEW_COLUMNS} FROM reviews WHERE user_id = ? AND capture_id = ?`),
+    insertReview: db.sql.query("INSERT INTO reviews (id, user_id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, ?, ?, ?, ?, ?)"),
+    turns: db.sql.query<TurnRow, [string, string]>(
+      "SELECT id, review_id, seq, actor, thread_id, body_json, at_ms FROM review_turns WHERE user_id = ? AND review_id = ? ORDER BY seq",
+    ),
+    turnExists: db.sql.query<{ n: number }, [string, string]>("SELECT 1 AS n FROM review_turns WHERE user_id = ? AND id = ?"),
+    insertTurn: db.sql.query("INSERT INTO review_turns (user_id, id, review_id, seq, actor, thread_id, body_json, at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"),
   };
 
   function stored(reviewId: ReviewId): Stored | null {
-    const row = q.review.get(reviewId);
+    const row = q.review.get(userId, reviewId);
     return row ? { captureId: row.capture_id as CaptureId, ...decodeScope(row.scope_json) } : null;
   }
 
   function loadTurns(reviewId: ReviewId): Turn[] {
-    return q.turns.all(reviewId).map((r): Turn => {
+    return q.turns.all(userId, reviewId).map((r): Turn => {
       const base = { id: r.id as TurnId, reviewId, seq: asSeq(r.seq), atMs: r.at_ms };
       const body = JSON.parse(r.body_json) as Record<string, unknown>;
       switch (r.actor) {
@@ -160,10 +175,12 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
   }
 
   function appendTurn(reviewId: ReviewId, id: TurnId, actor: Turn["actor"], threadId: ThreadId | null, body: object): void {
-    q.insertTurn.run(id, reviewId, deps.nextSeq(), actor, threadId, JSON.stringify(body), Math.round(now()));
+    q.insertTurn.run(userId, id, reviewId, deps.nextSeq(), actor, threadId, JSON.stringify(body), Math.round(now()));
   }
 
-  const hasTurn = (id: TurnId) => q.turnExists.get(id) !== null;
+  const heldByAnotherUser = (reviewId: ReviewId): boolean => q.reviewHeldByOther.get(reviewId, userId) !== null;
+
+  const hasTurn = (id: TurnId) => q.turnExists.get(userId, id) !== null;
 
   // ───────────────────────────── invites ─────────────────────────────
 
@@ -186,8 +203,8 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
   function inviteFold(captureId: CaptureId) {
     const events: InviteEvent[] = [
       ...closeEvents(captureId),
-      ...q.answers.all(captureId).map((a): InviteEvent => ({ kind: "answer", seq: asSeq(a.seq), answer: a.answer, watchedS: a.watched_s })),
-      ...q.reviewsOf.all(captureId).map((r): InviteEvent => ({ kind: "review_started", seq: asSeq(r.frozen_at_seq) })),
+      ...q.answers.all(userId, captureId).map((a): InviteEvent => ({ kind: "answer", seq: asSeq(a.seq), answer: a.answer, watchedS: a.watched_s })),
+      ...q.reviewsOf.all(userId, captureId).map((r): InviteEvent => ({ kind: "review_started", seq: asSeq(r.frozen_at_seq) })),
     ];
     return foldInvites(events, timeInviteGapS);
   }
@@ -198,7 +215,7 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
   function answerInvite(captureId: CaptureId, answer: InviteAnswer): InviteState {
     return db.tx(() => {
       if (!inviteFold(captureId).answered.has(answer)) {
-        q.insertAnswer.run(deps.nextSeq(), captureId, answer, deps.watchedSeconds(captureId), Math.round(now()));
+        q.insertAnswer.run(deps.nextSeq(), userId, captureId, answer, deps.watchedSeconds(captureId), Math.round(now()));
       }
       return invite(captureId);
     });
@@ -218,7 +235,7 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
       const responded = turns.some((t) => t.actor === "learner" && (t.act.kind === "answer" || t.act.kind === "skip" || t.act.kind === "dont_know"));
       return responded || kit.reviewState(r.id as ReviewId, turns, [], softTargetS, now()).phase !== "ended";
     };
-    return q.reviewsOf.all(captureId).filter(counts).reduce((m, r) => Material.union(m, decodeScope(r.scope_json).scope.material), Material.empty);
+    return q.reviewsOf.all(userId, captureId).filter(counts).reduce((m, r) => Material.union(m, decodeScope(r.scope_json).scope.material), Material.empty);
   }
 
   function candidates(captureId: CaptureId) {
@@ -278,6 +295,8 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     if (existing) return { kind: "started", reviewId, scope: existing.scope };
 
     return db.tx((): StartResult => {
+      // The id is the row's key across users, so another user's review would collide on insert; refuse it before anything else runs.
+      if (heldByAnotherUser(reviewId)) throw new RangeError(`review ${reviewId} belongs to another user`);
       let cands = candidates(captureId);
       let dropped = 0;
       if (choice === "stop_early") {
@@ -293,7 +312,7 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
 
       const scope: FrozenScope = dropped > 0 ? { ...frozen, partial: [...frozen.partial, { kind: "stopped_early", droppedClaims: dropped }] } : frozen;
       const texts = new Map(deps.assessableIn(captureId, scope.material).map((c) => [c.id, c.text] as const));
-      q.insertReview.run(reviewId, captureId, choice, encodeScope(scope, texts), scope.frozenAtSeq, Math.round(now()));
+      q.insertReview.run(reviewId, userId, captureId, choice, encodeScope(scope, texts), scope.frozenAtSeq, Math.round(now()));
       return { kind: "started", reviewId, scope };
     });
   }
@@ -340,7 +359,7 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
   }
 
   function list(captureId: CaptureId) {
-    return q.reviewsOf.all(captureId).map((r) => ({ reviewId: r.id as ReviewId, startedMs: r.started_ms })).sort((a, b) => b.startedMs - a.startedMs);
+    return q.reviewsOf.all(userId, captureId).map((r) => ({ reviewId: r.id as ReviewId, startedMs: r.started_ms })).sort((a, b) => b.startedMs - a.startedMs);
   }
 
   // ───────────────────────────── turns ─────────────────────────────
@@ -661,5 +680,5 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     yield { type: "turn_complete", turnId: completeId() };
   }
 
-  return { invite, answerInvite, options, start, turn, view, list };
+  return { invite, answerInvite, options, start, turn, view, list, heldByAnotherUser };
 }
