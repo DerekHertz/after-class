@@ -169,6 +169,8 @@ export function setup(opts: {
   sendTurn: (call: SendCall, n: number) => AsyncIterable<TurnEvent>;
   review?: () => ReviewView;
   save?: () => ReturnType<Api["save"]>;
+  /** Holds every `review` call until it settles, so a test can stop a turn between its stream and its refresh. */
+  reviewGate?: Promise<void>;
 }) {
   const unsent = createMemoryUnsent();
   const sends: SendCall[] = [];
@@ -188,7 +190,7 @@ export function setup(opts: {
       sends.push({ turnId, act });
       return opts.sendTurn({ turnId, act }, sends.length - 1);
     },
-    review: async () => (reviews++, opts.review ? opts.review() : parsedReview()),
+    review: async () => (reviews++, await opts.reviewGate, opts.review ? opts.review() : parsedReview()),
     save: async () => (saves++, opts.save ? opts.save() : { kind: "saved", notes: 1, observations: 1, links: 0 }),
     record: async () => { throw new Error("unused"); },
     usage: async () => { throw new Error("unused"); },

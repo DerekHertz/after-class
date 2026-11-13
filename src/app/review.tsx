@@ -141,6 +141,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const soft = softTargetPrompt(view.turns);
   const actions = availableActions(view.state, soft !== null);
   const streaming = state.live?.status === "streaming";
+  /** The controller's lock outlasts the stream: while it refreshes the view and saves, an act would be refused. */
+  const held = streaming || state.busy;
   const evidenceIds = selectedEvidenceIds(selection, automaticIds);
   const videos = sourceVideos(capture.data?.capture ?? null);
   const unanswered = unansweredLearnerTurn(view.turns);
@@ -181,14 +183,14 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     {soft && (
       <div className="note">
         <p>You have been at this a while. Keep going, or wrap up and save?</p>
-        <Actions ids={actions.filter((a) => a === "continue" || a === "wrap_up")} disabled={streaming} send={(id) => void controller.send(toAct(id, "", "text"))} />
+        <Actions ids={actions.filter((a) => a === "continue" || a === "wrap_up")} disabled={held} send={(id) => void controller.send(toAct(id, "", "text"))} />
       </div>
     )}
   </>;
 
   const deskContent = <Composer
     actions={actions.filter((a) => !["continue", "wrap_up", "pause", "resume", "end"].includes(a))}
-    disabled={streaming || state.unsent.length > 0}
+    disabled={held || state.unsent.length > 0}
     sendError={state.sendError}
     speech={speech}
     showSpeak={voice}
@@ -198,7 +200,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     send={(id, text, modality) => controller.send(toAct(id, text, modality))}
   />;
 
-  const setupForm = <TopicChecklist topics={view.topics} disabled={streaming} onStart={(fuzzy, note) => {
+  const setupForm = <TopicChecklist topics={view.topics} disabled={held} onStart={(fuzzy, note) => {
     setHandoff("submitted");
     void controller.send({ kind: "begin", fuzzy, ...(note === "" ? {} : { note }) }).then((sent) => { if (!sent) setHandoff("none"); });
   }} />;
@@ -217,7 +219,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
         <div className="review-navigation">
           <span className="review-phase">{questionMarker === null ? view.state.phase : `${questionMarker} · ${view.state.phase}`}</span>
           <button ref={savedNotes} type="button" aria-haspopup="dialog" onClick={() => setNotebookOpen(true)}>Saved notes</button>
-          <Actions ids={actions.filter(id => id === "pause" || id === "resume" || id === "end")} disabled={streaming || state.unsent.length > 0} send={id => void controller.send(toAct(id, "", "text"))} />
+          <HeaderActions ids={actions.filter(id => id === "pause" || id === "resume" || id === "end")} state={state} send={id => void controller.send(toAct(id, "", "text"))} />
         </div>
       </header>
       <div className="front-row-notices">
@@ -414,6 +416,11 @@ export function EndConfirm({ disabled, onConfirm, onCancel }: { readonly disable
       <button type="button" data-action="end-cancel" onClick={onCancel}>Keep reviewing</button>
     </span>
   );
+}
+
+/** Pause, Resume and Finish: held while a stream is live, while the controller's lock is held, and while an earlier turn is unsent. */
+export function HeaderActions({ ids, state, send }: { readonly ids: readonly ActionId[]; readonly state: SessionState; readonly send: (id: ActionId) => void }) {
+  return <Actions ids={ids} disabled={state.live?.status === "streaming" || state.busy || state.unsent.length > 0} send={send} />;
 }
 
 function Actions({ ids, disabled, send }: { readonly ids: readonly ActionId[]; readonly disabled: boolean; readonly send: (id: ActionId) => void }) {
