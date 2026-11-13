@@ -482,6 +482,8 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
       }
       case "retryPreparation": {
         if (!preparation || !segmentation) return null;
+        // Chunks are per user: a capture only another user holds answers as unknown. A capture nobody holds stays a no-op 204.
+        if (segmentation.heldByAnotherUser(captureId!)) return failure(404, "unknown capture", cors);
         const stuck = segmentation.current(captureId!).filter((rev) => {
           const prep = preparation.prep(rev.id);
           return !prep.finished || prep.supportedCount === 0;

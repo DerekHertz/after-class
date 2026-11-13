@@ -35,7 +35,7 @@ import { appliesBefore } from "../providers/memo";
 import type { Lookup, Task } from "../providers/memo";
 import type { ClaimSupportInput } from "../providers/jev-tasks";
 import { asSeq } from "../db";
-import type { Db } from "../db";
+import type { UserDb } from "../db";
 import type { WorkItem } from "../scheduler";
 import { assessable, checkVerdict, claimInside, cutoffFor, deriveClaimStatus, isFinished, locate, normalizeLabel, validateDraft } from "./core";
 import type { Check, ControlFact, Located } from "./core";
@@ -133,7 +133,7 @@ function decodeUnit(json: string): Unit {
   return { chunkId: s.chunkId, material: Material.fromCanonical(s.material), input, where: locate(newMaterial) };
 }
 
-export function createPreparation(db: Db, deps: {
+export function createPreparation(db: UserDb, deps: {
   chunk(id: ChunkRevisionId): ChunkRevision | null;
   currentChunks(captureId: CaptureId): readonly ChunkRevision[];
   bundle(material: Material): EvidenceBundle;
@@ -145,23 +145,26 @@ export function createPreparation(db: Db, deps: {
   frameBytes?: (id: EvidenceId) => Uint8Array | null;
 }): Preparation {
   const { tasks } = deps;
+  const { userId } = db;
+  // Every statement carries the handle's user as its first parameter. Ids that two users can derive alike (a claim id
+  // from the interpretation's memo key, a concept id from a label, a subject id from a chunk revision) are keyed with it.
   const q = {
-    frozenOf: db.sql.query<{ input_json: string }, [string, FrozenKind]>(`SELECT input_json FROM prep_inputs WHERE capture_id = ? AND kind = ? ORDER BY seq`),
-    frozen: db.sql.query<{ memo_key: string; input_json: string }, [FrozenKind, string]>(`SELECT memo_key, input_json FROM prep_inputs WHERE kind = ? AND subject_id = ?`),
-    unitByKey: db.sql.query<{ input_json: string }, [string]>(`SELECT input_json FROM prep_inputs WHERE kind = 'interpretation' AND memo_key = ?`),
-    freeze: db.sql.query(`INSERT INTO prep_inputs (kind, subject_id, capture_id, memo_key, input_json, seq) VALUES (?, ?, ?, ?, ?, ?)`),
-    controls: db.sql.query<{ seq: number; action: ControlFact["action"]; chunk_revision_id: string }, [string]>(
-      `SELECT seq, action, chunk_revision_id FROM prep_controls WHERE capture_id = ? ORDER BY seq`,
+    frozenOf: db.sql.query<{ input_json: string }, [string, string, FrozenKind]>(`SELECT input_json FROM prep_inputs WHERE user_id = ? AND capture_id = ? AND kind = ? ORDER BY seq`),
+    frozen: db.sql.query<{ memo_key: string; input_json: string }, [string, FrozenKind, string]>(`SELECT memo_key, input_json FROM prep_inputs WHERE user_id = ? AND kind = ? AND subject_id = ?`),
+    unitByKey: db.sql.query<{ input_json: string }, [string, string]>(`SELECT input_json FROM prep_inputs WHERE user_id = ? AND kind = 'interpretation' AND memo_key = ?`),
+    freeze: db.sql.query(`INSERT INTO prep_inputs (user_id, kind, subject_id, capture_id, memo_key, input_json, seq) VALUES (?, ?, ?, ?, ?, ?, ?)`),
+    controls: db.sql.query<{ seq: number; action: ControlFact["action"]; chunk_revision_id: string }, [string, string]>(
+      `SELECT seq, action, chunk_revision_id FROM prep_controls WHERE user_id = ? AND capture_id = ? ORDER BY seq`,
     ),
-    control: db.sql.query(`INSERT INTO prep_controls (seq, capture_id, action, chunk_revision_id, at_ms) VALUES (?, ?, ?, ?, ?)`),
-    claimIndexed: db.sql.query<{ n: number }, [string]>(`SELECT 1 AS n FROM claim_index WHERE id = ?`),
+    control: db.sql.query(`INSERT INTO prep_controls (user_id, seq, capture_id, action, chunk_revision_id, at_ms) VALUES (?, ?, ?, ?, ?, ?)`),
+    claimIndexed: db.sql.query<{ n: number }, [string, string]>(`SELECT 1 AS n FROM claim_index WHERE user_id = ? AND id = ?`),
     indexClaim: db.sql.query(
-      `INSERT INTO claim_index (id, capture_id, source_chunk_id, interpretation_key, ordinal, concept_id, seq) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO claim_index (user_id, id, capture_id, source_chunk_id, interpretation_key, ordinal, concept_id, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
-    conceptIndexed: db.sql.query<{ n: number }, [string]>(`SELECT 1 AS n FROM concept_index WHERE id = ?`),
-    indexConcept: db.sql.query(`INSERT INTO concept_index (id, label, summary, seq) VALUES (?, ?, ?, ?)`),
-    concept: db.sql.query<{ id: string; label: string; summary: string }, [string]>(`SELECT id, label, summary FROM concept_index WHERE id = ?`),
-    keysForConcept: db.sql.query<{ interpretation_key: string }, [string]>(`SELECT DISTINCT interpretation_key FROM claim_index WHERE concept_id = ?`),
+    conceptIndexed: db.sql.query<{ n: number }, [string, string]>(`SELECT 1 AS n FROM concept_index WHERE user_id = ? AND id = ?`),
+    indexConcept: db.sql.query(`INSERT INTO concept_index (user_id, id, label, summary, seq) VALUES (?, ?, ?, ?, ?)`),
+    concept: db.sql.query<{ id: string; label: string; summary: string }, [string, string]>(`SELECT id, label, summary FROM concept_index WHERE user_id = ? AND id = ?`),
+    keysForConcept: db.sql.query<{ interpretation_key: string }, [string, string]>(`SELECT DISTINCT interpretation_key FROM claim_index WHERE user_id = ? AND concept_id = ?`),
   };
 
   function need<I, O>(task: Task<I, O>, input: I, key: MemoKey, freeze: Freeze | null = null): Need {
@@ -171,9 +174,9 @@ export function createPreparation(db: Db, deps: {
   /** True when `key` is (now) the frozen input for its slot; false when an earlier freeze holds a different one. */
   function freezeOnce(captureId: CaptureId, key: MemoKey, f: Freeze): boolean {
     return db.tx(() => {
-      const prior = q.frozen.get(f.kind, f.subject);
+      const prior = q.frozen.get(userId, f.kind, f.subject);
       if (prior) return prior.memo_key === key;
-      q.freeze.run(f.kind, f.subject, captureId, key, JSON.stringify(f.json), db.nextSeq());
+      q.freeze.run(userId, f.kind, f.subject, captureId, key, JSON.stringify(f.json), db.nextSeq());
       return true;
     });
   }
@@ -190,7 +193,7 @@ export function createPreparation(db: Db, deps: {
   // ───────────────────────── derivation ─────────────────────────
 
   function controlsOf(captureId: CaptureId): ControlFact[] {
-    return q.controls.all(captureId).map((r) => ({
+    return q.controls.all(userId, captureId).map((r) => ({
       seq: asSeq(r.seq),
       action: r.action,
       material: deps.chunk(r.chunk_revision_id as ChunkRevisionId)?.material ?? Material.empty,
@@ -243,7 +246,7 @@ export function createPreparation(db: Db, deps: {
    * never rewritten, so a retried check or a cached revision can't key a second one.
    */
   function revisionSlot(captureId: CaptureId, id: ClaimId, original: ClaimDraft, c1: Check | null, unit: Unit): RevisionInput | null {
-    const prior = q.frozen.get("revision", id);
+    const prior = q.frozen.get(userId, "revision", id);
     const check = prior ? (JSON.parse(prior.input_json) as { readonly check: Check }).check : c1 && c1.verdict !== "yes" ? c1 : null;
     if (check === null) return null;
     const input: RevisionInput = { original, check, evidence: unit.input.newMaterial };
@@ -295,7 +298,7 @@ export function createPreparation(db: Db, deps: {
 
   function view(captureId: CaptureId): View {
     const controls = controlsOf(captureId);
-    const units = q.frozenOf.all(captureId, "interpretation").map((r) => viewUnit(decodeUnit(r.input_json), controls));
+    const units = q.frozenOf.all(userId, captureId, "interpretation").map((r) => viewUnit(decodeUnit(r.input_json), controls));
     const supersededBy = new Map<ClaimId, UnitView[]>();
     for (const u of units) for (const s of u.applied?.output.supersedes ?? []) supersededBy.set(s.claimId, [...(supersededBy.get(s.claimId) ?? []), u]);
 
@@ -317,12 +320,12 @@ export function createPreparation(db: Db, deps: {
 
   /** Records applied interpretations, which stay applied: any later stop-early has a larger Seq. */
   function index(captureId: CaptureId, units: readonly UnitView[], claims: readonly ClaimView[]): void {
-    const concepts = units.flatMap((u) => u.applied?.output.concepts ?? []).filter((c) => !q.conceptIndexed.get(conceptIdOf(c.label)));
-    const fresh = claims.filter((c) => !q.claimIndexed.get(c.claim.id));
+    const concepts = units.flatMap((u) => u.applied?.output.concepts ?? []).filter((c) => !q.conceptIndexed.get(userId, conceptIdOf(c.label)));
+    const fresh = claims.filter((c) => !q.claimIndexed.get(userId, c.claim.id));
     if (concepts.length === 0 && fresh.length === 0) return;
     db.tx(() => {
-      for (const c of concepts) if (!q.conceptIndexed.get(conceptIdOf(c.label))) q.indexConcept.run(conceptIdOf(c.label), c.label, c.summary, db.nextSeq());
-      for (const c of fresh) q.indexClaim.run(c.claim.id, captureId, c.claim.sourceChunkId, c.origin.lookup.key, c.ordinal, c.claim.conceptId, db.nextSeq());
+      for (const c of concepts) if (!q.conceptIndexed.get(userId, conceptIdOf(c.label))) q.indexConcept.run(userId, conceptIdOf(c.label), c.label, c.summary, db.nextSeq());
+      for (const c of fresh) q.indexClaim.run(userId, c.claim.id, captureId, c.claim.sourceChunkId, c.origin.lookup.key, c.ordinal, c.claim.conceptId, db.nextSeq());
     });
   }
 
@@ -359,7 +362,7 @@ export function createPreparation(db: Db, deps: {
       byConcept.set(c.concept.id, entry);
     }
     return [...byConcept.values()].flatMap(({ concept, claims }) => {
-      const prior = q.frozen.get("resource_search", concept.id);
+      const prior = q.frozen.get(userId, "resource_search", concept.id);
       const input: ResourceSearchInput = prior ? (JSON.parse(prior.input_json) as ResourceSearchInput) : { concept, supportedClaims: claims };
       const l = deps.lookup(tasks.searchResources, input);
       return open(l) ? [need(tasks.searchResources, input, l.key, prior ? null : { kind: "resource_search", subject: concept.id, json: input })] : [];
@@ -395,7 +398,7 @@ export function createPreparation(db: Db, deps: {
     return db.tx(() => {
       const seq = db.nextSeq();
       const at = Date.now();
-      for (const id of new Set(ids)) q.control.run(seq, captureId, action, id, at);
+      for (const id of new Set(ids)) q.control.run(userId, seq, captureId, action, id, at);
       return seq;
     });
   }
@@ -415,9 +418,9 @@ export function createPreparation(db: Db, deps: {
 
   /** Applied interpretation outputs that produced claims for these concepts (claim_index holds only applied ones). */
   function outputsFor(conceptIds: readonly ConceptId[]): InterpretationOutput[] {
-    const keys = new Set(conceptIds.flatMap((id) => q.keysForConcept.all(id).map((r) => r.interpretation_key)));
+    const keys = new Set(conceptIds.flatMap((id) => q.keysForConcept.all(userId, id).map((r) => r.interpretation_key)));
     return [...keys].flatMap((key) => {
-      const row = q.unitByKey.get(key);
+      const row = q.unitByKey.get(userId, key);
       const l = row ? deps.lookup(tasks.interpret, decodeUnit(row.input_json).input) : null;
       return l?.kind === "hit" ? [l.value] : [];
     });
@@ -431,7 +434,7 @@ export function createPreparation(db: Db, deps: {
     claimsIn: (captureId, material) => claimsOf(captureId, material).map((c) => c.claim),
     assessableIn: (captureId, material) => claimsOf(captureId, material).flatMap((c) => assessable(c.claim) ?? []),
     concepts: (ids) => ids.flatMap((id) => {
-      const r = q.concept.get(id);
+      const r = q.concept.get(userId, id);
       return r ? [{ id: r.id as ConceptId, label: r.label, summary: r.summary }] : [];
     }),
     confusions: (conceptIds) => {
@@ -454,7 +457,7 @@ export function createPreparation(db: Db, deps: {
       return [...out.values()];
     },
     resources: (conceptId) => {
-      const prior = q.frozen.get("resource_search", conceptId);
+      const prior = q.frozen.get(userId, "resource_search", conceptId);
       if (!prior) return { state: "not_started", connections: [] };
       const l = deps.lookup(tasks.searchResources, JSON.parse(prior.input_json) as ResourceSearchInput);
       if (l.kind === "hit") return { state: "found", connections: l.value };
