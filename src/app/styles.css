@@ -103,7 +103,6 @@ th, td { border-bottom: 1px solid var(--border); padding: var(--space-1) var(--s
 .review-navigation { display: flex; align-items: center; flex-wrap: wrap; gap: 24px; }
 .review-phase { color: var(--muted); text-transform: capitalize; }
 .review-workspace { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: clamp(24px, 3vw, 48px); align-items: start; }
-.conversation-notebook { grid-column: 2; grid-row: 1; min-width: 0; padding: clamp(18px, 2.5vw, 36px); background: var(--surface); border: 1px solid var(--border); border-radius: 24px 10px 24px 10px; box-shadow: 4px 6px 0 #302e3820; }
 .notebook-heading { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: baseline; gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 16px; }
 .review h2 { font: bold 1.4rem/1.25 Georgia, serif; margin: 0; }
 .conversation-history { max-height: min(44dvh, 32rem); min-height: 10rem; overflow: auto; scrollbar-gutter: stable; padding: 12px 8px 16px 0; overflow-wrap: anywhere; }
@@ -125,12 +124,10 @@ th, td { border-bottom: 1px solid var(--border); padding: var(--space-1) var(--s
 .review-observations { margin-top: 16px; border-top: 1px solid var(--border); }
 @media (max-width: 800px) {
   .review-workspace { grid-template-columns: minmax(0, 1fr); }
-  .conversation-notebook { grid-column: auto; grid-row: auto; }
   .conversation-history { max-height: 40dvh; }
   .review-navigation { gap: 16px; }
 }
 @media (max-width: 420px) {
   .review { padding: 12px; }
-  .conversation-notebook { padding: 16px; }
   .review .line.tutor p { font-size: 1.15rem; }
 }
