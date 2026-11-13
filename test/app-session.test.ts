@@ -214,6 +214,17 @@ describe("review session controller", () => {
     expect(h.sends).toHaveLength(1);
   });
 
+  test("a send refused while another is in flight keeps the error that send already showed", async () => {
+    const h = setup({ sendTurn: ({ turnId }) => events({ type: "learner_turn_stored", turnId }, { type: "turn_complete", turnId }) });
+    await h.controller.load();
+    const invalid = h.controller.send({ kind: "answer", text: "", modality: "text" });
+    const finish = h.controller.send({ kind: "end" });
+    expect(await invalid).toBe(false);
+    expect(await finish).toBe(false);
+    expect(h.controller.getState().sendError).toContain("Not sent.");
+    expect(h.sends.length).toBe(0);
+  });
+
   test("a learner act made while the finished turn is still settling is held visibly and refused with a message, never dropped silently", async () => {
     let release = () => {};
     const gate = new Promise<void>((r) => (release = r));

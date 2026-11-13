@@ -219,8 +219,8 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
         return true;
       });
       if (sent !== undefined) return sent;
-      // The lock is held by a turn that is still settling: say so rather than drop the act.
-      set({ sendError: "The last turn is still finishing. Please try again in a moment." });
+      // The lock is held by a turn that is still settling: say so rather than drop the act. An error already shown says more, so it stays.
+      if (state.sendError === null) set({ sendError: "The last turn is still finishing. Please try again in a moment." });
       return false;
     },
     retryTurn: () =>
