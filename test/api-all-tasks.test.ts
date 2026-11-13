@@ -349,8 +349,24 @@ describe("resource search without output_config.format", () => {
     expect(events).toHaveLength(1);
     expect(events[0]!.outcome).toBe("aborted");
     expect(events[0]!.inputTokens).toBe(500);
-    const cost = events[0]!.cost;
-    expect(cost.kind).toBe("estimated");
-    if (cost.kind === "estimated") expect(cost.usd).toBeCloseTo((500 * 4 + 50 * 20) / 1_000_000 + WEB_SEARCH_USD, 10);
+    // The aborted continuation was already sent, so it may have been billed: the total cost is unknown, not the first response's.
+    expect(events[0]!.cost.kind).toBe("unknown");
+  });
+
+  test("a continuation that fails in a way that may have been billed keeps the earlier tokens and makes the total cost unknown", async () => {
+    const paused = reply(searchBlocks, { stop: "pause_turn", input: 500, output: 50, searches: 1 });
+    // A retryable failure lets the memo try again, and the later attempt fails on its first call; only the attempt that billed matters here.
+    for (const failure of [new Anthropic.InternalServerError(500, {}, "server error", new Headers()), new Anthropic.APIConnectionError({ message: "connection reset" })]) {
+      const { result, events } = await run([paused, failure]);
+      expect(result.kind).toBe("failed");
+      const billed = events.filter((e) => e.inputTokens === 500);
+      expect(billed).toHaveLength(1);
+      expect(billed[0]!.cost.kind).toBe("unknown");
+      expect(events.every((e) => e.cost.kind !== "estimated")).toBe(true);
+    }
+    // A continuation whose response cannot be read has no usage of its own, so neither the total tokens nor the cost are known.
+    const { result, events } = await run([paused, { not: "a message" } as unknown as Message]);
+    expect(result.kind).toBe("failed");
+    expect(events.every((e) => e.cost.kind === "unknown")).toBe(true);
   });
 });

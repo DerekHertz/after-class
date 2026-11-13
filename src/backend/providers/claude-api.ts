@@ -574,14 +574,23 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
   async function structuredWithTools(req: ClaudeRequest, model: string, system: TextBlockParam[], first: readonly MessageParam[], tools: ToolUnion[], signal: AbortSignal): Promise<{ readonly parsed: Parsed; readonly usage: UsageReport }> {
     let messages: MessageParam[] = [...first];
     const reports: UsageReport[] = [];
-    /** The failure as the ledger should see it: the adapter's own error, with what was already spent. */
+    /**
+     * The failure as the ledger should see it: the adapter's own error, with what was already spent. The earlier responses' tokens are
+     * kept. Their summed cost is the whole cost only when the failed call was refused before any model ran. Any other failure, an abort
+     * included, may have billed that call too, so the total cost is unknown (R17).
+     */
     const afterBilled = (err: unknown): unknown => {
       if (reports.length === 0) return err;
+      const known = combine(reports);
+      const refusedBeforeAnyModelRan = !signal.aborted && err instanceof ApiCallError && err.billing === "not_billed";
+      const usage: UsageReport = refusedBeforeAnyModelRan
+        ? known
+        : { ...known, cost: { kind: "unknown", reason: "a continuation after a billed response may also have been billed, and its cost is unknown" } };
       // An abort carries the usage too. memo.ts records an aborted attempt with the usage of whatever ProviderError ended it, and
       // checks the signal before the error, so this still ends the attempt as aborted.
-      if (signal.aborted) return new ApiCallError("claude api call aborted after a billed response", combine(reports), false, "maybe_billed", null);
+      if (signal.aborted) return new ApiCallError("claude api call aborted after a billed response", usage, false, "maybe_billed", null);
       if (!(err instanceof ApiCallError)) return err;
-      return new ApiCallError(err.message, combine(reports), err.retryable, "maybe_billed", err.status);
+      return new ApiCallError(err.message, usage, err.retryable, "maybe_billed", err.status);
     };
     for (let n = 0; ; n++) {
       const sent = messages;
