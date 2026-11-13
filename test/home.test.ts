@@ -107,8 +107,26 @@ describe("the home page", () => {
     expect(html).toContain(`href="/app/record/${rSaved}"`);
     expect(html).not.toContain(rEnded);
     expect(reviewTarget({ reviewId: rEnded, phase: "ended", saved: "unsaved" })).toBeNull();
-    expect(reviewTarget({ reviewId: rEnded, phase: "ended", saved: "save_pending" })).toBeNull();
+    expect(reviewTarget({ reviewId: rEnded, phase: "ended", saved: "save_pending" })).toEqual({ page: "review", id: rEnded });
+    expect(reviewTarget({ reviewId: rSaved, phase: "ended", saved: "saved" })).toEqual({ page: "record", reviewId: rSaved });
     expect(reviewTarget({ reviewId: rActive, phase: "paused", saved: "unsaved" })).toEqual({ page: "review", id: rActive });
+  });
+
+  test("an ended review whose save failed links to its review screen, and an ended unsaved one stays plain text", () => {
+    const rPending = stableId("rvw", "pending");
+    const failed: LecturesResponse = { lectures: [{
+      ...data.lectures[0]!,
+      reviews: [
+        { reviewId: rPending, startedMs: 5, phase: "ended", saved: "save_pending", mainQuestions: 2 },
+        { reviewId: rEnded, startedMs: 2, phase: "ended", saved: "unsaved", mainQuestions: 0 },
+      ],
+    }] };
+    const html = renderToStaticMarkup(createElement(HomeBody, { api: noReads, data: failed }));
+    expect(html).toContain(`<a href="/app/review/${rPending}">Retry saving notes</a> <span class="muted">2 questions`);
+    expect(html).not.toContain("Notes not saved yet");
+    expect(html).toContain("Ended, not saved <span class=\"muted\">0 questions");
+    expect(html).not.toContain(rEnded);
+    expect(html).not.toContain("Pick up where you left off");
   });
 
   test("each row is named for what it opens, and its link always goes where reviewTarget says", () => {
@@ -116,7 +134,7 @@ describe("the home page", () => {
       { phase: "active", saved: "unsaved", label: "Continue review" },
       { phase: "paused", saved: "unsaved", label: "Continue review" },
       { phase: "ended", saved: "saved", label: "Open saved notes" },
-      { phase: "ended", saved: "save_pending", label: "Notes not saved yet" },
+      { phase: "ended", saved: "save_pending", label: "Retry saving notes" },
       { phase: "ended", saved: "unsaved", label: "Ended, not saved" },
     ] as const;
     for (const { phase, saved, label } of states) {
