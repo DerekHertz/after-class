@@ -685,6 +685,98 @@ CREATE TABLE review_turns (
 CREATE INDEX review_turns_by_review ON review_turns (review_id, seq);
 ${appendOnly("review_turns")}`,
     },
+    {
+      id: "002-user-id",
+      sql: `
+-- Every review row belongs to a user. A review id is minted by the app and stays unique across users, because the tutor and
+-- code turn ids, the notes and the observations are derived from it; the user_id column records whose it is, and a review is
+-- never deleted, so that ownership cannot lapse. A turn id is minted by the app too and may repeat across users, so turns key by
+-- (user_id, id), and a turn must belong to a review of the same user. Rebuilt like evidence/003-user-id: rows are saved, the
+-- tables and their triggers dropped (DROP does not fire triggers), made again with user_id, and the rows go back as the local user.
+-- Existing rows can only be the local app's, so the local user's row is inserted here when there are any; a fresh database
+-- gets its user from ensureLocalUser at boot.
+INSERT INTO users (id, created_ms)
+SELECT '${stableId("usr", "local")}', COALESCE((SELECT MIN(at_ms) FROM invite_answers), (SELECT MIN(started_ms) FROM reviews),
+  (SELECT MIN(at_ms) FROM review_turns), 0)
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE id = '${stableId("usr", "local")}')
+  AND (EXISTS (SELECT 1 FROM invite_answers) OR EXISTS (SELECT 1 FROM reviews) OR EXISTS (SELECT 1 FROM review_turns));
+
+CREATE TABLE invite_answers_save AS SELECT seq, capture_id, answer, watched_s, at_ms FROM invite_answers;
+CREATE TABLE reviews_save AS SELECT id, capture_id, choice, scope_json, frozen_at_seq, started_ms FROM reviews;
+CREATE TABLE review_turns_save AS SELECT id, review_id, seq, actor, thread_id, body_json, at_ms FROM review_turns;
+DROP TABLE review_turns;
+DROP TABLE reviews;
+DROP TABLE invite_answers;
+
+CREATE TABLE invite_answers (
+  seq INTEGER PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  capture_id TEXT NOT NULL,
+  answer TEXT NOT NULL CHECK (answer IN ('review_now','later','wait','stop_early')),
+  watched_s REAL NOT NULL CHECK (watched_s >= 0),
+  at_ms INTEGER NOT NULL
+) STRICT;
+INSERT INTO invite_answers (seq, user_id, capture_id, answer, watched_s, at_ms)
+SELECT seq, '${stableId("usr", "local")}', capture_id, answer, watched_s, at_ms FROM invite_answers_save ORDER BY seq;
+CREATE INDEX invite_answers_by_capture ON invite_answers (user_id, capture_id);
+${appendOnly("invite_answers")}
+
+-- R7: "Once a review starts, its scope never grows; corrections can change claims inside it but can't add material."
+CREATE TABLE reviews (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  capture_id TEXT NOT NULL,
+  choice TEXT NOT NULL CHECK (choice IN ('prepared_only','stop_early')),
+  scope_json TEXT NOT NULL,
+  frozen_at_seq INTEGER NOT NULL UNIQUE,
+  started_ms INTEGER NOT NULL,
+  UNIQUE (user_id, id)
+) STRICT;
+INSERT INTO reviews (id, user_id, capture_id, choice, scope_json, frozen_at_seq, started_ms)
+SELECT id, '${stableId("usr", "local")}', capture_id, choice, scope_json, frozen_at_seq, started_ms FROM reviews_save ORDER BY frozen_at_seq;
+CREATE INDEX reviews_by_capture ON reviews (user_id, capture_id);
+${appendOnly("reviews", "R7")}
+
+CREATE TABLE review_turns (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  id TEXT NOT NULL,
+  review_id TEXT NOT NULL,
+  seq INTEGER NOT NULL UNIQUE,
+  actor TEXT NOT NULL CHECK (actor IN ('learner','tutor','code')),
+  thread_id TEXT,
+  body_json TEXT NOT NULL,
+  at_ms INTEGER NOT NULL,
+  PRIMARY KEY (user_id, id),
+  FOREIGN KEY (user_id, review_id) REFERENCES reviews (user_id, id)
+) STRICT;
+INSERT INTO review_turns (user_id, id, review_id, seq, actor, thread_id, body_json, at_ms)
+SELECT '${stableId("usr", "local")}', id, review_id, seq, actor, thread_id, body_json, at_ms FROM review_turns_save ORDER BY seq;
+CREATE INDEX review_turns_by_review ON review_turns (user_id, review_id, seq);
+${appendOnly("review_turns")}
+
+DROP TABLE invite_answers_save;
+DROP TABLE reviews_save;
+DROP TABLE review_turns_save;
+
+-- R16: the raw evidence of an unsaved review is held. Same triggers as evidence/003, now holding only for a review of the same user.
+-- saved_reviews has no user_id until record/004-user-id, which narrows its half of the condition.
+DROP TRIGGER capture_facts_r16;
+DROP TRIGGER frames_r16;
+CREATE TRIGGER capture_facts_r16 BEFORE DELETE ON capture_facts
+WHEN EXISTS (
+    SELECT 1 FROM reviews r
+    WHERE r.user_id = OLD.user_id AND r.capture_id = OLD.capture_id
+      AND NOT EXISTS (SELECT 1 FROM saved_reviews s WHERE s.review_id = r.id))
+BEGIN SELECT RAISE(ABORT, 'R16: raw evidence of an unsaved review is held'); END;
+
+CREATE TRIGGER frames_r16 BEFORE DELETE ON frames
+WHEN EXISTS (
+    SELECT 1 FROM reviews r
+    WHERE r.user_id = OLD.user_id AND r.capture_id = OLD.capture_id
+      AND NOT EXISTS (SELECT 1 FROM saved_reviews s WHERE s.review_id = r.id))
+  AND NOT EXISTS (SELECT 1 FROM evidence_deletions d WHERE d.user_id = OLD.user_id AND d.evidence_id = OLD.evidence_id)
+BEGIN SELECT RAISE(ABORT, 'R16: frames of an unsaved review are held'); END;`,
+    },
   ],
 
   record: [

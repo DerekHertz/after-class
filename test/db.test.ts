@@ -113,8 +113,8 @@ function seedCapture(db: Db, captureId: string) {
 
 function startReview(db: Db, reviewId: string, captureId: string) {
   db.sql
-    .query("INSERT INTO reviews (id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, 'prepared_only', '{}', ?, 0)")
-    .run(reviewId, captureId, db.nextSeq());
+    .query("INSERT INTO reviews (id, user_id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, ?, 'prepared_only', '{}', ?, 0)")
+    .run(reviewId, ensureLocalUser(db), captureId, db.nextSeq());
 }
 
 describe("R16: Evidence cited by a saved note is only deleted when I delete it, never by expiry.", () => {
@@ -186,8 +186,8 @@ describe("append-only facts and snapshots", () => {
     const db = testDb();
     startReview(db, "rvw_1", "cap_1");
     db.sql
-      .query("INSERT INTO review_turns (id, review_id, seq, actor, thread_id, body_json, at_ms) VALUES ('turn_1', 'rvw_1', ?, 'learner', NULL, '{}', 0)")
-      .run(db.nextSeq());
+      .query("INSERT INTO review_turns (user_id, id, review_id, seq, actor, thread_id, body_json, at_ms) VALUES (?, 'turn_1', 'rvw_1', ?, 'learner', NULL, '{}', 0)")
+      .run(LOCAL_USER, db.nextSeq());
     expect(() => db.sql.run("UPDATE review_turns SET body_json = '{}'")).toThrow(/append-only/);
     db.sql
       .query(
@@ -238,7 +238,7 @@ describe("users", () => {
 
   test("a database from before the users migration gains the table and one user, and keeps its data", () => {
     withFile((path) => {
-      const old = { ...MIGRATIONS, kernel: MIGRATIONS.kernel.filter((m) => m.id !== "002-users"), providers: MIGRATIONS.providers.filter((m) => m.id !== "004-user-id"), evidence: MIGRATIONS.evidence.filter((m) => m.id !== "003-user-id" && m.id !== "004-capture-owners") };
+      const old = { ...MIGRATIONS, kernel: MIGRATIONS.kernel.filter((m) => m.id !== "002-users"), providers: MIGRATIONS.providers.filter((m) => m.id !== "004-user-id"), evidence: MIGRATIONS.evidence.filter((m) => m.id !== "003-user-id" && m.id !== "004-capture-owners"), review: MIGRATIONS.review.filter((m) => m.id !== "002-user-id") };
       const a = openDb(path, old);
       const seq = a.nextSeq();
       expect(a.sql.query("SELECT name FROM sqlite_master WHERE name = 'users'").all()).toEqual([]);

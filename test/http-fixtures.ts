@@ -319,8 +319,9 @@ export const said = (words: string): LearnerAct => ({ kind: "answer", text: word
  * The real review and record modules and the real HTTP server on one in-memory db. Preparation and segmentation are
  * answered from `world`; the tutor and wrap-up are scripted. `retries` records preparation.retry calls.
  */
-export function reviewRig(script: Script = pick, extra: { turnDeadlineMs?: number } = {}) {
-  const db = testUserDb();
+export function reviewRig(script: Script = pick, extra: { turnDeadlineMs?: number; db?: UserDb } = {}) {
+  const { db: given, ...serveExtra } = extra;
+  const db = given ?? testUserDb();
   const world = new World(db);
   const model = modelTask(script);
   const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
@@ -368,7 +369,7 @@ export function reviewRig(script: Script = pick, extra: { turnDeadlineMs?: numbe
   const server = serve({
     modules: { ledger: createLedger(db), evidence, reviews, record, preparation, segmentation },
     auth: { port: 0, extensionId: EXT_ID, token: TOKEN },
-    appDir: fixtureApp(), ...extra,
+    appDir: fixtureApp(), ...serveExtra,
   });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;

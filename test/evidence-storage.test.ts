@@ -136,7 +136,7 @@ describe("R16: cited evidence is deleted only by the user, never by expiry", () 
     const passage = h.evidence.watchOrder(s.captureId).passages[0]!.passage;
     const frame = stableId("ev", s.captureId, "f1");
     const reviewId = "rvw_x";
-    h.db.sql.run("INSERT INTO reviews (id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, 'prepared_only', '{}', ?, 0)", [reviewId, s.captureId, h.db.nextSeq()]);
+    h.db.sql.run("INSERT INTO reviews (id, user_id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, ?, 'prepared_only', '{}', ?, 0)", [reviewId, h.db.userId, s.captureId, h.db.nextSeq()]);
     if (opts.save !== false) {
       h.evidence.snapshotInTx([passage.id, frame]);
       h.db.sql.run("INSERT INTO saved_reviews (review_id, bundle_hash, saved_ms) VALUES (?, 'h', 0)", [reviewId]);

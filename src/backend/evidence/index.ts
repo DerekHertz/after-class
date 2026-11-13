@@ -539,7 +539,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
              HAVING MAX(received_ms) < ?
                AND NOT EXISTS (
                  SELECT 1 FROM reviews r
-                 WHERE r.capture_id = capture_facts.capture_id
+                 WHERE r.user_id = capture_facts.user_id AND r.capture_id = capture_facts.capture_id
                    AND NOT EXISTS (SELECT 1 FROM saved_reviews s WHERE s.review_id = r.id))`,
           )
           .all(userId, cutoff);

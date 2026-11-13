@@ -131,6 +131,9 @@ const REBUILT_BY_MIGRATION = new Set(["memo_inputs", "memo", "memo_failures", "u
 /** evidence/003-user-id rebuilds its four tables to add user_id, so db.ts copies rows into them. 004 backfills capture_owners. */
 for (const table of ["capture_facts", "frames", "evidence_snapshots", "evidence_deletions", "capture_owners"]) REBUILT_BY_MIGRATION.add(table);
 
+/** review/002-user-id rebuilds its three tables to add user_id, so db.ts copies rows into them. */
+for (const table of ["invite_answers", "reviews", "review_turns"]) REBUILT_BY_MIGRATION.add(table);
+
 function ownerOfFile(path: string): Owner | "none" {
   if (path === "src/backend/db.ts") return "kernel";
   const dir = path.match(/^src\/backend\/(\w+)\//)?.[1];

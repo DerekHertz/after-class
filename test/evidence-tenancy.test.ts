@@ -211,8 +211,8 @@ describe("two users in one database", () => {
     const b = lecture();
     alice.evidence.ingest({ captureId: a.captureId, facts: a.facts });
     bob.evidence.ingest({ captureId: b.captureId, facts: b.facts });
-    raw.sql.run("INSERT INTO reviews (id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, 'prepared_only', '{}', ?, 0)", [
-      stableId("rvw", "pending"), a.captureId, raw.nextSeq(),
+    raw.sql.run("INSERT INTO reviews (id, user_id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, ?, 'prepared_only', '{}', ?, 0)", [
+      stableId("rvw", "pending"), alice.id, a.captureId, raw.nextSeq(),
     ]);
 
     clock.t = NOW + 31 * DAY;
@@ -377,7 +377,7 @@ describe("the evidence routes with a second user", () => {
 });
 
 describe("a database from before evidence got user_id", () => {
-  const OLD = { ...MIGRATIONS, evidence: MIGRATIONS.evidence.filter((m) => m.id !== "003-user-id" && m.id !== "004-capture-owners") };
+  const OLD = { ...MIGRATIONS, evidence: MIGRATIONS.evidence.filter((m) => m.id !== "003-user-id" && m.id !== "004-capture-owners"), review: MIGRATIONS.review.filter((m) => m.id !== "002-user-id") };
   const CAPTURE = stableId("cap", "old");
   const FRAME = stableId("ev", CAPTURE, "f1");
   const CITED = stableId("ev", "cited");
