@@ -6,6 +6,7 @@
  * refuses a migration whose text changed after it ran. db.ts runs them and re-exports this module's names.
  */
 import { stableId } from "../shared/ids";
+import { OBSERVATION_STATUSES, RECORD_USER_ID } from "./migrations-record";
 
 export const OWNERS = ["kernel", "providers", "evidence", "segmentation", "preparation", "review", "record"] as const;
 export type Owner = (typeof OWNERS)[number];
@@ -16,7 +17,6 @@ export type Migration = { readonly id: string; readonly sql: string };
 const PURPOSES = `'boundary','frame_change','claim_check','interpretation','claim_revision','resource_search','tutor_turn','wrap_up'`;
 /** 003-diagram-purpose adds "diagram_summary"; 001 keeps the list it was applied with (its text is hashed). */
 const PURPOSES_WITH_DIAGRAM = `${PURPOSES},'diagram_summary'`;
-const OBSERVATION_STATUSES = `'independent','partial','after_help','unresolved','not_assessed'`;
 
 /** R16 holds: an unsaved review keeps its capture's raw evidence. Shared by the raw-evidence triggers. */
 const PENDING_SAVE_HOLDS = (captureCol: string) => `EXISTS (
@@ -983,5 +983,6 @@ CREATE TABLE save_failures (
   failed_ms INTEGER NOT NULL
 ) STRICT;`,
     },
+    RECORD_USER_ID,
   ],
 };

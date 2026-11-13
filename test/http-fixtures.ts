@@ -4,6 +4,8 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { UserDb } from "../src/backend/db";
+import type { DiagramSummaryInput, DiagramSummaryOutput } from "../src/backend/diagram";
+import { createDiagrams } from "../src/backend/diagram";
 import { createEvidence } from "../src/backend/evidence";
 import { serve } from "../src/backend/http";
 import type { Preparation } from "../src/backend/preparation";
@@ -23,7 +25,7 @@ import type { Interval } from "../src/shared/time";
 import { Material, interval } from "../src/shared/time";
 import { recordViewResponse, saveResponse, tutorStreamEvent } from "../src/shared/wire";
 import type { FakeStep } from "./fakes";
-import { fakeTask, ok, testUserDb } from "./fakes";
+import { fail, fakeTask, ok, testUserDb } from "./fakes";
 
 export const TOKEN = "tok-9f3a1c77e0b24d5aa8c1";
 
@@ -366,8 +368,24 @@ export function reviewRig(script: Script = pick, extra: { turnDeadlineMs?: numbe
   const segmentation = { current: world.deps.currentChunks, heldByAnotherUser: () => false } as unknown as Segmentation;
 
   const evidence = evidenceOn(db);
+  const diagrams = createDiagrams({
+    review: (reviewId) => {
+      try {
+        const { captureId, scope, topics } = reviews.view(reviewId);
+        return { captureId, scope, topics };
+      } catch (e) {
+        if (e instanceof Error && e.message.startsWith("unknown review")) return null;
+        throw e;
+      }
+    },
+    usable,
+    bundle: world.deps.bundle,
+    sources: () => [],
+    task: fakeTask<IdPart, never>({ purpose: "diagram_summary", provider: "claude", answer: () => fail("diagrams are not under test") }) as unknown as Task<DiagramSummaryInput, DiagramSummaryOutput>,
+    memo,
+  });
   const server = serve({
-    modules: { ledger: createLedger(db), evidence, reviews, record, preparation, segmentation },
+    modules: { ledger: createLedger(db), evidence, reviews, record, preparation, segmentation, diagrams },
     auth: { port: 0, extensionId: EXT_ID, token: TOKEN },
     appDir: fixtureApp(), ...serveExtra,
   });
@@ -397,7 +415,7 @@ export function reviewRig(script: Script = pick, extra: { turnDeadlineMs?: numbe
     return { status: r.status, body: (await r.json()) as Record<string, any> };
   };
 
-  return { db, world, model, base, flags, retries, snapshots, evidence, capture, prepare, startReview, turn, view };
+  return { db, world, model, base, flags, retries, snapshots, evidence, reviews, record, capture, prepare, startReview, turn, view };
 }
 
 type Rig = ReturnType<typeof reviewRig>;
@@ -412,8 +430,8 @@ export const startedIn = async (rig: Rig) => {
 };
 
 /** Review `reviewId` through to a saved record: two threads, one note, one link. */
-export async function savedRig() {
-  const rig = reviewRig();
+export async function savedRig(db?: UserDb) {
+  const rig = reviewRig(pick, db === undefined ? {} : { db });
   const reviewId = await startedIn(rig);
   for (const act of [{ kind: "resume" }, said("lines meeting at a point"), said("because both equations hold there"), { kind: "skip" }, { kind: "wrap_up" }] as LearnerAct[]) await rig.turn(reviewId, act);
   expect(saveResponse.parse(await (await post(rig.base, `/reviews/${reviewId}/save`, {})).json()).kind).toBe("saved");

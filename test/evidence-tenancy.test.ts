@@ -188,7 +188,7 @@ describe("two users in one database", () => {
     alice.evidence.ingest({ captureId: a.captureId, facts: a.facts });
     const frame = frameIdOf(a.captureId);
     alice.evidence.snapshotInTx([frame]);
-    raw.sql.run("INSERT INTO note_evidence (note_id, evidence_id) VALUES (?, ?)", [stableId("note", "cites"), frame]);
+    raw.sql.run("INSERT INTO note_evidence (user_id, note_id, evidence_id) VALUES (?, ?, ?)", [alice.id, stableId("note", "cites"), frame]);
     const original = alice.evidence.frameBytes(frame)!;
 
     clock.t = NOW + 31 * DAY;
@@ -222,7 +222,7 @@ describe("two users in one database", () => {
     expect(countFor(raw, "frames", alice.id)).toBe(1);
   });
 
-  test("R16: a tombstone releases only the snapshot of the user who made it", () => {
+  test("R16: a note holds only its own user's snapshot of an id both users hold, and a tombstone releases only its maker's", () => {
     const { raw, alice, bob } = twoUsers();
     const a = lecture();
     const b = lecture();
@@ -231,13 +231,16 @@ describe("two users in one database", () => {
     const id = alice.evidence.bundle(alice.evidence.watchedMaterial(a.captureId)).passages[0]!.id;
     alice.evidence.snapshotInTx([id]);
     bob.evidence.snapshotInTx([id]);
-    raw.sql.run("INSERT INTO note_evidence (note_id, evidence_id) VALUES (?, ?)", [stableId("note", "n"), id]);
-    raw.sql.run("INSERT INTO evidence_deletions (user_id, evidence_id, request_id, deleted_ms, seq) VALUES (?, ?, 'req', 0, ?)", [alice.id, id, raw.nextSeq()]);
+    raw.sql.run("INSERT INTO note_evidence (user_id, note_id, evidence_id) VALUES (?, ?, ?)", [alice.id, stableId("note", "n"), id]);
 
-    expect(() => raw.sql.run("DELETE FROM evidence_snapshots WHERE user_id = ?", [bob.id])).toThrow(/R16/);
+    raw.sql.run("DELETE FROM evidence_snapshots WHERE user_id = ?", [bob.id]);
+    expect(() => raw.sql.run("DELETE FROM evidence_snapshots WHERE user_id = ?", [alice.id])).toThrow(/R16/);
+    raw.sql.run("INSERT INTO evidence_deletions (user_id, evidence_id, request_id, deleted_ms, seq) VALUES (?, ?, 'req', 0, ?)", [bob.id, id, raw.nextSeq()]);
+    expect(() => raw.sql.run("DELETE FROM evidence_snapshots WHERE user_id = ?", [alice.id])).toThrow(/R16/);
+    raw.sql.run("INSERT INTO evidence_deletions (user_id, evidence_id, request_id, deleted_ms, seq) VALUES (?, ?, 'req', 0, ?)", [alice.id, id, raw.nextSeq()]);
     raw.sql.run("DELETE FROM evidence_snapshots WHERE user_id = ?", [alice.id]);
     expect(countFor(raw, "evidence_snapshots", alice.id)).toBe(0);
-    expect(countFor(raw, "evidence_snapshots", bob.id)).toBe(1);
+    expect(countFor(raw, "evidence_snapshots", bob.id)).toBe(0);
   });
 
   test("a surviving snapshot with no owner row is never shared or unlinked by another user", () => {
@@ -251,7 +254,7 @@ describe("two users in one database", () => {
     raw.sql.run("INSERT INTO evidence_snapshots (user_id, evidence_id, kind, source_id, start_s, end_s, frame_path, created_ms, width, height) VALUES (?, ?, 'frame', 'src_x', 3, 3, ?, 0, 640, 360)", [
       alice.id, frame, old,
     ]);
-    raw.sql.run("INSERT INTO note_evidence (note_id, evidence_id) VALUES (?, ?)", [stableId("note", "cites"), frame]);
+    raw.sql.run("INSERT INTO note_evidence (user_id, note_id, evidence_id) VALUES (?, ?, ?)", [alice.id, stableId("note", "cites"), frame]);
     const original = alice.evidence.frameBytes(frame)!;
 
     const b = lecture(a.captureId);
@@ -377,7 +380,7 @@ describe("the evidence routes with a second user", () => {
 });
 
 describe("a database from before evidence got user_id", () => {
-  const OLD = { ...MIGRATIONS, evidence: MIGRATIONS.evidence.filter((m) => m.id !== "003-user-id" && m.id !== "004-capture-owners"), review: MIGRATIONS.review.filter((m) => m.id !== "002-user-id") };
+  const OLD = { ...MIGRATIONS, evidence: MIGRATIONS.evidence.filter((m) => m.id !== "003-user-id" && m.id !== "004-capture-owners"), review: MIGRATIONS.review.filter((m) => m.id !== "002-user-id"), record: MIGRATIONS.record.filter((m) => m.id !== "004-user-id") };
   const CAPTURE = stableId("cap", "old");
   const FRAME = stableId("ev", CAPTURE, "f1");
   const CITED = stableId("ev", "cited");
@@ -465,7 +468,7 @@ describe("a database from before evidence got user_id", () => {
     expect(() => db.sql.run("DELETE FROM frames")).toThrow(/R16: frames of an unsaved review are held/);
     expect(() => db.sql.run("DELETE FROM evidence_snapshots WHERE evidence_id = ?", [CITED])).toThrow(/R16: evidence cited by a note is deleted only by the user/);
     db.sql.run("DELETE FROM evidence_snapshots WHERE evidence_id = ?", [GONE]);
-    db.sql.run("INSERT INTO saved_reviews (review_id, bundle_hash, saved_ms) VALUES (?, 'h', 0)", [stableId("rvw", "old")]);
+    db.sql.run("INSERT INTO saved_reviews (user_id, review_id, bundle_hash, saved_ms) VALUES (?, ?, 'h', 0)", [LOCAL_USER, stableId("rvw", "old")]);
     db.sql.run("DELETE FROM frames");
     db.sql.run("DELETE FROM capture_facts");
     expect(rows(db, "SELECT COUNT(*) AS n FROM capture_facts")).toBe(0);

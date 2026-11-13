@@ -253,9 +253,9 @@ describe("ReviewView.saved is the persisted save state", () => {
     const rig = reviewRig();
     const reviewId = await startedIn(rig);
     expect((await rig.view(reviewId)).body.saved).toBe("unsaved");
-    rig.db.sql.run("INSERT INTO save_failures (review_id, error, failed_ms) VALUES (?, 'earlier run', 0)", [reviewId]);
+    rig.db.sql.run("INSERT INTO save_failures (user_id, review_id, error, failed_ms) VALUES (?, ?, 'earlier run', 0)", [rig.db.userId, reviewId]);
     expect((await rig.view(reviewId)).body.saved).toBe("save_pending");
-    rig.db.sql.run("INSERT INTO saved_reviews (review_id, bundle_hash, saved_ms) VALUES (?, 'h', 0)", [reviewId]);
+    rig.db.sql.run("INSERT INTO saved_reviews (user_id, review_id, bundle_hash, saved_ms) VALUES (?, ?, 'h', 0)", [rig.db.userId, reviewId]);
     const view = await rig.view(reviewId);
     reviewViewResponse.parse(view.body);
     expect(view.body.saved).toBe("saved");

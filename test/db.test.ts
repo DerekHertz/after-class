@@ -122,7 +122,7 @@ describe("R16: Evidence cited by a saved note is only deleted when I delete it, 
     db.sql
       .query("INSERT INTO evidence_snapshots (user_id, evidence_id, kind, source_id, start_s, end_s, text, created_ms) VALUES (?, 'ev_p', 'passage', 'src_1', 1, 2, 'Ax = b', 0)")
       .run(ensureLocalUser(db));
-    db.sql.query("INSERT INTO note_evidence (note_id, evidence_id) VALUES (?, 'ev_p')").run(noteId);
+    db.sql.query("INSERT INTO note_evidence (user_id, note_id, evidence_id) VALUES (?, ?, 'ev_p')").run(LOCAL_USER, noteId);
   }
 
   test("expiry cannot delete a snapshot a note cites", () => {
@@ -134,7 +134,7 @@ describe("R16: Evidence cited by a saved note is only deleted when I delete it, 
   test("deleting the citing note releases the snapshot", () => {
     const db = testDb();
     snapshotCitedBy(db, "note_1");
-    db.sql.run("INSERT INTO note_deletions (note_id, deleted_ms) VALUES ('note_1', 0)");
+    db.sql.run("INSERT INTO note_deletions (user_id, note_id, deleted_ms) VALUES (?, 'note_1', 0)", [LOCAL_USER]);
     db.sql.run("DELETE FROM evidence_snapshots");
     expect(db.sql.query("SELECT count(*) AS n FROM evidence_snapshots").get()).toEqual({ n: 0 });
   });
@@ -160,7 +160,7 @@ describe("R16: Evidence cited by a saved note is only deleted when I delete it, 
     expect(() => db.sql.run("DELETE FROM capture_facts")).toThrow(/R16/);
     expect(() => db.sql.run("DELETE FROM frames")).toThrow(/R16/);
 
-    db.sql.run("INSERT INTO saved_reviews (review_id, bundle_hash, saved_ms) VALUES ('rvw_1', 'h', 0)");
+    db.sql.run("INSERT INTO saved_reviews (user_id, review_id, bundle_hash, saved_ms) VALUES (?, 'rvw_1', 'h', 0)", [LOCAL_USER]);
     db.sql.run("DELETE FROM capture_facts");
     db.sql.run("DELETE FROM frames");
     expect(db.sql.query("SELECT count(*) AS n FROM capture_facts").get()).toEqual({ n: 0 });
@@ -238,7 +238,7 @@ describe("users", () => {
 
   test("a database from before the users migration gains the table and one user, and keeps its data", () => {
     withFile((path) => {
-      const old = { ...MIGRATIONS, kernel: MIGRATIONS.kernel.filter((m) => m.id !== "002-users"), providers: MIGRATIONS.providers.filter((m) => m.id !== "004-user-id"), evidence: MIGRATIONS.evidence.filter((m) => m.id !== "003-user-id" && m.id !== "004-capture-owners"), segmentation: MIGRATIONS.segmentation.filter((m) => m.id !== "002-user-id"), preparation: MIGRATIONS.preparation.filter((m) => m.id !== "003-user-id"), review: MIGRATIONS.review.filter((m) => m.id !== "002-user-id") };
+      const old = { ...MIGRATIONS, kernel: MIGRATIONS.kernel.filter((m) => m.id !== "002-users"), providers: MIGRATIONS.providers.filter((m) => m.id !== "004-user-id"), evidence: MIGRATIONS.evidence.filter((m) => m.id !== "003-user-id" && m.id !== "004-capture-owners"), segmentation: MIGRATIONS.segmentation.filter((m) => m.id !== "002-user-id"), preparation: MIGRATIONS.preparation.filter((m) => m.id !== "003-user-id"), review: MIGRATIONS.review.filter((m) => m.id !== "002-user-id"), record: MIGRATIONS.record.filter((m) => m.id !== "004-user-id") };
       const a = openDb(path, old);
       const seq = a.nextSeq();
       expect(a.sql.query("SELECT name FROM sqlite_master WHERE name = 'users'").all()).toEqual([]);

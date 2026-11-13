@@ -173,7 +173,7 @@ describe("two users in one database: reviews", () => {
 });
 
 describe("a database from before reviews got user_id", () => {
-  const OLD = { ...MIGRATIONS, review: MIGRATIONS.review.filter((m) => m.id !== "002-user-id"), record: MIGRATIONS.record.filter((m) => !m.id.endsWith("-user-id")) };
+  const OLD = { ...MIGRATIONS, review: MIGRATIONS.review.filter((m) => m.id !== "002-user-id"), record: MIGRATIONS.record.filter((m) => m.id !== "004-user-id") };
   const CAPTURE = stableId("cap", "old");
   const REVIEW = stableId("rvw", "old");
   /** A real review's scope_json, so the reviews module can read it back after the upgrade. */

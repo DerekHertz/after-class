@@ -4,6 +4,10 @@
  * observation_decisions (user: dispute resolutions, overrides),
  * link_suggestions, link_decisions (user), saved_reviews.
  *
+ * One record serves one user (the `UserDb` it is built on): every query reads or writes with that user_id, and every key leads
+ * with it, because a link id derives from concept ids that all users who watch a lecture share. Note and observation ids
+ * derive from a review id, which belongs to one user (review/index.ts), so the ids another user presents match nothing here.
+ *
  * Per-actor tables, merged at read: the save writes only generated columns;
  * the user writes only *_edits / *_deletions / *_decisions.
  * R8: "Results from cancelled or outdated jobs never overwrite current preparation or my notes."
@@ -89,84 +93,90 @@ export function createRecord(db: UserDb, deps: {
   const now = () => Date.now();
   const pending = new Map<ReviewId, RecordBundle>();
 
+  const userId = db.userId;
   const q = {
-    tombstoned: db.sql.query<{ n: number }, [string]>(`SELECT COUNT(*) AS n FROM note_deletions WHERE note_id = ?`),
+    tombstoned: db.sql.query<{ n: number }, [string, string]>(`SELECT COUNT(*) AS n FROM note_deletions WHERE user_id = ? AND note_id = ?`),
     upsertNote: db.sql.query(
-      `INSERT INTO notes (id, review_id, concept_id, generated_json, saved_ms) VALUES (?1, ?2, ?3, ?4, ?5)
-       ON CONFLICT (id) DO UPDATE SET generated_json = excluded.generated_json`,
+      `INSERT INTO notes (user_id, id, ord, review_id, concept_id, generated_json, saved_ms)
+       VALUES (?1, ?2, (SELECT COALESCE(MAX(ord), 0) + 1 FROM notes WHERE user_id = ?1), ?3, ?4, ?5, ?6)
+       ON CONFLICT (user_id, id) DO UPDATE SET generated_json = excluded.generated_json`,
     ),
     // Add-only: a re-save never drops a citation, so it never releases evidence the note once held (R16).
-    noteEvidence: db.sql.query(`INSERT OR IGNORE INTO note_evidence (note_id, evidence_id) VALUES (?, ?)`),
+    noteEvidence: db.sql.query(`INSERT INTO note_evidence (user_id, note_id, evidence_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`),
     upsertObservation: db.sql.query(
-      `INSERT INTO observations (id, review_id, thread_id, claim_ids_json, concept_ids_json, proposed, facts_json, saved_ms, assessable)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-       ON CONFLICT (id) DO UPDATE SET claim_ids_json = excluded.claim_ids_json, concept_ids_json = excluded.concept_ids_json,
+      `INSERT INTO observations (user_id, id, ord, review_id, thread_id, claim_ids_json, concept_ids_json, proposed, facts_json, saved_ms, assessable)
+       VALUES (?1, ?2, (SELECT COALESCE(MAX(ord), 0) + 1 FROM observations WHERE user_id = ?1), ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+       ON CONFLICT (user_id, id) DO UPDATE SET claim_ids_json = excluded.claim_ids_json, concept_ids_json = excluded.concept_ids_json,
          proposed = excluded.proposed, facts_json = excluded.facts_json, assessable = excluded.assessable`,
     ),
     upsertLink: db.sql.query(
-      `INSERT INTO link_suggestions (id, review_id, from_concept, to_concept, type, evidence_json, rationale, saved_ms)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-       ON CONFLICT (id) DO UPDATE SET evidence_json = excluded.evidence_json, rationale = excluded.rationale`,
+      `INSERT INTO link_suggestions (user_id, id, ord, review_id, from_concept, to_concept, type, evidence_json, rationale, saved_ms)
+       VALUES (?1, ?2, (SELECT COALESCE(MAX(ord), 0) + 1 FROM link_suggestions WHERE user_id = ?1), ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+       ON CONFLICT (user_id, id) DO UPDATE SET evidence_json = excluded.evidence_json, rationale = excluded.rationale`,
     ),
-    savedCounts: db.sql.query<{ notes: number; observations: number; links: number }, [string, string, string]>(
-      `SELECT (SELECT COUNT(*) FROM notes WHERE review_id = ?1) AS notes,
-              (SELECT COUNT(*) FROM observations WHERE review_id = ?2) AS observations,
-              (SELECT COUNT(*) FROM link_suggestions WHERE review_id = ?3) AS links`,
+    savedCounts: db.sql.query<{ notes: number; observations: number; links: number }, [string, string]>(
+      `SELECT (SELECT COUNT(*) FROM notes WHERE user_id = ?1 AND review_id = ?2) AS notes,
+              (SELECT COUNT(*) FROM observations WHERE user_id = ?1 AND review_id = ?2) AS observations,
+              (SELECT COUNT(*) FROM link_suggestions WHERE user_id = ?1 AND review_id = ?2) AS links`,
     ),
-    savedAt: db.sql.query<{ n: number }, [string]>(`SELECT COUNT(*) AS n FROM saved_reviews WHERE review_id = ?`),
-    failedAt: db.sql.query<{ n: number }, [string]>(`SELECT COUNT(*) AS n FROM save_failures WHERE review_id = ?`),
+    savedAt: db.sql.query<{ n: number }, [string, string]>(`SELECT COUNT(*) AS n FROM saved_reviews WHERE user_id = ? AND review_id = ?`),
+    failedAt: db.sql.query<{ n: number }, [string, string]>(`SELECT COUNT(*) AS n FROM save_failures WHERE user_id = ? AND review_id = ?`),
     markFailed: db.sql.query(
-      `INSERT INTO save_failures (review_id, error, failed_ms) VALUES (?1, ?2, ?3)
-       ON CONFLICT (review_id) DO UPDATE SET error = excluded.error, failed_ms = excluded.failed_ms`,
+      `INSERT INTO save_failures (user_id, review_id, error, failed_ms) VALUES (?1, ?2, ?3, ?4)
+       ON CONFLICT (user_id, review_id) DO UPDATE SET error = excluded.error, failed_ms = excluded.failed_ms`,
     ),
     markEnded: db.sql.query(
-      `INSERT INTO save_failures (review_id, error, failed_ms) SELECT ?1, ?2, ?3
-       WHERE NOT EXISTS (SELECT 1 FROM saved_reviews WHERE review_id = ?1)
-       ON CONFLICT (review_id) DO NOTHING`,
+      `INSERT INTO save_failures (user_id, review_id, error, failed_ms) SELECT ?1, ?2, ?3, ?4
+       WHERE NOT EXISTS (SELECT 1 FROM saved_reviews WHERE user_id = ?1 AND review_id = ?2)
+       ON CONFLICT (user_id, review_id) DO NOTHING`,
     ),
-    clearFailed: db.sql.query(`DELETE FROM save_failures WHERE review_id = ?`),
+    clearFailed: db.sql.query(`DELETE FROM save_failures WHERE user_id = ? AND review_id = ?`),
     markSaved: db.sql.query(
-      `INSERT INTO saved_reviews (review_id, bundle_hash, saved_ms) VALUES (?1, ?2, ?3)
-       ON CONFLICT (review_id) DO UPDATE SET bundle_hash = excluded.bundle_hash, saved_ms = excluded.saved_ms`,
+      `INSERT INTO saved_reviews (user_id, review_id, bundle_hash, saved_ms) VALUES (?1, ?2, ?3, ?4)
+       ON CONFLICT (user_id, review_id) DO UPDATE SET bundle_hash = excluded.bundle_hash, saved_ms = excluded.saved_ms`,
     ),
     editNote: db.sql.query(
-      `INSERT INTO note_edits (note_id, text, edited_ms) VALUES (?1, ?2, ?3)
-       ON CONFLICT (note_id) DO UPDATE SET text = excluded.text, edited_ms = excluded.edited_ms`,
+      `INSERT INTO note_edits (user_id, note_id, text, edited_ms) VALUES (?1, ?2, ?3, ?4)
+       ON CONFLICT (user_id, note_id) DO UPDATE SET text = excluded.text, edited_ms = excluded.edited_ms`,
     ),
-    deleteNote: db.sql.query(`INSERT OR IGNORE INTO note_deletions (note_id, deleted_ms) VALUES (?, ?)`),
+    deleteNote: db.sql.query(`INSERT INTO note_deletions (user_id, note_id, deleted_ms) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`),
     decideLink: db.sql.query(
-      `INSERT INTO link_decisions (link_id, decision_json, decided_ms) VALUES (?1, ?2, ?3)
-       ON CONFLICT (link_id) DO UPDATE SET decision_json = excluded.decision_json, decided_ms = excluded.decided_ms`,
+      `INSERT INTO link_decisions (user_id, link_id, decision_json, decided_ms) VALUES (?1, ?2, ?3, ?4)
+       ON CONFLICT (user_id, link_id) DO UPDATE SET decision_json = excluded.decision_json, decided_ms = excluded.decided_ms`,
     ),
     decideObservation: db.sql.query(
-      `INSERT INTO observation_decisions (observation_id, kind, value, decided_ms) VALUES (?1, ?2, ?3, ?4)
-       ON CONFLICT (observation_id, kind) DO UPDATE SET value = excluded.value, decided_ms = excluded.decided_ms`,
+      `INSERT INTO observation_decisions (user_id, observation_id, kind, value, decided_ms) VALUES (?1, ?2, ?3, ?4, ?5)
+       ON CONFLICT (user_id, observation_id, kind) DO UPDATE SET value = excluded.value, decided_ms = excluded.decided_ms`,
     ),
-    notes: db.sql.query<NoteRow, [string | null, string | null]>(
+    notes: db.sql.query<NoteRow, [string, string | null, string | null]>(
       `SELECT n.id, n.review_id, n.concept_id, n.generated_json, e.text AS user_edit
-       FROM notes n LEFT JOIN note_edits e ON e.note_id = n.id
-       WHERE NOT EXISTS (SELECT 1 FROM note_deletions d WHERE d.note_id = n.id)
-         AND (?1 IS NULL OR n.review_id = ?1) AND (?2 IS NULL OR n.concept_id = ?2)
-       ORDER BY n.rowid`,
+       FROM notes n LEFT JOIN note_edits e ON e.user_id = n.user_id AND e.note_id = n.id
+       WHERE n.user_id = ?1
+         AND NOT EXISTS (SELECT 1 FROM note_deletions d WHERE d.user_id = n.user_id AND d.note_id = n.id)
+         AND (?2 IS NULL OR n.review_id = ?2) AND (?3 IS NULL OR n.concept_id = ?3)
+       ORDER BY n.ord`,
     ),
-    noteEvidenceOf: db.sql.query<{ evidence_id: string }, [string]>(`SELECT evidence_id FROM note_evidence WHERE note_id = ? ORDER BY evidence_id`),
+    noteEvidenceOf: db.sql.query<{ evidence_id: string }, [string, string]>(
+      `SELECT evidence_id FROM note_evidence WHERE user_id = ? AND note_id = ? ORDER BY evidence_id`,
+    ),
     deletedEvidence: db.sql.query<{ evidence_id: string; deleted_ms: number }, [string, string]>(
       `SELECT evidence_id, deleted_ms FROM evidence_deletions WHERE user_id = ? AND evidence_id IN (SELECT value FROM json_each(?)) ORDER BY evidence_id`,
     ),
-    observations: db.sql.query<ObservationRow, [string | null, string | null]>(
+    observations: db.sql.query<ObservationRow, [string, string | null, string | null]>(
       `SELECT o.id, o.review_id, o.thread_id, o.claim_ids_json, o.concept_ids_json, o.proposed, o.facts_json, o.assessable,
-         (SELECT value FROM observation_decisions WHERE observation_id = o.id AND kind = 'dispute_resolution') AS resolution,
-         (SELECT value FROM observation_decisions WHERE observation_id = o.id AND kind = 'override') AS override
+         (SELECT value FROM observation_decisions WHERE user_id = o.user_id AND observation_id = o.id AND kind = 'dispute_resolution') AS resolution,
+         (SELECT value FROM observation_decisions WHERE user_id = o.user_id AND observation_id = o.id AND kind = 'override') AS override
        FROM observations o
-       WHERE (?1 IS NULL OR o.review_id = ?1)
-         AND (?2 IS NULL OR EXISTS (SELECT 1 FROM json_each(o.concept_ids_json) WHERE value = ?2))
-       ORDER BY o.rowid`,
+       WHERE o.user_id = ?1
+         AND (?2 IS NULL OR o.review_id = ?2)
+         AND (?3 IS NULL OR EXISTS (SELECT 1 FROM json_each(o.concept_ids_json) WHERE value = ?3))
+       ORDER BY o.ord`,
     ),
-    links: db.sql.query<LinkRow, [string | null, string | null]>(
+    links: db.sql.query<LinkRow, [string, string | null, string | null]>(
       `SELECT l.id, l.from_concept, l.to_concept, l.type, l.evidence_json, l.rationale, d.decision_json
-       FROM link_suggestions l LEFT JOIN link_decisions d ON d.link_id = l.id
-       WHERE (?1 IS NULL OR l.review_id = ?1) AND (?2 IS NULL OR l.from_concept = ?2 OR l.to_concept = ?2)
-       ORDER BY l.rowid`,
+       FROM link_suggestions l LEFT JOIN link_decisions d ON d.user_id = l.user_id AND d.link_id = l.id
+       WHERE l.user_id = ?1 AND (?2 IS NULL OR l.review_id = ?2) AND (?3 IS NULL OR l.from_concept = ?3 OR l.to_concept = ?3)
+       ORDER BY l.ord`,
     ),
   };
 
@@ -186,24 +196,24 @@ export function createRecord(db: UserDb, deps: {
       let notes = 0;
       const cited = new Set<EvidenceId>(b.links.flatMap((l) => l.evidence));
       for (const n of b.notes) {
-        if (q.tombstoned.get(n.id)!.n > 0) continue;
-        q.upsertNote.run(n.id, n.reviewId, n.conceptId, JSON.stringify(n.generated), ms);
+        if (q.tombstoned.get(userId, n.id)!.n > 0) continue;
+        q.upsertNote.run(userId, n.id, n.reviewId, n.conceptId, JSON.stringify(n.generated), ms);
         for (const e of n.evidence) {
-          q.noteEvidence.run(n.id, e);
+          q.noteEvidence.run(userId, n.id, e);
           cited.add(e);
         }
         notes += 1;
       }
       for (const o of b.observations) {
-        q.upsertObservation.run(o.id, o.reviewId, o.threadId, JSON.stringify(o.claimIds), JSON.stringify(o.conceptIds), o.proposed, JSON.stringify(o.facts), ms, o.assessable ? 1 : 0);
+        q.upsertObservation.run(userId, o.id, o.reviewId, o.threadId, JSON.stringify(o.claimIds), JSON.stringify(o.conceptIds), o.proposed, JSON.stringify(o.facts), ms, o.assessable ? 1 : 0);
       }
-      for (const l of b.links) q.upsertLink.run(l.id, reviewId, l.from, l.to, l.type, JSON.stringify(l.evidence), l.rationale, ms);
+      for (const l of b.links) q.upsertLink.run(userId, l.id, reviewId, l.from, l.to, l.type, JSON.stringify(l.evidence), l.rationale, ms);
       // A re-save must not bring back evidence the user let go: a deleted note's citations, or evidence they deleted.
       const deleted = new Set(q.deletedEvidence.all(db.userId, JSON.stringify([...cited])).map((r) => r.evidence_id));
       deps.snapshotEvidenceInTx([...cited].filter((id) => !deleted.has(id)).sort());
       // Last, so the R16 hold on raw evidence lifts only once the snapshots exist.
-      q.markSaved.run(reviewId, b.hash, ms);
-      q.clearFailed.run(reviewId);
+      q.markSaved.run(userId, reviewId, b.hash, ms);
+      q.clearFailed.run(userId, reviewId);
       return { kind: "saved", notes, observations: b.observations.length, links: b.links.length } as const;
     });
   }
@@ -211,7 +221,7 @@ export function createRecord(db: UserDb, deps: {
   /** Outside the failed transaction, so it outlives the rollback. If even this cannot be written, the save still reports its failure. */
   function noteFailure(reviewId: ReviewId, error: string): SaveResult {
     try {
-      q.markFailed.run(reviewId, error, now());
+      q.markFailed.run(userId, reviewId, error, now());
     } catch {
       // the caller's retry is what matters; the marker is only a restart's memory of it
     }
@@ -220,7 +230,7 @@ export function createRecord(db: UserDb, deps: {
 
   async function save(reviewId: ReviewId): Promise<SaveResult> {
     // R15: "Retrying a save never creates a duplicate record." The rows are the first save's result, tombstoned notes included.
-    if (q.savedAt.get(reviewId)!.n > 0) return { kind: "saved", ...q.savedCounts.get(reviewId, reviewId, reviewId)! };
+    if (q.savedAt.get(userId, reviewId)!.n > 0) return { kind: "saved", ...q.savedCounts.get(userId, reviewId)! };
     let bundle: RecordBundle;
     try {
       bundle = await bundleFor(reviewId);
@@ -238,21 +248,21 @@ export function createRecord(db: UserDb, deps: {
   }
 
   function saveState(reviewId: ReviewId): ReviewSaveState {
-    if (q.savedAt.get(reviewId)!.n > 0) return "saved";
-    return q.failedAt.get(reviewId)!.n > 0 ? "save_pending" : "unsaved";
+    if (q.savedAt.get(userId, reviewId)!.n > 0) return "saved";
+    return q.failedAt.get(userId, reviewId)!.n > 0 ? "save_pending" : "unsaved";
   }
 
   function view(filter: { readonly reviewId?: ReviewId; readonly conceptId?: ConceptId }): RecordView {
     const reviewId = filter.reviewId ?? null;
     const conceptId = filter.conceptId ?? null;
 
-    const notes = q.notes.all(reviewId, conceptId).map((r) => ({
+    const notes = q.notes.all(userId, reviewId, conceptId).map((r) => ({
       id: r.id as NoteId,
       reviewId: r.review_id as ReviewId,
       conceptId: r.concept_id as ConceptId,
       generated: JSON.parse(r.generated_json) as NoteSegment[],
       userEdit: r.user_edit,
-      evidence: q.noteEvidenceOf.all(r.id).map((e) => e.evidence_id as EvidenceId),
+      evidence: q.noteEvidenceOf.all(userId, r.id).map((e) => e.evidence_id as EvidenceId),
     }));
 
     const turnsByReview = new Map<ReviewId, readonly Turn[]>();
@@ -261,7 +271,7 @@ export function createRecord(db: UserDb, deps: {
       if (!t) turnsByReview.set(id, (t = deps.turns(id)));
       return t;
     };
-    const observations = q.observations.all(reviewId, conceptId).map((r): Observation => {
+    const observations = q.observations.all(userId, reviewId, conceptId).map((r): Observation => {
       const rid = r.review_id as ReviewId;
       const threadId = r.thread_id as ThreadId;
       const turns = turnsOf(rid);
@@ -284,7 +294,7 @@ export function createRecord(db: UserDb, deps: {
       };
     });
 
-    const links = q.links.all(reviewId, conceptId).map((r) => ({
+    const links = q.links.all(userId, reviewId, conceptId).map((r) => ({
       id: r.id as LinkId,
       from: r.from_concept as ConceptId,
       to: r.to_concept as ConceptId,
@@ -305,12 +315,12 @@ export function createRecord(db: UserDb, deps: {
   return {
     save,
     saveState,
-    markEndedInTx: (reviewId) => void q.markEnded.run(reviewId, "the review ended and its save has not run yet", now()),
+    markEndedInTx: (reviewId) => void q.markEnded.run(userId, reviewId, "the review ended and its save has not run yet", now()),
     view,
-    editNote: (id, text) => void q.editNote.run(id, text, now()),
-    deleteNote: (id) => void q.deleteNote.run(id, now()),
-    decideLink: (id, decision) => void q.decideLink.run(id, JSON.stringify(decision), now()),
-    resolveDispute: (id, outcome) => void q.decideObservation.run(id, "dispute_resolution", outcome, now()),
-    overrideObservation: (id, status) => void q.decideObservation.run(id, "override", status, now()),
+    editNote: (id, text) => void q.editNote.run(userId, id, text, now()),
+    deleteNote: (id) => void q.deleteNote.run(userId, id, now()),
+    decideLink: (id, decision) => void q.decideLink.run(userId, id, JSON.stringify(decision), now()),
+    resolveDispute: (id, outcome) => void q.decideObservation.run(userId, id, "dispute_resolution", outcome, now()),
+    overrideObservation: (id, status) => void q.decideObservation.run(userId, id, "override", status, now()),
   };
 }
