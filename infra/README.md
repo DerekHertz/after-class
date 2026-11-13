@@ -121,7 +121,7 @@ Derek's first beta setup.
    - `ECR_REPOSITORY` from the `ecr_repository_name` output of `shared/`
    - `BETA_PUBLIC_CHECK` set to `false`, until `ingress_cidrs` includes `0.0.0.0/0`. A GitHub runner cannot reach the server while only Derek's address is allowed. The server's own check of `/health` still gates the deploy.
 
-5. Run the `deploy-beta` workflow from `master` and approve it. The app runs live, so the flow document's conditions for the first hosted live call apply: the spending limits are merged, Derek has set the amounts, and Derek approves the deploy. The deploy builds the arm64 image, pushes it to the shared repository by commit hash, and has the server pull it and restart the app. The server checks `/health` itself and rolls back to the previous image if the new one does not turn healthy. A healthy image is also saved on the server's data volume, and the workflow prints a warning if that save failed. From the allowed address, `curl <public_url>/health` returns `{"ok":true}`.
+5. Cut a release and deploy it, as in "Releases" below. The app runs live, so the flow document's conditions for the first hosted live call apply: the spending limits are merged, Derek has set the amounts, and Derek approves the deploy. The deploy builds the arm64 image, pushes it to the shared repository by commit hash, and has the server pull it and restart the app. The server checks `/health` itself and rolls back to the previous image if the new one does not turn healthy. A healthy image is also saved on the server's data volume, and the workflow prints a warning if that save failed. From the allowed address, `curl <public_url>/health` returns `{"ok":true}`.
 
 6. To open a shell, run `aws ssm start-session --target <instance_id output>`. This needs the Session Manager plugin for the AWS CLI on Derek's machine. The container logs are in the CloudWatch log group `/afterclass-beta`, in the streams `app` and `caddy`.
 
@@ -134,6 +134,33 @@ The app runs live, with Claude through the Messages API and Clerk sign-in, so it
 At every start of the app unit, `afterclass-fetch-keys` reads both parameters and writes `keys.env`, mode 0600 and owned by the container's user, into `/run/afterclass-app`. systemd creates that folder on tmpfs at each start and removes it at each stop. The script refuses a folder that is not on tmpfs, prints no value even under `bash -x`, and fails the start when a parameter is missing, empty, unreadable or longer than one line. The app container mounts the folder read-only at `/data/config`, where the image's `AFTERCLASS_CONFIG_DIR` points. The failure is a line that starts with `afterclass-fetch-keys:` in `journalctl -u afterclass-app`, and systemd tries again every 5 seconds.
 
 To rotate a key, put the new value with `--overwrite` and restart the app, through Session Manager: `systemctl restart afterclass-app`. A deploy restarts it too.
+
+## Releases
+
+A release is a `v<major>.<minor>.<patch>` tag on a commit on `master` whose `package.json` has the same version. The first is `v0.1.0`.
+
+1. In a pull request, set `version` in `package.json` to the new version, and merge it.
+2. Tag the merge commit and push the tag. The `release` workflow checks that the tag equals the package version and creates a GitHub Release with generated notes.
+
+   ```
+   git switch master && git pull
+   git tag -a v0.1.0 -m v0.1.0
+   git push origin v0.1.0
+   ```
+
+3. Deploy the tag, then approve the run in the `production` environment.
+
+   ```
+   gh workflow run deploy-beta --ref master -f tag=v0.1.0
+   ```
+
+   The workflow runs from `master`, because the environment allows no other branch. It checks out the tag, refuses a tag that does not equal the package version or whose commit is not on `master`, and deploys the image built from the tag's commit. The image tag on ECR and on the server is still that commit's hash. Redeploying an older tag is a rollback.
+
+Only Derek may create, move or delete a `v*` tag. The ruleset is `infra/github/tag-ruleset.json`. It applies to every account except the repository admin role, which on this personal repository is Derek alone. Because Derek bypasses it, the rule against force pushes does not stop Derek himself, so never move a pushed release tag. Apply it once:
+
+```
+gh api --method POST repos/DerekHertz/after-class/rulesets --input infra/github/tag-ruleset.json
+```
 
 ## Turning on HTTPS
 
