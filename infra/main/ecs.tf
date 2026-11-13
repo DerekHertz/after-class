@@ -45,7 +45,7 @@ data "aws_iam_policy_document" "execution" {
   statement {
     sid       = "EcrPull"
     actions   = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
-    resources = [aws_ecr_repository.api.arn]
+    resources = [local.ecr_repository_arn]
   }
 
   statement {
@@ -87,7 +87,7 @@ resource "aws_ecs_task_definition" "api" {
   container_definitions = jsonencode([
     {
       name      = "api"
-      image     = "${aws_ecr_repository.api.repository_url}:bootstrap"
+      image     = "${local.ecr_repository_url}:bootstrap"
       essential = true
 
       portMappings = [{ containerPort = var.container_port, protocol = "tcp" }]

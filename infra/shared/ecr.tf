@@ -1,3 +1,4 @@
+# The one image repository for the beta and the future ECS stack, so the same image moves between them.
 resource "aws_ecr_repository" "api" {
   name = "${var.name}-api"
 
