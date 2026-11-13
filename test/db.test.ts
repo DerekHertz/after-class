@@ -102,13 +102,13 @@ describe("R17: Every paid call records a usage event; unknown cost is stored as 
 
 function seedCapture(db: Db, captureId: string) {
   db.sql
-    .query("INSERT INTO capture_facts (seq, capture_id, client_seq, wall_ms, kind, body_json, received_ms) VALUES (?, ?, 0, 0, 'span', '{}', 0)")
-    .run(db.nextSeq(), captureId);
+    .query("INSERT INTO capture_facts (user_id, seq, capture_id, client_seq, wall_ms, kind, body_json, received_ms) VALUES (?, ?, ?, 0, 0, 'span', '{}', 0)")
+    .run(ensureLocalUser(db), db.nextSeq(), captureId);
   db.sql
     .query(
-      "INSERT INTO frames (evidence_id, capture_id, source_id, frame_id, media_s, width, height, path, seq) VALUES ('ev_f', ?, 'src_1', 'f1', 1, 1280, 720, '/tmp/f.jpg', ?)",
+      "INSERT INTO frames (user_id, evidence_id, capture_id, source_id, frame_id, media_s, width, height, path, seq) VALUES (?, 'ev_f', ?, 'src_1', 'f1', 1, 1280, 720, '/tmp/f.jpg', ?)",
     )
-    .run(captureId, db.nextSeq());
+    .run(LOCAL_USER, captureId, db.nextSeq());
 }
 
 function startReview(db: Db, reviewId: string, captureId: string) {
@@ -119,9 +119,9 @@ function startReview(db: Db, reviewId: string, captureId: string) {
 
 describe("R16: Evidence cited by a saved note is only deleted when I delete it, never by expiry.", () => {
   function snapshotCitedBy(db: Db, noteId: string) {
-    db.sql.run(
-      "INSERT INTO evidence_snapshots (evidence_id, kind, source_id, start_s, end_s, text, created_ms) VALUES ('ev_p', 'passage', 'src_1', 1, 2, 'Ax = b', 0)",
-    );
+    db.sql
+      .query("INSERT INTO evidence_snapshots (user_id, evidence_id, kind, source_id, start_s, end_s, text, created_ms) VALUES (?, 'ev_p', 'passage', 'src_1', 1, 2, 'Ax = b', 0)")
+      .run(ensureLocalUser(db));
     db.sql.query("INSERT INTO note_evidence (note_id, evidence_id) VALUES (?, 'ev_p')").run(noteId);
   }
 
@@ -142,7 +142,7 @@ describe("R16: Evidence cited by a saved note is only deleted when I delete it, 
   test("the user deleting the evidence itself releases it", () => {
     const db = testDb();
     snapshotCitedBy(db, "note_1");
-    db.sql.query("INSERT INTO evidence_deletions (evidence_id, request_id, deleted_ms, seq) VALUES ('ev_p', 'req_1', 0, ?)").run(db.nextSeq());
+    db.sql.query("INSERT INTO evidence_deletions (user_id, evidence_id, request_id, deleted_ms, seq) VALUES (?, 'ev_p', 'req_1', 0, ?)").run(LOCAL_USER, db.nextSeq());
     db.sql.run("DELETE FROM evidence_snapshots");
     expect(db.sql.query("SELECT count(*) AS n FROM evidence_snapshots").get()).toEqual({ n: 0 });
   });
@@ -238,7 +238,7 @@ describe("users", () => {
 
   test("a database from before the users migration gains the table and one user, and keeps its data", () => {
     withFile((path) => {
-      const old = { ...MIGRATIONS, kernel: MIGRATIONS.kernel.filter((m) => m.id !== "002-users"), providers: MIGRATIONS.providers.filter((m) => m.id !== "004-user-id"), segmentation: MIGRATIONS.segmentation.filter((m) => m.id !== "002-user-id"), preparation: MIGRATIONS.preparation.filter((m) => m.id !== "003-user-id") };
+      const old = { ...MIGRATIONS, kernel: MIGRATIONS.kernel.filter((m) => m.id !== "002-users"), providers: MIGRATIONS.providers.filter((m) => m.id !== "004-user-id"), evidence: MIGRATIONS.evidence.filter((m) => m.id !== "003-user-id" && m.id !== "004-capture-owners"), segmentation: MIGRATIONS.segmentation.filter((m) => m.id !== "002-user-id"), preparation: MIGRATIONS.preparation.filter((m) => m.id !== "003-user-id") };
       const a = openDb(path, old);
       const seq = a.nextSeq();
       expect(a.sql.query("SELECT name FROM sqlite_master WHERE name = 'users'").all()).toEqual([]);

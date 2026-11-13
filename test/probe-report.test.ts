@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { openDb } from "../src/backend/db";
+import { ensureLocalUser, openDb, scopeDb } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
 import type { EvidenceBundleJson } from "../src/backend/evidence";
 import { randomId, stableId } from "../src/shared/ids";
@@ -319,7 +319,8 @@ describe("probe-export on a data dir", () => {
 
   function fabricate(): string {
     const dataDir = tmpDir("afterclass-probe-test-");
-    const db = openDb(join(dataDir, "afterclass.sqlite"));
+    const raw = openDb(join(dataDir, "afterclass.sqlite"));
+    const db = scopeDb(raw, ensureLocalUser(raw));
     const evidence = createEvidence(db, dataDir, {
       lookupFrameChange: () => ({ kind: "missing", key: stableId("key", "x") }),
       runFrameChange: async () => undefined,

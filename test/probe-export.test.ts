@@ -6,7 +6,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { openDb } from "../src/backend/db";
+import { ensureLocalUser, openDb, scopeDb } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
 import { randomId, stableId } from "../src/shared/ids";
 import type { CaptureId, MemoKey } from "../src/shared/ids";
@@ -42,7 +42,8 @@ describe("pickCapture", () => {
 describe("exportCapture default capture", () => {
   function twoCaptures() {
     const dir = tmpDir("afterclass-probe-export-");
-    const db = openDb(join(dir, "afterclass.sqlite"));
+    const raw = openDb(join(dir, "afterclass.sqlite"));
+    const db = scopeDb(raw, ensureLocalUser(raw));
     const keyOf = (input: { readonly after: { readonly frame: { readonly id: string } } }): MemoKey => stableId("key", "frame_change", input.after.frame.id);
     const evidence = createEvidence(db, dir, {
       lookupFrameChange: (input) => ({ kind: "missing", key: keyOf(input) }),

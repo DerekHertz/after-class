@@ -429,7 +429,7 @@ export async function main(options: MainOptions = {}): Promise<Running> {
   });
 
   // Every capture that may still have work: those on disk now, plus any ingested since. A stopped capture keeps preparing.
-  const captures = new Set<CaptureId>(db.sql.query<{ capture_id: string }, []>("SELECT DISTINCT capture_id FROM capture_facts").all().map((r) => r.capture_id as CaptureId));
+  const captures = new Set<CaptureId>(evidence.captures());
 
   const perCapture = (where: string, items: (captureId: CaptureId) => readonly WorkItem[]) => (): readonly WorkItem[] =>
     [...captures].flatMap((captureId) => {

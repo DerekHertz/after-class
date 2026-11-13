@@ -427,6 +427,145 @@ ALTER TABLE evidence_snapshots ADD COLUMN width INTEGER;
 ALTER TABLE evidence_snapshots ADD COLUMN height INTEGER;
 CREATE INDEX frames_by_capture ON frames (capture_id);`,
     },
+    {
+      id: "003-user-id",
+      sql: `
+-- Every evidence row belongs to a user. SQLite cannot add a NOT NULL column that references users, and the keys widen to
+-- (user_id, ...) because passage evidence ids are derived from the transcript, so two users who watch the same video and
+-- interval get the same id. Each table is rebuilt: rows are saved, the table and its triggers are dropped (DROP does not fire
+-- triggers), the table is made again with user_id, and the rows go back as the local user.
+-- Existing rows can only be the local app's, so the local user's row is inserted here when there is any evidence to attach it to.
+-- A fresh database gets its user from ensureLocalUser at boot, as before.
+INSERT INTO users (id, created_ms)
+SELECT '${stableId("usr", "local")}', COALESCE((SELECT MIN(received_ms) FROM capture_facts), (SELECT MIN(created_ms) FROM evidence_snapshots),
+  (SELECT MIN(deleted_ms) FROM evidence_deletions), 0)
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE id = '${stableId("usr", "local")}')
+  AND (EXISTS (SELECT 1 FROM capture_facts) OR EXISTS (SELECT 1 FROM frames) OR EXISTS (SELECT 1 FROM evidence_snapshots)
+    OR EXISTS (SELECT 1 FROM evidence_deletions));
+
+CREATE TABLE capture_facts_save AS SELECT seq, capture_id, client_seq, wall_ms, kind, body_json, received_ms FROM capture_facts;
+CREATE TABLE frames_save AS SELECT evidence_id, capture_id, source_id, frame_id, media_s, width, height, path, seq FROM frames;
+CREATE TABLE evidence_snapshots_save AS SELECT evidence_id, kind, source_id, start_s, end_s, text, frame_path, created_ms, transcript_rev_id, origin,
+  width, height FROM evidence_snapshots;
+CREATE TABLE evidence_deletions_save AS SELECT evidence_id, request_id, deleted_ms, seq FROM evidence_deletions;
+DROP TABLE capture_facts;
+DROP TABLE frames;
+DROP TABLE evidence_snapshots;
+DROP TABLE evidence_deletions;
+
+CREATE TABLE capture_facts (
+  seq INTEGER PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  capture_id TEXT NOT NULL,
+  client_seq INTEGER NOT NULL CHECK (client_seq >= 0),
+  wall_ms REAL NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('control','source','transcript','transcript_unavailable','span','ad','frame','channel','transcription_choice')),
+  body_json TEXT NOT NULL,
+  received_ms INTEGER NOT NULL,
+  UNIQUE (user_id, capture_id, client_seq)
+) STRICT;
+INSERT INTO capture_facts (seq, user_id, capture_id, client_seq, wall_ms, kind, body_json, received_ms)
+SELECT seq, '${stableId("usr", "local")}', capture_id, client_seq, wall_ms, kind, body_json, received_ms FROM capture_facts_save ORDER BY seq;
+CREATE INDEX capture_facts_by_capture ON capture_facts (user_id, capture_id);
+${appendOnly("capture_facts")}
+
+CREATE TABLE frames (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  evidence_id TEXT NOT NULL,
+  capture_id TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  frame_id TEXT NOT NULL,
+  media_s REAL NOT NULL CHECK (media_s >= 0),
+  width INTEGER NOT NULL CHECK (width BETWEEN 280 AND 1568),
+  height INTEGER NOT NULL CHECK (height BETWEEN 280 AND 1568),
+  path TEXT NOT NULL,
+  seq INTEGER NOT NULL UNIQUE,
+  PRIMARY KEY (user_id, evidence_id),
+  UNIQUE (user_id, capture_id, frame_id)
+) STRICT;
+INSERT INTO frames (user_id, evidence_id, capture_id, source_id, frame_id, media_s, width, height, path, seq)
+SELECT '${stableId("usr", "local")}', evidence_id, capture_id, source_id, frame_id, media_s, width, height, path, seq FROM frames_save ORDER BY seq;
+CREATE INDEX frames_by_source ON frames (user_id, source_id, media_s);
+CREATE INDEX frames_by_capture ON frames (user_id, capture_id);
+${appendOnly("frames")}
+
+CREATE TABLE evidence_snapshots (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  evidence_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('passage','frame')),
+  source_id TEXT NOT NULL,
+  start_s REAL NOT NULL CHECK (start_s >= 0),
+  end_s REAL NOT NULL CHECK (end_s >= start_s),
+  text TEXT,
+  frame_path TEXT,
+  created_ms INTEGER NOT NULL,
+  transcript_rev_id TEXT,
+  origin TEXT,
+  width INTEGER,
+  height INTEGER,
+  PRIMARY KEY (user_id, evidence_id),
+  CHECK ((kind = 'passage') = (text IS NOT NULL)),
+  CHECK ((kind = 'frame') = (frame_path IS NOT NULL))
+) STRICT;
+INSERT INTO evidence_snapshots (user_id, evidence_id, kind, source_id, start_s, end_s, text, frame_path, created_ms, transcript_rev_id, origin, width, height)
+SELECT '${stableId("usr", "local")}', evidence_id, kind, source_id, start_s, end_s, text, frame_path, created_ms, transcript_rev_id, origin, width, height
+FROM evidence_snapshots_save;
+${appendOnly("evidence_snapshots", "R16")}
+
+CREATE TABLE evidence_deletions (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  evidence_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  deleted_ms INTEGER NOT NULL,
+  seq INTEGER NOT NULL UNIQUE,
+  PRIMARY KEY (user_id, evidence_id)
+) STRICT;
+INSERT INTO evidence_deletions (user_id, evidence_id, request_id, deleted_ms, seq)
+SELECT '${stableId("usr", "local")}', evidence_id, request_id, deleted_ms, seq FROM evidence_deletions_save ORDER BY seq;
+
+DROP TABLE capture_facts_save;
+DROP TABLE frames_save;
+DROP TABLE evidence_snapshots_save;
+DROP TABLE evidence_deletions_save;
+
+-- R16: "Evidence cited by a saved note is only deleted when I delete it, never by expiry."
+-- Same triggers as 001, with the user's own tombstone as the release. note_evidence and reviews have no user_id until the
+-- record and review migrations, so a note or review of another user that cites the same evidence id also holds it: the
+-- safe direction, and record's migration narrows it.
+CREATE TRIGGER evidence_snapshots_r16 BEFORE DELETE ON evidence_snapshots
+WHEN EXISTS (
+    SELECT 1 FROM note_evidence ne
+    WHERE ne.evidence_id = OLD.evidence_id
+      AND NOT EXISTS (SELECT 1 FROM note_deletions nd WHERE nd.note_id = ne.note_id))
+  AND NOT EXISTS (SELECT 1 FROM evidence_deletions d WHERE d.user_id = OLD.user_id AND d.evidence_id = OLD.evidence_id)
+BEGIN SELECT RAISE(ABORT, 'R16: evidence cited by a note is deleted only by the user'); END;
+
+CREATE TRIGGER capture_facts_r16 BEFORE DELETE ON capture_facts
+WHEN ${PENDING_SAVE_HOLDS("OLD.capture_id")}
+BEGIN SELECT RAISE(ABORT, 'R16: raw evidence of an unsaved review is held'); END;
+
+CREATE TRIGGER frames_r16 BEFORE DELETE ON frames
+WHEN ${PENDING_SAVE_HOLDS("OLD.capture_id")}
+  AND NOT EXISTS (SELECT 1 FROM evidence_deletions d WHERE d.user_id = OLD.user_id AND d.evidence_id = OLD.evidence_id)
+BEGIN SELECT RAISE(ABORT, 'R16: frames of an unsaved review are held'); END;`,
+    },
+    {
+      id: "004-capture-owners",
+      sql: `
+-- A capture id belongs to the first user that ingests it, for good. Frame evidence ids and file paths derive from the capture id,
+-- so this keeps them unique to one user even after expiry deletes the capture's facts. Backfilled from the rows that exist.
+CREATE TABLE capture_owners (
+  capture_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  claimed_ms INTEGER NOT NULL
+) STRICT;
+INSERT INTO capture_owners (capture_id, user_id, claimed_ms)
+SELECT capture_id, MIN(user_id), MIN(received_ms) FROM capture_facts GROUP BY capture_id;
+INSERT INTO capture_owners (capture_id, user_id, claimed_ms)
+SELECT capture_id, MIN(user_id), 0 FROM frames
+WHERE capture_id NOT IN (SELECT capture_id FROM capture_owners) GROUP BY capture_id;
+${appendOnly("capture_owners")}`,
+    },
   ],
 
   segmentation: [
@@ -802,6 +941,7 @@ export const TABLE_SCOPES: { readonly [table: string]: TableScope } = {
   frames: "user",
   evidence_snapshots: "user",
   evidence_deletions: "user",
+  capture_owners: "user",
   chunk_revisions: "user",
   claim_index: "user",
   concept_index: "user", // content-derived, but carries a per-pipeline seq

@@ -388,11 +388,14 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
   const linkId = matched.params.linkId as LinkId | undefined;
   const observationId = matched.params.observationId as ObservationId | undefined;
   try {
+    // Another user's capture answers as one this caller cannot see. An id nobody has ingested keeps its empty view.
+    if (captureId !== undefined && evidence.capturedByAnotherUser(captureId)) return failure(404, "unknown capture", cors);
     switch (name) {
       case "ingest": {
         const raw = await readJson(req);
         assertNoForeignFacts(raw);
         const batch = parseIngestBatch(raw);
+        if (evidence.capturedByAnotherUser(batch.captureId)) return failure(404, "unknown capture", cors);
         let ackedThroughSeq: number;
         try {
           ({ ackedThroughSeq } = evidence.ingest(batch));
@@ -528,6 +531,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
       }
       case "evidence": {
         const q = parseQuery("evidence", new URL(req.url)) as { material: Material } | { ids: EvidenceId[] } | { captureId: CaptureId };
+        if ("captureId" in q && evidence.capturedByAnotherUser(q.captureId)) return failure(404, "unknown capture", cors);
         const bundle =
           "material" in q ? evidence.bundle(q.material)
           : "ids" in q ? evidenceByIds(evidence, q.ids)
@@ -541,6 +545,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
       }
       case "deleteEvidence": {
         const { evidenceIds } = parseEvidenceDeleteRequest(await readJson(req));
+        if (evidence.heldByAnotherUser(evidenceIds)) return failure(404, "unknown evidence", cors);
         evidence.deleteByUser(evidenceIds, crypto.randomUUID());
         return noContent(cors);
       }
