@@ -80,12 +80,20 @@
 /* The topic heading shares its row with Show diagram, so the diagram costs the board no extra line. */
 .front-row-scene .front-row-heading { display: flex; align-items: center; gap: 8px 14px; margin: 0 0 10px; }
 .front-row-scene .front-row-heading .show-diagram { flex: none; white-space: nowrap; }
-/* The label sits in a middle column that takes its full one-line width when the row has room, between two equal side columns, so it
-   reads as centred. The right column never gets narrower than Show diagram, so the label wraps, breaking a long word if it must,
-   before it can reach the button. */
-.front-row-scene[data-board-align="center"] .front-row-heading { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, max-content) minmax(max-content, 1fr); align-items: center; min-height: 44px; }
-.front-row-scene[data-board-align="center"] .front-row-heading .front-row-eyebrow { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
-.front-row-scene[data-board-align="center"] .front-row-heading .show-diagram { grid-column: 3; justify-self: end; }
+/* The label sits in a middle column between two side columns that are never narrower than Show diagram, so it stays centred
+   and wraps, breaking a long word if it must, before it can reach the button. The left column holds an invisible copy of the
+   button's text in the button's board font, padding and border, so both side columns reserve the same width. */
+.front-row-scene[data-board-align="center"] .front-row-heading { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(0, max-content) minmax(max-content, 1fr); align-items: center; min-height: 44px; }
+.front-row-scene[data-board-align="center"] .front-row-heading::before { content: "Show diagram"; grid-column: 1; grid-row: 1; visibility: hidden; white-space: nowrap; padding: 6px 12px; border: 2px solid transparent; font: 500 1rem/1.15 'After Class Pixel', var(--font); }
+.front-row-scene[data-board-align="center"] .front-row-heading .front-row-eyebrow { grid-column: 2; grid-row: 1; min-width: 0; overflow-wrap: anywhere; text-align: center; }
+.front-row-scene[data-board-align="center"] .front-row-heading .show-diagram { grid-column: 3; grid-row: 1; justify-self: end; }
+/* A board too narrow for the label between two button-wide columns puts the label on its own centred line and Show diagram under it. */
+.front-row-scene[data-board-align="center"] .current-exchange { container: exchange / inline-size; }
+@container exchange (max-width: 32rem) {
+  .front-row-scene[data-board-align="center"] .front-row-heading { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 8px; }
+  .front-row-scene[data-board-align="center"] .front-row-heading::before { display: none; }
+  .front-row-scene[data-board-align="center"] .front-row-heading :is(.front-row-eyebrow, .show-diagram) { grid-column: 1; grid-row: auto; justify-self: center; }
+}
 /* A long label wraps, breaking a long word if it must, so it never pushes into Show diagram. */
 .front-row-scene .front-row-eyebrow { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; display: flex; align-items: center; gap: 14px; margin: 0; color: var(--fr-board-ink-soft); font: 600 clamp(.9rem, 1.25cqw, 1.2rem)/1.2 'After Class Pixel', var(--font); letter-spacing: .14em; text-transform: uppercase; }
 .front-row-scene .front-row-eyebrow::after { content: ""; flex: 1 1 3em; max-width: 14em; height: 3px; background: currentColor; }

@@ -61,6 +61,29 @@ const longLabels = [
 ];
 for (const scene of Object.keys(SCENES)) {
   for (const size of [...windows, { width: 390, height: 844 }, { width: 320, height: 700 }]) {
+    for (const label of ["Recursion", "Dynamic programming and memoised recursion over subproblems"]) {
+      test(`in ${scene} at ${size.width}x${size.height} the label "${label.slice(0, 20)}" stays centred when the room centres its heading`, async ({ page }) => {
+        await page.setViewportSize(size);
+        await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene } });
+        await page.goto("/?scenario=review&clean=1");
+        await expect(page.locator(".front-row-heading .show-diagram")).toBeVisible();
+        test.skip((await page.locator(".front-row-scene").getAttribute("data-board-align")) !== "center", "this room's heading is start-aligned");
+        await page.evaluate(() => document.fonts.ready);
+        const offset = await page.evaluate((text) => {
+          const eyebrow = document.querySelector(".front-row-eyebrow")!;
+          eyebrow.lastChild!.textContent = text;
+          const e = eyebrow.getBoundingClientRect();
+          const h = document.querySelector(".front-row-heading")!.getBoundingClientRect();
+          return Math.abs((e.left + e.right) / 2 - (h.left + h.right) / 2);
+        }, label);
+        expect(offset).toBeLessThanOrEqual(2);
+      });
+    }
+  }
+}
+
+for (const scene of Object.keys(SCENES)) {
+  for (const size of [...windows, { width: 390, height: 844 }, { width: 320, height: 700 }]) {
     test(`in ${scene} at ${size.width}x${size.height} a long topic label wraps before it reaches Show diagram`, async ({ page }) => {
       await page.setViewportSize(size);
       await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene } });
@@ -77,7 +100,7 @@ for (const scene of Object.keys(SCENES)) {
           const button = document.querySelector(".front-row-heading .show-diagram")!.getBoundingClientRect();
           const heading = document.querySelector(".front-row-heading")!.getBoundingClientRect();
           const hits = rects.some((r) => r.left < button.right && button.left < r.right && r.top < button.bottom && button.top < r.bottom);
-          const outside = rects.some((r) => r.left < heading.left - 1 || r.right > heading.right + 1);
+          const outside = rects.length === 0 || rects.some((r) => r.width === 0 || r.left < heading.left - 1 || r.right > heading.right + 1 || r.top < heading.top - 1 || r.bottom > heading.bottom + 1);
           return { hits, outside, lines: rects.length };
         }, label);
         expect({ scene, size, label, hits: result.hits, outside: result.outside }).toEqual({ scene, size, label, hits: false, outside: false });
