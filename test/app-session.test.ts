@@ -126,6 +126,50 @@ describe("review session controller", () => {
     expect(fresh.sends).toEqual([{ turnId: stableId("turn", "l2"), act: { kind: "end" } }]);
   });
 
+  test("R15: a stored turn whose stream failed while the view refresh also failed is still resent under its own id", async () => {
+    const acts: LearnerAct[] = [{ kind: "end" }, answer];
+    for (const act of acts) {
+      let refreshes = 0;
+      const h = setup({
+        review: () => {
+          if (refreshes++ === 0) throw new Error("network down");
+          return parsedReview();
+        },
+        sendTurn: ({ turnId }, n) =>
+          n === 0
+            ? events({ type: "learner_turn_stored", turnId }, { type: "turn_failed", error: "tutor down", retryable: true })
+            : events({ type: "learner_turn_stored", turnId }, { type: "turn_complete", turnId }),
+      });
+      await h.controller.send(act);
+      expect(h.controller.getState()).toMatchObject({ live: { status: "failed" }, loadError: "network down", unsent: [] });
+      expect(h.controller.getState().view).toBeNull();
+      await h.controller.retryTurn();
+      expect(h.sends).toHaveLength(2);
+      expect(h.sends[1]).toEqual(h.sends[0]!);
+      expect(h.controller.getState().live).toBeNull();
+    }
+  });
+
+  test("R15: a connection that drops after the backend stored the turn leaves a Retry that resends it", async () => {
+    let refreshes = 0;
+    const h = setup({
+      review: () => {
+        if (refreshes++ === 0) throw new Error("network down");
+        return parsedReview();
+      },
+      sendTurn: async function* ({ turnId }, n) {
+        yield { type: "learner_turn_stored", turnId };
+        if (n === 0) throw new ApiError("connection reset", 503);
+        yield { type: "turn_complete", turnId };
+      },
+    });
+    await h.controller.send({ kind: "end" });
+    expect(h.controller.getState().live).toMatchObject({ status: "failed", retryable: true });
+    await h.controller.retryTurn();
+    expect(h.sends).toEqual([h.sends[0]!, h.sends[0]!]);
+    expect(h.controller.getState().live).toBeNull();
+  });
+
   test("an HTTP failure before the stream starts leaves the turn unsent and marks it retryable by status", async () => {
     const h = setup({
       // A failed async iterator rejects on next(), before yielding any event.

@@ -8,7 +8,9 @@
  *   stream → `learner_turn_stored` removes it from the store.
  * A turn that failed before it was stored is resent from the store with its
  * original id. A stored turn the tutor never answered is resent from the
- * review view, again with its original id.
+ * review view, again with its original id. When that view cannot show the turn
+ * (its refresh failed), the failed live turn is resent from the controller's
+ * own record of it.
  *
  * While an unsent turn exists, `send` is refused: the oldest unsent turn must
  * be resent first, so turns reach the backend in the order the learner made
@@ -106,6 +108,8 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
   let state: SessionState = { view: null, loadError: null, live: null, unsent: [], storageDegraded: false, sendError: null, saving: false, busy: false, saveError: null, savedSummary: null };
   const listeners = new Set<() => void>();
   let streaming = false;
+  /** The act of the latest turn, kept past the unsent row's removal so Retry can resend a failed live turn that no view shows. */
+  let lastRun: { readonly turnId: TurnId; readonly act: LearnerAct } | null = null;
 
   const set = (patch: Partial<SessionState>) => {
     state = { ...state, ...patch };
@@ -141,6 +145,7 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
 
   async function runTurn(turnId: TurnId, act: LearnerAct): Promise<void> {
     speaker.beginTurn();
+    lastRun = { turnId, act };
     set({ live: startLive(turnId) });
     let wrappedUp = false;
     try {
@@ -233,6 +238,8 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
         if (owed) return runTurn(owed.id, owed.act);
         const stranded = state.view ? strandedEndTurn(state.view) : null;
         if (stranded) return runTurn(stranded.id, stranded.act);
+        // The stream failed after the backend stored the turn and the view refresh failed too: nothing above can see the turn.
+        if (lastRun && state.live?.status === "failed" && state.live.turnId === lastRun.turnId) return runTurn(lastRun.turnId, lastRun.act);
       }),
     discardUnsent: async () => {
       await exclusive(async () => {
