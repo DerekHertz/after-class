@@ -12,7 +12,7 @@
  * `at` returns the event's own return value, so an async caller may `await il.at(...)` to hold its
  * first event until the second has finished. Each registered event fires once, at the first hit.
  */
-export type Interleave = {
+type Interleave = {
   /** Register the event to run when `name` is first hit. */
   on(name: string, event: () => unknown): void;
   /** Call at the interleaving point. Runs the registered event, if any and not yet fired. */

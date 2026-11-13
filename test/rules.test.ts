@@ -35,13 +35,6 @@ describe("Derek's rules are quoted verbatim", () => {
   });
 });
 
-describe("Derek's rules", () => {
-  test.todo("R3 a header with a non-assessable claim id is rejected before any word streams; assessable() returns null unless supported_by_check (W8: validateMove; W6: assessable)");
-  test.todo("R6 options() is ready with resource search pending or failed (W7)");
-  test.todo("R8 a hit stored after the stop-early Seq leaves the claim dropped; an outdated input key is never selected; save never writes note_edits (W6, W8)");
-  test.todo("R15 save twice ⇒ identical row counts and IDs; a resent turn or start with the same app-minted id inserts nothing (W8, W7)");
-});
-
 describe("the diagram lines and R19 are in the flow doc byte for byte (Derek: \"Approve as written\", 2026-11-06)", () => {
   const doc = readFileSync(join(ROOT, "docs/flows/after-class.md"), "utf8");
   const SHOW = [

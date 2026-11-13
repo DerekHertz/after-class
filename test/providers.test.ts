@@ -115,9 +115,10 @@ describe("Jev client", () => {
     });
 
     test("a reference in question text counts", async () => {
-      const { fetch } = scriptedFetch(() => json(answersBody({ q: { type: "noul", noul: 0.5 } })));
+      const { fetch, seen } = scriptedFetch(() => json(answersBody({ q: { type: "noul", noul: 0.5 } })));
       const req = noulReq({ images: [okImage], questions: { q: { type: "noul", instructions: "Does frame_0 show an equation?" } } });
       await createJevClient({ apiKey: "k", fetch }).ask(req, NEVER);
+      expect(seen).toHaveLength(1);
     });
 
     test("reads sizes and formats from the bytes", () => {

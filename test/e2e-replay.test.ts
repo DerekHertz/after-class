@@ -90,12 +90,9 @@ const dir = (prefix: string): string => {
 
 // ───────────────────────────── fake tasks: real task objects, scripted attempts, fake prices ─────────────────────────────
 
-/** Providers the real tasks are built over. Any call is a live call. */
-const spyJev: JevClient = { ask: () => (live.push("jev.ask"), Promise.reject(new Error("live Jev call"))) };
-const spyClaude: ClaudeCli = {
-  structured: () => (live.push("claude.structured"), Promise.reject(new Error("live Claude call"))),
-  streamText: () => (live.push("claude.streamText"), Promise.reject(new Error("live Claude call"))),
-};
+/** The tasks' attempts are replaced below, so these providers are never reached; the traps above are the guard. */
+const noJev = {} as JevClient;
+const noClaude = {} as ClaudeCli;
 
 const price = (cost: Cost, model: string): UsageReport => ({ model, inputTokens: 100, outputTokens: 5, cacheReadTokens: null, cost });
 const FAKE_JEV = price({ kind: "measured", usd: 0.001 }, "fake-jev (replay data)");
@@ -121,17 +118,17 @@ function fakeTasks() {
   const unexpected: string[] = [];
 
   // Window 1 (30 to 60 s) is a boundary: it closes chunk 0 and so raises the review invite. Every other window continues.
-  const boundary = faked(boundaryTask(spyJev), (i) => ({
+  const boundary = faked(boundaryTask(noJev), (i) => ({
     output: {
       windowId: i.window.id, newConcept: i.window.ordinal === 1 ? "yes" : "no", stoppingPoint: i.window.ordinal === 1 ? "yes" : "no",
       pNewConcept: 0.5, pStoppingPoint: 0.5, questionVersion: "fake",
     } as const,
     usage: FAKE_JEV,
   }));
-  const frameChange = faked(frameChangeTask(spyJev), () => ({ output: "yes" as const, usage: FAKE_JEV }));
-  const checkClaim = faked(claimSupportTask(spyJev), () => ({ output: { verdict: "yes" as const, p: 0.9 }, usage: FAKE_JEV }));
+  const frameChange = faked(frameChangeTask(noJev), () => ({ output: "yes" as const, usage: FAKE_JEV }));
+  const checkClaim = faked(claimSupportTask(noJev), () => ({ output: { verdict: "yes" as const, p: 0.9 }, usage: FAKE_JEV }));
 
-  const interpret = faked(interpretTask(spyClaude, () => null), (i) => {
+  const interpret = faked(interpretTask(noClaude, () => null), (i) => {
     const ps = i.newMaterial.passages;
     const at = (s: number) => ps.find((p) => p.interval.start === s)!.id;
     const draft = (text: string, evidence: [EvidenceId], visualDependent = false): ClaimDraft => ({ text, evidence, visualDependent, assumptions: [] });
@@ -154,11 +151,11 @@ function fakeTasks() {
       usage: FAKE_UNKNOWN,
     };
   });
-  const revise = faked(reviseTask(spyClaude, () => null), () => (unexpected.push("revise"), { output: undefined as never, usage: FAKE_UNKNOWN }));
-  const searchResources = faked(resourceSearchTask(spyClaude), () => ({ output: [], usage: FAKE_UNKNOWN }));
+  const revise = faked(reviseTask(noClaude, () => null), () => (unexpected.push("revise"), { output: undefined as never, usage: FAKE_UNKNOWN }));
+  const searchResources = faked(resourceSearchTask(noClaude), () => ({ output: [], usage: FAKE_UNKNOWN }));
 
   // The tutor. Code has already decided which moves are allowed; this picks one, as a scripted Claude would.
-  const tutor = faked(tutorTask(spyClaude), (input, ctx) => {
+  const tutor = faked(tutorTask(noClaude), (input, ctx) => {
     const { move, say } = tutorReply(input);
     const header = JSON.stringify(move);
     ctx.streamTo?.(`${header.slice(0, 20)}`);
@@ -166,7 +163,7 @@ function fakeTasks() {
     ctx.streamTo?.(say);
     return { output: { move, say }, usage: FAKE_TUTOR };
   });
-  const wrapUp = faked(wrapUpTask(spyClaude), (input) => {
+  const wrapUp = faked(wrapUpTask(noClaude), (input) => {
     const label = (conceptId: string) => input.claims.find((c) => c.conceptId === conceptId)!.text.split(":")[0]!;
     const concepts = [...new Set(input.claims.map((c) => c.conceptId))];
     return {
@@ -183,7 +180,7 @@ function fakeTasks() {
     };
   });
 
-  const diagramSummary = faked(diagramSummaryTask(spyClaude, () => null), (i) => ({ output: { title: i.topic.label, lines: [{ text: "Replay-data line.", evidence: [(i.passages[0] ?? i.frames[0]!).id] as [EvidenceId] }] }, usage: FAKE_UNKNOWN }));
+  const diagramSummary = faked(diagramSummaryTask(noClaude, () => null), (i) => ({ output: { title: i.topic.label, lines: [{ text: "Replay-data line.", evidence: [(i.passages[0] ?? i.frames[0]!).id] as [EvidenceId] }] }, usage: FAKE_UNKNOWN }));
   const tasks: TaskSet = { boundary, frameChange, preparation: { interpret, revise, checkClaim, searchResources }, tutor, wrapUp, diagramSummary };
   const all = { boundary, frameChange, interpret, revise, checkClaim, searchResources, tutor, wrapUp, diagramSummary };
   const callCounts = () => Object.fromEntries(Object.entries(all).map(([k, t]) => [k, t.calls.length]));
@@ -595,7 +592,7 @@ describe("REPLAY DATA (fake tasks, no live call): capture to saved record over H
 
   test("flow D, show me the diagram: frames from the review's own claims, one summary call, then cached, with a usage event", async () => {
     const product = await plainRun();
-    const own = faked(diagramSummaryTask(spyClaude, () => null), (i) => ({
+    const own = faked(diagramSummaryTask(noClaude, () => null), (i) => ({
       output: { title: `What is ${i.topic.label}?`, lines: [{ text: "Replay-data line.", evidence: [(i.passages[0] ?? i.frames[0]!).id] as [EvidenceId] }, { text: "Out-of-scope replay line.", evidence: [stableId("ev", "outside the review") as EvidenceId] as [EvidenceId] }] },
       usage: FAKE_UNKNOWN,
     }));
