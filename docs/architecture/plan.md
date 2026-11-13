@@ -62,7 +62,7 @@ Goal: separate the change in code shape from the change of engine.
 
 1. Change `Db.tx` and every query helper to return promises, with `bun:sqlite` still underneath. One PR for the kernel, then one per module.
 2. Replace synchronous `memo.lookup` inside derivations with "load the lookups this derivation needs, then run the pure function". `LookupFn` already exists so derivations can run against a map.
-3. Add the per-user command lock as an interface that is a no-op on SQLite, and call it at the start of every command.
+3. Add the per-user command lock as an interface, and call it at the start of every command. The Postgres spike in `docs/architecture/spike-postgres.md` showed that R16 fails on Postgres without it, so the lock is real from its first use there.
 4. Review every transaction body for an `await` between a check and its use. This is the "state checked then used later" class from the retros, and it is the main risk of this phase.
 
 Done when the suite passes with the asynchronous interface and no module imports `bun:sqlite` except the SQLite implementation of `Db`.
@@ -73,7 +73,7 @@ Goal: the same tests pass on Postgres, and frames no longer need a local disk.
 
 1. Port each module's migrations to the Postgres dialect as a second migration set, one PR per module: typed columns for `STRICT`, `jsonb`, PL/pgSQL versions of the append-only, R16 and R17 triggers, and `ON CONFLICT` for `INSERT OR IGNORE`.
 2. Add the Postgres implementation of `Db` on `Bun.sql`, with the per-user advisory lock and the per-user sequence row.
-3. Run the whole suite against both engines in CI. SQLite stays for local use and replay samples until Derek retires it.
+3. Run the whole suite against Postgres in CI. Derek decided on 2026-11-13 that SQLite does not stay after the move, so local development and replay samples run on Postgres in a container, and the SQLite implementation of `Db` is removed once the suite passes on Postgres.
 4. Introduce a frame store interface with two implementations: the current filesystem code, and S3 through `Bun.s3`. Write the object before the row, and add the orphan sweeper.
 5. Change `GET /frames/:evidenceId` to redirect to a presigned URL when the S3 store is active.
 6. Write a one-off importer from an existing `afterclass.sqlite` and its `frames/` directory into Postgres and the bucket, so Derek's own record moves with him.
@@ -191,4 +191,4 @@ Product and policy decisions:
 - Retention for other people's data. The 30-day default for uncited raw captures was set for a local, single-user record.
 - Any new rule in Derek's own sentences, for example on isolation between learners, spend caps or account deletion. The agent does not draft rule text unless Derek asks, and never numbers a rule he has not approved.
 - The privacy notice and terms, and advice from someone qualified on storing third-party lecture content, on learners under 18 and on users in the EU or UK.
-- Whether SQLite stays as a supported local mode after the move.
+- Whether SQLite stays as a supported local mode after the move: decided 2026-11-13, Postgres only.
