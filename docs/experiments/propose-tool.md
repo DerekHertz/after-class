@@ -1,5 +1,7 @@
 # Model label-proposal tool (experiment 6, stages 2 to 4)
 
+**Tooling retired 2026-11-13.** The scripts this file names were removed from master after commit 1817f06, so check out that commit to run the commands below.
+
 `scripts/jev-lab-propose.ts` asks a Claude model to PROPOSE labels for a lecture set so Derek can verify them. It is the code for stages 2 (timing pilot), 3 (model labels) and the proposal side of stage 4 of `docs/experiments/06-model-optimized-jev.md` (merge `docs-exp6-protocol`, PR #60, first; this note belongs under its stages). Proposals are a model's, not Derek's labels and not truth. Everything below marked PROPOSED needs Derek's OK before any call.
 
 ```

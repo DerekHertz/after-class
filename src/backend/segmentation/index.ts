@@ -21,10 +21,9 @@ import { appliesBefore } from "../providers/memo";
 import type { Lookup } from "../providers/memo";
 import { buildWindows, planChunks, reconcile, route, routeWithFraming } from "./core";
 import type { RoutingOptions } from "./core";
-export { routeWithFraming } from "./core";
 export type { RoutingOptions } from "./core";
 
-/** Re-exported so the experiment 2 lab measures the windowing and chunk planning the product runs, without importing core.ts. */
+/** Frozen re-exports of the product's windowing and chunk planning (src/MODULES.md). */
 export { buildWindows, planChunks } from "./core";
 
 /** Starting values (flow B: tune on held-out clips). The product runs PRODUCT_JEV_SETUP.segmentation (../jev-setup.ts); these defaults are the lab baseline. */

@@ -6,10 +6,9 @@
  * Derek, chat 2026-11-06: "Yes, use round 1". Amendment text: docs/flows/after-class.md section B.
  *
  * frameRelevance and claimRelevance are NOT here and not in the product (they removed under 1% of frames in the
- * experiment and would add calls); they stay lab-only in jev-tasks.ts QUESTIONS.
+ * experiment and would add calls). Their tasks were retired with the lab tooling on 2026-11-13.
  *
- * The lab keeps its own baseline: QUESTIONS (wording "1"), THRESHOLDS (0.7/0.3) and SEGMENTATION_DEFAULTS (30 s)
- * are unchanged so stored experiment 2, 6 and 7 runs still rescore byte for byte.
+ * The baseline wording QUESTIONS (version "1"), THRESHOLDS (0.7/0.3) and SEGMENTATION_DEFAULTS (30 s) are unchanged.
  */
 import type { SegmentationConfig } from "./segmentation";
 import type { RoutingOptions } from "./segmentation";

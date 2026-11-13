@@ -7,18 +7,13 @@
  *
  * productBoundaryTask / productFrameChangeTask: the product's setup (jev-setup.ts, experiment 7 round 1, approved by Derek 2026-11-06); main.ts wires these.
  *
- * Experiment 7 tasks (docs/experiments/07-jev-saves-the-tutor.md), lab-only except lessonFraming, which the product asks inside its boundary request; draft wording:
- *   frameRelevanceTask  do the captions around a kept frame refer to what it shows?
- *   claimRelevanceTask  does an existing claim relate to the new material?
- *   lessonFramingTask   boundaryTask plus a third question: lesson introduction / conclusion?
- *
  * Verdict mapping is the only place probabilities become yes/no/uncertain.
  * Errors never become "no": a throwing attempt is retried up to maxAttempts,
  * then the memo marks the key failed and the CALLER's derivation maps failed →
  * uncertain (boundary: continue; frame: keep; claim: revise/unverified).
  */
 import { z } from "zod";
-import type { BoundaryJudgment, BoundaryWindow, ClaimDraft, EvidenceBundle, Frame, Passage, Verdict } from "../../shared/domain";
+import type { BoundaryJudgment, BoundaryWindow, ClaimDraft, Frame, Passage, Verdict } from "../../shared/domain";
 import { canonicalJson } from "../../shared/ids";
 import type { IdPart } from "../../shared/ids";
 import { ProviderError } from "./memo";
@@ -71,29 +66,11 @@ export const QUESTIONS = {
     supported:
       "Does state.evidence support state.claim within its stated scope? Treat state.assumptions as labelled assumptions, not as evidence. Answer no if the evidence contradicts the claim, does not address it, or supports only a narrower claim.",
   },
-  // Experiment 7 drafts (neutral first wording; Fable refines them on clips 1 to 22; not approved as product wording).
-  frameRelevance: {
-    version: "1",
-    refersToFrame:
-      "Do the captions in state.captions refer to what state.frame shows, so that someone reading only the captions would need to see the frame? Answer no if the captions never mention or point to anything visible in the frame, or if the frame only repeats what the captions already say in full.",
-  },
-  claimRelevance: {
-    version: "1",
-    related:
-      "Does state.claim relate to the material in state.passages, so that a tutor preparing that material would need the claim to avoid restating it or to supersede it? Answer no if the claim is about a different topic than state.passages.",
-  },
-  lessonFraming: {
-    version: "1",
-    framing:
-      "Is state.passage the introduction of a lesson (for example a greeting, an announcement of what the lesson covers, or a statement of its goals), or does state.context end with the conclusion or summary of a lesson (for example a recap, a closing remark, or a statement that the lesson is over)? Answer no if both are ordinary lesson content.",
-  },
 } as const;
 
 /** Question wording as an input (experiment 6 arms). Omitted everywhere in the product, which uses QUESTIONS as written. */
 export type BoundaryQuestions = { readonly newConcept: string; readonly stoppingPoint: string };
 export type FrameChangeQuestions = { readonly teachingChange: string };
-export type FrameRelevanceQuestions = { readonly refersToFrame: string };
-export type ClaimRelevanceQuestions = { readonly related: string };
 export type LessonFramingQuestions = { readonly framing: string };
 
 const sha16 = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex").slice(0, 16);
@@ -109,19 +86,6 @@ export function boundaryWordingVersion(q?: BoundaryQuestions): string {
 export function frameChangeWordingVersion(q?: FrameChangeQuestions): string {
   if (q === undefined || q.teachingChange === QUESTIONS.frameChange.teachingChange) return QUESTIONS.frameChange.version;
   return `arm-${sha16(canonicalJson({ teachingChange: q.teachingChange }))}`;
-}
-
-export function frameRelevanceWordingVersion(q?: FrameRelevanceQuestions): string {
-  if (q === undefined || q.refersToFrame === QUESTIONS.frameRelevance.refersToFrame) return QUESTIONS.frameRelevance.version;
-  return `arm-${sha16(canonicalJson({ refersToFrame: q.refersToFrame }))}`;
-}
-export function claimRelevanceWordingVersion(q?: ClaimRelevanceQuestions): string {
-  if (q === undefined || q.related === QUESTIONS.claimRelevance.related) return QUESTIONS.claimRelevance.version;
-  return `arm-${sha16(canonicalJson({ related: q.related }))}`;
-}
-export function lessonFramingWordingVersion(q?: LessonFramingQuestions): string {
-  if (q === undefined || q.framing === QUESTIONS.lessonFraming.framing) return QUESTIONS.lessonFraming.version;
-  return `arm-${sha16(canonicalJson({ framing: q.framing }))}`;
 }
 
 const MAX_ATTEMPTS = 3;
@@ -147,16 +111,6 @@ export type ClaimSupportInput = {
   readonly claim: ClaimDraft;
   readonly passages: readonly Passage[]; // exactly the cited passages
   readonly frames: readonly FrameWithBytes[]; // exactly the cited frames
-};
-
-export type FrameRelevanceInput = {
-  readonly frame: FrameWithBytes;
-  readonly nearbyPassages: readonly Passage[]; // watched passages within ±15 s media (see passagesNear)
-};
-
-export type ClaimRelevanceInput = {
-  readonly claim: { readonly id: string; readonly text: string };
-  readonly newPassages: readonly Passage[]; // the passages of the new material
 };
 
 const ids = (xs: readonly { readonly id: string }[]): IdPart => xs.map((x) => x.id);
@@ -202,15 +156,6 @@ const claimOutputSchema = z.object({ verdict: verdictSchema, p: probabilitySchem
  */
 export function boundaryTask(jev: JevClient, questions?: BoundaryQuestions): Task<BoundaryInput, BoundaryJudgment> {
   return buildBoundaryTask(jev, questions, null);
-}
-
-/**
- * Experiment 7 task 3: boundaryTask with a third question in the SAME request (one round trip, one copy of the state
- * and images; a separate task would send the window's frames a second time). The verdict goes on the judgment as
- * `lessonFraming`; the version carries both wordings, so keys never collide with boundaryTask's.
- */
-export function lessonFramingTask(jev: JevClient, framing?: LessonFramingQuestions, questions?: BoundaryQuestions): Task<BoundaryInput, BoundaryJudgment> {
-  return buildBoundaryTask(jev, questions, framing ?? QUESTIONS.lessonFraming, lessonFramingWordingVersion(framing));
 }
 
 /**
@@ -355,81 +300,4 @@ export function claimSupportTask(jev: JevClient): Task<ClaimSupportInput, { read
     },
     decode: (stored) => claimOutputSchema.parse(stored),
   };
-}
-
-/**
- * Experiment 7 task 1. state = { frame: "frame", captions: [{t,text}] }.
- * Caller: yes keeps the frame for the tutor, no drops it, uncertain/failed keeps it (see framesKept).
- */
-export function frameRelevanceTask(jev: JevClient, questions?: FrameRelevanceQuestions): Task<FrameRelevanceInput, Verdict> {
-  const text = questions ?? QUESTIONS.frameRelevance;
-  return {
-    provider: "jev",
-    purpose: "frame_change", // the memo and ledger schema allow a fixed purpose set; the version ("frame_relevance.<wording>") separates keys
-    model: JEV_MODEL,
-    version: versionOf(`frame_relevance.${frameRelevanceWordingVersion(questions)}`),
-    maxAttempts: MAX_ATTEMPTS,
-    canonicalInput: (i) => ({ frame: i.frame.frame.id, nearby: ids(i.nearbyPassages) }),
-    async attempt(i, ctx) {
-      const images = [image("frame", i.frame)];
-      const { answers, usage } = await jev.ask(
-        {
-          model: JEV_MODEL,
-          state: { frame: "frame", captions: i.nearbyPassages.map(timed) },
-          questions: { refers_to_frame: noul(text.refersToFrame) },
-          images,
-        },
-        ctx.signal,
-      );
-      return { output: toVerdict(probability(answers.refers_to_frame)), usage };
-    },
-    decode: (stored) => verdictSchema.parse(stored),
-  };
-}
-
-/**
- * Experiment 7 task 2. state = { claim: text, passages: [{t,text}] }.
- * Caller: yes sends the claim, no leaves it out, uncertain/failed sends it (see claimsKept).
- */
-export function claimRelevanceTask(jev: JevClient, questions?: ClaimRelevanceQuestions): Task<ClaimRelevanceInput, Verdict> {
-  const text = questions ?? QUESTIONS.claimRelevance;
-  return {
-    provider: "jev",
-    purpose: "claim_check", // as above: the version ("claim_relevance.<wording>") separates keys
-    model: JEV_MODEL,
-    version: versionOf(`claim_relevance.${claimRelevanceWordingVersion(questions)}`),
-    maxAttempts: MAX_ATTEMPTS,
-    canonicalInput: (i) => ({ claim: { id: i.claim.id, text: i.claim.text }, passages: ids(i.newPassages) }),
-    async attempt(i, ctx) {
-      const { answers, usage } = await jev.ask(
-        {
-          model: JEV_MODEL,
-          state: { claim: i.claim.text, passages: i.newPassages.map(timed) },
-          questions: { related: noul(text.related) },
-          images: [],
-        },
-        ctx.signal,
-      );
-      return { output: toVerdict(probability(answers.related)), usage };
-    },
-    decode: (stored) => verdictSchema.parse(stored),
-  };
-}
-
-/** Passages of the frame's source whose interval touches [mediaS - radiusS, mediaS + radiusS] (task 1's ±15 s). */
-export function passagesNear(frame: Frame, passages: readonly Passage[], radiusS = 15): Passage[] {
-  return passages.filter((p) => p.sourceId === frame.sourceId && p.interval.end >= frame.mediaS - radiusS && p.interval.start <= frame.mediaS + radiusS);
-}
-
-/** A lookup that failed is "failed"; an id with no entry (not judged) is treated the same way by the helpers below. */
-export type RelevanceVerdict = Verdict | "failed";
-
-/** Task 1: the frames the tutor gets. Only a "no" drops one; yes, uncertain, failed and unjudged frames are kept. Order preserved. */
-export function framesKept(bundle: Pick<EvidenceBundle, "frames">, verdicts: ReadonlyMap<string, RelevanceVerdict>): Frame[] {
-  return bundle.frames.filter((f) => verdicts.get(f.id) !== "no");
-}
-
-/** Task 2: the existing claims sent on a delta call. Only a "no" drops one. Order preserved. */
-export function claimsKept<C extends { readonly id: string }>(claims: readonly C[], verdicts: ReadonlyMap<string, RelevanceVerdict>): C[] {
-  return claims.filter((c) => verdicts.get(c.id) !== "no");
 }

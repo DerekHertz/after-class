@@ -1,5 +1,7 @@
 # Experiment 6: the approved optimizer prompt template
 
+**Tooling retired 2026-11-13.** The scripts this file names were removed from master after commit 1817f06, so check out that commit to run the commands below.
+
 Approved by Derek on 2026-11-05. The text between the two marker comments is the template, word for word; do not reword it. `scripts/jev-lab-optimize.ts` reads it from this file at run time, fills the `<<...>>` placeholder lines (and `<<N>>`, `<<M>>` inside a line), and refuses to run if the text between the markers no longer has the approved SHA-256 (`a10cf915d4b789951c10174e19f58574830e8fb85c747ffd142142e31ca81492`). A change to the template is a new approval from Derek, not an edit.
 
 <!-- BEGIN APPROVED TEMPLATE -->
