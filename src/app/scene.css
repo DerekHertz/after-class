@@ -10,6 +10,7 @@
 .appearance-picker { margin-left: auto; }
 .appearance-picker > summary { cursor: pointer; }
 .scene-masthead > .sign-out { margin-left: 8px; border-radius: 0; cursor: pointer; white-space: nowrap; }
+.sign-in-page { text-align: center; }
 .sign-in-widget { display: flex; justify-content: center; margin-top: 16px; }
 
 /* Room & companion opens as a sheet of the room's parchment, in the same ink, type and square controls as the pages. */
