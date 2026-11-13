@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { AppApi } from "../src/app/api";
 import { ApiError } from "../src/app/api";
 import { OptionsView, checkAgain } from "../src/app/capture";
-import { availableActions, conversationLines, coveredLines, currentEvidenceIds, estimateText, formatClock, groupGaps, inspectBundle, lectureHeading, liveText, noteView, observationRow, optionsScreen, parseRoute, partialLines, reduceLive, routePath, softTargetPrompt, startLive, toAct, unansweredLearnerTurn, usageRows } from "../src/app/core";
+import { availableActions, conversationLines, coveredLines, currentEvidenceIds, estimateText, formatClock, groupGaps, inspectBundle, lectureHeading, liveText, noteView, observationRow, optionsScreen, parseRoute, partialLines, reduceLive, routePath, softTargetPrompt, startLive, strandedEndTurn, toAct, unansweredLearnerTurn, usageRows } from "../src/app/core";
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { UsageTable } from "../src/app/record";
 import { BundleInspector, EvidencePane } from "../src/app/ui";
@@ -207,6 +207,16 @@ describe("conversation", () => {
     expect(unansweredLearnerTurn(parsedReview({ turns: [tutorAsk, learnerAnswer()] }).turns)?.id).toBe(stableId("turn", "l2"));
     expect(unansweredLearnerTurn(parsedReview({ turns: [tutorAsk, learnerAnswer(), turnJson(3, "tutor", { move: { kind: "close_thread", threadId: thr }, say: "Thanks." })] }).turns)).toBeNull();
     expect(unansweredLearnerTurn(parsedReview({ turns: [tutorAsk, turnJson(2, "learner", { act: { kind: "pause" } })] }).turns)).toBeNull();
+  });
+
+  test("a finish the tutor never wrapped up is offered for resend only while the review is active, and a pause is not one", () => {
+    const end = turnJson(2, "learner", { act: { kind: "end" } });
+    expect(strandedEndTurn(parsedReview({ turns: [tutorAsk, end] }))?.id).toBe(stableId("turn", "l2"));
+    expect(strandedEndTurn(parsedReview({ turns: [tutorAsk, end, turnJson(3, "code", { notice: { kind: "soft_target_reached", elapsedS: 600 } })] }))?.id).toBe(stableId("turn", "l2"));
+    expect(strandedEndTurn(parsedReview({ turns: [tutorAsk, end, turnJson(3, "tutor", { move: { kind: "wrap_up" }, say: "Done." })] }))).toBeNull();
+    expect(strandedEndTurn(parsedReview({ turns: [tutorAsk, end], phase: "ended" }))).toBeNull();
+    expect(strandedEndTurn(parsedReview({ turns: [tutorAsk, turnJson(2, "learner", { act: { kind: "pause" } })] }))).toBeNull();
+    expect(strandedEndTurn(parsedReview({ turns: [tutorAsk, learnerAnswer()] }))).toBeNull();
   });
 
   test("which actions are offered follows the phase and the detour (R11: a detour waits for yes)", () => {

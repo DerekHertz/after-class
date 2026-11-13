@@ -365,6 +365,21 @@ export function unansweredLearnerTurn(turns: readonly Turn[]): Extract<Turn, { a
 }
 
 /**
+ * The learner `end` the tutor never wrapped up: the last non-code turn is a learner end and the review is still active,
+ * so the wrap-up call failed after the end was stored. Resending its id replays the stored turn and goes on, so it cannot duplicate.
+ * Kept apart from unansweredLearnerTurn, which pause and end are deliberately not part of.
+ */
+export function strandedEndTurn(view: Pick<ReviewView, "turns" | "state">): Extract<Turn, { actor: "learner" }> | null {
+  if (view.state.phase !== "active") return null;
+  for (let i = view.turns.length - 1; i >= 0; i--) {
+    const t = view.turns[i]!;
+    if (t.actor === "code") continue;
+    return t.actor === "learner" && t.act.kind === "end" ? t : null;
+  }
+  return null;
+}
+
+/**
  * The learner turn whose request stopped part-way (the backend says the tutor owes a move). Resending its id
  * replays the stored moves and goes on, so it cannot duplicate. Null unless the review is active and owes a move.
  */
