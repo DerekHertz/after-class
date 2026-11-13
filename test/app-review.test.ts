@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { stableId } from "../src/shared/ids";
 import type { Seq, Turn } from "../src/shared/domain";
-import { conversationLines, currentEvidenceIds, selectedEvidenceIds, shouldSubmitAnswer, startLive } from "../src/app/core";
+import { conversationLines, currentEvidenceIds, selectedEvidenceIds, questionScrollTop, shouldSubmitAnswer, startLive } from "../src/app/core";
 
 const reviewId = stableId("rvw", "ui");
 const threadId = stableId("thr", "ui");
@@ -43,5 +43,30 @@ describe("answer keyboard shortcut", () => {
   test("composition and held keys never submit", () => {
     expect(shouldSubmitAnswer({ ...key, isComposing: true }, true, false, "a")).toBe(false);
     expect(shouldSubmitAnswer({ ...key, repeat: true }, true, false, "a")).toBe(false);
+  });
+});
+
+describe("scrolling the board to the tutors question", () => {
+  const board = { scrollTop: 0, clientHeight: 300, scrollHeight: 1200 };
+  test("a reply that fits the board does not move it", () => {
+    expect(questionScrollTop(board, { top: 20, bottom: 220 })).toBeNull();
+  });
+  test("a reply longer than the board scrolls so its last lines, the question, sit at the bottom", () => {
+    expect(questionScrollTop(board, { top: 20, bottom: 900 })).toBe(900 + 12 - 300);
+  });
+  test("a short reply that starts below the bottom scrolls until it is wholly in view", () => {
+    expect(questionScrollTop(board, { top: 400, bottom: 520 })).toBe(520 + 12 - 300);
+  });
+  test("a long reply whose end is already in view stays put, wherever the learner scrolled", () => {
+    expect(questionScrollTop({ ...board, scrollTop: 640 }, { top: 20, bottom: 900 })).toBeNull();
+  });
+  test("a reply above the visible area is brought back into view", () => {
+    expect(questionScrollTop({ ...board, scrollTop: 800 }, { top: 20, bottom: 200 })).toBe(0);
+  });
+  test("a reply that only just fits shows its first line, and the gap below gives way", () => {
+    expect(questionScrollTop(board, { top: 400, bottom: 695 })).toBe(400);
+  });
+  test("the target never passes the end of the contents of the board", () => {
+    expect(questionScrollTop({ scrollTop: 0, clientHeight: 300, scrollHeight: 700 }, { top: 500, bottom: 690 })).toBe(400);
   });
 });
