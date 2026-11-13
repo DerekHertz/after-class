@@ -51,6 +51,7 @@ Nothing here has been planned or applied. Derek runs every command below, with `
 ## Beta variables
 
 - `ingress_cidrs` is required and has no default. Use `["<your public IP>/32"]` until sign-in lands, then `["0.0.0.0/0"]`.
+- `sslip_https` defaults to `false`. Set it to `true` with no domain to serve HTTPS on `<elastic-ip-with-dashes>.sslip.io`, a free public name that resolves to the Elastic IP, so the beta has a real certificate before a domain is bought. Like `domain`, it needs `ingress_cidrs` to include `0.0.0.0/0`.
 - `domain` defaults to `null`: no DNS record, HTTP only on the Elastic IP. Set it to the apex domain, whose Route 53 hosted zone must exist, to turn on automatic HTTPS. Caddy gets its certificate from Let's Encrypt, which validates from the internet, so Terraform refuses a `domain` unless `ingress_cidrs` includes `0.0.0.0/0`.
 - `availability_zone` defaults to `us-east-2a` and is pinned, so a change in the zone offerings never replaces the data volume. A precondition checks that the instance type is offered there.
 - `caddy_image` is pinned by version and digest. To update it, read the new index digest from the registry and change both.

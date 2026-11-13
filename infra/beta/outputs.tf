@@ -1,6 +1,6 @@
 output "public_url" {
-  description = "Set as the BETA_URL variable of the production environment. The https address when a domain is set, otherwise http on the Elastic IP."
-  value       = var.domain == null ? "http://${aws_eip.beta.public_ip}" : "https://${var.domain}"
+  description = "Set as the BETA_URL variable of the production environment. The https address when a domain or sslip_https is set, otherwise http on the Elastic IP."
+  value       = local.site_name == "" ? "http://${aws_eip.beta.public_ip}" : "https://${local.site_name}"
 }
 
 output "elastic_ip" {

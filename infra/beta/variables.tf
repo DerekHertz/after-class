@@ -36,6 +36,17 @@ variable "domain" {
   }
 }
 
+variable "sslip_https" {
+  description = "With no domain, serve HTTPS on <elastic-ip-with-dashes>.sslip.io, a free public name that resolves to the Elastic IP, so the beta gets a real Let's Encrypt certificate before a domain is bought. Ignored when domain is set. Needs ingress_cidrs to include 0.0.0.0/0 for the same reason as domain."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.sslip_https || contains(var.ingress_cidrs, "0.0.0.0/0")
+    error_message = "sslip_https needs ingress_cidrs to include 0.0.0.0/0, because Let's Encrypt validates from the internet."
+  }
+}
+
 variable "availability_zone" {
   description = "Zone for the instance and its data volume. Pinned, not looked up, so a change in the offerings never replaces the data volume."
   type        = string

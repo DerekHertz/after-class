@@ -107,8 +107,11 @@ resource "aws_ebs_volume" "data" {
 }
 
 locals {
+  # The name Caddy serves and gets a certificate for. Empty means plain HTTP on the Elastic IP.
+  site_name = var.domain != null ? var.domain : (var.sslip_https ? "${replace(aws_eip.beta.public_ip, ".", "-")}.sslip.io" : "")
+
   caddyfile = templatefile("${path.module}/files/Caddyfile.tftpl", {
-    domain   = var.domain == null ? "" : var.domain
+    domain   = local.site_name
     app_port = var.app_port
   })
 
