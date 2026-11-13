@@ -6,3 +6,5 @@ minimumReleaseAge = 604800
 [test]
 # Candidate design packages under docs/ carry their own sketch tests; only test/ is the suite.
 root = "./test"
+# Puts the temp dir on tmpfs when /dev/shm exists and TMPDIR is unset; see the file.
+preload = ["./test/tmpdir-preload.ts"]
