@@ -8,7 +8,7 @@ Status: PROTOCOL, written before any result. No call has been made.
 
 The product calls Claude through `claude -p` on Derek's subscription. That path reports a notional cost and has no control over caching. This experiment tries a second backend that calls the Messages API through the official SDK, so a review's lecture context can be cached across its turns and its cost is measured from usage.
 
-Derek approved one new dependency for it, `@anthropic-ai/sdk` at exactly 1.5.0. The backend is `src/backend/providers/claude-api.ts`. `AFTERCLASS_CLAUDE_BACKEND=api` routes only the tutor turn and the wrap-up to it, and every other Claude task keeps the CLI. The default is the CLI and its behavior is unchanged.
+Derek approved one new dependency for it, `@anthropic-ai/sdk` at exactly 1.5.0. The backend is `src/backend/providers/claude-api.ts`. The experiment ran with `AFTERCLASS_CLAUDE_BACKEND=api` routing only the tutor turn and the wrap-up to it. Since then the same setting routes every Claude task to the API, so a machine without Claude Code can run the product. The experiment's runner and results only cover the tutor turn and the wrap-up. The default is the CLI and its behavior is unchanged.
 
 ## Cases
 

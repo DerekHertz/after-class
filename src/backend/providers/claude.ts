@@ -30,8 +30,8 @@
  * Stateless: every call is a fresh process with the full context built from
  * our DB. No --resume, so Claude's session store is never a second copy of a review.
  * No @anthropic-ai/sdk here: this file is the subscription path to Claude. The other path, the Messages
- * API through the SDK, is claude-api.ts, and main.ts routes only the tutor turn and the wrap-up to it,
- * and only when AFTERCLASS_CLAUDE_BACKEND=api. It reuses this file's request type, limiter and abort error.
+ * API through the SDK, is claude-api.ts, and main.ts routes every task to it when AFTERCLASS_CLAUDE_BACKEND=api
+ * and none otherwise. It reuses this file's request type, limiter and abort error.
  */
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

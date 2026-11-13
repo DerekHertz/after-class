@@ -7,8 +7,8 @@
  *            AFTERCLASS_ANTHROPIC_API_KEY (optional) goes to the Claude Messages API adapter and nowhere else, the same way. It is
  *            read only when AFTERCLASS_CLAUDE_BACKEND=api, and it never reaches the `claude` child.
  *   claude   AFTERCLASS_CLAUDE_BACKEND=cli | api. Default cli: every Claude task runs through `claude -p` on the subscription.
- *            api: ONLY the tutor turn and the wrap-up call the Messages API (paid, priced from usage); every other Claude task
- *            keeps the CLI. api with no key refuses to start. Replay mode builds no Claude adapter, so the setting does nothing there.
+ *            api: EVERY Claude task calls the Messages API (paid, priced from usage), so no `claude` binary is needed. api with no key
+ *            refuses to start. Replay mode builds no Claude adapter, so the setting does nothing there.
  *   voice    Tutor speech from ElevenLabs through POST /voice/speech, live mode with a key only; otherwise GET /voice says
  *            unavailable and the app speaks with Chrome's voice. AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL.
  *   token    ~/.config/afterclass/pairing-token (0600), created on first boot, printed with "listening on 127.0.0.1:<port>".
@@ -201,8 +201,7 @@ export function resolveClaudeBackend(requested: string | undefined): ClaudeBacke
   throw new Error(`AFTERCLASS_CLAUDE_BACKEND must be "cli" or "api", got "${requested}"`);
 }
 
-/** `tutorClaude` backs the tutor turn and the wrap-up only. It is the same adapter as `claude` unless the api backend is chosen. */
-export function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameBytes, tutorClaude: ClaudeCli = claude): TaskSet {
+export function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameBytes): TaskSet {
   return {
     boundary: productBoundaryTask(jev),
     frameChange: productFrameChangeTask(jev),
@@ -212,8 +211,8 @@ export function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameB
       checkClaim: claimSupportTask(jev),
       searchResources: resourceSearchTask(claude),
     },
-    tutor: tutorTask(tutorClaude),
-    wrapUp: wrapUpTask(tutorClaude),
+    tutor: tutorTask(claude),
+    wrapUp: wrapUpTask(claude),
     diagramSummary: diagramSummaryTask(claude, frameBytes),
   };
 }
@@ -261,19 +260,18 @@ export async function main(options: MainOptions = {}): Promise<Running> {
 
   // evidence is created after the tasks that need its bytes; the tasks only read it when a call runs
   const frameBytes: FrameBytes = (id) => evidence.frameBytes(id);
-  const liveTasks = (): TaskSet => {
+  const liveClaude = (): ClaudeCli => {
+    if (claudeBackend === "api") {
+      log("claude backend: api for every Claude task (paid, priced from usage); no claude binary is used");
+      return createClaudeApi({ apiKey: anthropicKey!, maxConcurrent: DEFAULT_LIMITS.claude, ...(options.anthropic ? { client: options.anthropic } : {}) });
+    }
     const claudeCwd = join(dataDir, "claude-cwd");
     mkdirSync(claudeCwd, { recursive: true });
     // No provider key may reach the child: claude -p bills the subscription login, and the Jev, voice and Messages API keys are not its business.
     const { TYPESAFE_API_KEY: _jevKey, ELEVENLABS_API_KEY: _voiceKey, AFTERCLASS_ANTHROPIC_API_KEY: _messagesKey, ...childEnv } = env;
-    const cli = createClaudeCli({ bin: options.claudeBin ?? "claude", cwd: claudeCwd, maxConcurrent: DEFAULT_LIMITS.claude, env: childEnv, ...(options.spawn ? { spawn: options.spawn } : {}) });
-    // Only the tutor turn and the wrap-up take the API backend. Every other task keeps the CLI.
-    const messagesApi = claudeBackend === "api"
-      ? createClaudeApi({ apiKey: anthropicKey!, maxConcurrent: DEFAULT_LIMITS.claude, ...(options.anthropic ? { client: options.anthropic } : {}) })
-      : cli;
-    if (claudeBackend === "api") log("claude backend: api for the tutor turn and the wrap-up (paid, priced from usage); every other Claude task uses the CLI");
-    return buildTasks(createJevClient({ apiKey: apiKey!, ...(options.fetch ? { fetch: options.fetch } : {}) }), cli, frameBytes, messagesApi);
+    return createClaudeCli({ bin: options.claudeBin ?? "claude", cwd: claudeCwd, maxConcurrent: DEFAULT_LIMITS.claude, env: childEnv, ...(options.spawn ? { spawn: options.spawn } : {}) });
   };
+  const liveTasks = (): TaskSet => buildTasks(createJevClient({ apiKey: apiKey!, ...(options.fetch ? { fetch: options.fetch } : {}) }), liveClaude(), frameBytes);
   const tasks: TaskSet = options.tasks ?? (mode === "live" ? liveTasks() : buildTasks(refusingJev, refusingClaude, frameBytes));
 
   // Injected tasks make no live call, so the memo may run them. Without them, replay never runs a task at all.

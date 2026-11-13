@@ -529,28 +529,26 @@ describe("abort and timeout", () => {
   });
 });
 
-describe("what this trial does not cover", () => {
-  test("web tools are refused with a clear non-retryable error and nothing is sent", async () => {
+describe("images and web tools", () => {
+  test("a text-only request keeps the plain string prompt and carries no tools", async () => {
     const { claude, seen } = api({ deltas: ["x"] });
-    for (const run of [() => claude.streamText(req({ webTools: true }), () => {}, NEVER), () => claude.structured(req({ webTools: true }), Out, NEVER)]) {
-      const err = await run().catch((e) => e);
-      expect(err).toBeInstanceOf(ProviderError);
-      expect(err.retryable).toBe(false);
-      expect(err.message).toContain("web tools");
-    }
-    expect(seen).toHaveLength(0);
+    await claude.streamText(req(), () => {}, NEVER);
+    const p = seen[0]!.params as MessageStreamParams;
+    expect(p.messages).toEqual([{ role: "user", content: "Ask a question." }]);
+    expect("tools" in p).toBe(false);
   });
 
-  test("images are refused with a clear non-retryable error and nothing is sent", async () => {
+  test("images and web tools reach the stream request as base64 blocks and the two server tools", async () => {
     const { claude, seen } = api({ deltas: ["x"] });
-    const images = [{ label: "frame", mediaType: "image/png" as const, bytes: new Uint8Array([1]) }];
-    for (const run of [() => claude.streamText(req({ images }), () => {}, NEVER), () => claude.structured(req({ images }), Out, NEVER)]) {
-      const err = await run().catch((e) => e);
-      expect(err).toBeInstanceOf(ProviderError);
-      expect(err.retryable).toBe(false);
-      expect(err.message).toContain("images");
-    }
-    expect(seen).toHaveLength(0);
+    const images = [{ label: "frame", mediaType: "image/png" as const, bytes: new Uint8Array([1, 2]) }];
+    await claude.streamText(req({ images, webTools: true }), () => {}, NEVER);
+    const p = seen[0]!.params as MessageStreamParams;
+    expect(p.messages[0]!.content).toEqual([
+      { type: "text", text: "Image frame:" },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "AQI=" } },
+      { type: "text", text: "Ask a question." },
+    ]);
+    expect(p.tools).toEqual([{ type: "web_search_20260209", name: "web_search", max_uses: 5 }, { type: "web_fetch_20260209", name: "web_fetch", max_uses: 5 }]);
   });
 });
 
