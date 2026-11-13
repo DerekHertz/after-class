@@ -179,16 +179,18 @@ function deleteDatabase(idb: IDBFactory, name: string): Promise<void> {
 }
 
 /**
- * Deletes the unsent turns of every account in this browser except `keep`'s (null when nobody is signed in), so a
- * shared computer holds only the signed-in account's drafts. `left` is deleted even where the browser cannot list its
- * databases.
+ * Deletes the unsent turns of every account in this browser except the signed-in one's, so a shared computer holds
+ * only the signed-in account's drafts. `signedIn` is read after the databases are listed, not when the cleanup starts:
+ * a cleanup that began before someone signed in must not delete that person's new drafts. `left` is deleted even
+ * where the browser cannot list its databases.
  */
-export async function clearOtherAccounts(idb: IDBFactory | undefined, keep: string | null, left: string | null): Promise<void> {
+export async function clearOtherAccounts(idb: IDBFactory | undefined, signedIn: () => string | null, left: string | null): Promise<void> {
   if (idb === undefined) return;
   const listed = await Promise.resolve()
     .then(() => idb.databases())
     .then((dbs) => dbs.map((d) => d.name ?? ""), () => []);
-  const kept = keep === null ? null : accountUnsentDb(keep);
   const names = new Set([...listed, ...(left === null ? [] : [accountUnsentDb(left)])]);
+  const keep = signedIn();
+  const kept = keep === null ? null : accountUnsentDb(keep);
   await Promise.all([...names].filter((n) => n.startsWith(ACCOUNT_PREFIX) && n !== kept).map((n) => deleteDatabase(idb, n)));
 }

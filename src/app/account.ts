@@ -74,7 +74,8 @@ export function followAccount(clerk: ClerkClient, platform: Platform): Accounts 
   const open = (userId: string | null): Account | null =>
     userId === null ? null : { userId, services: servicesFor(() => accountToken(clerk, userId), accountUnsentDb(userId), platform) };
   let current = open(clerk.user?.id ?? null);
-  void clearOtherAccounts(platform.idb, current?.userId ?? null, null);
+  const signedIn = () => current?.userId ?? null;
+  void clearOtherAccounts(platform.idb, signedIn, null);
   const listeners = new Set<() => void>();
   clerk.addListener(() => {
     const userId = clerk.user?.id ?? null;
@@ -82,7 +83,7 @@ export function followAccount(clerk: ClerkClient, platform: Platform): Accounts 
     const left = current;
     left?.services.dispose();
     current = open(userId);
-    void clearOtherAccounts(platform.idb, userId, left?.userId ?? null);
+    void clearOtherAccounts(platform.idb, signedIn, left?.userId ?? null);
     for (const listener of listeners) listener();
   });
   return {

@@ -90,23 +90,24 @@ function setup(start: string | null, idb = fakeIdb({ autoComplete: true })) {
     signal = init?.signal;
     return net.fetchFn(input, init);
   }) as typeof fetch;
+  const listening: string[] = [];
   const platform: Platform = {
     voiceEnabled: () => true,
     play: voice.play,
     fallback: voice.fallback,
     browserSpeaker: () => voice.synth,
-    speechInput: () => ({ supported: false, start() {}, stop() {} }),
+    speechInput: () => ({ supported: false, start() {}, stop: () => void listening.push("stopped") }),
     idb: idb.factory,
     fetch: fetchFn,
   };
   const accounts = followAccount(clerk, platform);
   const bearers = () => net.calls.map((c) => `${c.headers.get("authorization")} ${c.method} ${c.url}`);
-  return { clerk, idb, voice, streams, net, accounts, bearers };
+  return { clerk, idb, voice, streams, net, accounts, bearers, listening };
 }
 
 describe("switching accounts mid-turn", () => {
   test("Alice's in-flight turn sends nothing with Bob's token, and her tutor stops talking", async () => {
-    const { clerk, voice, streams, accounts, bearers } = setup(ALICE);
+    const { clerk, voice, streams, accounts, bearers, listening } = setup(ALICE);
     const alice = accounts.current()!.services;
     alice.speaker.beginTurn();
     await tick();
@@ -129,10 +130,11 @@ describe("switching accounts mid-turn", () => {
     expect(voice.cut).toEqual(["elevenlabs audio"]);
     expect(voice.said).toEqual(["elevenlabs audio"]);
     expect(settled).toBe(true);
+    expect(listening).toEqual(["stopped"]);
   });
 
   test("signing out mid-turn ends Alice's requests and speech the same way", async () => {
-    const { clerk, voice, streams, accounts, bearers } = setup(ALICE);
+    const { clerk, voice, streams, accounts, bearers, listening } = setup(ALICE);
     const alice = accounts.current()!.services;
     alice.speaker.beginTurn();
     await tick();
@@ -150,10 +152,29 @@ describe("switching accounts mid-turn", () => {
     expect(voice.cut).toEqual(["elevenlabs audio"]);
     expect(voice.said).toEqual(["elevenlabs audio"]);
     expect(settled).toBe(true);
+    expect(listening).toEqual(["stopped"]);
   });
 });
 
 describe("unsent answers on a shared computer", () => {
+  test("a cleanup that started before Bob signed in does not delete Bob's new draft", async () => {
+    const idb = fakeIdb({ autoComplete: true });
+    const listDatabases = idb.factory.databases.bind(idb.factory);
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    (idb.factory as { databases: IDBFactory["databases"] }).databases = async () => (await held, listDatabases());
+    const { clerk, accounts } = setup(ALICE, idb);
+    clerk.signInAs(null);
+    clerk.signInAs(BOB);
+    await accounts.current()!.services.unsent.put({ turnId: tid("bob"), reviewId, act: aliceAnswer, createdAtMs: 2 });
+    release();
+    await tick();
+    expect(idb.dbs.has(accountUnsentDb(BOB))).toBe(true);
+    expect(idb.dbs.has(accountUnsentDb(ALICE))).toBe(false);
+    const reopened = createIndexedDbUnsent(idb.factory, 1000, accountUnsentDb(BOB));
+    expect((await reopened.forReview(reviewId)).length).toBe(1);
+  });
+
   test("Bob's store cannot read Alice's stored draft, even for her review", async () => {
     const idb = fakeIdb({ autoComplete: true });
     const aliceStore = createIndexedDbUnsent(idb.factory, 1000, accountUnsentDb(ALICE));
