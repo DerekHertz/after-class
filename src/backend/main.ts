@@ -370,7 +370,15 @@ export async function main(options: MainOptions = {}): Promise<Running> {
     async wrapUp(reviewId) {
       const turns = reviews.view(reviewId).turns;
       const threads = [...new Set(turns.flatMap((t) => (t.actor === "tutor" && (t.move.kind === "ask_main" || t.move.kind === "quick_check") ? [t.move.threadId] : [])))];
-      const result = await memo.run(tasks.wrapUp, { turns, claims: usableNow(reviewId), threads });
+      const input = { turns, claims: usableNow(reviewId), threads };
+      // A terminal failure stored before this request began answered an earlier save, so this retry clears it and asks once more.
+      // A failure this request produced is returned as is. A hit is never cleared.
+      const asOf = db.nextSeq();
+      let result = await memo.run(tasks.wrapUp, input);
+      if (result.kind === "failed" && result.atSeq < asOf) {
+        memo.clearFailures([result.key]);
+        result = await memo.run(tasks.wrapUp, input);
+      }
       if (result.kind === "hit") return result.value;
       throw new Error(result.kind === "failed" ? `wrap-up failed: ${result.lastError}` : `wrap-up ${result.kind}`);
     },
