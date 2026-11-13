@@ -43,7 +43,7 @@ function NotFound() {
   );
 }
 
-function App({ services: { api, speaker, speech, unsent } }: { readonly services: Services }) {
+function App({ services: { api, speaker, speech, unsent }, hosted = false }: { readonly services: Services; readonly hosted?: boolean }) {
   const route = parseRoute(usePathname());
   switch (route.page) {
     case "home":
@@ -59,7 +59,7 @@ function App({ services: { api, speaker, speech, unsent } }: { readonly services
     case "record":
       return <RecordScreen api={api} reviewId={route.reviewId === null ? null : parseId("rvw", route.reviewId)} />;
     case "usage":
-      return <UsageScreen api={api} />;
+      return <UsageScreen api={api} hosted={hosted} />;
     case "not_found":
       return <NotFound />;
   }
@@ -70,7 +70,7 @@ function Hosted({ clerk, accounts }: { readonly clerk: ClerkClient; readonly acc
   const account = useSyncExternalStore(accounts.subscribe, accounts.current);
   return (
     <SceneShell account={account && <SignOutButton clerk={clerk} />}>
-      {account ? <App key={account.userId} services={account.services} /> : <SignInScreen clerk={clerk} />}
+      {account ? <App key={account.userId} services={account.services} hosted /> : <SignInScreen clerk={clerk} />}
     </SceneShell>
   );
 }

@@ -11,6 +11,7 @@ import { createLedger } from "../src/backend/providers/ledger";
 import { createScheduler } from "../src/backend/scheduler";
 import type { Timers } from "../src/backend/scheduler";
 import { createReviews } from "../src/backend/review";
+import { nextThreadId } from "../src/backend/review/tutor";
 import type { TutorInput, TutorOutput } from "../src/backend/review/tutor";
 import { resolveBudgetLimits, stopSwitch, STOP_FILE } from "../src/backend/main";
 import type { Db, UserDb } from "../src/backend/db";
@@ -142,6 +143,20 @@ describe("caps", () => {
     gate.resolve(ok("x", { usage: usage(UNKNOWN) }));
     expect((await Promise.all(runs)).map((r) => r.kind)).toEqual(["hit", "hit", "held", "held", "held"]);
     expect(holds(w.db)).toHaveLength(2);
+  });
+
+  test("Derek: \"i think it should be allowed to finish\". The wrap-up passes both caps and still counts, but the stop switch holds it", async () => {
+    const w = world({ userUsd: TUTOR, totalUsd: TUTOR });
+    const t = claudeTask("tutor_turn", () => ok("x", { usage: usage(UNKNOWN) }));
+    expect((await w.memo.run(t, { n: 1 })).kind).toBe("hit");
+    expect(await w.memo.run(t, { n: 2 })).toMatchObject({ kind: "held", hold: { reason: "user_budget" } });
+    const wrapUp = claudeTask("wrap_up", () => ok("saved", { usage: usage(UNKNOWN) }));
+    expect((await w.memo.run(wrapUp, { n: 1 })).kind).toBe("hit");
+    expect(used(w.budget, w.db)).toBe(TUTOR + ESTIMATE_USD.wrap_up);
+    expect(w.db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM usage_events WHERE purpose = 'wrap_up'").get()!.n).toBe(1);
+    w.stop(true);
+    expect(await w.memo.run(wrapUp, { n: 2 })).toMatchObject({ kind: "held", hold: { reason: "stopped" } });
+    expect(wrapUp.calls).toEqual([{ n: 1 }]);
   });
 
   test("no cap set means every attempt starts and is still counted", async () => {
@@ -323,6 +338,24 @@ describe("what the learner sees", () => {
     expect(tutor.calls).toHaveLength(1);
   });
 
+  test("a learner held by a cap who asks to finish gets code's wrap-up line with no call, and the stop switch still holds it", async () => {
+    const r = startedRig();
+    const tutor = heldTutor(r.db, { userUsd: TUTOR, totalUsd: 50 }, (input) => reply({ kind: "ask_main", threadId: nextThreadId(input.state), claimIds: [input.claims[0]!.id] }, "What is the main idea?"));
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: tutor.runTutor, clearFailures: tutor.clearFailures }, { now: () => 1 });
+    expect(types(await collect(reviews.turn(r.reviewId, randomId("turn"), { kind: "begin" }))).at(-1)).toBe("turn_complete");
+    expect(tutor.calls).toHaveLength(1);
+    expect(tutor.budget.allowance(r.db.userId).held).toMatchObject({ reason: "user_budget" });
+
+    tutor.stop(true);
+    expect(types(await collect(reviews.turn(r.reviewId, randomId("turn"), { kind: "end" })))).toEqual(["learner_turn_stored", "turn_held"]);
+    tutor.stop(false);
+    const events = await collect(reviews.turn(r.reviewId, randomId("turn"), { kind: "end" }));
+    expect(events.find((e) => e.type === "move")).toMatchObject({ move: { kind: "wrap_up" } });
+    expect(types(events).at(-1)).toBe("turn_complete");
+    expect(tutor.calls).toHaveLength(1);
+    expect(reviews.view(r.reviewId).state.phase).toBe("ended");
+  });
+
   test("a turn already streaming is never cut when the stop switch goes on", async () => {
     const r = startedRig();
     const move = askMain(r.claim);
@@ -351,6 +384,12 @@ describe("what the learner sees", () => {
     expect(html).toContain("This month&#x27;s AI allowance is used up. It resets on December 1.");
   });
 
+  test("held with money left, the page says not enough is left for another step, not that the allowance is used up", () => {
+    const held = { reason: "user_budget" as const, resetsAtMs: DEC_1 };
+    expect(allowanceView({ usedUsd: 4.79, limitUsd: 5, resetsAtMs: DEC_1, held })!.held).toBe("Not enough of this month's AI allowance is left for another AI step. It resets on December 1.");
+    expect(allowanceView({ usedUsd: 5.2, limitUsd: 5, resetsAtMs: DEC_1, held })!.held).toBe("This month's AI allowance is used up. It resets on December 1.");
+    expect(allowanceView({ usedUsd: 1, limitUsd: 5, resetsAtMs: DEC_1, held: { reason: "total_budget", resetsAtMs: DEC_1 } })!.held).toBe("After Class has used this month's AI allowance for everyone. It resets on December 1.");
+  });
   test("the wire carries turn_held and the allowance, and an older backend's usage without one decodes as no budget", () => {
     expect(tutorStreamEvent.parse({ type: "turn_held", hold: { reason: "stopped" } })).toEqual({ type: "turn_held", hold: { reason: "stopped" } });
     expect(() => tutorStreamEvent.parse({ type: "turn_held", hold: { reason: "user_budget" } })).toThrow();

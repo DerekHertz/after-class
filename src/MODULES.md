@@ -19,10 +19,11 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 
 ## Budgets
 
-- One `Budget` serves every user, built in `main.ts` on the whole `Db` in live mode and passed to each user's `createMemo` and `createLedger`. Replay mode builds none.
+- One `Budget` serves every user, built once in `main.ts`'s `compose` on the raw `Db` in live mode and passed to each user's `createMemo` and `createLedger` in `wire`. Each memo reserves as its own `UserDb`'s user. Replay mode builds none.
+- Neither cap holds a `wrap_up` call, and a tutor turn that a cap holds when its only allowed move is `wrap_up` gets code's wrap-up line instead, so a learner can always finish and save. The stop switch still holds both, and a wrap-up still reserves, settles and counts.
 - `memo.run` returns `RunResult<O>`, which is `Lookup<O>` or `Held` (`{ kind: "held", key, hold }`): the budget refused the attempt before it began, so nothing was called or stored and the key stays missing. `lookup` never returns `held`. `appliesBefore` takes a `RunResult`.
 - The scheduler reads one thing of a run's result: a `held` key is left alone for `heldRetryMs` (60 s) and one timer pumps every held key again then.
-- A held tutor turn streams `turn_held` with its `BudgetHold` and ends; the learner's turn stays stored, so a resend continues it. `GET /usage` carries the user's `allowance` (null in replay mode). `src/shared/allowance.ts` holds the words a learner reads.
+- A held tutor turn streams `turn_held` with its `BudgetHold` and ends; the learner's turn stays stored, so a resend continues it. `GET /usage` carries the user's `allowance` (null in replay mode). `src/shared/allowance.ts` holds the words a learner reads. Hosted, the usage page shows only the allowance; the tables by cost kind and purpose are local only.
 - `ProviderError` takes an optional `billing`. A `not_billed` failure with no usage is recorded as an estimated $0 (basis "rejected before any model ran") and settles its hold at $0.
 
 ## Working rules

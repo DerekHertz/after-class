@@ -611,15 +611,16 @@ export function AllowanceNote({ allowance }: { readonly allowance: UsageSummary[
   );
 }
 
-export function UsageScreen({ api }: { readonly api: AppApi }) {
+/** Hosted, a learner sees only this month's allowance. The tables by cost kind and purpose are for the developer running it locally. */
+export function UsageScreen({ api, hosted = false }: { readonly api: AppApi; readonly hosted?: boolean }) {
   const usage = useAsync(useCallback(() => api.usage(), [api]));
   return (
     <main className="notebook-page usage-page room-paper" {...objectFrame("source")}>
-      <header className="page-heading"><div><p className="page-kicker">Local usage record</p><h1>Usage</h1></div><nav aria-label="Usage navigation"><Link to={{ page: "record", reviewId: null }}>My notebook</Link><Link to={{ page: "home" }}>Your lectures</Link></nav></header>
+      <header className="page-heading"><div><p className="page-kicker">{hosted ? "Your AI allowance" : "Local usage record"}</p><h1>Usage</h1></div><nav aria-label="Usage navigation"><Link to={{ page: "record", reviewId: null }}>My notebook</Link><Link to={{ page: "home" }}>Your lectures</Link></nav></header>
       <ErrorNote error={usage.error} retry={usage.reload} />
       {usage.data === null && usage.error === null && <p className="page-loading" role="status">Opening the usage record...</p>}
       {usage.data && <AllowanceNote allowance={usage.data.allowance} />}
-      {usage.data && <div className="record-section"><UsageTable summary={usage.data} /></div>}
+      {usage.data && !hosted && <div className="record-section"><UsageTable summary={usage.data} /></div>}
     </main>
   );
 }

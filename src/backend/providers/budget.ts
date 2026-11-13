@@ -17,6 +17,10 @@
  *
  * A call can cost more than its estimate. Its settlement then takes the month past the cap by the difference, and every
  * attempt after it is refused. So the cap can be passed by at most the overrun of the calls already running when it is reached.
+ *
+ * Derek, 2026-11-13, on a learner who reaches a cap mid-review: "i think it should be allowed to finish". So the wrap-up
+ * that saves a review is never held by either cap. The stop switch still holds it, and it still reserves, settles and
+ * counts toward the month like any other call, so a finished review can take a month past its cap by one wrap-up.
  */
 import type { MemoKey, UserId } from "../../shared/ids";
 import type { Allowance, BudgetHold, Cost, Purpose } from "../../shared/domain";
@@ -51,6 +55,9 @@ export const ESTIMATE_USD: Readonly<Record<Purpose, number>> = {
 
 /** The call the usage page's "held" asks about: a learner's next tutor turn. */
 const PROBE: Purpose = "tutor_turn";
+
+/** Calls neither cap holds: finishing a review (see the header). */
+const UNCAPPED: ReadonlySet<Purpose> = new Set<Purpose>(["wrap_up"]);
 
 export type BudgetLimits = {
   /** Per user per month. Null: no per-user cap. */
@@ -102,9 +109,10 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
     settle: db.sql.query(`UPDATE budget_holds SET settled_micros = ?, settled_ms = ? WHERE id = ? AND settled_micros IS NULL`),
   };
 
-  /** Why an attempt that would add `micros` to this month is refused, or null when it may start. */
-  function holdFor(userId: UserId, atMs: number, micros: number): BudgetHold | null {
+  /** Why an attempt for `purpose` that would add `micros` to this month is refused, or null when it may start. */
+  function holdFor(userId: UserId, atMs: number, purpose: Purpose, micros: number): BudgetHold | null {
     if (opts.stopped()) return { reason: "stopped" };
+    if (UNCAPPED.has(purpose)) return null;
     const period = periodOf(atMs);
     const resetsAtMs = periodEndMs(atMs);
     if (userCap !== null && q.userUsed.get(period, userId)!.used + micros > userCap) return { reason: "user_budget", resetsAtMs };
@@ -117,7 +125,7 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
       return db.sql.transaction((): Admission => {
         const at = now();
         const micros = toMicros(ESTIMATE_USD[purpose]);
-        const hold = holdFor(userId, at, micros);
+        const hold = holdFor(userId, at, purpose, micros);
         if (hold !== null) return { kind: "held", hold };
         const id = `hold_${crypto.randomUUID()}`;
         q.insert.run(id, userId, periodOf(at), purpose, key, micros, Math.round(at));
@@ -135,7 +143,7 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
         usedUsd: q.userUsed.get(periodOf(at), userId)!.used / MICROS,
         limitUsd: opts.limits.userUsd,
         resetsAtMs: periodEndMs(at),
-        held: holdFor(userId, at, toMicros(ESTIMATE_USD[PROBE])),
+        held: holdFor(userId, at, PROBE, toMicros(ESTIMATE_USD[PROBE])),
       };
     },
   };

@@ -645,6 +645,10 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
           return;
         }
         if (outcome.kind === "held") {
+          // Derek, 2026-11-13: "i think it should be allowed to finish". A cap never holds a turn that can only wrap up,
+          // so code says the wrap-up line without a call. The stop switch still holds it.
+          const onlyWrapUp = input.allowed.length === 1 && input.allowed[0] === "wrap_up";
+          if (onlyWrapUp && outcome.hold.reason !== "stopped") break;
           yield { type: "turn_held", hold: outcome.hold };
           return;
         }
