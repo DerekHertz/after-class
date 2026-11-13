@@ -1,7 +1,8 @@
 #!/bin/bash
 # Usage: afterclass-pull <commit hash>. Makes the app image available on this host. It uses the image Docker already has,
 # then the tarball that afterclass-save-image keeps on the data volume, then ECR. The tarball comes before ECR so a
-# replacement instance starts the app without ECR, whose retention rules may have expired the tag.
+# replacement instance starts the app without ECR, whose retention rules may have expired the tag. A bad tarball is set
+# aside for afterclass-save-image to replace.
 set -euo pipefail
 
 . /etc/afterclass/settings.env
@@ -23,7 +24,10 @@ if [ -f "$tarball" ]; then
   if docker load --input "$tarball" >/dev/null && docker image inspect "$image" >/dev/null 2>&1; then
     exit 0
   fi
-  echo "afterclass-pull: ${tarball} did not load, pulling from ECR" >&2
+  # A tarball that fails to load, or loads some other image, is moved aside so the next save writes a good one in its place.
+  # It is renamed, not deleted, because Docker can also fail to load a good file, and the save step removes it later.
+  echo "afterclass-pull: ${tarball} did not load as ${image}, moving it to ${tarball}.bad and pulling from ECR" >&2
+  mv -f "$tarball" "${tarball}.bad"
 fi
 
 # The login token lasts 12 hours. Keep it in a throwaway Docker config, not in root's home.

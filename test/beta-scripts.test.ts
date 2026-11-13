@@ -180,8 +180,10 @@ const storeKey = (tag: string): string => imageName(tag).replace(/[/:]/g, "_");
 
 /**
  * A stand-in for the docker CLI. Its image store is a folder of marker files, so a save on one host followed by a load on
- * another behaves like the real round trip. `pullFails` stands for an image ECR no longer holds, `saveFails` leaves a half
- * file and exits 1, and `size` is what `image inspect --format` reports.
+ * another behaves like the real round trip. A saved tarball is a real tar archive whose manifest.json lists the image, and a
+ * load reads that manifest, so an archive that is not a tar fails to load and an archive of another image loads that image.
+ * `pullFails` stands for an image ECR no longer holds, `saveFails` leaves a half file and exits 1, and `size` is what
+ * `image inspect --format` reports.
  */
 function fakeDocker(host: Host, opts: { store: string; pullFails?: boolean | undefined; saveFails?: boolean | undefined; size?: number }): void {
   mkdirSync(opts.store, { recursive: true });
@@ -200,10 +202,14 @@ case "$1 $2" in
     echo partial > "$3"
     ${opts.saveFails ? "exit 1" : ""}
     [ -e "${opts.store}/$(key "$4")" ] || exit 1
-    echo "$4" > "$3"; exit 0;;
+    d=$(mktemp -d)
+    printf '[{"Config":"c.json","RepoTags":["%s"],"Layers":[]}]' "$4" > "$d/manifest.json"
+    tar -cf "$3" -C "$d" manifest.json; rm -rf "$d"; exit 0;;
   "load --input")
-    grep -q corrupt "$3" && exit 1
-    touch "${opts.store}/$(key "$(cat "$3")")"; exit 0;;
+    manifest=$(tar -xOf "$3" manifest.json) || exit 1
+    loaded=$(echo "$manifest" | sed -n 's/.*"RepoTags":\\["\\([^"]*\\)".*/\\1/p')
+    [ -n "$loaded" ] || exit 1
+    touch "${opts.store}/$(key "$loaded")"; exit 0;;
   "pull "*)
     ${opts.pullFails ? "exit 1" : ""}
     touch "${opts.store}/$(key "$2")"; exit 0;;
@@ -219,25 +225,56 @@ function addLocalImage(store: string, tag: string): void {
   writeFileSync(join(store, storeKey(tag)), "");
 }
 
+type TarballKind = "good" | "not-a-tar" | "truncated" | "wrong-image";
+
+/** Writes the file docker save leaves for `tag`, or a damaged one. A wrong-image tarball is a good archive of the OLDEST image. */
+function writeTarball(path: string, tag: string, kind: TarballKind = "good"): void {
+  if (kind === "not-a-tar") {
+    writeFileSync(path, "corrupt\n");
+    return;
+  }
+  const work = tmpDir("afterclass-tar-");
+  const listed = kind === "wrong-image" ? OLDEST : tag;
+  writeFileSync(join(work, "manifest.json"), JSON.stringify([{ Config: "c.json", RepoTags: [imageName(listed)], Layers: [] }]));
+  expect(Bun.spawnSync(["tar", "-cf", path, "-C", work, "manifest.json"]).exitCode).toBe(0);
+  if (kind === "truncated") writeFileSync(path, readFileSync(path).subarray(0, 520));
+}
+
+/** The image names in a tarball's manifest.json, or null when the file is not a readable archive. */
+function tarballImages(path: string): string[] | null {
+  const run = Bun.spawnSync(["tar", "-xOf", path, "manifest.json"]);
+  if (run.exitCode !== 0) return null;
+  return (JSON.parse(run.stdout.toString()) as { RepoTags: string[] }[]).flatMap((entry) => entry.RepoTags);
+}
+
 function runSave(opts: {
   keep: string[];
   have?: string[];
   tarballs?: string[];
+  damaged?: Partial<Record<string, TarballKind>>;
   strays?: string[];
   freeBytes?: number;
   saveFails?: boolean;
-}): { status: number; stderr: string; files: string[]; log: string[] } {
+}): { status: number; stderr: string; files: string[]; log: string[]; host: Host; images: (tag: string) => string[] | null } {
   const host = makeHost("afterclass-save-test-");
   const store = join(host.root, "store");
   fakeDocker(host, { store, saveFails: opts.saveFails });
   for (const tag of opts.have ?? [opts.keep[0]!]) addLocalImage(store, tag);
   const dir = join(host.root, "data/afterclass/images");
-  for (const tag of opts.tarballs ?? []) writeFileSync(join(dir, `${tag}.tar`), `${imageName(tag)}\n`);
+  for (const tag of opts.tarballs ?? []) writeTarball(join(dir, `${tag}.tar`), tag);
+  for (const [tag, kind] of Object.entries(opts.damaged ?? {})) writeTarball(join(dir, `${tag}.tar`), tag, kind);
   for (const name of opts.strays ?? []) writeFileSync(join(dir, name), "stray");
   stub(host.bin, "df", `printf 'Avail\\n%s\\n' ${opts.freeBytes ?? 10_000_000_000}`);
 
   const run = runScript(host, "afterclass-save-image", opts.keep);
-  return { status: run.status, stderr: run.stderr, files: readdirSync(dir).sort(), log: readLog(host) };
+  return {
+    status: run.status,
+    stderr: run.stderr,
+    files: readdirSync(dir).sort(),
+    log: readLog(host),
+    host,
+    images: (tag) => tarballImages(join(dir, `${tag}.tar`)),
+  };
 }
 
 describe("afterclass-save-image", () => {
@@ -267,10 +304,32 @@ describe("afterclass-save-image", () => {
     expect(run.files).toEqual([`${OLD}.tar`]);
   });
 
-  test("a tarball that already exists is not written again", () => {
+  test("a tarball that already holds the image is not written again", () => {
     const run = runSave({ keep: [NEW], tarballs: [NEW] });
     expect(run.status).toBe(0);
     expect(run.log.some((line) => line.startsWith("docker save"))).toBe(false);
+  });
+
+  for (const kind of ["not-a-tar", "truncated", "wrong-image"] as const) {
+    test(`an existing ${kind} tarball is replaced from the running image`, () => {
+      const run = runSave({ keep: [NEW], damaged: { [NEW]: kind } });
+      expect(run.status).toBe(0);
+      expect(run.log.some((line) => line.startsWith("docker save"))).toBe(true);
+      expect(run.images(NEW)).toEqual([imageName(NEW)]);
+      expect(run.files).toEqual([`${NEW}.tar`]);
+    });
+  }
+
+  test("a damaged tarball is left in place when the replacement cannot be written, never half replaced", () => {
+    const run = runSave({ keep: [NEW], damaged: { [NEW]: "not-a-tar" }, saveFails: true });
+    expect(run.status).not.toBe(0);
+    expect(run.files).toEqual([`${NEW}.tar`]);
+  });
+
+  test("a tarball a pull set aside as .bad is removed", () => {
+    const run = runSave({ keep: [NEW], tarballs: [NEW], strays: [`${NEW}.tar.bad`] });
+    expect(run.status).toBe(0);
+    expect(run.files).toEqual([`${NEW}.tar`]);
   });
 
   test("an image that is not on the host is an error, not an empty tarball", () => {
@@ -285,34 +344,42 @@ describe("afterclass-save-image", () => {
   });
 });
 
-function runPull(opts: { tag: string; have?: string[]; tarball?: { content?: string }; pullFails?: boolean }): {
+function runPull(opts: { tag: string; have?: string[]; tarball?: TarballKind; pullFails?: boolean }): {
   status: number;
   log: string[];
   hasImage: boolean;
+  files: string[];
+  stderr: string;
 } {
   const host = makeHost("afterclass-pull-test-");
   const store = join(host.root, "store");
   fakeDocker(host, { store, pullFails: opts.pullFails });
   for (const tag of opts.have ?? []) addLocalImage(store, tag);
-  if (opts.tarball) {
-    writeFileSync(join(host.root, "data/afterclass/images", `${opts.tag}.tar`), opts.tarball.content ?? `${imageName(opts.tag)}\n`);
-  }
+  const dir = join(host.root, "data/afterclass/images");
+  if (opts.tarball) writeTarball(join(dir, `${opts.tag}.tar`), opts.tag, opts.tarball);
   const run = runScript(host, "afterclass-pull", [opts.tag]);
-  return { status: run.status, log: readLog(host), hasImage: existsSync(join(store, storeKey(opts.tag))) };
+  return {
+    status: run.status,
+    log: readLog(host),
+    hasImage: existsSync(join(store, storeKey(opts.tag))),
+    files: readdirSync(dir).sort(),
+    stderr: run.stderr,
+  };
 }
 
 describe("afterclass-pull", () => {
   test("an image already on the host is neither loaded nor pulled", () => {
-    const run = runPull({ tag: NEW, have: [NEW], tarball: {} });
+    const run = runPull({ tag: NEW, have: [NEW], tarball: "good" });
     expect(run.status).toBe(0);
     expect(run.log.some((line) => line.startsWith("docker load") || line.startsWith("docker pull"))).toBe(false);
   });
 
   test("an image ECR has expired starts from the tarball on the data volume", () => {
-    const run = runPull({ tag: NEW, tarball: {}, pullFails: true });
+    const run = runPull({ tag: NEW, tarball: "good", pullFails: true });
     expect(run.status).toBe(0);
     expect(run.hasImage).toBe(true);
     expect(run.log.some((line) => line.startsWith("docker pull"))).toBe(false);
+    expect(run.files).toEqual([`${NEW}.tar`]);
   });
 
   test("an expired image with no tarball fails, rather than starting something else", () => {
@@ -321,12 +388,21 @@ describe("afterclass-pull", () => {
     expect(run.hasImage).toBe(false);
   });
 
-  test("a tarball that does not load falls back to ECR", () => {
-    const run = runPull({ tag: NEW, tarball: { content: "corrupt" } });
-    expect(run.status).toBe(0);
-    expect(run.hasImage).toBe(true);
-    expect(run.log.some((line) => line.startsWith("docker pull"))).toBe(true);
-  });
+  for (const kind of ["not-a-tar", "truncated", "wrong-image"] as const) {
+    test(`a ${kind} tarball is set aside and the image comes from ECR`, () => {
+      const run = runPull({ tag: NEW, tarball: kind });
+      expect(run.status).toBe(0);
+      expect(run.hasImage).toBe(true);
+      expect(run.log.some((line) => line.startsWith("docker pull"))).toBe(true);
+      expect(run.files).toEqual([`${NEW}.tar.bad`]);
+    });
+
+    test(`a ${kind} tarball with ECR expired fails the pull and keeps the file as .bad`, () => {
+      const run = runPull({ tag: NEW, tarball: kind, pullFails: true });
+      expect(run.status).not.toBe(0);
+      expect(run.files).toEqual([`${NEW}.tar.bad`]);
+    });
+  }
 
   test("an image with no tarball is pulled from ECR", () => {
     const run = runPull({ tag: NEW });
@@ -336,6 +412,15 @@ describe("afterclass-pull", () => {
 });
 
 describe("a replaced instance", () => {
+  /** Moves the data volume of one host to a new host whose ECR no longer holds the image. */
+  function replaceHost(old: Host): Host {
+    const fresh = makeHost("afterclass-replace-new-");
+    rmSync(join(fresh.root, "data"), { recursive: true });
+    renameSync(join(old.root, "data"), join(fresh.root, "data"));
+    fakeDocker(fresh, { store: join(fresh.root, "store"), pullFails: true });
+    return fresh;
+  }
+
   test("starts the image the old instance saved to /data, after ECR expired it", () => {
     const old = makeHost("afterclass-replace-old-");
     fakeDocker(old, { store: join(old.root, "store") });
@@ -343,12 +428,43 @@ describe("a replaced instance", () => {
     stub(old.bin, "df", "printf 'Avail\\n10000000000\\n'");
     expect(runScript(old, "afterclass-save-image", [NEW, OLD]).status).toBe(0);
 
-    const fresh = makeHost("afterclass-replace-new-");
-    rmSync(join(fresh.root, "data"), { recursive: true });
-    renameSync(join(old.root, "data"), join(fresh.root, "data"));
-    fakeDocker(fresh, { store: join(fresh.root, "store"), pullFails: true });
+    const fresh = replaceHost(old);
     expect(runScript(fresh, "afterclass-pull", [NEW]).status).toBe(0);
     expect(existsSync(join(fresh.root, "store", storeKey(NEW)))).toBe(true);
+  });
+
+  test("a corrupt tarball does not stop a healthy deploy, the next save repairs it, and a replacement survives ECR expiry", () => {
+    const host = makeHost("afterclass-repair-");
+    const store = join(host.root, "store");
+    const dir = join(host.root, "data/afterclass/images");
+    fakeDocker(host, { store });
+    stub(host.bin, "df", "printf 'Avail\\n10000000000\\n'");
+    writeTarball(join(dir, `${NEW}.tar`), NEW, "not-a-tar");
+
+    expect(runScript(host, "afterclass-pull", [NEW]).status).toBe(0);
+    expect(existsSync(join(store, storeKey(NEW)))).toBe(true);
+    expect(readdirSync(dir)).toEqual([`${NEW}.tar.bad`]);
+
+    expect(runScript(host, "afterclass-save-image", [NEW]).status).toBe(0);
+    expect(readdirSync(dir)).toEqual([`${NEW}.tar`]);
+    expect(tarballImages(join(dir, `${NEW}.tar`))).toEqual([imageName(NEW)]);
+
+    const fresh = replaceHost(host);
+    expect(runScript(fresh, "afterclass-pull", [NEW]).status).toBe(0);
+    expect(existsSync(join(fresh.root, "store", storeKey(NEW)))).toBe(true);
+  });
+
+  test("a wrong-image tarball that deploy never pulled is still replaced by the save", () => {
+    const host = makeHost("afterclass-repair-wrong-");
+    fakeDocker(host, { store: join(host.root, "store") });
+    addLocalImage(join(host.root, "store"), NEW);
+    stub(host.bin, "df", "printf 'Avail\\n10000000000\\n'");
+    const dir = join(host.root, "data/afterclass/images");
+    writeTarball(join(dir, `${NEW}.tar`), NEW, "wrong-image");
+
+    expect(runScript(host, "afterclass-save-image", [NEW]).status).toBe(0);
+    expect(tarballImages(join(dir, `${NEW}.tar`))).toEqual([imageName(NEW)]);
+    expect(runScript(replaceHost(host), "afterclass-pull", [NEW]).status).toBe(0);
   });
 });
 
