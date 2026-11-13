@@ -1,0 +1,455 @@
+{
+  "rail": {
+    "sceneId": "last-desk",
+    "name": "Rail-side Classroom",
+    "companion": {
+      "anchor": "On the desk at the far left: left edge 1.5% of the window width in, bottom edge 16u above the window bottom, 220u square.",
+      "layout": {
+        "side": "left",
+        "inset": "1.5cqw",
+        "bottom": 16,
+        "size": 220
+      }
+    },
+    "notebook": {
+      "anchor": "On the desk at the far right: right edge 1.5% of the window width in, bottom edge 20u above the window bottom, 200u wide by 150u tall. The lecture folio sits just above it at 80% of its width.",
+      "layout": {
+        "side": "right",
+        "inset": "1.5cqw",
+        "bottom": 20,
+        "width": 200
+      }
+    },
+    "layers": {
+      "background": {
+        "source": "rail-background/rail-background.png",
+        "file": "rail-background.png",
+        "anchor": "Covers the window at scale b. Anchored to the right edge, so the window in the wall is always whole and the crop comes off the plain wall on the left. When the window is wider than 16:10, 22% of the vertical crop comes off the top and 78% off the bottom.",
+        "layout": {
+          "anchorX": "right",
+          "anchorY": 0.22,
+          "wallFrom": 0,
+          "wallTo": 1228
+        },
+        "features": {
+          "window": {
+            "x": 2456,
+            "y": 236,
+            "width": 688,
+            "height": 1024
+          }
+        }
+      },
+      "board": {
+        "source": "rail-board/rail-board.png",
+        "file": "rail-board.png",
+        "fill": "#18564b",
+        "slice": {
+          "top": 44,
+          "right": 64,
+          "bottom": 62,
+          "left": 64
+        },
+        "inner": [
+          64,
+          44,
+          1344,
+          737
+        ],
+        "anchor": "Centred on the wall left of the window (from the window's left edge to the background's window frame, less 36u each side). Top edge at 12% of the window height. Bottom edge 64u above the desk's far edge. Width fills the wall up to 2.7 times the height; height is at most the width divided by 1.3.",
+        "layout": {
+          "top": "12cqh",
+          "gapAboveDesk": 64,
+          "sideMargin": 36,
+          "maxAspect": 2.7,
+          "minAspect": 1.3
+        }
+      },
+      "ledgeItems": {
+        "source": "rail-extras/rail-extras.png",
+        "file": "rail-ledge-items.png",
+        "box": [
+          700,
+          540,
+          1380,
+          680
+        ],
+        "anchor": "On the board's ledge: left edge 9% of the board's width in from the board's left edge, base 33u above the board's bottom edge.",
+        "layout": {
+          "on": "board",
+          "left": "9%",
+          "bottom": 33
+        }
+      },
+      "vine": {
+        "source": "rail-extras/rail-extras.png",
+        "file": "rail-vine.png",
+        "box": [
+          80,
+          200,
+          460,
+          700
+        ],
+        "anchor": "Hangs over the board's top-left corner: its top-left corner sits 150u left of and 62u above the board's top-left corner, so only its inner edge crosses the frame.",
+        "layout": {
+          "on": "board",
+          "left": -150,
+          "top": -62
+        }
+      },
+      "desk": {
+        "source": "rail-desk/rail-desk.png",
+        "file": "rail-desk.png",
+        "slice": {
+          "top": 0,
+          "right": 150,
+          "bottom": 0,
+          "left": 150
+        },
+        "inner": [
+          150,
+          30,
+          1872,
+          290
+        ],
+        "anchor": "Spans the window edge to edge. Its far edge sits 310u above the window bottom; the rest of its depth runs off the bottom. The two end slices keep their size; the middle stretches sideways.",
+        "layout": {
+          "height": 310
+        }
+      },
+      "mat": {
+        "source": "rail-mat/rail-mat.png",
+        "file": "rail-mat.png",
+        "fill": "#fef0e2",
+        "slice": {
+          "top": 28,
+          "right": 30,
+          "bottom": 30,
+          "left": 28
+        },
+        "inner": [
+          28,
+          28,
+          1400,
+          427
+        ],
+        "anchor": "Centred horizontally on the desk. Width is the window width less 270u each side for the companion and the notebook, up to 1000u. Top edge 26u below the desk's far edge, bottom edge 14u above the window bottom.",
+        "layout": {
+          "sideReserve": 270,
+          "maxWidth": 1000,
+          "top": 26,
+          "bottom": 14
+        }
+      }
+    }
+  },
+  "harbor": {
+    "sceneId": "study-bench",
+    "name": "Harbor Study Terrace",
+    "companion": {
+      "anchor": "On the desk at the far left: left edge 1.5% of the window width in, bottom edge 40u above the window bottom, 220u square.",
+      "layout": {
+        "side": "left",
+        "inset": "1.5cqw",
+        "bottom": 40,
+        "size": 220
+      }
+    },
+    "notebook": {
+      "anchor": "On the desk at the far right: right edge 1.5% of the window width in, bottom edge 20u above the window bottom, 200u wide by 150u tall. The lecture folio sits just above it at 80% of its width.",
+      "layout": {
+        "side": "right",
+        "inset": "1.5cqw",
+        "bottom": 20,
+        "width": 200
+      }
+    },
+    "layers": {
+      "background": {
+        "source": "harbor-background/harbor-background.png",
+        "file": "harbor-background.png",
+        "anchor": "Covers the window at scale b, centred horizontally. When the window is wider than 16:10, 30% of the vertical crop comes off the top and 70% off the bottom.",
+        "layout": {
+          "anchorX": "center",
+          "anchorY": 0.3,
+          "wallFrom": 0,
+          "wallTo": 1586
+        },
+        "features": {
+          "horizonY": 868,
+          "railingTopY": 1104,
+          "floorFromY": 1400
+        }
+      },
+      "board": {
+        "source": "harbor-board/harbor-board.png",
+        "file": "harbor-board.png",
+        "fill": "#0f725e",
+        "slice": {
+          "top": 56,
+          "right": 215,
+          "bottom": 242,
+          "left": 215
+        },
+        "inner": [
+          56,
+          52,
+          1334,
+          540
+        ],
+        "anchor": "Centred horizontally in the window, less 170u each side. Top edge at 15% of the window height, which leaves room for the lamps. Its legs run 120u down behind the desk's far edge. Width fills the window up to 2.7 times the height. The bottom slice holds the legs and braces and keeps its size.",
+        "layout": {
+          "top": "15cqh",
+          "gapAboveDesk": -120,
+          "sideMargin": 170,
+          "maxAspect": 2.7
+        }
+      },
+      "lamp": {
+        "source": "harbor-extras/harbor-extras.png",
+        "file": "harbor-lamp.png",
+        "box": [
+          170,
+          140,
+          340,
+          290
+        ],
+        "anchor": "The room's ledge item. Three copies stand on the board's top beam, centred at 18%, 50% and 82% of the board's width, base 14u below the board's top edge.",
+        "layout": {
+          "on": "board",
+          "bottom": "calc(100% - var(--u) * 14)",
+          "copies": [
+            "18%",
+            "50%",
+            "82%"
+          ],
+          "transform": "translateX(-50%)"
+        }
+      },
+      "awning": {
+        "source": "harbor-extras/harbor-extras.png",
+        "file": "harbor-awning.png",
+        "box": [
+          1110,
+          70,
+          1460,
+          460
+        ],
+        "anchor": "Pinned to the window's top-right corner, behind the board.",
+        "layout": {
+          "on": "room",
+          "right": 0,
+          "top": 0,
+          "z": 1
+        }
+      },
+      "cushion": {
+        "source": "harbor-extras/harbor-extras.png",
+        "file": "harbor-cushion.png",
+        "box": [
+          640,
+          750,
+          940,
+          920
+        ],
+        "anchor": "On the desk under the companion: left edge 0.6% of the window width in, bottom edge 14u above the window bottom.",
+        "layout": {
+          "on": "desk",
+          "left": "0.6cqw",
+          "bottom": 14,
+          "z": 6
+        }
+      },
+      "desk": {
+        "source": "harbor-desk-2/harbor-desk-2.png",
+        "file": "harbor-desk.png",
+        "slice": {
+          "top": 0,
+          "right": 120,
+          "bottom": 0,
+          "left": 120
+        },
+        "inner": [
+          120,
+          24,
+          1932,
+          310
+        ],
+        "anchor": "Spans the window edge to edge. Its far edge sits 310u above the window bottom; the rest of its depth runs off the bottom. The two end slices keep their size; the middle stretches sideways.",
+        "layout": {
+          "height": 310
+        }
+      },
+      "mat": {
+        "source": "harbor-mat/harbor-mat.png",
+        "file": "harbor-mat.png",
+        "fill": "#feebcd",
+        "slice": {
+          "top": 44,
+          "right": 44,
+          "bottom": 44,
+          "left": 44
+        },
+        "inner": [
+          44,
+          44,
+          1348,
+          390
+        ],
+        "anchor": "Centred horizontally on the desk. Width is the window width less 270u each side for the companion and the notebook, up to 1000u. Top edge 26u below the desk's far edge, bottom edge 14u above the window bottom.",
+        "layout": {
+          "sideReserve": 270,
+          "maxWidth": 1000,
+          "top": 26,
+          "bottom": 14
+        }
+      }
+    }
+  },
+  "canal": {
+    "sceneId": "projection-booth",
+    "name": "Lantern Canal Film Club",
+    "companion": {
+      "anchor": "On the desk at the far left: left edge 1.5% of the window width in, bottom edge 16u above the window bottom, 220u square.",
+      "layout": {
+        "side": "left",
+        "inset": "1.5cqw",
+        "bottom": 16,
+        "size": 220
+      }
+    },
+    "notebook": {
+      "anchor": "On the desk at the far right: right edge 1.5% of the window width in, bottom edge 20u above the window bottom, 200u wide by 150u tall. The lecture folio sits just above it at 80% of its width.",
+      "layout": {
+        "side": "right",
+        "inset": "1.5cqw",
+        "bottom": 20,
+        "width": 200
+      }
+    },
+    "layers": {
+      "background": {
+        "source": "canal-background/canal-background.png",
+        "file": "canal-background.png",
+        "anchor": "Covers the window at scale b. Anchored to the left edge, so the window in the wall is always whole and the crop comes off the plain plank wall on the right. When the window is wider than 16:10, 22% of the vertical crop comes off the top and 78% off the bottom.",
+        "layout": {
+          "anchorX": "left",
+          "anchorY": 0.22,
+          "wallFrom": 376,
+          "wallTo": 1586
+        },
+        "features": {
+          "window": {
+            "x": 44,
+            "y": 264,
+            "width": 700,
+            "height": 1104
+          }
+        }
+      },
+      "board": {
+        "source": "canal-board/canal-board.png",
+        "file": "canal-board.png",
+        "fill": "#fbe1c5",
+        "slice": {
+          "top": 104,
+          "right": 100,
+          "bottom": 50,
+          "left": 100
+        },
+        "inner": [
+          100,
+          104,
+          1263,
+          669
+        ],
+        "anchor": "Centred on the wall right of the window (from the background's window frame to the window's right edge, less 36u each side). Top edge at 12% of the window height. Bottom edge 78u above the desk's far edge, which leaves room for the pull tab. Width fills the wall up to 2.7 times the height; height is at most the width divided by 1.3.",
+        "layout": {
+          "top": "12cqh",
+          "gapAboveDesk": 78,
+          "sideMargin": 36,
+          "maxAspect": 2.7,
+          "minAspect": 1.3
+        }
+      },
+      "pullTab": {
+        "source": "canal-extras/canal-extras.png",
+        "file": "canal-pull-tab.png",
+        "box": [
+          1130,
+          450,
+          1230,
+          550
+        ],
+        "anchor": "The room's ledge item. Hangs under the centre of the screen's bottom bar, its top edge 6u above the board's bottom edge.",
+        "layout": {
+          "on": "board",
+          "left": "50%",
+          "top": "calc(100% - var(--u) * 6)",
+          "transform": "translateX(-50%)"
+        }
+      },
+      "projector": {
+        "source": "canal-extras/canal-extras.png",
+        "file": "canal-projector.png",
+        "box": [
+          260,
+          330,
+          560,
+          640
+        ],
+        "anchor": "Stands on the desk's far-left corner: left edge 24u in from the window's left edge, feet 250u above the window bottom, which is 60u below the desk's far edge.",
+        "layout": {
+          "on": "desk",
+          "left": 24,
+          "bottom": 250,
+          "z": 6
+        }
+      },
+      "desk": {
+        "source": "canal-desk/canal-desk.png",
+        "file": "canal-desk.png",
+        "slice": {
+          "top": 0,
+          "right": 110,
+          "bottom": 0,
+          "left": 110
+        },
+        "inner": [
+          110,
+          24,
+          1952,
+          360
+        ],
+        "anchor": "Spans the window edge to edge. Its far edge sits 310u above the window bottom; the rest of its depth runs off the bottom. The two end slices keep their size; the middle stretches sideways.",
+        "layout": {
+          "height": 310
+        }
+      },
+      "mat": {
+        "source": "canal-mat/canal-mat.png",
+        "file": "canal-mat.png",
+        "fill": "#2c3a61",
+        "slice": {
+          "top": 36,
+          "right": 36,
+          "bottom": 36,
+          "left": 36
+        },
+        "inner": [
+          36,
+          36,
+          1383,
+          361
+        ],
+        "anchor": "Centred horizontally on the desk. Width is the window width less 270u each side for the companion and the notebook, up to 1000u. Top edge 26u below the desk's far edge, bottom edge 14u above the window bottom.",
+        "layout": {
+          "sideReserve": 270,
+          "maxWidth": 1000,
+          "top": 26,
+          "bottom": 14
+        }
+      }
+    }
+  }
+}
