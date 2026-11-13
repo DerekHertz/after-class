@@ -117,8 +117,10 @@ export type Memo = {
    * promise (single-flight; only the first caller's `streamTo` gets deltas).
    * Otherwise attempts until success, a non-retryable error, or `maxAttempts`.
    * An aborted attempt records an `aborted` usage event and resolves `missing`.
+   * `onRetry` runs after a retryable failure and before the next attempt, so a caller that
+   * has been given the failed attempt's `streamTo` deltas can drop them.
    */
-  run<I, O>(task: Task<I, O>, input: I, opts?: { readonly signal?: AbortSignal; readonly streamTo?: (delta: string) => void }): Promise<Lookup<O>>;
+  run<I, O>(task: Task<I, O>, input: I, opts?: { readonly signal?: AbortSignal; readonly streamTo?: (delta: string) => void; readonly onRetry?: () => void }): Promise<Lookup<O>>;
   /** User retry: forget terminal failures so demand re-runs them. Never deletes hits. */
   clearFailures(keys: readonly MemoKey[]): void;
   /** Exact input, output and usage for a key (PRD acceptance: inspectable preprocessing). */
@@ -241,7 +243,7 @@ export function createMemo(db: Db, mode: MemoMode, opts: MemoOptions = {}): Memo
     );
   }
 
-  async function attemptLoop<I, O>(task: Task<I, O>, input: I, key: MemoKey, signal: AbortSignal, streamTo: ((d: string) => void) | null): Promise<Lookup<O>> {
+  async function attemptLoop<I, O>(task: Task<I, O>, input: I, key: MemoKey, signal: AbortSignal, streamTo: ((d: string) => void) | null, onRetry: (() => void) | null): Promise<Lookup<O>> {
     q.insertInput.run(key, task.provider, task.purpose, task.version, task.model, canonicalJson(task.canonicalInput(input)), Math.round(now()));
     let failures = q.failure.get(key)?.attempts ?? 0;
     while (true) {
@@ -286,18 +288,19 @@ export function createMemo(db: Db, mode: MemoMode, opts: MemoOptions = {}): Memo
         failures = q.upsertFailure.get(key, message, db.nextSeq(), terminal ? 1 : 0)!.attempts;
       });
       if (terminal) return settled(task as Task<unknown, O>, key);
+      onRetry?.();
       await sleep(retryDelayMs(failures), signal);
     }
   }
 
-  function run<I, O>(task: Task<I, O>, input: I, runOpts: { signal?: AbortSignal; streamTo?: (delta: string) => void } = {}): Promise<Lookup<O>> {
+  function run<I, O>(task: Task<I, O>, input: I, runOpts: { signal?: AbortSignal; streamTo?: (delta: string) => void; onRetry?: () => void } = {}): Promise<Lookup<O>> {
     const key = keyOf(task, input);
     const flying = inflight.get(key);
     if (flying) return flying as Promise<Lookup<O>>;
     const done = settled(task as Task<unknown, O>, key);
     if (done.kind !== "missing") return Promise.resolve(done);
     if (mode === "replay") return Promise.reject(new ReplayMiss(task.purpose, key));
-    const p = attemptLoop(task, input, key, runOpts.signal ?? NEVER, runOpts.streamTo ?? null).finally(() => inflight.delete(key));
+    const p = attemptLoop(task, input, key, runOpts.signal ?? NEVER, runOpts.streamTo ?? null, runOpts.onRetry ?? null).finally(() => inflight.delete(key));
     inflight.set(key, p);
     return p;
   }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { asSeq } from "../src/backend/db";
+import { liveText, reduceLive, startLive } from "../src/app/core";
 import type { Reviews, TutorKit } from "../src/backend/review";
 import { MAX_MOVES_PER_TURN, createReviews } from "../src/backend/review";
 import type { TutorOutput } from "../src/backend/review/tutor";
@@ -39,6 +40,39 @@ describe("turn", () => {
     const stored = reviews.view(r.reviewId).turns;
     expect(stored.map((x) => x.actor)).toEqual(["learner", "tutor"]);
     expect(stored[1]).toMatchObject({ actor: "tutor", threadId: THREAD, say: "What is the main idea? Say it in your own words." });
+  });
+
+  describe("a retried model call", () => {
+    const say = "What is the main idea? Say it in your own words.";
+
+    async function retried(firstDeltas: (move: TutorMove) => string[]) {
+      const r = startedRig();
+      const move = askMain(r.claim);
+      const t = tutorHarness(r.db, (_input, call) => (call === 1 ? fail("claude timed out", { retryable: true, deltas: firstDeltas(move) }) : reply(move, say)));
+      const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: kit, now: () => 1 });
+      const events = await collect(reviews.turn(r.reviewId, randomId("turn"), answer()));
+      const stored = reviews.view(r.reviewId).turns.filter((x) => x.actor === "tutor");
+      return { events, stored };
+    }
+
+    test("the text on screen ends equal to the stored turn when the first attempt had spoken", async () => {
+      const { events, stored } = await retried((move) => [`${JSON.stringify(move)}\n`, "What is the main "]);
+      let live = startLive("t");
+      for (const e of events) live = reduceLive(live, e);
+      expect(stored).toMatchObject([{ say }]);
+      expect(live.status).toBe("complete");
+      expect(liveText(live)).toBe(say);
+      expect(live.sentences.join(" ")).toBe(say);
+    });
+
+    test("the text on screen ends equal to the stored turn when the first attempt had not finished its header", async () => {
+      const { events, stored } = await retried((move) => [JSON.stringify(move).slice(0, 12)]);
+      let live = startLive("t");
+      for (const e of events) live = reduceLive(live, e);
+      expect(stored).toMatchObject([{ say }]);
+      expect(live.status).toBe("complete");
+      expect(liveText(live)).toBe(say);
+    });
   });
 
   test("every learner turn carries the thread open when it was said", async () => {

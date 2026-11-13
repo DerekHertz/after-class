@@ -92,7 +92,7 @@ export type ReviewsDeps = {
   concepts?(ids: readonly ConceptId[]): readonly Concept[];
   bundle(material: Material): EvidenceBundle;
   watchedSeconds(captureId: CaptureId): number;
-  runTutor(input: TutorInput, streamTo: (delta: string) => void, signal: AbortSignal): Promise<Lookup<TutorOutput>>;
+  runTutor(input: TutorInput, streamTo: (delta: string) => void, signal: AbortSignal, onRetry: () => void): Promise<Lookup<TutorOutput>>;
   /** The memo's: a resend clears the stored terminal failure of its tutor call so the model is asked again. */
   clearFailures: Memo["clearFailures"];
   runWrapUp(input: WrapUpInput): Promise<Lookup<WrapUpOutput>>;
@@ -402,11 +402,11 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
    * A terminal failure stored before this request began answered an earlier send,
    * not this one, so a resend clears it and asks the model once more.
    */
-  async function runTutor(input: TutorInput, onDelta: (d: string) => void, signal: AbortSignal, asOf: Seq): Promise<Lookup<TutorOutput>> {
-    const lookup = await deps.runTutor(input, onDelta, signal);
+  async function runTutor(input: TutorInput, onDelta: (d: string) => void, onRetry: () => void, signal: AbortSignal, asOf: Seq): Promise<Lookup<TutorOutput>> {
+    const lookup = await deps.runTutor(input, onDelta, signal, onRetry);
     if (lookup.kind !== "failed" || lookup.atSeq > asOf) return lookup;
     deps.clearFailures([lookup.key]);
-    return deps.runTutor(input, onDelta, signal);
+    return deps.runTutor(input, onDelta, signal, onRetry);
   }
 
   /**
@@ -439,6 +439,14 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
       invalid = why;
       ctl.abort();
     };
+    /** The retried call streams its whole reply again, header included, so the header gate and the shown prose start over. */
+    const onRetry = () => {
+      buf = "";
+      gated = false;
+      streamedMove = null;
+      pending = "";
+      push({ type: "say_reset" });
+    };
     const onDelta = (d: string) => {
       if (invalid !== null) return;
       if (gated) return speak(d);
@@ -454,7 +462,7 @@ export function createReviews(db: Db, deps: ReviewsDeps, config: ReviewsOptions 
     };
 
     let settled: Settled | null = null;
-    runTutor(input, onDelta, ctl.signal, asOf).then(
+    runTutor(input, onDelta, onRetry, ctl.signal, asOf).then(
       (lookup): Settled => ({ ok: true, lookup }),
       (err: unknown): Settled => ({ ok: false, error: err instanceof Error ? err.message : String(err) }),
     ).then((s) => {

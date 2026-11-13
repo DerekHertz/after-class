@@ -429,6 +429,7 @@ export function reduceLive(live: Live, event: TurnEvent): Live {
     // A request can hold several tutor moves; a move event closes one, so words after it belong to the next.
     case "say_delta": return live.move !== null ? { ...live, move: null, deltaText: event.text, sentences: [] } : { ...live, deltaText: live.deltaText + event.text };
     case "sentence": return live.move !== null ? { ...live, move: null, deltaText: "", sentences: [event.text] } : { ...live, sentences: [...live.sentences, event.text] };
+    case "say_reset": return { ...live, deltaText: "", sentences: [] };
     case "turn_complete": return { ...live, status: "complete" };
     case "turn_failed": return { ...live, status: "failed", error: event.error, retryable: event.retryable };
   }

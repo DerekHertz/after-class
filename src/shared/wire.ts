@@ -479,6 +479,7 @@ export const tutorStreamEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("move"), turnId: idOf("turn"), move: tutorMovez }),
   z.object({ type: z.literal("say_delta"), text: z.string() }),
   z.object({ type: z.literal("sentence"), text: z.string() }),
+  z.object({ type: z.literal("say_reset") }),
   z.object({ type: z.literal("turn_complete"), turnId: idOf("turn") }),
   z.object({ type: z.literal("turn_failed"), error: z.string(), retryable: z.boolean() }),
 ]) satisfies z.ZodType<TurnEvent>;

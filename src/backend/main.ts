@@ -374,7 +374,7 @@ export async function main(options: MainOptions = {}): Promise<Running> {
     concepts: preparation.concepts,
     bundle: evidence.bundle,
     watchedSeconds: (captureId) => evidence.captureView(captureId).watchedSeconds,
-    runTutor: (input, streamTo, signal) => memo.run(tasks.tutor, input, { signal, streamTo }),
+    runTutor: (input, streamTo, signal, onRetry) => memo.run(tasks.tutor, input, { signal, streamTo, onRetry }),
     clearFailures: memo.clearFailures,
     runWrapUp: (input) => memo.run(tasks.wrapUp, input),
     endedInTx: (reviewId) => record.markEndedInTx(reviewId),

@@ -480,12 +480,15 @@ export type ReviewState = {
  * One tutor turn as streamed to the app (NDJSON). Order is fixed:
  *   learner_turn_stored → move → say_delta* / sentence* → turn_complete
  * `move` is the validated header; nothing is spoken before it.
+ * `say_reset` says the model call is being retried: the client drops the prose and sentences shown so far,
+ * because the retry streams the whole reply again. Words already spoken aloud stay spoken.
  */
 export type TurnEvent =
   | { readonly type: "learner_turn_stored"; readonly turnId: TurnId }
   | { readonly type: "move"; readonly turnId: TurnId; readonly move: TutorMove }
   | { readonly type: "say_delta"; readonly text: string }
   | { readonly type: "sentence"; readonly text: string }
+  | { readonly type: "say_reset" }
   | { readonly type: "turn_complete"; readonly turnId: TurnId }
   | { readonly type: "turn_failed"; readonly error: string; readonly retryable: boolean };
 

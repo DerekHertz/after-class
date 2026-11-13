@@ -205,7 +205,7 @@ export function tutorHarness(db: Db, script: Script) {
   };
   return {
     calls: base.calls as unknown as TutorInput[],
-    runTutor: (input: TutorInput, streamTo: (d: string) => void, signal: AbortSignal) => memo.run(task, input, { signal, streamTo }),
+    runTutor: (input: TutorInput, streamTo: (d: string) => void, signal: AbortSignal, onRetry: () => void) => memo.run(task, input, { signal, streamTo, onRetry }),
     clearFailures: memo.clearFailures,
   };
 }
