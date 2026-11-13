@@ -785,9 +785,10 @@ export type Route =
   | { readonly page: "review"; readonly id: string }
   | { readonly page: "record"; readonly reviewId: string | null }
   | { readonly page: "usage" }
+  | { readonly page: "connect_extension" }
   | { readonly page: "not_found" };
 
-/** `/app/capture/<id>`, `/app/review/<id>`, `/app/record[/<reviewId>]`, `/app/usage`. */
+/** `/app/capture/<id>`, `/app/review/<id>`, `/app/record[/<reviewId>]`, `/app/usage`, `/app/connect-extension`. */
 export function parseRoute(pathname: string): Route {
   let parts: string[];
   try {
@@ -800,6 +801,7 @@ export function parseRoute(pathname: string): Route {
   if (page === "review" && id) return { page: "review", id };
   if (page === "record") return { page: "record", reviewId: id ?? null };
   if (page === "usage") return { page: "usage" };
+  if (page === "connect-extension") return { page: "connect_extension" };
   return { page: "home" };
 }
 
@@ -811,6 +813,7 @@ export const routePath = (r: Route): string => {
     case "review": return `/app/review/${encodeURIComponent(r.id)}`;
     case "record": return r.reviewId === null ? "/app/record" : `/app/record/${encodeURIComponent(r.reviewId)}`;
     case "usage": return "/app/usage";
+    case "connect_extension": return "/app/connect-extension";
   }
 };
 

@@ -8,8 +8,9 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClerkVerifier } from "../src/backend/clerk";
+import { createDevices } from "../src/backend/devices";
 import { serve } from "../src/backend/http";
-import { clerkUsers, main, mainHosted, resolveAuth } from "../src/backend/main";
+import { clerkUsers, hostedCallers, main, mainHosted, resolveAuth } from "../src/backend/main";
 import type { HostedRunning } from "../src/backend/main";
 import type { Memo } from "../src/backend/providers/memo";
 import type { Allowance, Cost } from "../src/shared/domain";
@@ -20,12 +21,12 @@ import { ROUTES, routeUrl } from "../src/shared/wire";
 import type { RouteName } from "../src/shared/wire";
 import type { SigningKey } from "./clerk-fixtures";
 import { ISSUER, PUBLIC_ORIGIN, PUBLISHABLE_KEY, claims, fakeJwks, jwksServer, sign, signingKey } from "./clerk-fixtures";
-import { EXT_ID, TOKEN, fixtureApp, raw, registerCleanup, wireFacts, world } from "./http-fixtures";
+import { EXTENSION_ORIGIN, EXT_ID, TOKEN, connectDevice, fixtureApp, raw, registerCleanup, wireFacts, world } from "./http-fixtures";
 
 registerCleanup();
 
 const SCRIPT = "https://clerk.afterclass.test/npm/@clerk/clerk-js@6.42.2/dist/clerk.browser.js";
-const PARAM_KIND: Record<string, IdKind> = { captureId: "cap", reviewId: "rvw", topicId: "cpt", evidenceId: "ev", noteId: "note", linkId: "lnk", observationId: "obs" };
+const PARAM_KIND: Record<string, IdKind> = { captureId: "cap", reviewId: "rvw", topicId: "cpt", evidenceId: "ev", noteId: "note", linkId: "lnk", observationId: "obs", deviceId: "dev" };
 
 let key: SigningKey;
 beforeAll(async () => {
@@ -36,8 +37,9 @@ beforeAll(async () => {
 function hostedServer() {
   const w = world();
   const verifier = createClerkVerifier({ issuer: ISSUER, jwksUrl: "https://clerk.afterclass.test/.well-known/jwks.json", authorizedParties: [PUBLIC_ORIGIN] }, { fetch: fakeJwks([key]).fetch });
+  const devices = createDevices(w.db);
   const server = serve({
-    hosted: { publicOrigin: PUBLIC_ORIGIN, extensionId: EXT_ID, clerk: { scriptUrl: SCRIPT, publishableKey: PUBLISHABLE_KEY }, userFor: clerkUsers(verifier, w.db) },
+    hosted: { publicOrigin: PUBLIC_ORIGIN, extensionId: EXT_ID, clerk: { scriptUrl: SCRIPT, publishableKey: PUBLISHABLE_KEY }, userFor: hostedCallers(clerkUsers(verifier, w.db), devices), devices },
     port: 0,
     modulesFor: () => ({ ledger: { summary: () => ({ total: { known: 0, unknown: 0 } }) } as never, evidence: w.evidence, reviews: w.reviews }),
     appDir: fixtureApp(),
@@ -61,11 +63,13 @@ describe("hosted requests", () => {
   });
   afterAll(() => s.stop());
 
-  test("every route in ROUTES answers 401 with no token, a pairing token, or a refused session token", async () => {
+  test("every route that takes a bearer answers 401 with no token, a pairing token, a refused session token or an unknown device token", async () => {
     const expired = await bearerFor({ exp: Math.floor(Date.now() / 1000) - 600 });
     const otherOrigin = await bearerFor({ azp: "https://evil.test" });
+    const unknownDevice = `Bearer acd_${"A".repeat(43)}`;
     for (const name of Object.keys(ROUTES) as RouteName[]) {
-      for (const authorization of [null, `Bearer ${TOKEN}`, expired, otherOrigin]) {
+      if (ROUTES[name].bearer.length === 0) continue;
+      for (const authorization of [null, `Bearer ${TOKEN}`, expired, otherOrigin, unknownDevice]) {
         const r = await raw(s.port, sampleUrl(name), { Authorization: authorization, "Content-Type": "application/json" }, ROUTES[name].method);
         expect(r.status, `${name} with ${authorization?.slice(0, 20)}`).toBe(401);
       }
@@ -93,15 +97,20 @@ describe("hosted requests", () => {
     }
   });
 
-  test("the pinned extension passes the Origin check but has no session token yet, so ingest is 401", async () => {
-    const r = await raw(s.port, "/ingest", { Origin: `chrome-extension://${EXT_ID}`, Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" }, "POST");
-    expect(r.status).toBe(401);
+  test("the pinned extension passes the Origin check, but a pairing token or a session token on ingest is 401", async () => {
+    for (const authorization of [`Bearer ${TOKEN}`, await bearerFor()]) {
+      for (const origin of [EXTENSION_ORIGIN, { Origin: PUBLIC_ORIGIN }, {}]) {
+        const r = await raw(s.port, "/ingest", { ...origin, Authorization: authorization, "Content-Type": "application/json" }, "POST");
+        expect(r.status, JSON.stringify(origin)).toBe(401);
+      }
+    }
   });
 
-  test("ingest links back to the app on the public origin", async () => {
+  test("ingest from a connected extension links back to the app on the public origin", async () => {
+    const device = await connectDevice(s.base, { Authorization: await bearerFor(), "Content-Type": "application/json" });
     const res = await fetch(`${s.base}/ingest`, {
       method: "POST",
-      headers: { Authorization: await bearerFor(), "Content-Type": "application/json" },
+      headers: device.headers,
       body: JSON.stringify({ captureId: stableId("cap", "hosted"), facts: wireFacts(0, 2) }),
     });
     expect(res.status).toBe(200);
@@ -153,6 +162,7 @@ function hostedEnv(jwksUrl: string, dataDir: string) {
     AFTERCLASS_CLERK_JWKS_URL: jwksUrl,
     AFTERCLASS_CLERK_PUBLISHABLE_KEY: PUBLISHABLE_KEY,
     AFTERCLASS_PUBLIC_ORIGIN: PUBLIC_ORIGIN,
+    AFTERCLASS_EXTENSION_ID: EXT_ID,
     AFTERCLASS_DATA: dataDir,
   };
 }
@@ -186,6 +196,7 @@ describe("mainHosted", () => {
   }
 
   const as = async (sub: string) => ({ Authorization: `Bearer ${await sign(key, claims({ sub }))}`, "Content-Type": "application/json" });
+  const extensionOf = async (base: string, sub: string) => (await connectDevice(base, await as(sub))).headers;
   const usersIn = (dataDir: string) => {
     const db = new Database(join(dataDir, "afterclass.sqlite"), { readonly: true });
     try {
@@ -229,13 +240,13 @@ describe("mainHosted", () => {
     const bob = await as("user_bob");
     const lectures = async (headers: Record<string, string>) => ((await (await fetch(`${b.base}/lectures`, { headers })).json()) as { lectures: { captureId: string }[] }).lectures.map((l) => l.captureId);
     try {
-      const ingest = await fetch(`${b.base}/ingest`, { method: "POST", headers: alice, body: JSON.stringify({ captureId: cap, facts: wireFacts(0, 3) }) });
+      const ingest = await fetch(`${b.base}/ingest`, { method: "POST", headers: await extensionOf(b.base, "user_alice"), body: JSON.stringify({ captureId: cap, facts: wireFacts(0, 3) }) });
       expect(ingest.status).toBe(200);
       expect(await lectures(alice)).toEqual([cap]);
       expect(await lectures(bob)).toEqual([]);
       expect((await fetch(`${b.base}/captures/${cap}`, { headers: bob })).status).toBe(404);
       expect((await fetch(`${b.base}/captures/${cap}`, { headers: alice })).status).toBe(200);
-      const stolen = await fetch(`${b.base}/ingest`, { method: "POST", headers: bob, body: JSON.stringify({ captureId: cap, facts: wireFacts(0, 3) }) });
+      const stolen = await fetch(`${b.base}/ingest`, { method: "POST", headers: await extensionOf(b.base, "user_bob"), body: JSON.stringify({ captureId: cap, facts: wireFacts(0, 3) }) });
       expect(stolen.status).toBe(404);
     } finally {
       await b.r.stop();
@@ -343,9 +354,8 @@ describe("mainHosted", () => {
     const dataDir = dir("afterclass-hosted-data-");
     const cap = stableId("cap", "old-lecture");
     let b = await boot(dataDir);
-    const alice = await as("user_alice");
     try {
-      expect((await fetch(`${b.base}/ingest`, { method: "POST", headers: alice, body: JSON.stringify({ captureId: cap, facts: wireFacts(0, 3) }) })).status).toBe(200);
+      expect((await fetch(`${b.base}/ingest`, { method: "POST", headers: await extensionOf(b.base, "user_alice"), body: JSON.stringify({ captureId: cap, facts: wireFacts(0, 3) }) })).status).toBe(200);
     } finally {
       await b.r.stop();
     }

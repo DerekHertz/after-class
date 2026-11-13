@@ -8,10 +8,16 @@
 </head>
 <body>
 <h1>After Class</h1>
+<section id="local">
 <p>Paste the pairing token that <code>bun run dev</code> prints. It is kept in this extension only and sent only to the local backend at <code>127.0.0.1:4317</code>.</p>
 <label for="token">Pairing token</label>
 <input id="token" type="password" autocomplete="off" spellcheck="false">
 <div class="row"><button id="save" class="primary">Save and test</button></div>
+</section>
+<section id="hosted" hidden>
+<p>After Class sends the lectures you capture to your account. Connect it once from this browser.</p>
+<div class="row"><button id="connect" class="primary">Connect</button></div>
+</section>
 <p id="result" role="status"></p>
 <script type="module" src="options.js"></script>
 </body>

@@ -16,6 +16,7 @@ import { Link, usePathname } from "./ui";
 import { HomeScreen } from "./home";
 import { objectFrame } from "./room-object";
 import { SignInScreen, SignInUnavailable, SignOutButton, clerkScript, loadClerk } from "./sign-in";
+import { ConnectExtensionScreen, extensionIdOf } from "./connect";
 import type { ClerkClient } from "./sign-in";
 
 /** The backend writes the pairing token into the served HTML; it is never in the URL or in storage. */
@@ -43,7 +44,8 @@ function NotFound() {
   );
 }
 
-function App({ services: { api, speaker, speech, unsent }, hosted = false }: { readonly services: Services; readonly hosted?: boolean }) {
+/** `extensionId`: hosted, the pinned extension the connect page reaches ("" when the server names none); null locally. */
+function App({ services: { api, speaker, speech, unsent }, extensionId }: { readonly services: Services; readonly extensionId: string | null }) {
   const route = parseRoute(usePathname());
   switch (route.page) {
     case "home":
@@ -59,7 +61,9 @@ function App({ services: { api, speaker, speech, unsent }, hosted = false }: { r
     case "record":
       return <RecordScreen api={api} reviewId={route.reviewId === null ? null : parseId("rvw", route.reviewId)} />;
     case "usage":
-      return <UsageScreen api={api} hosted={hosted} />;
+      return <UsageScreen api={api} hosted={extensionId !== null} />;
+    case "connect_extension":
+      return <ConnectExtensionScreen api={api} extensionId={extensionId} />;
     case "not_found":
       return <NotFound />;
   }
@@ -70,7 +74,7 @@ function Hosted({ clerk, accounts }: { readonly clerk: ClerkClient; readonly acc
   const account = useSyncExternalStore(accounts.subscribe, accounts.current);
   return (
     <SceneShell account={account && <SignOutButton clerk={clerk} />}>
-      {account ? <App key={account.userId} services={account.services} hosted /> : <SignInScreen clerk={clerk} />}
+      {account ? <App key={account.userId} services={account.services} extensionId={extensionIdOf(document) ?? ""} /> : <SignInScreen clerk={clerk} />}
     </SceneShell>
   );
 }
@@ -78,7 +82,7 @@ function Hosted({ clerk, accounts }: { readonly clerk: ClerkClient; readonly acc
 const root = createRoot(document.getElementById("root")!);
 const script = clerkScript(document);
 if (script === null) {
-  root.render(<AppearanceProvider><SceneShell><App services={servicesFor(readToken(), LOCAL_UNSENT_DB, browser)} /></SceneShell></AppearanceProvider>);
+  root.render(<AppearanceProvider><SceneShell><App services={servicesFor(readToken(), LOCAL_UNSENT_DB, browser)} extensionId={null} /></SceneShell></AppearanceProvider>);
 } else {
   loadClerk(script).then(
     (clerk) => root.render(<AppearanceProvider><Hosted clerk={clerk} accounts={followAccount(clerk, browser)} /></AppearanceProvider>),

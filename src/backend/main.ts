@@ -27,7 +27,8 @@
  *            AFTERCLASS_PUBLIC_ORIGIN (a bare origin, e.g. https://afterclass.example). Also required:
  *            AFTERCLASS_CLERK_ISSUER (the instance's Frontend API URL), AFTERCLASS_CLERK_JWKS_URL (its
  *            /.well-known/jwks.json) and AFTERCLASS_CLERK_PUBLISHABLE_KEY. Who may sign up is Clerk's setting
- *            (restricted mode or the allowlist in Clerk's dashboard), not ours.
+ *            (restricted mode or the allowlist in Clerk's dashboard), not ours. The extension connects with a device
+ *            token (`devices.ts`), so AFTERCLASS_EXTENSION_ID must name the Chrome Web Store item.
  *
  * Each user's modules sit on that user's `UserDb` (`wire`), built at boot for every known user and on first sign-in for
  * a new one. The Jev and Claude clients and the scheduler are shared, so provider limits hold across users.
@@ -52,6 +53,8 @@ import { heldMessage } from "../shared/allowance";
 import { LOCAL_USER, ensureLocalUser, openDb, scopeDb, signedInUsers, userForIdentity } from "./db";
 import type { Db, UserDb } from "./db";
 import { clerkScriptUrl, createClerkVerifier, frontendApiOf } from "./clerk";
+import { createDevices, isDeviceToken } from "./devices";
+import type { Devices } from "./devices";
 import type { ClerkConfig, Rejection, Verifier } from "./clerk";
 import { createMemo, ProviderError } from "./providers/memo";
 import type { Memo, MemoMode, Task } from "./providers/memo";
@@ -329,7 +332,7 @@ export function resolveAuth(env: Env): Auth {
 }
 
 /** A session token's user: verified against Clerk's keys, then mapped to its `users` row, which its first sign-in creates. */
-export function clerkUsers(verifier: Verifier, db: Db, onRefused: (reason: Rejection) => void = () => {}): HostedAuth["userFor"] {
+export function clerkUsers(verifier: Verifier, db: Db, onRefused: (reason: Rejection) => void = () => {}): (token: string) => Promise<UserId | null> {
   return async (token) => {
     const verdict = await verifier.verify(token);
     if (!verdict.ok) {
@@ -337,6 +340,18 @@ export function clerkUsers(verifier: Verifier, db: Db, onRefused: (reason: Rejec
       return null;
     }
     return userForIdentity(db, { provider: "clerk", subject: verdict.subject });
+  };
+}
+
+/** Every hosted bearer token: a device token by its shape, looked up hashed; anything else is a session token for Clerk. */
+export function hostedCallers(sessionUser: (token: string) => Promise<UserId | null>, devices: Devices): HostedAuth["userFor"] {
+  return async (token) => {
+    if (isDeviceToken(token)) {
+      const userId = devices.userFor(token);
+      return userId === null ? null : { userId, bearer: "device" };
+    }
+    const userId = await sessionUser(token);
+    return userId === null ? null : { userId, bearer: "session" };
   };
 }
 
@@ -669,6 +684,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     ledger: g.ledger, evidence: g.served, reviews: g.reviews, record: g.record, preparation: g.preparation, segmentation: g.segmentation, voice: g.voice, diagrams: g.diagrams,
   });
   const hostname = env.AFTERCLASS_HOST || "127.0.0.1";
+  const devices = createDevices(rawDb);
   const server =
     auth.kind === "local"
       ? serve({
@@ -683,7 +699,8 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
           publicOrigin: auth.publicOrigin,
           extensionId,
           clerk: { scriptUrl: clerkScriptUrl(auth.frontendApi), publishableKey: auth.publishableKey },
-          userFor: clerkUsers(createClerkVerifier(auth.clerk), rawDb, (reason) => reportOnce("sign-in", new Error(`a session token was refused (${reason})`))),
+          userFor: hostedCallers(clerkUsers(createClerkVerifier(auth.clerk), rawDb, (reason) => reportOnce("sign-in", new Error(`a session token was refused (${reason})`))), devices),
+          devices,
         },
         port,
         modulesFor: (userId) => served(graphFor(userId)),
@@ -708,7 +725,8 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
         ? "voice: ELEVENLABS_API_KEY is ignored in hosted mode, where ElevenLabs stays off; the app speaks with Chrome's voice"
         : "voice: unavailable (no ELEVENLABS_API_KEY in keys.env, or replay mode); the app speaks with Chrome's voice",
   );
-  if (auth.kind === "clerk") log(`sign-in: Clerk for ${auth.publicOrigin}; the extension's routes answer 401 until device tokens land`);
+  if (auth.kind === "clerk") log(`sign-in: Clerk for ${auth.publicOrigin}; the extension connects through ${auth.publicOrigin}/app/connect-extension`);
+  if (auth.kind === "clerk" && extensionId === "") logError("backend: AFTERCLASS_EXTENSION_ID is not set, so no extension can connect until it is");
   // The token is printed only for a loopback bind. A hosted container's log goes to CloudWatch, which is not a place for a secret.
   log(hostname === "127.0.0.1" && auth.kind === "local" ? `listening on 127.0.0.1:${boundPort}\npairing token: ${token}` : `listening on ${hostname}:${boundPort}`);
 

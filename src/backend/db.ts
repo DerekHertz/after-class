@@ -45,6 +45,9 @@ export type TableScope = "user" | "shared" | "identity";
  */
 export const TABLE_SCOPES: { readonly [table: string]: TableScope } = {
   users: "identity",
+  // A user's connected browsers and connect codes. Looked up by token or code hash to find the user, so not through a UserDb.
+  devices: "user",
+  connect_codes: "user",
   seq_counter: "shared", // becomes a per-user sequence row in the Postgres phase
   schema_migrations: "shared",
   // The memo mixes lecture-derived rows with tutor_turn and wrap_up rows that hold a learner's answers, dialogue and notes,

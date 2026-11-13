@@ -13,6 +13,7 @@ import type { NoteDrafts, NotebookLecture, NotebookTopic, NotebookViewName } fro
 import { objectFrame } from "./room-object";
 import { ErrorNote, EvidencePane, FrameImage, Link, useAsync } from "./ui";
 import { DiagramSummaryView, POLL_MS } from "./diagram";
+import { ConnectedBrowsers } from "./connect";
 import { frameLink, NO_FRAME_NOTE, shouldPollDiagrams } from "./diagram-view";
 
 
@@ -611,7 +612,10 @@ export function AllowanceNote({ allowance }: { readonly allowance: UsageSummary[
   );
 }
 
-/** Hosted, a learner sees only this month's allowance. The tables by cost kind and purpose are for the developer running it locally. */
+/**
+ * Hosted, a learner sees this month's allowance and the account's connected browsers. The tables by cost kind and purpose are
+ * for the developer running it locally.
+ */
 export function UsageScreen({ api, hosted = false }: { readonly api: AppApi; readonly hosted?: boolean }) {
   const usage = useAsync(useCallback(() => api.usage(), [api]));
   return (
@@ -621,6 +625,7 @@ export function UsageScreen({ api, hosted = false }: { readonly api: AppApi; rea
       {usage.data === null && usage.error === null && <p className="page-loading" role="status">Opening the usage record...</p>}
       {usage.data && <AllowanceNote allowance={usage.data.allowance} />}
       {usage.data && !hosted && <div className="record-section"><UsageTable summary={usage.data} /></div>}
+      {hosted && <ConnectedBrowsers api={api} />}
     </main>
   );
 }

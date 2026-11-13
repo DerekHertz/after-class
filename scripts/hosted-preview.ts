@@ -8,12 +8,19 @@
  * The browser asks for ClerkJS at https://clerk.afterclass.test, the host the publishable key names; the spec routes
  * that host to the fake Clerk. The stub ClerkJS is labelled as a test stub on screen, and its "sign in" mints a real
  * RS256 session token that the backend verifies exactly as it would Clerk's.
+ *
+ * It also builds the hosted extension for this origin into dist/hosted-preview-extension and pins the id Chrome gives
+ * that folder when it is loaded unpacked, so e2e/connect-extension.spec.ts can connect a real extension. The seeded
+ * lecture goes up the way the extension sends one: through a connect code and a device token.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { CLERK_JS_VERSION } from "../src/backend/clerk";
 import { mainHosted } from "../src/backend/main";
+import { buildExtension } from "./build-extension";
 
 const port = Number(process.env.AFTERCLASS_HOSTED_PREVIEW_PORT ?? 8774);
 const clerkPort = Number(process.env.AFTERCLASS_FAKE_CLERK_PORT ?? 8775);
@@ -67,6 +74,13 @@ const fakeClerk = Bun.serve({
   },
 });
 
+/** Chrome names an unpacked extension by the SHA-256 of its folder's path: the first 32 hex digits, each 0-f written as a-p. */
+const unpackedId = (dir: string) => createHash("sha256").update(realpathSync(dir)).digest("hex").slice(0, 32).split("").map((h) => String.fromCharCode(97 + parseInt(h, 16))).join("");
+
+const extensionDir = resolve(import.meta.dir, "../dist/hosted-preview-extension");
+await buildExtension(extensionDir, { hostedOrigin: origin });
+const extensionId = unpackedId(extensionDir);
+
 const dataDir = mkdtempSync(join(tmpdir(), "afterclass-hosted-preview-"));
 const running = await mainHosted({
   port,
@@ -80,6 +94,7 @@ const running = await mainHosted({
     AFTERCLASS_CLERK_JWKS_URL: `http://127.0.0.1:${clerkPort}/.well-known/jwks.json`,
     AFTERCLASS_CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from("clerk.afterclass.test$").toString("base64")}`,
     AFTERCLASS_PUBLIC_ORIGIN: origin,
+    AFTERCLASS_EXTENSION_ID: extensionId,
   },
   error: () => {},
 });
@@ -91,14 +106,21 @@ const facts = [
   { kind: "span", videoId: "dQw4w9WgXcQ", start: 0, end: 600, rate: 1, tabVisible: true, wallDurationMs: 600_000 },
   { kind: "control", action: "stop", reason: "user" },
 ].map((f, clientSeq) => ({ ...f, clientSeq, wallMs: 1_000 + clientSeq }));
+const session = { Authorization: `Bearer ${await sessionToken("user_preview")}`, "Content-Type": "application/json" };
+const fromExtension = { "Content-Type": "application/json", Origin: `chrome-extension://${extensionId}` };
+const { code } = (await (await fetch(`${origin}/devices/connect-codes`, { method: "POST", headers: session, body: JSON.stringify({ label: "Preview seed" }) })).json()) as { code: string };
+const { token } = (await (await fetch(`${origin}/devices/exchange`, { method: "POST", headers: fromExtension, body: JSON.stringify({ code }) })).json()) as { token: string };
 const seeded = await fetch(`${origin}/ingest`, {
   method: "POST",
-  headers: { Authorization: `Bearer ${await sessionToken("user_preview")}`, "Content-Type": "application/json" },
+  headers: { ...fromExtension, Authorization: `Bearer ${token}` },
   body: JSON.stringify({ captureId: "cap_aaaaaaaaaaaaaaaaaaaaaaaaaa", facts }),
 });
 if (!seeded.ok) throw new Error(`seeding the preview lecture failed: ${seeded.status} ${await seeded.text()}`);
+// The seeding device was only a way in; the account starts with no connected browser.
+const { devices } = (await (await fetch(`${origin}/devices`, { headers: session })).json()) as { devices: { id: string }[] };
+for (const d of devices) await fetch(`${origin}/devices/${d.id}`, { method: "DELETE", headers: session });
 
-console.log(`Hosted preview with a fake Clerk. Replay mode, temporary data. ${origin}`);
+console.log(`Hosted preview with a fake Clerk. Replay mode, temporary data. ${origin}. Extension ${extensionId} in ${extensionDir}`);
 const shutdown = () =>
   void running.stop().then(() => {
     void fakeClerk.stop(true);

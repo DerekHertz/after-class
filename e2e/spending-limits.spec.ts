@@ -58,10 +58,11 @@ test("the usage page shows this month's use against the allowance, and says used
   await keep(page, "usage-held", info.project.name);
 });
 
-test("hosted, a learner's usage page shows only the allowance, not the developer tables", async ({ page }, info) => {
+test("hosted, a learner's usage page shows the allowance and connected browsers, not the developer tables", async ({ page }, info) => {
   await page.goto("/?scenario=usage-held&clean=1&account=1");
   await expect(page.getByText("$4.79 of your $5.00 AI allowance used this month. It resets on December 1.")).toBeVisible();
   await expect(page.getByText(NOT_ENOUGH_LEFT)).toBeVisible();
   await expect(page.getByRole("table")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Connected browsers" })).toBeVisible();
   await keep(page, "usage-hosted", info.project.name);
 });

@@ -208,6 +208,9 @@ export function createFixture(scenario: Scenario): Fixture {
     },
     async voiceAvailable() { return false; },
     async speech() { throw new Error("the preview has no voice"); },
+    async createConnectCode() { throw new ApiError("The preview has no connected browsers.", 501); },
+    async devices() { return []; },
+    async revokeDevice() { log("device.revoke"); },
     async evidence(query) {
       log("evidence.read");
       if (scenario === "evidence-error" && evidenceAttempts++ === 0) throw new ApiError("Fixture evidence request failed. Retry is available.", 503);
