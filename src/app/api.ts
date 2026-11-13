@@ -83,7 +83,12 @@ export class ApiError extends Error {
   }
 }
 
-export type ApiOptions = { readonly baseUrl?: string; readonly fetch?: typeof fetch };
+export type ApiOptions = {
+  readonly baseUrl?: string;
+  readonly fetch?: typeof fetch;
+  /** The signed-in account's lifetime. Its abort cancels every request and stream in flight, and no request is sent after it. */
+  readonly signal?: AbortSignal;
+};
 
 /** The bearer token: the pairing token, or a function that returns the current session token for each request. */
 export type Credential = string | (() => Promise<string>);
@@ -93,13 +98,19 @@ export function createApi(credential: Credential, options: ApiOptions = {}): App
   const base = options.baseUrl ?? "";
   const doFetch = options.fetch ?? ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
   const enc = encodeURIComponent;
+  const life = options.signal;
 
-  async function send(method: string, path: string, body?: unknown): Promise<Response> {
+  async function send(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
     let res: Response;
     try {
-      const headers: Record<string, string> = { authorization: `Bearer ${await token()}` };
+      const bearer = await token();
+      if (life?.aborted) throw new Error("This account is signed out.");
+      const headers: Record<string, string> = { authorization: `Bearer ${bearer}` };
       if (body !== undefined) headers["content-type"] = "application/json";
-      res = await doFetch(`${base}${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      const both = life !== undefined && signal !== undefined ? AbortSignal.any([life, signal]) : (life ?? signal);
+      res = await doFetch(`${base}${path}`, {
+        method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...(both === undefined ? {} : { signal: both }),
+      });
     } catch (e) {
       throw new ApiError(e instanceof Error ? e.message : "network error", 0);
     }
@@ -125,16 +136,7 @@ export function createApi(credential: Credential, options: ApiOptions = {}): App
   };
 
   async function speech(text: string, signal?: AbortSignal): Promise<Blob> {
-    const body = ROUTES.speak.request!.parse({ text });
-    let res: Response;
-    try {
-      const headers = { authorization: `Bearer ${await token()}`, "content-type": "application/json" };
-      res = await doFetch(`${base}${ROUTES.speak.path}`, { method: ROUTES.speak.method, headers, body: JSON.stringify(body), ...(signal ? { signal } : {}) });
-    } catch (e) {
-      throw new ApiError(e instanceof Error ? e.message : "network error", 0);
-    }
-    if (!res.ok) throw new ApiError(await errorMessage(res), res.status);
-    return res.blob();
+    return (await send(ROUTES.speak.method, ROUTES.speak.path, ROUTES.speak.request!.parse({ text }), signal)).blob();
   }
 
   async function* sendTurn(reviewId: ReviewId, turnId: TurnId, act: LearnerAct): AsyncGenerator<TutorStreamEvent> {

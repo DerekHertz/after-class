@@ -26,8 +26,24 @@ test("hosted sign-in: signed out shows the sign-in screen, signing in shows the 
   await expect(page.getByText("Locks - Operating Systems").first()).toBeVisible();
   await page.screenshot({ path: `test-results/hosted-sign-in/signed-in-${info.project.name}.png` });
 
+  // An unsent answer in the account's database, written by hand because the seeded lecture has no review to answer in.
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open("afterclass-app.user_preview", 1);
+    open.onupgradeneeded = () => open.result.createObjectStore("unsent_turns", { keyPath: "turnId" });
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const tx = open.result.transaction("unsent_turns", "readwrite");
+      tx.objectStore("unsent_turns").put({ turnId: "turn_unsent", reviewId: "rvw_unsent", act: { kind: "answer", text: "my unsent answer", modality: "text" }, createdAtMs: 1 });
+      tx.oncomplete = () => (open.result.close(), resolve());
+      tx.onerror = () => reject(tx.error);
+    };
+  }));
+  const accountDatabases = () => page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name).filter((n) => n?.startsWith("afterclass-app.")));
+  expect(await accountDatabases()).toEqual(["afterclass-app.user_preview"]);
+
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByRole("heading", { name: "Sign in to After Class" })).toBeVisible();
+  await expect.poll(accountDatabases).toEqual([]);
   expect(errors).toEqual([]);
 });
 

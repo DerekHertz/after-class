@@ -40,8 +40,19 @@ export function loadClerk(script: HTMLScriptElement, host: { Clerk?: ClerkClient
   });
 }
 
-/** The session token for one request. A signed-out session sends none, and the backend answers 401. */
-export const sessionToken = async (clerk: ClerkClient): Promise<string> => (await clerk.session?.getToken()) ?? "";
+/**
+ * The session token for one request of `userId`'s account. It refuses once another account, or nobody, is signed in,
+ * before and after asking Clerk, so no request of one account carries another account's token.
+ */
+export async function accountToken(clerk: ClerkClient, userId: string): Promise<string> {
+  const stillSignedIn = () => {
+    if (clerk.user?.id !== userId) throw new Error("This account is signed out.");
+  };
+  stillSignedIn();
+  const token = (await clerk.session?.getToken()) ?? "";
+  stillSignedIn();
+  return token;
+}
 
 export function SignInScreen({ clerk }: { readonly clerk: ClerkClient }) {
   const mount = useRef<HTMLDivElement>(null);

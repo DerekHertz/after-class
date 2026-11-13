@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ApiError, createApi } from "../src/app/api";
-import { SignInScreen, SignOutButton, loadClerk, sessionToken } from "../src/app/sign-in";
+import { SignInScreen, SignOutButton, accountToken, loadClerk } from "../src/app/sign-in";
 import type { ClerkClient } from "../src/app/sign-in";
 
 const lectures = () => new Response(JSON.stringify({ lectures: [] }), { headers: { "content-type": "application/json" } });
@@ -47,9 +47,22 @@ describe("createApi with a session", () => {
     expect((error as ApiError).status).toBe(0);
   });
 
-  test("a signed-out session sends an empty bearer, which the backend refuses", async () => {
-    expect(await sessionToken(fakeClerk())).toBe("");
-    expect(await sessionToken(fakeClerk({ session: { getToken: async () => "jwt" } }))).toBe("jwt");
+  test("an account's token is refused once another account, or nobody, is signed in, even if the switch lands while Clerk is asked", async () => {
+    const clerk = fakeClerk({ user: { id: "user_alice" }, session: { getToken: async () => "alice-jwt" } });
+    expect(await accountToken(clerk, "user_alice")).toBe("alice-jwt");
+    await expect(accountToken(clerk, "user_bob")).rejects.toThrow("signed out");
+
+    const switching = fakeClerk({ user: { id: "user_alice" } });
+    Object.assign(switching, {
+      session: {
+        getToken: async () => {
+          Object.assign(switching, { user: { id: "user_bob" } });
+          return "bob-jwt";
+        },
+      },
+    });
+    await expect(accountToken(switching, "user_alice")).rejects.toThrow("signed out");
+    await expect(accountToken(fakeClerk(), "user_alice")).rejects.toThrow("signed out");
   });
 });
 
