@@ -650,7 +650,7 @@ export type WrapUpOutput = {
   readonly notes: readonly { readonly conceptId: AssessableClaim["conceptId"]; readonly tutorSummary: string; readonly evidence: readonly string[] }[];
 };
 
-const wrapUpSchema: z.ZodType<WrapUpOutput> = z.object({
+export const wrapUpSchema: z.ZodType<WrapUpOutput> =z.object({
   observations: z.array(z.object({
     threadId,
     proposed: z.enum(["independent", "partial", "after_help", "unresolved", "not_assessed"]),
