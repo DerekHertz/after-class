@@ -1,7 +1,8 @@
 import { useCallback, useRef, useState } from "react";
+import { heldMessage } from "../shared/allowance";
 import { randomId } from "../shared/ids";
 import type { CaptureId, ReviewId } from "../shared/ids";
-import type { ReviewOptions, StartChoice } from "../shared/domain";
+import type { ReviewOptions, StartChoice, UsageSummary } from "../shared/domain";
 import type { AppApi } from "./api";
 import { formatClock, inspectBundle, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
 import type { OptionsScreen, ScopeSummary, SourceTitles, StartOffer } from "./core";
@@ -12,6 +13,7 @@ import { BundleInspector, ErrorNote, EvidencePane, Link, navigate, useAsync } fr
 
 const POLL_MS = 3000;
 const isProcessing = (options: ReviewOptions): boolean => options.kind === "processing";
+const isHeld = (usage: UsageSummary): boolean => usage.allowance?.held != null;
 
 export type OptionsViewProps = {
   readonly screen: OptionsScreen;
@@ -156,6 +158,9 @@ export async function checkAgain(
 export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readonly captureId: CaptureId }) {
   const capture = useAsync(useCallback(() => api.captureView(captureId), [api, captureId]));
   const options = usePolled(useCallback(() => api.reviewOptions(captureId), [api, captureId]), isProcessing, POLL_MS);
+  // A budget that holds back new model calls holds back preparation too. Read again while it does, so the note goes when it lifts.
+  const usage = usePolled(useCallback(() => api.usage(), [api]), isHeld, POLL_MS);
+  const held = usage.data?.allowance?.held ?? null;
   const [startError, setStartError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [refused, setRefused] = useState<ReviewOptions | null>(null);
@@ -223,6 +228,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
       <ErrorNote error={startError} />
       {options.data === null && options.error === null && <p className="page-loading" role="status">Looking for prepared lecture material...</p>}
       {starting && <p className="page-loading" role="status">Saving your choice...</p>}
+      {held !== null && shown !== null && shown.kind !== "ready" && <p className="note" role="status">{heldMessage(held)}</p>}
       {shown && (
         <OptionsView
           screen={optionsScreen(shown, titles, videos)}

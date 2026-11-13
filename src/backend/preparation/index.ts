@@ -32,7 +32,7 @@ import type {
 } from "../../shared/domain";
 import { Material } from "../../shared/time";
 import { appliesBefore } from "../providers/memo";
-import type { Lookup, Task } from "../providers/memo";
+import type { Lookup, RunResult, Task } from "../providers/memo";
 import type { ClaimSupportInput } from "../providers/jev-tasks";
 import { asSeq } from "../db";
 import type { UserDb } from "../db";
@@ -138,7 +138,7 @@ export function createPreparation(db: UserDb, deps: {
   currentChunks(captureId: CaptureId): readonly ChunkRevision[];
   bundle(material: Material): EvidenceBundle;
   lookup<I, O>(task: Task<I, O>, input: I): Lookup<O>;
-  run<I, O>(task: Task<I, O>, input: I, signal: AbortSignal): Promise<Lookup<O>>;
+  run<I, O>(task: Task<I, O>, input: I, signal: AbortSignal): Promise<RunResult<O>>;
   clearFailures: (keys: readonly Lookup<unknown>["key"][]) => void;
   tasks: PreparationTasks;
   /** Frame JPEG bytes for claim checks. Absent ⇒ a check citing a frame fails, so its claim ends unverified. */

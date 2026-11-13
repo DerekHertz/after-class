@@ -15,6 +15,8 @@
  *    and the scheduler aborts inflight items no longer demanded. The scheduler never
  *    reads a result: derivations apply it through `appliesBefore`.
  *  - R5: "Choosing Later never cancels preparation." This file never imports review/.
+ *  - Budgets: a run that resolves `held` (memo.ts) made no call. Its key is left alone for `heldRetryMs` and a pump is
+ *    set for then, so held work is asked again when the stop switch is off or a new month starts, without a busy loop.
  *
  * Priority: boundary windows > frame judgments > claim checks/revisions >
  * interpretation > resource search.
@@ -30,6 +32,9 @@ export type WorkItem = {
   readonly provider: Provider;
   run(signal: AbortSignal): Promise<unknown>; // = memo.run(task, input, { signal })
 };
+
+/** memo.run's answer when a budget refused the attempt. The only part of a result the scheduler reads. */
+const isHeld = (result: unknown): boolean => typeof result === "object" && result !== null && (result as { readonly kind?: unknown }).kind === "held";
 
 export type SchedulerLimits = { readonly jev: number; readonly claude: number }; // starting values: 4, 2
 
@@ -53,6 +58,8 @@ export type SchedulerOptions = {
   readonly sweep?: { readonly run: () => void; readonly everyMs?: number };
   /** How long a key whose run threw is left alone. memo.run records provider failures itself and resolves; a throw is something else. Default 5000. */
   readonly cooldownMs?: number;
+  /** How long a key whose run a budget held back is left alone before it is asked again. Default 60000. */
+  readonly heldRetryMs?: number;
   readonly now?: () => number;
   readonly timers?: Timers;
   /** `where` is the failing item's key, or "sweepExpired". */
@@ -104,6 +111,7 @@ export function createScheduler(
 ): Scheduler {
   const debounceMs = options.debounceMs ?? 50;
   const cooldownMs = options.cooldownMs ?? 5000;
+  const heldRetryMs = options.heldRetryMs ?? 60_000;
   const now = options.now ?? Date.now;
   const timers = options.timers ?? realTimers;
 
@@ -114,6 +122,8 @@ export function createScheduler(
   let pumping = false;
   let again = false;
   let cancelDebounce: (() => void) | null = null;
+  let cancelWake: (() => void) | null = null;
+  const heldKeys = new Set<MemoKey>();
 
   /** Every source, deduplicated by key, ordered by priority then source order. */
   function collect(): Map<MemoKey, WorkItem> {
@@ -154,8 +164,12 @@ export function createScheduler(
     running.set(item.key, { key: item.key, purpose: item.purpose, provider: item.provider, startedAtMs, controller, done });
     void (async () => {
       try {
-        await item.run(controller.signal);
-        if (!controller.signal.aborted) {
+        const result = await item.run(controller.signal);
+        if (isHeld(result)) {
+          coolingUntil.set(item.key, now() + heldRetryMs);
+          heldKeys.add(item.key);
+          wakeAfterHold();
+        } else if (!controller.signal.aborted) {
           const s = samples.get(item.purpose) ?? { provider: item.provider, ms: [] };
           s.ms.push(now() - startedAtMs);
           samples.set(item.purpose, s);
@@ -171,6 +185,17 @@ export function createScheduler(
         if (!stopped) schedulePump();
       }
     })();
+  }
+
+  /** One timer for every held key: when the first one's wait is over, all of them are asked again in one pump. */
+  function wakeAfterHold(): void {
+    if (cancelWake || stopped) return;
+    cancelWake = timers.after(heldRetryMs, () => {
+      cancelWake = null;
+      for (const key of heldKeys) coolingUntil.delete(key);
+      heldKeys.clear();
+      pump();
+    });
   }
 
   function schedulePump(): void {
@@ -247,6 +272,8 @@ export function createScheduler(
       stopped = true;
       cancelDebounce?.();
       cancelDebounce = null;
+      cancelWake?.();
+      cancelWake = null;
       stopSweep?.();
       const pending = [...running.values()];
       for (const r of pending) r.controller.abort();

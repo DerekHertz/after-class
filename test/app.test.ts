@@ -331,6 +331,7 @@ describe("evidence inspector", () => {
 
 describe("usage view", () => {
   const summary = (byKind: Partial<UsageSummary["byKind"]>): UsageSummary => ({
+    allowance: null,
     byKind: { measured: { calls: 0, usd: null }, notional: { calls: 0, usd: null }, estimated: { calls: 0, usd: null }, unknown: { calls: 0, usd: null }, ...byKind },
     byPurpose: {
       boundary: { calls: 3, errors: 1, unknownCost: 3 }, frame_change: { calls: 0, errors: 0, unknownCost: 0 }, claim_check: { calls: 0, errors: 0, unknownCost: 0 },

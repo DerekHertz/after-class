@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { appliesBefore, createMemo, ReplayMiss } from "../src/backend/providers/memo";
-import type { Memo } from "../src/backend/providers/memo";
+import type { Memo, RunResult } from "../src/backend/providers/memo";
 import type { UserDb } from "../src/backend/db";
 import { deferred, fail, fakeTask, ok, testUserDb, usage } from "./fakes";
 import type { FakeStep } from "./fakes";
@@ -28,7 +28,7 @@ describe("content-keyed cache", () => {
     const second = await memo.run(t, { window: "w1" });
     expect(first).toMatchObject({ kind: "hit", value: "judged w1" });
     expect(second).toEqual(first);
-    expect(memo.lookup(t, { window: "w1" })).toEqual(first);
+    expect<RunResult<string>>(memo.lookup(t, { window: "w1" })).toEqual(first);
     expect(t.calls).toEqual([{ window: "w1" }]);
   });
 

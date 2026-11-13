@@ -2,8 +2,9 @@
  * Pure view logic for the review app: everything a screen decides, with no
  * React and no IO. Screens render what these return.
  */
+import { heldMessage, resetDay } from "../shared/allowance";
 import type {
-  Author, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
+  Allowance, Author, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
   ReviewState, ReviewView, ScopePreview, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
 } from "../shared/domain";
 import type { EvidenceId, SourceId } from "../shared/ids";
@@ -434,7 +435,8 @@ export type Live = {
   readonly move: TutorMove | null;
   readonly deltaText: string;
   readonly sentences: readonly string[];
-  readonly status: "streaming" | "complete" | "failed";
+  /** `held`: a budget refused the tutor's call before it began, and `error` holds the words to show. */
+  readonly status: "streaming" | "complete" | "failed" | "held";
   readonly error: string | null;
   readonly retryable: boolean;
 };
@@ -453,6 +455,7 @@ export function reduceLive(live: Live, event: TurnEvent): Live {
     case "say_reset": return { ...live, deltaText: "", sentences: [] };
     case "turn_complete": return { ...live, status: "complete" };
     case "turn_failed": return { ...live, status: "failed", error: event.error, retryable: event.retryable };
+    case "turn_held": return { ...live, status: "held", error: heldMessage(event.hold), retryable: false };
   }
 }
 
@@ -760,6 +763,18 @@ export function usageRows(summary: UsageSummary): UsageRow[] {
     const amount = calls === 0 ? "none" : k === "unknown" || usd === null ? "unknown" : usd > 0 && usd < 0.0001 ? "<$0.0001" : `$${usd.toFixed(usd < 1 ? 4 : 2)}`;
     return { kind: KIND_LABEL[k], calls, amount };
   });
+}
+
+const dollars = (usd: number): string => (usd > 0 && usd < 0.005 ? "<$0.01" : `$${usd.toFixed(2)}`);
+
+/** The month's allowance as the usage page states it. Null when no budget runs (replay mode). */
+export function allowanceView(a: Allowance | null): { readonly line: string; readonly held: string | null } | null {
+  if (a === null) return null;
+  const line =
+    a.limitUsd === null
+      ? `${dollars(a.usedUsd)} counted this month, with no monthly cap. The month resets on ${resetDay(a.resetsAtMs)}.`
+      : `${dollars(a.usedUsd)} of your ${dollars(a.limitUsd)} AI allowance used this month. It resets on ${resetDay(a.resetsAtMs)}.`;
+  return { line, held: a.held === null ? null : heldMessage(a.held) };
 }
 
 // ───────────────────────────── Routing ──────────────────────────────────────

@@ -14,6 +14,11 @@
  *   token    ~/.config/afterclass/pairing-token (0600), created on first boot, printed with "listening on 127.0.0.1:<port>".
  *   data     $AFTERCLASS_DATA (default ./data): afterclass.sqlite, frames/
  *   mode     AFTERCLASS_MODE=live | replay. Unset: live when a keys file exists, replay otherwise.
+ *   budget   Live mode only; replay never touches it. Every paid attempt reserves against this month's (UTC) per-user and total
+ *            budgets first (providers/budget.ts). AFTERCLASS_BUDGET_USER_USD and AFTERCLASS_BUDGET_TOTAL_USD set them in dollars.
+ *            Hosted (AFTERCLASS_AUTH=clerk, or AFTERCLASS_HOST not loopback) defaults to 5 and 50; local has no cap unless set.
+ *            Stop switch: AFTERCLASS_STOP_PAID_CALLS=1, or a file named stop-paid-calls in the config dir, which is looked for
+ *            before every attempt (create it to stop new paid calls, delete it to resume; calls already running finish).
  *   hosted   The container image sets AFTERCLASS_HOST=0.0.0.0, AFTERCLASS_HEALTH_ANY_HOST=1, AFTERCLASS_BUILD_APP=0 and
  *            AFTERCLASS_CONFIG_DIR. Unset, the backend binds 127.0.0.1 and every route keeps the localhost Host check.
  *            AFTERCLASS_HEALTH_ANY_HOST=1 relaxes the Host check for GET /health only, for the load balancer's health check.
@@ -33,10 +38,13 @@ import { join, resolve } from "node:path";
 import { buildApp } from "../../scripts/build-app";
 import type { CaptureId, EvidenceId } from "../shared/ids";
 import type { AssessableClaim, BoundaryJudgment, BoundaryWindow, Evidence, Frame, Passage, Verdict } from "../shared/domain";
+import { heldMessage } from "../shared/allowance";
 import { ensureLocalUser, openDb, scopeDb } from "./db";
 import type { UserDb } from "./db";
 import { createMemo, ProviderError } from "./providers/memo";
 import type { Memo, MemoMode, Task } from "./providers/memo";
+import { createBudget } from "./providers/budget";
+import type { BudgetLimits } from "./providers/budget";
 import { createLedger } from "./providers/ledger";
 import type { Ledger } from "./providers/ledger";
 import { createJevClient } from "./providers/jev";
@@ -89,7 +97,7 @@ export type TaskSet = {
 export type Env = Readonly<Record<string, string | undefined>>;
 
 export type MainOptions = {
-  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_CLAUDE_BACKEND, AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_HOST, AFTERCLASS_HEALTH_ANY_HOST, AFTERCLASS_BUILD_APP, AFTERCLASS_CONFIG_DIR, AFTERCLASS_EXTENSION_ID, AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL. */
+  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_CLAUDE_BACKEND, AFTERCLASS_BUDGET_USER_USD, AFTERCLASS_BUDGET_TOTAL_USD, AFTERCLASS_STOP_PAID_CALLS, AFTERCLASS_AUTH (hosted or not), AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_HOST, AFTERCLASS_HEALTH_ANY_HOST, AFTERCLASS_BUILD_APP, AFTERCLASS_CONFIG_DIR, AFTERCLASS_EXTENSION_ID, AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL. */
   readonly env?: Env;
   /** Holds keys.env and pairing-token. Defaults to AFTERCLASS_CONFIG_DIR, then ~/.config/afterclass. */
   readonly configDir?: string;
@@ -220,6 +228,37 @@ export function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameB
   };
 }
 
+// ───────────────────────────── budgets ─────────────────────────────
+
+/** Derek, 2026-11-13: "$5 per user and $50 total". */
+export const HOSTED_LIMITS: BudgetLimits = { userUsd: 5, totalUsd: 50 };
+export const STOP_FILE = "stop-paid-calls";
+
+const LOOPBACK = new Set(["", "127.0.0.1", "localhost", "::1"]);
+
+function usdSetting(name: string, text: string | undefined): number | null {
+  if (text === undefined || text === "") return null;
+  const usd = Number(text);
+  if (!Number.isFinite(usd) || usd < 0) throw new Error(`${name} must be a dollar amount of 0 or more, got "${text}"`);
+  return usd;
+}
+
+/** Hosted means people other than the machine's owner can reach the backend, so their calls are capped by default. */
+export function resolveBudgetLimits(env: Env): BudgetLimits {
+  const hosted = env.AFTERCLASS_AUTH === "clerk" || !LOOPBACK.has(env.AFTERCLASS_HOST ?? "");
+  const userUsd = usdSetting("AFTERCLASS_BUDGET_USER_USD", env.AFTERCLASS_BUDGET_USER_USD);
+  const totalUsd = usdSetting("AFTERCLASS_BUDGET_TOTAL_USD", env.AFTERCLASS_BUDGET_TOTAL_USD);
+  return hosted ? { userUsd: userUsd ?? HOSTED_LIMITS.userUsd, totalUsd: totalUsd ?? HOSTED_LIMITS.totalUsd } : { userUsd, totalUsd };
+}
+
+/** The stop switch: the environment at boot, or the file, which is looked for before every attempt. */
+export function stopSwitch(env: Env, configDir: string): () => boolean {
+  const flag = env.AFTERCLASS_STOP_PAID_CALLS ?? "";
+  if (!["", "0", "1"].includes(flag)) throw new Error(`AFTERCLASS_STOP_PAID_CALLS must be 1 or 0, got "${flag}"`);
+  const file = join(configDir, STOP_FILE);
+  return flag === "1" ? () => true : () => existsSync(file);
+}
+
 const parsePort = (text: string | undefined): number | null => {
   if (text === undefined || text === "") return null;
   const n = Number(text);
@@ -253,6 +292,8 @@ export async function main(options: MainOptions = {}): Promise<Running> {
   if (mode === "live" && claudeBackend === "api" && anthropicKey === undefined) {
     throw new Error(`AFTERCLASS_CLAUDE_BACKEND=api needs AFTERCLASS_ANTHROPIC_API_KEY in ${keysPath}; refusing to start`);
   }
+  const budgetLimits = resolveBudgetLimits(env);
+  const paidCallsStopped = stopSwitch(env, configDir);
   const token = loadPairingToken(join(configDir, "pairing-token"));
   const port = options.port ?? parsePort(env.AFTERCLASS_PORT) ?? DEFAULT_PORT;
   const extensionId = env.AFTERCLASS_EXTENSION_ID ?? "";
@@ -281,8 +322,9 @@ export async function main(options: MainOptions = {}): Promise<Running> {
 
   // Injected tasks make no live call, so the memo may run them. Without them, replay never runs a task at all.
   const memoMode: MemoMode = mode === "replay" && !options.tasks ? "replay" : "live";
-  const memo = createMemo(db, memoMode);
-  const ledger = createLedger(db);
+  const budget = mode === "live" ? createBudget(rawDb, { limits: budgetLimits, stopped: paidCallsStopped }) : null;
+  const memo = createMemo(db, memoMode, budget === null ? {} : { budget });
+  const ledger = createLedger(db, budget);
 
   let alive = true;
   let scheduler: Scheduler | null = null;
@@ -408,7 +450,7 @@ export async function main(options: MainOptions = {}): Promise<Running> {
         result = await memo.run(tasks.wrapUp, input);
       }
       if (result.kind === "hit") return result.value;
-      throw new Error(result.kind === "failed" ? `wrap-up failed: ${result.lastError}` : `wrap-up ${result.kind}`);
+      throw new Error(result.kind === "failed" ? `wrap-up failed: ${result.lastError}` : result.kind === "held" ? heldMessage(result.hold) : `wrap-up ${result.kind}`);
     },
     snapshotEvidenceInTx: evidence.snapshotInTx,
     links: preparation.linkSuggestions,
@@ -503,6 +545,8 @@ export async function main(options: MainOptions = {}): Promise<Running> {
       ? "mode: live (Jev with the key from keys.env; Claude through claude -p on your login)"
       : `mode: replay (${keysFile ? "AFTERCLASS_MODE=replay" : "no keys file"}: Jev unavailable, Claude unavailable, every live call is refused)`,
   );
+  const cap = (usd: number | null) => (usd === null ? "no cap" : `$${usd}`);
+  if (budget !== null) log(`budget per month (UTC): ${cap(budgetLimits.userUsd)} per user, ${cap(budgetLimits.totalUsd)} in total; stop switch: ${join(configDir, STOP_FILE)}${paidCallsStopped() ? " (on)" : ""}`);
   log(voice.available ? `voice: ElevenLabs (model ${voice.model}, voice ${voice.voiceId})` : "voice: unavailable (no ELEVENLABS_API_KEY in keys.env, or replay mode); the app speaks with Chrome's voice");
   // The token is printed only for a loopback bind. A hosted container's log goes to CloudWatch, which is not a place for a secret.
   log(hostname === "127.0.0.1" ? `listening on 127.0.0.1:${boundPort}\npairing token: ${token}` : `listening on ${hostname}:${boundPort}`);

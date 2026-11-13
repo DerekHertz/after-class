@@ -4,7 +4,7 @@ import type { ConceptId, EvidenceId, NoteId, ReviewId } from "../shared/ids";
 import type { DiagramFrame, EvidenceBundle, LinkDecision, LinkType, Note, Observation, ObservationStatus, RecordView, TopicDiagram, UsageSummary } from "../shared/domain";
 import type { LecturesResponse } from "../shared/wire";
 import type { AppApi } from "./api";
-import { formatClock, formatInterval, noteView, observationRow, STATUS_LABEL, usageRows } from "./core";
+import { allowanceView, formatClock, formatInterval, noteView, observationRow, STATUS_LABEL, usageRows } from "./core";
 import type { SourceTitles } from "./core";
 import { canChangeObservation, changeObservation, DISPUTE_CHOICES, loadReviewContext, observationContext } from "./observation-view";
 import type { DisputeChoice, ObservationContext, ReviewContext } from "./observation-view";
@@ -597,6 +597,20 @@ export function UsageTable({ summary }: { readonly summary: UsageSummary }) {
   );
 }
 
+/** This month's allowance. Nothing when no budget runs. */
+export function AllowanceNote({ allowance }: { readonly allowance: UsageSummary["allowance"] }) {
+  const view = allowanceView(allowance);
+  if (view === null) return null;
+  return (
+    <section className="record-section" aria-labelledby="allowance-heading">
+      <h2 id="allowance-heading">This month</h2>
+      <p>{view.line}</p>
+      {view.held !== null && <p className="note" role="status">{view.held}</p>}
+      <p className="muted">A call whose cost was not reported counts at the amount set aside for it before it ran.</p>
+    </section>
+  );
+}
+
 export function UsageScreen({ api }: { readonly api: AppApi }) {
   const usage = useAsync(useCallback(() => api.usage(), [api]));
   return (
@@ -604,6 +618,7 @@ export function UsageScreen({ api }: { readonly api: AppApi }) {
       <header className="page-heading"><div><p className="page-kicker">Local usage record</p><h1>Usage</h1></div><nav aria-label="Usage navigation"><Link to={{ page: "record", reviewId: null }}>My notebook</Link><Link to={{ page: "home" }}>Your lectures</Link></nav></header>
       <ErrorNote error={usage.error} retry={usage.reload} />
       {usage.data === null && usage.error === null && <p className="page-loading" role="status">Opening the usage record...</p>}
+      {usage.data && <AllowanceNote allowance={usage.data.allowance} />}
       {usage.data && <div className="record-section"><UsageTable summary={usage.data} /></div>}
     </main>
   );

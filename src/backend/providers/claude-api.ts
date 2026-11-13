@@ -269,10 +269,13 @@ export function billingOfStatus(status: number | null): Billing {
   return status !== null && REJECTED_BEFORE_ANY_MODEL_RAN.has(status) ? "not_billed" : "maybe_billed";
 }
 
-/** A call that failed in transport or at the API, with what the runner needs to price it. Built only by `failureOf` and the adapter's own checks, never from a caught value. A refusal or a bad stop is a plain ProviderError that carries usage. */
+/**
+ * A call that failed in transport or at the API, with what the runner needs to price it. Built only by `failureOf` and the adapter's own checks, never from a caught value. A refusal or a bad stop is a plain ProviderError that carries usage.
+ * Its `billing` reaches memo.ts through ProviderError, which records a not-billed failure with no usage as costing nothing, so a 429 does not use up a budget.
+ */
 export class ApiCallError extends ProviderError {
-  constructor(message: string, usage: UsageReport | null, retryable: boolean, readonly billing: Billing, readonly status: number | null) {
-    super(message, usage, retryable);
+  constructor(message: string, usage: UsageReport | null, retryable: boolean, billing: Billing, readonly status: number | null) {
+    super(message, usage, retryable, billing);
   }
 }
 

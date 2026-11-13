@@ -11,7 +11,7 @@
 import { z } from "zod";
 import { FRAME_BOUNDS } from "./domain";
 import type {
-  CaptureFact, CaptureView, Claim, ClaimDraft, DetourState, DiagramSummary, TopicDiagram, EvidenceBundle, Frame, FrozenScope, InviteAnswer, InviteState, LearnerAct,
+  Allowance, BudgetHold, CaptureFact, CaptureView, Claim, ClaimDraft, DetourState, DiagramSummary, TopicDiagram, EvidenceBundle, Frame, FrozenScope, InviteAnswer, InviteState, LearnerAct,
   LinkDecision, Note, Observation, ObservationStatus, Passage, RecordView, ReviewOptions, ReviewView, SaveResult, Seq, StartChoice,
   StartResult, Turn, TurnEvent, TutorMove, UsageSummary,
 } from "./domain";
@@ -474,6 +474,11 @@ export const reviewViewResponse = z.object({
   saved: z.enum(["unsaved", "saved", "save_pending"]),
 }) satisfies z.ZodType<ReviewView>;
 
+export const budgetHoldz = z.union([
+  z.object({ reason: z.literal("stopped") }),
+  z.object({ reason: z.enum(["user_budget", "total_budget"]), resetsAtMs: z.number() }),
+]) satisfies z.ZodType<BudgetHold>;
+
 export const tutorStreamEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("learner_turn_stored"), turnId: idOf("turn") }),
   z.object({ type: z.literal("move"), turnId: idOf("turn"), move: tutorMovez }),
@@ -482,6 +487,7 @@ export const tutorStreamEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("say_reset") }),
   z.object({ type: z.literal("turn_complete"), turnId: idOf("turn") }),
   z.object({ type: z.literal("turn_failed"), error: z.string(), retryable: z.boolean() }),
+  z.object({ type: z.literal("turn_held"), hold: budgetHoldz }),
 ]) satisfies z.ZodType<TurnEvent>;
 
 // ───────────────────────────── Diagrams ─────────────────────────────────────
@@ -543,16 +549,28 @@ export const saveResponse = z.discriminatedUnion("kind", [
 const COST_KINDS = ["measured", "notional", "estimated", "unknown"] as const;
 const PURPOSES = ["boundary", "frame_change", "claim_check", "interpretation", "claim_revision", "resource_search", "tutor_turn", "wrap_up", "diagram_summary"] as const;
 
-/** A kind with no calls may be omitted by the backend; it decodes as zero calls and no amount, never as $0. */
+const allowancez = z.object({
+  usedUsd: z.number(),
+  limitUsd: z.number().nullable(),
+  resetsAtMs: z.number(),
+  held: budgetHoldz.nullable(),
+}) satisfies z.ZodType<Allowance>;
+
+/**
+ * A kind with no calls may be omitted by the backend; it decodes as zero calls and no amount, never as $0.
+ * `allowance` is null when no budget runs, and absent from a backend older than budgets.
+ */
 export const usageResponse = z
   .object({
     byKind: z.partialRecord(z.enum(COST_KINDS), z.object({ calls: z.number(), usd: z.number().nullable() })),
     byPurpose: z.partialRecord(z.enum(PURPOSES), z.object({ calls: z.number(), errors: z.number(), unknownCost: z.number() })),
+    allowance: allowancez.nullish(),
   })
   .transform(
     (s): UsageSummary => ({
       byKind: Object.fromEntries(COST_KINDS.map((k) => [k, s.byKind[k] ?? { calls: 0, usd: null }])) as UsageSummary["byKind"],
       byPurpose: Object.fromEntries(PURPOSES.map((p) => [p, s.byPurpose[p] ?? { calls: 0, errors: 0, unknownCost: 0 }])) as UsageSummary["byPurpose"],
+      allowance: s.allowance ?? null,
     }),
   );
 
@@ -586,7 +604,7 @@ export const evidenceQuery = z.union([
 export const recordQuery = z.strictObject({ reviewId: idOf("rvw").optional() });
 
 /**
- * What a route sends back. `ndjson` streams one `event` per line and ends on `turn_complete` or `turn_failed`.
+ * What a route sends back. `ndjson` streams one `event` per line and ends on `turn_complete`, `turn_failed` or `turn_held`.
  * `empty` is 204 No Content: the app's commands read no body, so the backend sends none.
  */
 export type Reply =

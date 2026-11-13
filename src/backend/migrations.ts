@@ -6,6 +6,7 @@
  * refuses a migration whose text changed after it ran. db.ts runs them and re-exports this module's names.
  */
 import { stableId } from "../shared/ids";
+import { BUDGET_HOLDS } from "./migrations-budget";
 import { OBSERVATION_STATUSES, RECORD_USER_ID } from "./migrations-record";
 
 export const OWNERS = ["kernel", "providers", "evidence", "segmentation", "preparation", "review", "record"] as const;
@@ -315,6 +316,7 @@ DROP TABLE memo_save;
 DROP TABLE memo_inputs_save;
 DROP TABLE voice_usage_events_save;`,
     },
+    BUDGET_HOLDS,
   ],
 
   evidence: [

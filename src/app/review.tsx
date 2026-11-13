@@ -186,7 +186,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const unanswered = unansweredLearnerTurn(view.turns);
   const heading = lectureHeading([...titles.values()]);
   const scopeSeconds = Material.sources(view.scope.material).reduce((sum, id) => sum + Material.get(view.scope.material, id).intervals().reduce((s, i) => s + (i.end - i.start), 0), 0);
-  const canRetry = !streaming && (state.unsent.length > 0 || unanswered !== null || owedLearnerTurn(view) !== null || strandedEndTurn(view) !== null || state.live?.status === "failed");
+  const canRetry = !streaming && state.live?.status !== "held" && (state.unsent.length > 0 || unanswered !== null || owedLearnerTurn(view) !== null || strandedEndTurn(view) !== null || state.live?.status === "failed");
 
   const questionMarker = view.state.mainQuestions > 0 ? `Question ${view.state.mainQuestions}` : null;
 
@@ -202,8 +202,9 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           {live !== null && (
             <li className="line tutor" data-question="">
               <strong>{live.move ? MOVE_LABEL[live.move.kind] : "Tutor"}</strong>
-              <p>{liveText(live) || "..."}</p>
+              {(live.status !== "held" || liveText(live) !== "") && <p>{liveText(live) || "..."}</p>}
               {live.status === "failed" && <p className="note note-error">{live.error}</p>}
+              {live.status === "held" && <p className="note" role="status">{live.error}</p>}
             </li>
           )}
         </ol>
