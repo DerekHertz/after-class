@@ -158,8 +158,8 @@
 /* The folio and the notebook on the desk. The whole object is the button; it lifts when pointed at or focused. */
 .scene-shell .front-row-scene .front-row-object { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 44px; min-height: 44px; margin: 0; padding: 0 0 4px; border: 0; border-radius: 0; background: transparent; box-shadow: none; cursor: pointer; }
 .front-row-object .front-row-object-art { position: absolute; inset: 0; background: var(--fr-object-art) 50% 100% / contain no-repeat; filter: drop-shadow(0 4px 0 #00000052); transition: translate 120ms ease-out, filter 120ms ease-out; }
-.front-row-object[data-object="source"] { --fr-object-art: url('./assets/room-objects/source-folio.png'); }
-.front-row-object[data-object="history"] { --fr-object-art: url('./assets/room-objects/review-notebook.png'); }
+.front-row-object[data-object="source"] { --fr-object-art: url('./assets/front-row-v2/closed-folio.png'); }
+.front-row-object[data-object="history"] { --fr-object-art: url('./assets/front-row-v2/closed-notebook.png'); }
 .front-row-object .front-row-object-tag { position: relative; padding: 3px 8px; background: var(--fr-bar); color: var(--fr-bar-ink); border: 2px solid var(--fr-bar-ink); font: 500 .95rem/1.2 'After Class Pixel', var(--font); white-space: nowrap; }
 .front-row-object:is(:hover, :focus-visible) .front-row-object-art { translate: 0 -4px; filter: drop-shadow(0 8px 0 #00000052) brightness(1.08); }
 .front-row-object:is(:hover, :focus-visible) .front-row-object-tag { background: var(--fr-bar-ink); color: var(--fr-bar); }
@@ -290,6 +290,10 @@
   /* The board's text starts below the navigation where the board's own top would sit under it. */
   .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { position: absolute; z-index: 4; left: calc(var(--fr-board-l) + var(--fr-board-il)); width: calc(var(--fr-board-w) - var(--fr-board-il) - var(--fr-board-ir)); top: max(calc(var(--fr-board-top) + var(--fr-board-it)), var(--fr-nav-reserve)); bottom: calc(100% - var(--fr-board-top) - var(--fr-board-h) + var(--fr-board-ib)); overflow: auto; overscroll-behavior: contain; }
   .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { position: absolute; z-index: 7; left: calc(var(--fr-mat-l) + var(--fr-mat-il)); width: calc(var(--fr-mat-w) - var(--fr-mat-il) - var(--fr-mat-ir)); top: calc(var(--fr-desk-top) + var(--fr-mat-top) + var(--fr-mat-it)); bottom: calc(var(--fr-mat-bottom) + var(--fr-mat-ib)); overflow: auto; overscroll-behavior: contain; }
+  /* Board type follows the room scale, so the text keeps its share of the board when the window is wide or tall. */
+  .front-row-scene .front-row-eyebrow { font-size: clamp(.9rem, calc(var(--fr-u) * 15), 1.2rem); }
+  .scene-shell .front-row-scene .current-exchange .line p { font-size: clamp(1.05rem, calc(var(--fr-u) * 19), 1.35rem); }
+  .scene-shell .front-row-scene .current-exchange .line[data-question] p { font-size: clamp(1.4rem, calc(var(--fr-u) * 34), 2.7rem); }
   .front-row-scene[data-board-align="center"] .front-row-area[data-area="board"] { display: flex; flex-direction: column; justify-content: safe center; }
   /* The field takes the height the mat has left once the label and buttons are placed. */
   .front-row-scene .front-row-area[data-area="desk"] > .composer { height: 100%; }
@@ -298,10 +302,10 @@
   .scene-shell .front-row-scene .composer textarea { height: 100%; }
   .front-row-scene[data-mat-actions="beside"] .composer .assist-actions > * { flex: 1 1 auto; white-space: nowrap; }
   .front-row-scene .front-row-buddy { position: absolute; z-index: 8; left: var(--fr-side-inset); bottom: var(--fr-buddy-bottom); width: var(--fr-buddy-size); height: var(--fr-buddy-size); }
-  /* The notebook sits on the desk at the far right, and the folio just above it at 80% of its width. Each is its own raster. */
+  /* The closed notebook lies on the desk at the far right, and the closed folio just above it at 90% of its width. Each is its own raster. */
   .scene-shell .front-row-scene .front-row-object { position: absolute; z-index: 8; }
   .front-row-scene .front-row-object[data-object="history"] { right: var(--fr-side-inset); bottom: var(--fr-book-bottom); width: var(--fr-book-w); height: var(--fr-book-h); }
-  .front-row-scene .front-row-object[data-object="source"] { right: calc(var(--fr-side-inset) + var(--fr-book-w) * .1); bottom: calc(var(--fr-book-bottom) + var(--fr-book-h) + var(--fr-u) * 8); width: calc(var(--fr-book-w) * .8); aspect-ratio: 1448 / 1086; }
+  .front-row-scene .front-row-object[data-object="source"] { right: calc(var(--fr-side-inset) + var(--fr-book-w) * .05); bottom: calc(var(--fr-book-bottom) + var(--fr-book-h) + var(--fr-u) * 8); width: calc(var(--fr-book-w) * .9); aspect-ratio: 1180 / 976; }
 }
 
 /* Mid-width windows: the review's navigation takes a second row under the masthead chips. */

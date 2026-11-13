@@ -16,12 +16,12 @@
       "sceneId": "last-desk",
       "name": "Rail-side Classroom",
       "notebook": {
-        "anchor": "On the desk at the far right: right edge 1.5% of the window width in, bottom edge 20u above the window bottom, 200u wide by 150u tall. The lecture folio sits just above it at 80% of its width.",
+        "anchor": "On the desk at the far right: right edge 1.5% of the window width in, bottom edge 20u above the window bottom, 150u square. The closed lecture folio sits just above it at 90% of its width.",
         "layout": {
           "side": "right",
           "inset": "1.5cqw",
           "bottom": 20,
-          "width": 200
+          "width": 150
         }
       },
       "companion": {
@@ -236,12 +236,12 @@
       "sceneId": "study-bench",
       "name": "Harbor Study Terrace",
       "notebook": {
-        "anchor": "On the desk at the far right: right edge 1.5% of the window width in, bottom edge 20u above the window bottom, 200u wide by 150u tall. The lecture folio sits just above it at 80% of its width.",
+        "anchor": "On the desk at the far right: right edge 1.5% of the window width in, bottom edge 20u above the window bottom, 150u square. The closed lecture folio sits just above it at 90% of its width.",
         "layout": {
           "side": "right",
           "inset": "1.5cqw",
           "bottom": 20,
-          "width": 200
+          "width": 150
         }
       },
       "companion": {
@@ -481,12 +481,12 @@
       "sceneId": "projection-booth",
       "name": "Lantern Canal Film Club",
       "notebook": {
-        "anchor": "On the desk at the far right: right edge 1.5% of the window width in, bottom edge 20u above the window bottom, 200u wide by 150u tall. The lecture folio sits just above it at 80% of its width.",
+        "anchor": "On the desk at the far right: right edge 1.5% of the window width in, bottom edge 20u above the window bottom, 150u square. The closed lecture folio sits just above it at 90% of its width.",
         "layout": {
           "side": "right",
           "inset": "1.5cqw",
           "bottom": 20,
-          "width": 200
+          "width": 150
         }
       },
       "companion": {
@@ -505,7 +505,7 @@
           "height": 1984
         },
         "source": {
-          "generated": "canal-background/canal-background.png",
+          "generated": "canal-background-2/canal-background.png",
           "crop": [
             0,
             0,
@@ -568,10 +568,10 @@
         "centreSpread": 0.71,
         "appFill": "#fbe1c5",
         "distanceFromAppFill": 5.7,
-        "anchor": "Centred on the wall right of the window (from the background's window frame to the window's right edge, less 36u each side). Top edge at 12% of the window height. Bottom edge 78u above the desk's far edge, which leaves room for the pull tab. Width fills the wall up to 2.7 times the height; height is at most the width divided by 1.3.",
+        "anchor": "Centred on the wall right of the window (from the background's window frame to the window's right edge, less 36u each side). Top edge at 7% of the window height. Bottom edge 52u above the desk's far edge, which leaves room for the pull tab. Width fills the wall up to 2.7 times the height; height is at most the width divided by 1.3.",
         "layout": {
-          "top": "12cqh",
-          "gapAboveDesk": 78,
+          "top": "7cqh",
+          "gapAboveDesk": 52,
           "sideMargin": 36,
           "maxAspect": 2.7,
           "minAspect": 1.3
@@ -697,6 +697,41 @@
           "top": 26,
           "bottom": 14
         }
+      }
+    }
+  },
+  "closedObjects": {
+    "about": "Closed objects for the desk buttons of all three rooms. The open frames in src/app/assets/room-objects stay the dialog art.",
+    "closed-notebook": {
+      "file": "closed-notebook.png",
+      "size": {
+        "width": 1028,
+        "height": 1030
+      },
+      "source": {
+        "generated": "closed-objects/closed-objects.png",
+        "crop": [
+          70,
+          314,
+          584,
+          829
+        ]
+      }
+    },
+    "closed-folio": {
+      "file": "closed-folio.png",
+      "size": {
+        "width": 1180,
+        "height": 976
+      },
+      "source": {
+        "generated": "closed-objects/closed-objects.png",
+        "crop": [
+          817,
+          297,
+          1407,
+          785
+        ]
       }
     }
   }

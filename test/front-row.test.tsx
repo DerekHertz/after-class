@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { COMPANIONS, SCENES, parseAppearance } from "../src/app/appearance";
 import type { CompanionId, SceneId } from "../src/app/appearance";
@@ -191,6 +192,20 @@ describe("the folio and the notebook are the supplied art, and their pages read 
     let diff = 0;
     for (let x = 0; x < slice.left; x++) for (let c = 0; c < 3; c++) diff += Math.abs(pixel(png, x, slice.top)[c]! - pixel(png, x, end)[c]!);
     expect(diff / (slice.left * 3)).toBeLessThan(12);
+  });
+});
+
+describe("the objects on the desk are closed", () => {
+  const sprites = { source: "closed-folio", history: "closed-notebook" } as const;
+  const css = readFileSync(new URL("../src/app/front-row.css", import.meta.url), "utf8");
+
+  test("each desk object draws a closed-object sprite with transparent corners, never the open frame", () => {
+    for (const [object, name] of Object.entries(sprites)) {
+      const png = readPng(new URL(`../src/app/assets/front-row-v2/${name}.png`, import.meta.url));
+      expect({ object, alpha: png.alpha, width: png.width > 500 && png.width < 2000 }).toEqual({ object, alpha: true, width: true });
+      for (const [x, y] of [[0, 0], [png.width - 1, 0], [0, png.height - 1], [png.width - 1, png.height - 1]] as const) expect({ object, x, y, alpha: png.rgba[(y * png.width + x) * 4 + 3] }).toEqual({ object, x, y, alpha: 0 });
+      expect(css).toContain(`.front-row-object[data-object="${object}"] { --fr-object-art: url('./assets/front-row-v2/${name}.png'); }`);
+    }
   });
 });
 

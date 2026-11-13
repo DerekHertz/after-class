@@ -104,7 +104,7 @@ export const ROOM_ART = {
   matTop: 26,
   matBottom: 14,
   companionSize: 220,
-  notebook: { bottom: 20, width: 200 },
+  notebook: { bottom: 20, width: 150 },
   /** Distance of the companion and the notebook from the window's side edges. */
   sideInset: "1.5cqw",
   /** Space kept between a text area and the edge of the plain area it sits in. */
@@ -180,7 +180,7 @@ export const FRONT_ROW_ROOMS = {
     background: { anchorX: 0, anchorY: 0.22, wall: { from: 376, to: 1586 } },
     board: {
       art: { size: { width: 2926, height: 1646 }, slice: { top: 208, right: 200, bottom: 100, left: 200 }, inner: { top: 208, right: 200, bottom: 100, left: 200 } },
-      align: "start", top: "12cqh", gapAboveDesk: 78, sideMargin: 36, maxAspect: 2.7, minAspect: 1.3,
+      align: "start", top: "7cqh", gapAboveDesk: 52, sideMargin: 36, maxAspect: 2.7, minAspect: 1.3,
       tone: "light", fill: "#fbe1c5", ink: "#191d42", inkSoft: "#3b3f63",
     },
     desk: { art: { size: { width: 4344, height: 820 }, slice: { top: 0, right: 220, bottom: 0, left: 220 } } },
@@ -233,7 +233,7 @@ export function roomStyle(scene: SceneId): CSSProperties {
     "--fr-mat-top": u(ROOM_ART.matTop), "--fr-mat-bottom": u(ROOM_ART.matBottom),
     "--fr-side-inset": ROOM_ART.sideInset,
     "--fr-buddy-bottom": u(room.companionBottom), "--fr-buddy-size": u(ROOM_ART.companionSize),
-    "--fr-book-bottom": u(ROOM_ART.notebook.bottom), "--fr-book-w": u(ROOM_ART.notebook.width), "--fr-book-h": u(ROOM_ART.notebook.width * 0.75),
+    "--fr-book-bottom": u(ROOM_ART.notebook.bottom), "--fr-book-w": u(ROOM_ART.notebook.width), "--fr-book-h": u(ROOM_ART.notebook.width * 1028 / 1030),
     "--fr-board-fill": board.fill, "--fr-board-ink": board.ink, "--fr-board-ink-soft": board.inkSoft,
     "--fr-mat-fill": mat.fill, "--fr-mat-ink": mat.ink, "--fr-mat-ink-soft": mat.inkSoft,
     ...nineSlice("board", board.art), ...nineSlice("desk", desk.art), ...nineSlice("mat", mat.art),

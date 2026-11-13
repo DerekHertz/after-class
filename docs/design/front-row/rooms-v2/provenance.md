@@ -478,3 +478,52 @@ The mat is completely BLANK: no writing, no marks, no logo, no pattern, no folds
 
 No text, no letters, no numbers, no signs with writing, no UI, no people, no animals, no characters.
 ````
+
+## Fixes after review (2026-11-13)
+
+Derek found the canal window's lattice off centre and the desk's Source and Earlier objects blank. Two more runs were made with the same `codex exec` command as above, from a scratch folder, at most two at a time. Both are used. The processing is the same as the edits listed at the top: nearest-neighbour 2x, binary alpha, specks under 40 pixels dropped, crop to the opaque bounding box. No pixel was repainted or recoloured.
+
+### canal-background-2
+
+- Why: the first canal background had its one vertical mullion left of the glass's centre (about 215 of a 65 to 435 glass at 2000 px wide), so the two panes differed in width.
+- References attached: `src/app/assets/front-row/projection-booth.png` and the previous background at 1586x992.
+- Original: `~/.codex/generated_images/01a1d61c-81e5-7d70-a9d4-8d891988dc9e/exec-f10ba36c-88b1-48a4-9c9d-dad0cd9f4b1e.png` (1586x992)
+- Used for `canal-background.png` (3172x1984): not cropped, then doubled. It replaces the file in `src/app/assets/front-row-v2/` too.
+- Result: the mullion is now at the glass's horizontal centre, and the window sits at the same place, so the manifest's window feature, safe area and wall span are unchanged. The two transoms are still not exact thirds, with rows of about 190, 162 and 150 plate pixels, the same unevenness as before.
+
+Prompt, as sent:
+
+````
+Use your built-in image generation tool (not code, not SVG, not a script) to generate ONE image. Attached: `reference.png` (the old canal film club plate, for palette and style) and `current-1x.png` (the current background, which is nearly right). Save the generated PNG unchanged as `canal-background.png` in the current folder. Do not draw or edit anything with code. In your final message give the saved path, the original path of the generated file, and the image's pixel size.
+
+Image prompt:
+
+Redraw `current-1x.png` almost exactly: the same empty front wall of a small canal-side film club room on a rainy evening, landscape 16:10, at the largest size available, flat orthographic head-on elevation. Same navy vertical wall panels, same picture rail across the top, same dark wainscot band along the bottom, same window position (left side, its frame spanning about 2% to 23% of the width and 13% to 69% of the height), same wooden frame colour and same pixel density and style: detailed 32-bit anime pixel art, crisp chunky pixel clusters, fine dark outlines, no smoothing, not vector, not photoreal. Same view through the glass: a rainy blue dusk over a narrow canal, wooden townhouses with glowing warm windows and red-orange paper lanterns, an arched stone bridge, a distant pagoda, a weeping willow, lantern reflections in the water, fine diagonal rain.
+
+The ONE change: the window must be geometrically regular. It is a plain rectangular wooden frame with a head, two jambs and a sill. Inside it there is exactly ONE vertical mullion, placed EXACTLY at the horizontal centre of the glass, so the left and right panes are the same width. There are exactly TWO horizontal transoms, placed at exactly one third and two thirds of the glass height, so the three rows of panes are the same height. All mullions and transoms are the same thickness, perfectly straight, perfectly vertical or horizontal, crossing at right angles, with the same margin of glass between them and the frame on both sides. The frame is symmetric left to right. No open sash, no tilt, no perspective, no bend.
+
+There is NO chalkboard, NO screen, NO desk, NO furniture, NO notebook and NO top bar. No text, no letters, no numbers, no UI, no people, no characters.
+````
+
+### closed-objects
+
+- Why: the desk buttons drew the open frames `source-folio.png` and `review-notebook.png`, whose centres are blank pages.
+- References attached: `src/app/assets/front-row/last-desk.png` (its closed navy notebook with the brass moon), the two open frames and `rail-ledge-items.png` for density.
+- Original: `~/.codex/generated_images/01a1d61c-81e9-7de3-8eba-a336f148cb48/exec-8c40e0be-540f-47f0-b2e3-eeef93892532.png` (1448x1086, real alpha)
+- Used for `closed-notebook.png` (1028x1030, crop x 70 to 584, y 314 to 829) and `closed-folio.png` (1180x976, crop x 817 to 1407, y 297 to 785), then doubled. Both are in `src/app/assets/front-row-v2/` and are drawn by all three rooms. The open frames stay the dialog art.
+
+Prompt, as sent:
+
+````
+Use your built-in image generation tool (not code, not SVG, not a script) to generate ONE image. Attached: `reference-plate.png` (an old room plate whose bottom right shows a CLOSED navy notebook lying on a desk), `notebook-open.png` and `folio-open.png` (two open-object frames, for palette only) and `style-ref.png` (a small sprite at the target pixel density). Save the generated PNG unchanged as `closed-objects.png` in the current folder. Do not draw or edit anything with code. In your final message give the saved path, the original path of the generated file, the image's pixel size, and whether the background is truly transparent.
+
+Image prompt:
+
+A production game sprite sheet of two small props, isolated on a genuinely transparent background (real alpha, nothing outside the objects' silhouettes, no desk, no scene, no cast shadow). Landscape canvas. The two props are separate, far apart with a wide transparent gap, each fully inside the canvas, both drawn at the same scale. Same style, palette and pixel density as the attached art: detailed 32-bit anime pixel art, crisp chunky pixel clusters, fine dark outlines, no smoothing, not vector, not photoreal. Both lie flat on a surface seen from above and slightly in front, nearly head-on, with no rotation: every edge is straight and level.
+
+Left prop: a CLOSED hardcover notebook, exactly like the closed navy book in the bottom right of `reference-plate.png`: a navy-blue cover with fine stitched border lines, a brass-yellow crescent moon at the upper centre of the cover, a brass-yellow bookmark ribbon hanging from the bottom edge, cream-amber page edges visible along the bottom and right sides, a dark spine on the left. Landscape proportion about 4:3.
+
+Right prop: a CLOSED lecture folio of the same size and proportion, matching `folio-open.png`: a closed wooden-backed folio with a teal cloth spine on the left (with a small cream wave motif), a warm honey-brown wooden cover with a dark outline and wood-grain pixels, two small brass clips near the top, brass corner caps, and two small amber tabs sticking out of the right edge. Its cover is closed, so no parchment page face is visible.
+
+No text, no letters, no numbers, no UI, no people, no characters.
+````

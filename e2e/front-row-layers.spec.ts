@@ -25,6 +25,8 @@ for (const scene of Object.keys(SCENES)) {
         const navigation = [...document.querySelectorAll(".scene-masthead > *, .front-row-bar > *, .front-row-bar .review-navigation > *")].map(box).filter((b) => b.right > b.left && b.bottom > b.top);
         return {
           boardArt: one('.front-row-art [data-layer="board"]'), boardText: one('.front-row-area[data-area="board"]'),
+          heading: one(".front-row-heading"), showDiagram: one(".front-row-heading .show-diagram"), question: one(".current-exchange .line[data-question]"),
+          overflow: (({ scrollHeight, clientHeight }) => scrollHeight - clientHeight)(document.querySelector('.front-row-area[data-area="board"]')!),
           matArt: one('.front-row-art [data-layer="mat"]'), deskText: one('.front-row-area[data-area="desk"]'), field: one(".composer textarea"),
           buddy: one(".front-row-buddy"), notebook: one('.front-row-object[data-object="history"]'), folio: one('.front-row-object[data-object="source"]'),
           desk: one('.front-row-art [data-layer="desk"]'), navigation, window: { left: 0, top: 0, right: innerWidth, bottom: innerHeight },
@@ -32,6 +34,8 @@ for (const scene of Object.keys(SCENES)) {
       });
       expect(boxes.navigation.length).toBeGreaterThan(3);
       expect(within(boxes.boardText, boxes.boardArt)).toBe(true);
+      expect(boxes.overflow).toBeLessThanOrEqual(1);
+      for (const part of [boxes.heading, boxes.showDiagram, boxes.question]) expect(within(part, boxes.boardText)).toBe(true);
       expect(within(boxes.deskText, boxes.matArt)).toBe(true);
       expect(within(boxes.field, boxes.deskText)).toBe(true);
       for (const [name, b] of Object.entries({ boardText: boxes.boardText, field: boxes.field, buddy: boxes.buddy, notebook: boxes.notebook, folio: boxes.folio })) {
