@@ -1,0 +1,127 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 0 and seed -9199602919001305939 with 1 worker on 8 cores with 1986MB heap and 64MB offheap memory [pid: 844736] (Linux 6.18.58.1-microsoft-standard-WSL2 amd64, Ubuntu 21.0.13.0.3 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /tmp/claude-1000/-home-dhertzell-AfterClass/1b6258b4-8d3e-4695-97ec-c79a545656cb/scratchpad/wt-model/docs/flows/model/ReviewEnd.tla
+Semantic processing of module ReviewEnd
+Starting... (2026-11-13 07:51:31)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Computed 2 initial states...
+Finished computing initial states: 4 distinct states generated at 2026-11-13 07:51:31.
+Progress(11) at 2026-11-13 07:51:31: 227 states generated, 76 distinct states found, 0 states left on queue.
+Checking temporal properties for the complete state space with 76 total distinct states at (2026-11-13 07:51:31)
+Error: Temporal properties were violated.
+
+Error: The following behavior constitutes a counter-example:
+
+State 1: <Initial predicate>
+/\ live = "none"
+/\ wrapMemo = "missing"
+/\ endTurn = "none"
+/\ saveError = FALSE
+/\ dropped = FALSE
+/\ known = "none"
+/\ saved = "unsaved"
+/\ screen = "review"
+/\ trouble = FALSE
+/\ saving = FALSE
+/\ settling = FALSE
+
+State 2: <YouConfirmFinish line 88, col 5 to line 92, col 89 of module ReviewEnd>
+/\ live = "streaming"
+/\ wrapMemo = "missing"
+/\ endTurn = "unsent"
+/\ saveError = FALSE
+/\ dropped = FALSE
+/\ known = "none"
+/\ saved = "unsaved"
+/\ screen = "review"
+/\ trouble = FALSE
+/\ saving = FALSE
+/\ settling = FALSE
+
+State 3: <TheBackendStoresYourEnd line 102, col 5 to line 104, col 104 of module ReviewEnd>
+/\ live = "streaming"
+/\ wrapMemo = "missing"
+/\ endTurn = "stored"
+/\ saveError = FALSE
+/\ dropped = FALSE
+/\ known = "none"
+/\ saved = "unsaved"
+/\ screen = "review"
+/\ trouble = FALSE
+/\ saving = FALSE
+/\ settling = FALSE
+
+State 4: <TheTutorWrapsUp line 116, col 5 to line 120, col 76 of module ReviewEnd>
+/\ live = "none"
+/\ wrapMemo = "missing"
+/\ endTurn = "wrapped"
+/\ saveError = FALSE
+/\ dropped = FALSE
+/\ known = "wrapped"
+/\ saved = "save_pending"
+/\ screen = "review"
+/\ trouble = FALSE
+/\ saving = TRUE
+/\ settling = FALSE
+
+State 5: <TroubleStarts line 79, col 18 to line 79, col 164 of module ReviewEnd>
+/\ live = "none"
+/\ wrapMemo = "missing"
+/\ endTurn = "wrapped"
+/\ saveError = FALSE
+/\ dropped = FALSE
+/\ known = "wrapped"
+/\ saved = "save_pending"
+/\ screen = "review"
+/\ trouble = TRUE
+/\ saving = TRUE
+/\ settling = FALSE
+
+State 6: <TheSaveRuns line 159, col 8 to line 167, col 80 of module ReviewEnd>
+/\ live = "none"
+/\ wrapMemo = "terminal"
+/\ endTurn = "wrapped"
+/\ saveError = TRUE
+/\ dropped = FALSE
+/\ known = "wrapped"
+/\ saved = "save_pending"
+/\ screen = "review"
+/\ trouble = TRUE
+/\ saving = FALSE
+/\ settling = FALSE
+
+State 7: <TroubleClears line 76, col 18 to line 76, col 145 of module ReviewEnd>
+/\ live = "none"
+/\ wrapMemo = "terminal"
+/\ endTurn = "wrapped"
+/\ saveError = TRUE
+/\ dropped = FALSE
+/\ known = "wrapped"
+/\ saved = "save_pending"
+/\ screen = "review"
+/\ trouble = FALSE
+/\ saving = FALSE
+/\ settling = FALSE
+
+State 8: <YouPressRetrySave line 171, col 5 to line 174, col 105 of module ReviewEnd>
+/\ live = "none"
+/\ wrapMemo = "terminal"
+/\ endTurn = "wrapped"
+/\ saveError = TRUE
+/\ dropped = FALSE
+/\ known = "wrapped"
+/\ saved = "save_pending"
+/\ screen = "review"
+/\ trouble = FALSE
+/\ saving = TRUE
+/\ settling = FALSE
+
+Back to state 7: <TheSaveRuns line 159, col 8 to line 167, col 80 of module ReviewEnd>
+
+Finished checking temporal properties in 00s at 2026-11-13 07:51:31
+227 states generated, 76 distinct states found, 0 states left on queue.
+Finished in 00s at (2026-11-13 07:51:31)
+
