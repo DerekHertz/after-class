@@ -75,6 +75,9 @@ mv /etc/fstab.new /etc/fstab
 systemctl daemon-reload
 mountpoint -q /data || mount /data
 
+# One bridge network for Caddy and the app, so Caddy reaches the app by name and neither runs on the host network.
+docker network inspect afterclass >/dev/null 2>&1 || docker network create afterclass
+
 mkdir -p /data/db /data/config /data/afterclass /data/caddy/data /data/caddy/config
 
 systemctl daemon-reload

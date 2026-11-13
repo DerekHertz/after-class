@@ -149,3 +149,24 @@ describe("afterclass-bootstrap disk_signature", () => {
     expect(result.stdout).not.toBe("xfs");
   });
 });
+
+describe("beta container wiring", () => {
+  const caddyUnit = readFileSync(join(FILES, "afterclass-caddy.service"), "utf8");
+  const appStart = readFileSync(join(FILES, "afterclass-app-start.sh"), "utf8");
+  const caddyfile = readFileSync(join(FILES, "Caddyfile.tftpl"), "utf8");
+
+  test("Caddy leaves the host network, so it cannot reach the metadata service, and drops every capability but port binding", () => {
+    expect(caddyUnit).not.toContain("--network host");
+    expect(caddyUnit).toContain("--network afterclass");
+    expect(caddyUnit).toContain("-p 80:80 -p 443:443");
+    expect(caddyUnit).toContain("--cap-drop ALL --cap-add NET_BIND_SERVICE");
+    expect(caddyUnit).toContain("--security-opt no-new-privileges");
+    expect(caddyUnit).toContain("--read-only");
+  });
+
+  test("Caddy proxies to the app container by the name and network the app starts with", () => {
+    expect(appStart).toContain("--name afterclass-app");
+    expect(appStart).toContain("--network afterclass");
+    expect(caddyfile).toContain("reverse_proxy afterclass-app:${app_port}");
+  });
+});

@@ -14,7 +14,7 @@ gid=$(docker run --rm --entrypoint id "$image" -g)
 chown "${uid}:${gid}" /data/db /data/config
 
 exec docker run --rm --init --name afterclass-app \
-  --cap-drop ALL --security-opt no-new-privileges \
+  --network afterclass --cap-drop ALL --security-opt no-new-privileges \
   --env-file /etc/afterclass/app.env \
   -p "127.0.0.1:${APP_PORT}:${APP_PORT}" \
   -v /data/db:/data/db -v /data/config:/data/config \
