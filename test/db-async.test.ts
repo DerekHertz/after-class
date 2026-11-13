@@ -508,6 +508,97 @@ describe("the raw connection during an async transaction", () => {
     expect(prepared.all()).toEqual([{ k: "earlier" }, { k: "mine" }]);
   });
 
+  test("objects captured before the transaction cannot reach the unguarded connection: valueOf, handle, native", async () => {
+    const { sync, db } = setup();
+    const stmt = sync.sql.query("INSERT INTO scratch (k, v) VALUES ('native', 1)");
+    const viaValueOf = sync.sql.valueOf() as typeof sync.sql;
+    const viaNative = (stmt as unknown as { native: { run(): unknown } }).native;
+    await db.tx(async (t) => {
+      await put(t, "mine");
+      expect(() => viaValueOf.run("INSERT INTO scratch (k, v) VALUES ('valueOf', 1)")).toThrow(ConnectionBusyError);
+      expect(() => viaNative.run()).toThrow(ConnectionBusyError);
+      expect(() => (sync.sql as unknown as { handle: { run(): void } }).handle.run?.()).not.toThrow(/Cannot read/);
+    });
+    expect(await keys(db)).toEqual(["mine"]);
+  });
+
+  test("iterators created before the transaction check on every step, from iterate, Symbol.iterator and the helpers", async () => {
+    const { sync, db } = setup();
+    const insert = (k: string) => sync.sql.query(`INSERT INTO scratch (k, v) VALUES ('${k}', 1) RETURNING k`);
+    const iterated = insert("iterate").iterate();
+    const symbol = insert("symbol")[Symbol.iterator]();
+    const mapped = (insert("mapped").iterate() as unknown as { map(f: (row: unknown) => unknown): IterableIterator<unknown> }).map((row) => row);
+    await db.tx(async (t) => {
+      await put(t, "mine");
+      for (const it of [iterated, symbol, mapped]) {
+        expect(() => it.next()).toThrow(ConnectionBusyError);
+        expect(() => it.return?.()).toThrow(ConnectionBusyError);
+      }
+    });
+    expect(await keys(db)).toEqual(["mine"]);
+  });
+
+  test("transaction variants .immediate, .deferred and .exclusive exist and work when idle, and throw while a transaction is open", async () => {
+    const { sync, db } = setup();
+    const wrapped = sync.sql.transaction(() => sync.sql.query("INSERT INTO scratch (k, v) VALUES ('idle', 1)").run().changes);
+    expect(wrapped()).toBe(1);
+    for (const mode of ["immediate", "deferred", "exclusive"] as const) expect(typeof wrapped[mode]).toBe("function");
+    expect(sync.sql.transaction(() => 7).immediate()).toBe(7);
+    await db.tx(async () => {
+      for (const mode of ["immediate", "deferred", "exclusive"] as const) expect(() => wrapped[mode]()).toThrow(ConnectionBusyError);
+      expect(() => wrapped()).toThrow(ConnectionBusyError);
+    });
+  });
+
+  test("every own and prototype property of Database, Statement, an iterator and a transaction function is guarded or returns no raw object", async () => {
+    const { sync, db } = setup();
+    const stmt = sync.sql.query("SELECT k FROM scratch");
+    const targets: [string, object][] = [
+      ["Database", sync.sql],
+      ["Statement", stmt],
+      ["iterator", stmt.iterate()],
+      ["transaction function", sync.sql.transaction(() => 1)],
+    ];
+    const isPlain = (v: unknown) => {
+      const proto = Object.getPrototypeOf(v);
+      return Array.isArray(v) || ArrayBuffer.isView(v) || proto === Object.prototype || proto === null;
+    };
+    const leaks: string[] = [];
+    const walk = (label: string, obj: object, depth: number) => {
+      const keys = new Set<string | symbol>();
+      for (let p: object | null = obj; p && p !== Object.prototype && p !== Function.prototype; p = Object.getPrototypeOf(p)) {
+        for (const k of Reflect.ownKeys(p)) keys.add(k);
+      }
+      for (const k of keys) {
+        if (k === "constructor" || k === "prototype" || k === "length" || k === "name") continue;
+        let value: unknown;
+        try {
+          value = (obj as Record<string | symbol, unknown>)[k];
+        } catch {
+          continue;
+        }
+        const where = `${label}.${String(k)}`;
+        if (typeof value === "function") {
+          let error: unknown;
+          try {
+            (value as () => unknown)();
+          } catch (e) {
+            error = e;
+          }
+          if (!(error instanceof ConnectionBusyError)) leaks.push(`${where}() ran without the guard`);
+          if (depth < 2) walk(`${where}`, value, depth + 1);
+        } else if (typeof value === "object" && value !== null && !isPlain(value)) {
+          if (depth >= 3) leaks.push(`${where} nests too deep to check`);
+          else walk(where, value, depth + 1);
+        }
+      }
+    };
+    await db.tx(async () => {
+      for (const [label, obj] of targets) walk(label, obj, 0);
+    });
+    expect(leaks).toEqual([]);
+  });
+
   test("the refusal is the named error", async () => {
     const { sync, db } = setup();
     await db.tx(async () => {

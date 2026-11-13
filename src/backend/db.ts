@@ -8,7 +8,7 @@
  * Single process, synchronous bun:sqlite, WAL: every command is one `tx`, so
  * writers serialize without locks. Nested `tx` calls become savepoints.
  */
-import { Database, Statement } from "bun:sqlite";
+import { Database } from "bun:sqlite";
 import type { Seq } from "../shared/domain";
 import { stableId } from "../shared/ids";
 import type { UserId } from "../shared/ids";
@@ -192,26 +192,51 @@ function refuseDuringAsyncTx(gate: Gate, what: string): void {
 }
 
 /**
- * A view of the connection whose every method, and every statement it hands out, throws while an asynchronous
- * transaction is open. On one SQLite connection a task that runs while such a transaction yields would otherwise join
- * it, be acknowledged and then be rolled back with it. The transaction's own handle uses the unguarded connection.
+ * A view of the connection that throws `ConnectionBusyError` on every use while an asynchronous transaction is open.
+ * On one SQLite connection a task that runs while such a transaction yields would otherwise join it, be acknowledged
+ * and then be rolled back with it. The transaction's own handle uses the unguarded connection.
+ *
+ * The guard is total by allow-list. A result or property value passes through unwrapped only if it is a primitive, an
+ * array, a plain object or a typed array (rows, `{ changes }`, blobs). A function, or any other object, gets a guard
+ * of its own, and the target itself maps back to its guard. That covers statements, iterators and iterator helpers,
+ * `native`, `valueOf()`, `handle` and the `.immediate` variants of `transaction`. Results of calling a returned
+ * function are the caller's own values and are not wrapped.
  */
 function guardObject<T extends object>(target: T, check: () => void, cache = new WeakMap<object, object>()): T {
-  return new Proxy(target, {
+  const known = cache.get(target);
+  if (known) return known as T;
+  const proxy = new Proxy(target, {
     get(t, p) {
       const value = Reflect.get(t, p, t);
-      if (typeof value !== "function") return value;
+      if (typeof value !== "function") return wrapResult(value, check, cache);
       return (...args: unknown[]) => {
         check();
-        const result = value.apply(t, args);
-        if (result instanceof Statement) {
-          let wrapped = cache.get(result);
-          if (!wrapped) cache.set(result, (wrapped = guardObject(result, check, cache)));
-          return wrapped;
-        }
-        if (typeof result === "function") return (...inner: unknown[]) => (check(), result(...inner));
-        return result;
+        return wrapResult(value.apply(t, args), check, cache);
       };
     },
   });
+  cache.set(target, proxy);
+  return proxy;
+}
+
+function wrapResult(result: unknown, check: () => void, cache: WeakMap<object, object>): unknown {
+  if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
+  if (typeof result === "function") return guardFunction(result as (...args: unknown[]) => unknown, check, cache);
+  if (Array.isArray(result) || ArrayBuffer.isView(result)) return result;
+  const proto = Object.getPrototypeOf(result);
+  if (proto === Object.prototype || proto === null) return result;
+  return guardObject(result, check, cache);
+}
+
+/**
+ * A function that checks on every call. Its own properties (`transaction(fn).immediate`, `.database`) are wrapped as
+ * results. The proxy's target is a fresh arrow function, so the proxy invariants for the original's non-writable
+ * properties do not stop that.
+ */
+function guardFunction(fn: (...args: unknown[]) => unknown, check: () => void, cache: WeakMap<object, object>) {
+  const shell = function (this: unknown, ...args: unknown[]) {
+    check();
+    return Reflect.apply(fn, this, args);
+  };
+  return new Proxy(shell, { get: (_, p) => wrapResult(Reflect.get(fn, p), check, cache) });
 }
