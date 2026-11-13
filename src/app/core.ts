@@ -2,7 +2,7 @@
  * Pure view logic for the review app: everything a screen decides, with no
  * React and no IO. Screens render what these return.
  */
-import { allowanceHeldMessage, heldMessage, resetDay } from "../shared/allowance";
+import { heldMessage, resetDay } from "../shared/allowance";
 import type {
   Allowance, Author, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
   ReviewState, ReviewView, ScopePreview, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
@@ -774,7 +774,7 @@ export function allowanceView(a: Allowance | null): { readonly line: string; rea
     a.limitUsd === null
       ? `${dollars(a.usedUsd)} counted this month, with no monthly cap. The month resets on ${resetDay(a.resetsAtMs)}.`
       : `${dollars(a.usedUsd)} of your ${dollars(a.limitUsd)} AI allowance used this month. It resets on ${resetDay(a.resetsAtMs)}.`;
-  return { line, held: allowanceHeldMessage(a) };
+  return { line, held: a.held === null ? null : heldMessage(a.held) };
 }
 
 // ───────────────────────────── Routing ──────────────────────────────────────

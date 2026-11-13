@@ -9,16 +9,16 @@
  *   claude   AFTERCLASS_CLAUDE_BACKEND=cli | api. Default cli: every Claude task runs through `claude -p` on the subscription.
  *            api: EVERY Claude task calls the Messages API (paid, priced from usage), so no `claude` binary is needed. api with no key
  *            refuses to start. Replay mode builds no Claude adapter, so the setting does nothing there.
- *   voice    Tutor speech from ElevenLabs through POST /voice/speech, live mode with a key only; otherwise GET /voice says
- *            unavailable and the app speaks with Chrome's voice. AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL.
+ *   voice    Tutor speech from ElevenLabs through POST /voice/speech, local live mode with a key only; otherwise GET /voice says
+ *            unavailable and the app speaks with Chrome's voice. Hosted mode ignores the key: voice is not budgeted. AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL.
  *   token    ~/.config/afterclass/pairing-token (0600), created on first boot, printed with "listening on 127.0.0.1:<port>".
  *   data     $AFTERCLASS_DATA (default ./data): afterclass.sqlite, frames/
  *   mode     AFTERCLASS_MODE=live | replay. Unset: live when a keys file exists, replay otherwise.
- *   budget   Live mode only; replay never touches it. Every paid attempt reserves against this month's (UTC) per-user and total
- *            budgets first (providers/budget.ts). AFTERCLASS_BUDGET_USER_USD and AFTERCLASS_BUDGET_TOTAL_USD set them in dollars.
+ *   budget   Live mode only; replay never touches it. Every paid request reserves against this month's (UTC) per-user and total
+ *            budgets as it is sent (providers/budget.ts), and boot settles what a previous process left. AFTERCLASS_BUDGET_USER_USD and AFTERCLASS_BUDGET_TOTAL_USD set them in dollars.
  *            Hosted (AFTERCLASS_AUTH=clerk, or AFTERCLASS_HOST not loopback) defaults to 5 and 50; local has no cap unless set.
  *            Stop switch: AFTERCLASS_STOP_PAID_CALLS=1, or a file named stop-paid-calls in the config dir, which is looked for
- *            before every attempt (create it to stop new paid calls, delete it to resume; calls already running finish).
+ *            before every request (create it to stop new paid requests, delete it to resume; requests already sent finish).
  *   hosted   The container image sets AFTERCLASS_HOST=0.0.0.0, AFTERCLASS_HEALTH_ANY_HOST=1, AFTERCLASS_BUILD_APP=0 and
  *            AFTERCLASS_CONFIG_DIR. Unset, the backend binds 127.0.0.1 and every route keeps the localhost Host check.
  *            AFTERCLASS_HEALTH_ANY_HOST=1 relaxes the Host check for GET /health only, for the load balancer's health check.
@@ -256,15 +256,20 @@ function usdSetting(name: string, text: string | undefined): number | null {
   return usd;
 }
 
-/** Hosted means people other than the machine's owner can reach the backend, so their calls are capped by default. */
+/** Hosted means people other than the machine's owner can reach the backend. */
+export function isHosted(env: Env): boolean {
+  return env.AFTERCLASS_AUTH === "clerk" || !LOOPBACK.has(env.AFTERCLASS_HOST ?? "");
+}
+
+/** A hosted backend's calls are capped by default. */
 export function resolveBudgetLimits(env: Env): BudgetLimits {
-  const hosted = env.AFTERCLASS_AUTH === "clerk" || !LOOPBACK.has(env.AFTERCLASS_HOST ?? "");
+  const hosted = isHosted(env);
   const userUsd = usdSetting("AFTERCLASS_BUDGET_USER_USD", env.AFTERCLASS_BUDGET_USER_USD);
   const totalUsd = usdSetting("AFTERCLASS_BUDGET_TOTAL_USD", env.AFTERCLASS_BUDGET_TOTAL_USD);
   return hosted ? { userUsd: userUsd ?? HOSTED_LIMITS.userUsd, totalUsd: totalUsd ?? HOSTED_LIMITS.totalUsd } : { userUsd, totalUsd };
 }
 
-/** The stop switch: the environment at boot, or the file, which is looked for before every attempt. */
+/** The stop switch: the environment at boot, or the file, which is looked for before every request. */
 export function stopSwitch(env: Env, configDir: string): () => boolean {
   const flag = env.AFTERCLASS_STOP_PAID_CALLS ?? "";
   if (!["", "0", "1"].includes(flag)) throw new Error(`AFTERCLASS_STOP_PAID_CALLS must be 1 or 0, got "${flag}"`);
@@ -373,7 +378,10 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   const apiKey = keys.TYPESAFE_API_KEY;
   const voiceId = env.AFTERCLASS_ELEVENLABS_VOICE_ID || DEFAULT_VOICE_ID;
   const voiceModel = env.AFTERCLASS_ELEVENLABS_MODEL || DEFAULT_VOICE_MODEL;
-  if (keys.ELEVENLABS_API_KEY !== undefined) checkVoiceSettings(voiceId, voiceModel);
+  // Derek, 2026-11-13: "we can keep elevenlabs off for now". Voice runs outside the budget, so hosted mode never uses the key.
+  const voiceIgnored = isHosted(env) && keys.ELEVENLABS_API_KEY !== undefined;
+  const voiceKey = isHosted(env) ? undefined : keys.ELEVENLABS_API_KEY;
+  if (voiceKey !== undefined) checkVoiceSettings(voiceId, voiceModel);
   if (mode === "live" && apiKey === undefined) throw new Error(`${keysPath} has no TYPESAFE_API_KEY; refusing to start`);
   const claudeBackend = resolveClaudeBackend(env.AFTERCLASS_CLAUDE_BACKEND);
   const anthropicKey = keys.AFTERCLASS_ANTHROPIC_API_KEY;
@@ -412,6 +420,8 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   const memoMode: MemoMode = mode === "replay" && !options.tasks ? "replay" : "live";
   // One budget for every user, on the raw db: the total cap sums all of them. Each user's memo reserves as its own user.
   const budget = mode === "live" ? createBudget(rawDb, { limits: budgetLimits, stopped: paidCallsStopped }) : null;
+  // Before any request: what a previous process left unsettled gets its usage event (R17) and counts at its reservation.
+  const interrupted = budget?.reconcileInterrupted() ?? 0;
 
   let alive = true;
   let scheduler: Scheduler | null = null;
@@ -579,9 +589,9 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     };
 
     const voice: Voice =
-      keys.ELEVENLABS_API_KEY === undefined
+      voiceKey === undefined
         ? unavailableVoice
-        : createVoice({ apiKey: keys.ELEVENLABS_API_KEY, voiceId, model: voiceModel, db, ...(options.fetch ? { fetch: options.fetch } : {}) });
+        : createVoice({ apiKey: voiceKey, voiceId, model: voiceModel, db, ...(options.fetch ? { fetch: options.fetch } : {}) });
 
     return { tasks, evidence, served, segmentation, preparation, reviews, record, ledger, memo, diagrams, voice, captures, db };
   }
@@ -690,7 +700,14 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   );
   const cap = (usd: number | null) => (usd === null ? "no cap" : `$${usd}`);
   if (budget !== null) log(`budget per month (UTC): ${cap(budgetLimits.userUsd)} per user, ${cap(budgetLimits.totalUsd)} in total; stop switch: ${join(configDir, STOP_FILE)}${paidCallsStopped() ? " (on)" : ""}`);
-  log(keys.ELEVENLABS_API_KEY !== undefined ? `voice: ElevenLabs (model ${voiceModel}, voice ${voiceId})` : "voice: unavailable (no ELEVENLABS_API_KEY in keys.env, or replay mode); the app speaks with Chrome's voice");
+  if (interrupted > 0) log(`budget: ${interrupted} call(s) a previous process left unfinished are recorded at unknown cost and count at their reservation`);
+  log(
+    voiceKey !== undefined
+      ? `voice: ElevenLabs (model ${voiceModel}, voice ${voiceId})`
+      : voiceIgnored
+        ? "voice: ELEVENLABS_API_KEY is ignored in hosted mode, where ElevenLabs stays off; the app speaks with Chrome's voice"
+        : "voice: unavailable (no ELEVENLABS_API_KEY in keys.env, or replay mode); the app speaks with Chrome's voice",
+  );
   if (auth.kind === "clerk") log(`sign-in: Clerk for ${auth.publicOrigin}; the extension's routes answer 401 until device tokens land`);
   // The token is printed only for a loopback bind. A hosted container's log goes to CloudWatch, which is not a place for a secret.
   log(hostname === "127.0.0.1" && auth.kind === "local" ? `listening on 127.0.0.1:${boundPort}\npairing token: ${token}` : `listening on ${hostname}:${boundPort}`);

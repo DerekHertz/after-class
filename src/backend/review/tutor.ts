@@ -633,7 +633,7 @@ export function tutorTask(claude: ClaudeCli): Task<TutorInput, TutorOutput> {
       return { system, prompt, effort: TUTOR_REQUEST.effort };
     },
     async attempt(input, ctx) {
-      const { text, usage } = await claude.streamText(tutorRequest(input), ctx.streamTo ?? (() => {}), ctx.signal);
+      const { text, usage } = await claude.streamText(tutorRequest(input), ctx.streamTo ?? (() => {}), ctx);
       const header = parseMoveHeader(text.includes("\n") ? text : `${text}\n`);
       if (header.kind !== "header") throw new ProviderError(`invalid move header: ${header.kind === "invalid" ? header.why : "empty reply"}`, usage, false);
       const verdict = validateMove(header.move, input);
@@ -692,7 +692,7 @@ export function wrapUpTask(claude: ClaudeCli): Task<WrapUpInput, WrapUpOutput> {
     maxAttempts: 3,
     canonicalInput: (input) => ({ system: WRAP_UP_SYSTEM, prompt: wrapUpPrompt(input), effort: WRAP_UP_REQUEST.effort }),
     async attempt(input, ctx) {
-      return claude.structured({ ...WRAP_UP_REQUEST, system: WRAP_UP_SYSTEM, prompt: wrapUpPrompt(input) }, wrapUpSchema, ctx.signal);
+      return claude.structured({ ...WRAP_UP_REQUEST, system: WRAP_UP_SYSTEM, prompt: wrapUpPrompt(input) }, wrapUpSchema, ctx);
     },
     decode: (stored) => wrapUpSchema.parse(stored),
   };

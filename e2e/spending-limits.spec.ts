@@ -10,12 +10,17 @@ async function keep(page: Page, name: string, project: string) {
   if (dir) await page.screenshot({ path: `${dir}/${name}-${project}.png`, fullPage: true });
 }
 
-test("a tutor turn held by the budget says so in plain words, fits on the board and offers no retry", async ({ page }, info) => {
-  await page.goto("/?scenario=held-turn&clean=1");
+async function sendHeldTurn(page: Page, scenario: string) {
+  await page.goto(`/?scenario=${scenario}&clean=1`);
   await page.getByLabel("Your thinking").fill("One thread could release its lock first.");
   await page.getByRole("button", { name: "Share my thinking" }).click();
-  const note = page.getByText(USED_UP);
+}
+
+test("a tutor turn held with money left says not enough is left, fits on the board and offers no retry", async ({ page }, info) => {
+  await sendHeldTurn(page, "held-turn");
+  const note = page.getByText(NOT_ENOUGH_LEFT);
   await expect(note).toBeVisible();
+  await expect(page.getByText(USED_UP)).toHaveCount(0);
   const board = page.locator('.front-row-area[data-area="board"]');
   const fits = await board.evaluate((el) => el.scrollHeight <= el.clientHeight);
   expect(fits, "the board shows the held note without scrolling").toBe(true);
@@ -24,6 +29,13 @@ test("a tutor turn held by the budget says so in plain words, fits on the board 
   await expect(page.getByText("The tutor's reply did not finish.")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
   await keep(page, "held-turn", info.project.name);
+});
+
+test("a tutor turn held once the allowance is spent says it is used up", async ({ page }, info) => {
+  await sendHeldTurn(page, "held-turn-used-up");
+  await expect(page.getByText(USED_UP)).toBeVisible();
+  await expect(page.getByText(NOT_ENOUGH_LEFT)).toHaveCount(0);
+  await keep(page, "held-turn-used-up", info.project.name);
 });
 
 test("preparation held by the budget says so on the lecture page", async ({ page }, info) => {

@@ -3,7 +3,7 @@ import { createClaudeCli } from "../src/backend/providers/claude";
 import { boundaryTask, claimSupportTask, frameChangeTask } from "../src/backend/providers/jev-tasks";
 import { createLedger } from "../src/backend/providers/ledger";
 import type { Task } from "../src/backend/providers/memo";
-import { createMemo, ProviderError } from "../src/backend/providers/memo";
+import { createMemo, ProviderError, unbudgeted } from "../src/backend/providers/memo";
 import { testUserDb } from "./fakes";
 import { boundaryInput, claim, cli, fakeJev, frame, Out, p, passage, req, successEnvelope, withBytes } from "./providers-fixtures";
 
@@ -19,7 +19,7 @@ describe("R17 and the ledger", () => {
     canonicalInput: (i) => ({ tag: i.tag }),
     decode: (s) => Out.parse(s),
     async attempt(_i, c) {
-      const r = await claude.structured(req(), Out, c.signal);
+      const r = await claude.structured(req(), Out, unbudgeted(c.signal));
       return { output: r.output, usage: r.usage };
     },
   });

@@ -21,7 +21,7 @@ import { createLedger } from "../src/backend/providers/ledger";
 import { createMemo } from "../src/backend/providers/memo";
 import type { Task } from "../src/backend/providers/memo";
 import { testUserDb } from "./fakes";
-import { NEVER } from "./providers-fixtures";
+import { OPEN } from "./providers-fixtures";
 
 const KEY = "sk-ant-api03-all-tasks-0123456789";
 const ev = (name: string) => stableId("ev", name) as EvidenceId;
@@ -293,7 +293,7 @@ describe("resource search without output_config.format", () => {
     const failure = new Anthropic.BadRequestError(400, {}, "bad continuation", new Headers());
     const { client } = scripted([paused, failure]);
     const err = await createClaudeApi({ apiKey: KEY, maxConcurrent: 1, client }).structured(
-      { model: "opus", effort: "high", system: "s", prompt: "p", images: [], webTools: true, timeoutMs: 5_000 }, z.object({ resources: z.array(z.string()) }), NEVER,
+      { model: "opus", effort: "high", system: "s", prompt: "p", images: [], webTools: true, timeoutMs: 5_000 }, z.object({ resources: z.array(z.string()) }), OPEN,
     ).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiCallError);
     const failed = err as ApiCallError;

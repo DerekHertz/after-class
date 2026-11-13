@@ -16,7 +16,7 @@ import { buildTasks, loadPairingToken, main, readKeys, resolveClaudeBackend, res
 import type { MainOptions, Running, TaskSet } from "../src/backend/main";
 import type { ClaudeCli, SpawnFn } from "../src/backend/providers/claude";
 import type { ApiClient } from "../src/backend/providers/claude-api";
-import { ProviderError } from "../src/backend/providers/memo";
+import { ProviderError, unbudgeted } from "../src/backend/providers/memo";
 import { reviewState } from "../src/backend/review/tutor";
 import type { TutorInput } from "../src/backend/review/tutor";
 import type { ClaimSupportInput, BoundaryInput, FrameChangeInput } from "../src/backend/providers/jev-tasks";
@@ -651,7 +651,7 @@ describe("AFTERCLASS_CLAUDE_BACKEND", () => {
       },
     };
     const jev = { ask: () => Promise.reject(new Error("no Jev call in this test")) };
-    const ctx = { signal: new AbortController().signal, streamTo: null };
+    const ctx = { ...unbudgeted(new AbortController().signal), streamTo: null };
     const empty = { passages: [], frames: [], gaps: [] };
     const tasks = buildTasks(jev, adapter, () => null);
     await Promise.allSettled([

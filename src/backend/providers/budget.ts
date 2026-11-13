@@ -1,33 +1,36 @@
 /**
- * Budgets for paid calls (plan phase 7, step 1). memo.ts reserves before every attempt and settles after it; nothing else
- * writes budget_holds. One budget serves every user, because the monthly total sums all of them.
+ * Budgets for paid calls (plan phase 7, step 1). Every outbound paid request reserves here at the moment it is sent (memo.ts
+ * hands the adapter an `admit` it calls after any queue, right before the request leaves), and memo.ts settles the attempt's
+ * holds after it. `reconcileInterrupted` settles what a previous process left. Nothing else writes budget_holds. One budget
+ * serves every user, because the monthly total sums all of them.
  *
  * Derek, amendment of 2026-11-13: "Every hosted call runs inside a per-user budget and a monthly total budget, and a stop
  * switch halts all paid calls." The amounts he set: "$5 per user and $50 total".
  * R17: "Every paid call records a usage event; unknown cost is stored as unknown, not zero." A settlement takes the cost the
  * usage event records, and an unknown cost keeps its reservation, so a call nobody priced still counts against the cap.
  *
- *   reserve   one IMMEDIATE transaction: the stop switch, then this user's month, then everyone's month, then the insert. The
- *             write lock is taken before the sums are read, so two attempts (in this process or another on the same file)
- *             cannot both take the last of a budget.
+ *   reserve   one IMMEDIATE transaction per request: the stop switch, then this user's month, then everyone's month, then the
+ *             insert. The write lock is taken before the sums are read, so two requests (in this process or another on the same
+ *             file) cannot both take the last of a budget. A call that sends several requests (a resource search that continues a
+ *             paused turn) reserves for each one.
  *   settle    inside the transaction that records the attempt's usage event, so a hold is settled exactly when its event exists.
- *   crash     a hold never settled (a call still running, or a process that ended mid-call) counts at its reservation for the
- *             rest of its month. That call may have been billed and has no usage event, so its reservation is the only figure.
- *             It does not carry into the next month, because each month sums only its own holds.
+ *   crash     a hold a process never settled may have been billed. At boot, before any new request, `reconcileInterrupted` writes
+ *             one usage event of unknown cost for each attempt such holds belong to, and settles each hold at its reservation.
  *
  * A call can cost more than its estimate. Its settlement then takes the month past the cap by the difference, and every
- * attempt after it is refused. So the cap can be passed by at most the overrun of the calls already running when it is reached.
+ * request after it is refused. So the cap can be passed by at most the overrun of the requests already sent when it is reached.
  *
  * Derek, 2026-11-13, on a learner who reaches a cap mid-review: "i think it should be allowed to finish". So the wrap-up
  * that saves a review is never held by either cap. The stop switch still holds it, and it still reserves, settles and
  * counts toward the month like any other call, so a finished review can take a month past its cap by one wrap-up.
  */
+import { stableId } from "../../shared/ids";
 import type { MemoKey, UserId } from "../../shared/ids";
 import type { Allowance, BudgetHold, Cost, Purpose } from "../../shared/domain";
 import type { Db } from "../db";
 
 /**
- * What one attempt reserves, in USD. A settlement replaces it with the recorded cost, so for a priced call it only decides
+ * What one request reserves, in USD. A settlement replaces it with the recorded cost, so for a priced call it only decides
  * whether the attempt may start. For a call of unknown cost it is the amount counted.
  *
  *   Claude (every task runs on claude-opus-5-5 through the Messages API in hosted mode). Experiment 8 measured a first tutor turn
@@ -35,7 +38,7 @@ import type { Db } from "../db";
  *   price). $0.75 covers the largest of those. Interpretation, revision and the diagram summary are not measured on the API.
  *   Priced as `worstCaseUsd` prices a call (all of max_tokens spent, every input token a 1 hour cache write), a structured call
  *   with 50,000 input tokens comes to $0.75. Resource search adds up to 5 web searches at $0.01 per call and up to 3
- *   continuations, so it reserves $1. These are estimates, not upper bounds: the same worst case is $1.23 for a tutor turn with
+ *   continuations, each a request that reserves $1 again. These are estimates, not upper bounds: the same worst case is $1.23 for a tutor turn with
  *   experiment 8's 69,251-token context and $4.81 for a resource search with 100,000, and reserving that much would refuse a
  *   learner's turn with a quarter of their $5 unused.
  *   Jev: TypeSafe has published no price, so every Jev call's cost is unknown and this figure is what it counts. $0.001 is a
@@ -68,7 +71,7 @@ export type BudgetLimits = {
 
 export type BudgetOptions = {
   readonly limits: BudgetLimits;
-  /** The stop switch, asked before every attempt, so flipping it needs no restart. Attempts already running finish. */
+  /** The stop switch, asked before every request, so flipping it needs no restart. Requests already sent finish. */
   readonly stopped: () => boolean;
   readonly now?: () => number;
 };
@@ -81,7 +84,12 @@ export type Budget = {
   /** Run it inside the transaction that records the attempt's usage event. */
   settle(reservation: Reservation, cost: Cost): void;
   allowance(userId: UserId): Allowance;
+  /** At boot, before any request: settle the holds a previous process left, with a usage event of unknown cost for each attempt. Returns how many attempts. */
+  reconcileInterrupted(): number;
 };
+
+/** The reason a reconciled usage event gives for its unknown cost. */
+export const INTERRUPTED = "the process ended before the call finished, so it may have been billed";
 
 const MICROS = 1_000_000;
 const toMicros = (usd: number): number => Math.round(usd * MICROS);
@@ -107,6 +115,17 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
     totalUsed: db.sql.query<{ used: number }, [string]>(`SELECT ${spent} WHERE period = ?`),
     insert: db.sql.query(`INSERT INTO budget_holds (id, user_id, period, purpose, memo_key, reserved_micros, reserved_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`),
     settle: db.sql.query(`UPDATE budget_holds SET settled_micros = ?, settled_ms = ? WHERE id = ? AND settled_micros IS NULL`),
+    interrupted: db.sql.query<{ user_id: string; memo_key: string; provider: string; model: string; purpose: string; started: number; next: number }, []>(
+      `SELECT h.user_id, h.memo_key, i.provider, i.model, i.purpose, MIN(h.reserved_ms) AS started,
+              (SELECT COALESCE(MAX(attempt_no), 0) + 1 FROM usage_events u WHERE u.user_id = h.user_id AND u.memo_key = h.memo_key) AS next
+       FROM budget_holds h JOIN memo_inputs i ON i.user_id = h.user_id AND i.key = h.memo_key
+       WHERE h.settled_micros IS NULL GROUP BY h.user_id, h.memo_key`,
+    ),
+    insertInterrupted: db.sql.query(
+      `INSERT INTO usage_events (id, user_id, memo_key, capture_id, attempt_no, provider, model, purpose, outcome, cost_kind, cost_reason, started_ms, duration_ms)
+       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 'aborted', 'unknown', ?, ?, 0)`,
+    ),
+    settleInterrupted: db.sql.query(`UPDATE budget_holds SET settled_micros = reserved_micros, settled_ms = ? WHERE user_id = ? AND memo_key = ? AND settled_micros IS NULL`),
   };
 
   /** Why an attempt for `purpose` that would add `micros` to this month is refused, or null when it may start. */
@@ -115,8 +134,14 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
     if (UNCAPPED.has(purpose)) return null;
     const period = periodOf(atMs);
     const resetsAtMs = periodEndMs(atMs);
-    if (userCap !== null && q.userUsed.get(period, userId)!.used + micros > userCap) return { reason: "user_budget", resetsAtMs };
-    if (totalCap !== null && q.totalUsed.get(period)!.used + micros > totalCap) return { reason: "total_budget", resetsAtMs };
+    if (userCap !== null) {
+      const used = q.userUsed.get(period, userId)!.used;
+      if (used + micros > userCap) return { reason: "user_budget", resetsAtMs, usedUp: used >= userCap };
+    }
+    if (totalCap !== null) {
+      const used = q.totalUsed.get(period)!.used;
+      if (used + micros > totalCap) return { reason: "total_budget", resetsAtMs, usedUp: used >= totalCap };
+    }
     return null;
   }
 
@@ -145,6 +170,18 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
         resetsAtMs: periodEndMs(at),
         held: holdFor(userId, at, PROBE, toMicros(ESTIMATE_USD[PROBE])),
       };
+    },
+
+    reconcileInterrupted() {
+      return db.sql.transaction((): number => {
+        const at = Math.round(now());
+        const attempts = q.interrupted.all();
+        for (const a of attempts) {
+          q.insertInterrupted.run(stableId("use", a.user_id, a.memo_key, a.next), a.user_id, a.memo_key, a.next, a.provider, a.model, a.purpose, INTERRUPTED, a.started);
+          q.settleInterrupted.run(at, a.user_id, a.memo_key);
+        }
+        return attempts.length;
+      }).immediate();
     },
   };
 }

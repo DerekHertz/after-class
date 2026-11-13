@@ -32,7 +32,7 @@ import { readKeys } from "../../src/backend/main";
 import type { ApiCallDetail, ApiClient } from "../../src/backend/providers/claude-api";
 import { API_MODELS, ApiCallError, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, createClaudeApi, outputFormatOf, redactThenClip, worstCaseUsd } from "../../src/backend/providers/claude-api";
 import type { ClaudeCli, ClaudeRequest, Effort } from "../../src/backend/providers/claude";
-import { ProviderError } from "../../src/backend/providers/memo";
+import { ProviderError, unbudgeted } from "../../src/backend/providers/memo";
 import { parseMoveHeader, wrapUpSchema } from "../../src/backend/review/tutor";
 
 export const DEFAULT_KEYS_PATH = join(homedir(), ".config", "afterclass", "keys.env");
@@ -588,11 +588,11 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
       if (call.purpose === "tutor_turn") {
         const result = await claude.streamText(req, () => {
           firstTextMs ??= now() - started;
-        }, deps.signal ?? new AbortController().signal);
+        }, unbudgeted(deps.signal ?? new AbortController().signal));
         text = result.text;
         usageCost = result.usage.cost.kind === "estimated" ? result.usage.cost.usd : null;
       } else {
-        const result = await claude.structured(req, wrapUpSchema, deps.signal ?? new AbortController().signal);
+        const result = await claude.structured(req, wrapUpSchema, unbudgeted(deps.signal ?? new AbortController().signal));
         schemaValid = true;
         usageCost = result.usage.cost.kind === "estimated" ? result.usage.cost.usd : null;
       }

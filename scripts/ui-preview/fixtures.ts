@@ -26,7 +26,7 @@ export const ids = {
   chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait"), ordering: id("cpt", "ordering"), earlierCapture: id("cap", "earlier-capture"),
   otherCapture: id("cap", "other-capture"), pendingReview: id("rvw", "pending-review"), unsavedReview: id("rvw", "unsaved-review"),
 };
-export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "capture-ready", "capture-processing", "capture-held", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "usage", "usage-held", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
+export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-processing", "capture-held", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "usage", "usage-held", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
 export type Scenario = typeof scenarios[number];
 export const scenarioFrom = (search: string): Scenario => scenarios.find(s => s === new URLSearchParams(search).get("scenario")) ?? "review";
 
@@ -223,7 +223,7 @@ export function createFixture(scenario: Scenario): Fixture {
       const learner = reviewViewz.parse({ ...view, scope: { ...view.scope, material }, turns: [{ id: turnId, reviewId: ids.review, actor: "learner", seq: view.turns.length + 1, atMs: 5000, threadId: begin ? null : ids.thread, act }] }).turns[0]!;
       view = { ...view, turns: [...view.turns.filter(t => t.id !== turnId), learner] };
       yield { type: "learner_turn_stored", turnId };
-      if (scenario === "held-turn" && !begin) { yield { type: "turn_held", hold: { reason: "user_budget", resetsAtMs: MONTH_END } }; return; }
+      if ((scenario === "held-turn" || scenario === "held-turn-used-up") && !begin) { yield { type: "turn_held", hold: { reason: "user_budget", resetsAtMs: MONTH_END, usedUp: scenario === "held-turn-used-up" } }; return; }
       const move = begin ? { kind: "ask_main" as const, threadId: ids.thread, claimIds: [ids.claim] as const } : scenario === "streaming" ? { kind: "explain" as const, threadId: ids.thread, evidence: [ids.laterPassage] } : { kind: "ask_followup" as const, threadId: ids.thread };
       yield { type: "move", turnId, move };
       const say = begin ? firstQuestion : "What might change if the threads acquired resources in a consistent order?";
@@ -260,8 +260,9 @@ export function createFixture(scenario: Scenario): Fixture {
     async deleteEvidence(evidenceIds) { log("evidence.delete"); record = { ...record, unavailableEvidence: evidenceIds.map(id => ({ kind: "deleted", id, deletedAtMs: 1000 })) }; },
     async usage() {
       const held = scenario === "usage-held" || scenario === "capture-held" || scenario === "held-turn";
+      if (scenario === "held-turn-used-up") return usageSummaryz.parse({ byKind: {}, byPurpose: {}, allowance: { usedUsd: 5, limitUsd: 5, resetsAtMs: MONTH_END, held: { reason: "user_budget", resetsAtMs: MONTH_END, usedUp: true } } });
       return usageSummaryz.parse(held
-        ? { byKind: { estimated: { calls: 14, usd: 4.31 }, unknown: { calls: 3, usd: null } }, byPurpose: { interpretation: { calls: 3, errors: 0, unknownCost: 0 }, tutor_turn: { calls: 11, errors: 0, unknownCost: 0 }, boundary: { calls: 3, errors: 0, unknownCost: 3 } }, allowance: { usedUsd: 4.79, limitUsd: 5, resetsAtMs: MONTH_END, held: { reason: "user_budget", resetsAtMs: MONTH_END } } }
+        ? { byKind: { estimated: { calls: 14, usd: 4.31 }, unknown: { calls: 3, usd: null } }, byPurpose: { interpretation: { calls: 3, errors: 0, unknownCost: 0 }, tutor_turn: { calls: 11, errors: 0, unknownCost: 0 }, boundary: { calls: 3, errors: 0, unknownCost: 3 } }, allowance: { usedUsd: 4.79, limitUsd: 5, resetsAtMs: MONTH_END, held: { reason: "user_budget", resetsAtMs: MONTH_END, usedUp: false } } }
         : { byKind: {}, byPurpose: {}, allowance: { usedUsd: 1.37, limitUsd: 5, resetsAtMs: MONTH_END, held: null } });
     },
   };

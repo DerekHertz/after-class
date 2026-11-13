@@ -251,16 +251,17 @@ describe("mainHosted", () => {
 
   describe("budgets", () => {
     /** Live mode with a keys file, so the one shared budget runs. Every provider call is refused and counted. */
-    async function bootLive() {
+    async function bootLive(extraKeys = "") {
       const configDir = dir("afterclass-hosted-config-");
       const dataDir = dir("afterclass-hosted-data-");
-      writeFileSync(join(configDir, "keys.env"), "TYPESAFE_API_KEY=sk-hosted-budget\n", { mode: 0o600 });
+      writeFileSync(join(configDir, "keys.env"), `TYPESAFE_API_KEY=sk-hosted-budget\n${extraKeys}`, { mode: 0o600 });
+      const logs: string[] = [];
       let providerCalls = 0;
       const refuse = () => {
         providerCalls++;
         throw new Error("a hosted budget test reached a provider");
       };
-      const r = await mainHosted({ port: 0, buildApp: false, configDir, appDir: fixtureApp(), env: hostedEnv(jwks.url, dataDir), fetch: refuse as unknown as typeof fetch, spawn: refuse, log: () => {}, error: () => {} });
+      const r = await mainHosted({ port: 0, buildApp: false, configDir, appDir: fixtureApp(), env: hostedEnv(jwks.url, dataDir), fetch: refuse as unknown as typeof fetch, spawn: refuse, log: (t) => void logs.push(t), error: () => {} });
       expect(r.mode).toBe("live");
       const base = `http://127.0.0.1:${r.port}`;
       const signIn = async (sub: string) => {
@@ -270,6 +271,7 @@ describe("mainHosted", () => {
         try {
           const userId = db.query<{ id: UserId }, [string]>("SELECT id FROM users WHERE auth_subject = ?").get(sub)!.id;
           return {
+            headers,
             memo: r.modulesFor(userId).memo,
             allowance: async () => ((await (await fetch(`${base}/usage`, { headers })).json()) as { allowance: Allowance | null }).allowance,
           };
@@ -277,8 +279,22 @@ describe("mainHosted", () => {
           db.close();
         }
       };
-      return { r, signIn, providerCalls: () => providerCalls };
+      return { r, base, logs, signIn, providerCalls: () => providerCalls };
     }
+
+    test("ElevenLabs stays off even with its key in keys.env: voice is unavailable, nothing is sent, and the log says the key is ignored", async () => {
+      const b = await bootLive("ELEVENLABS_API_KEY=sk-eleven-hosted\n");
+      try {
+        const alice = await b.signIn("user_alice");
+        expect(await (await fetch(`${b.base}/voice`, { headers: alice.headers })).json()).toEqual({ available: false });
+        const speech = await fetch(`${b.base}/voice/speech`, { method: "POST", headers: { ...alice.headers, "content-type": "application/json" }, body: JSON.stringify({ text: "Hello." }) });
+        expect(speech.status).toBe(503);
+        expect(b.providerCalls()).toBe(0);
+        expect(b.logs.join("\n")).toContain("voice: ELEVENLABS_API_KEY is ignored in hosted mode");
+      } finally {
+        await b.r.stop();
+      }
+    });
 
     const turns = (cost: Cost = UNKNOWN_COST) => fakeTask<{ n: number }, string>({ purpose: "tutor_turn", provider: "claude", answer: () => ok("turn", { usage: usage(cost) }) });
     const run = (memo: Memo, task: ReturnType<typeof turns>, ns: readonly number[]) => Promise.all(ns.map((n) => memo.run(task, { n }).then((r) => r.kind)));

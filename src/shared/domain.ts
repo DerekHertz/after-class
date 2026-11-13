@@ -666,11 +666,12 @@ export type UsageSummary = {
 
 /**
  * Why a paid call was refused before it began: the stop switch is on, or the call would take this user's or everyone's
- * spend for the calendar month (UTC) past its budget. `resetsAtMs` is the start of the next month.
+ * spend for the calendar month (UTC) past its budget. `resetsAtMs` is the start of the next month. `usedUp`: spend has
+ * already reached that budget. When false, money is left but not enough for the call's estimate.
  */
 export type BudgetHold =
   | { readonly reason: "stopped" }
-  | { readonly reason: "user_budget" | "total_budget"; readonly resetsAtMs: number };
+  | { readonly reason: "user_budget" | "total_budget"; readonly resetsAtMs: number; readonly usedUp: boolean };
 
 /** One user's budget for the current calendar month (UTC). */
 export type Allowance = {

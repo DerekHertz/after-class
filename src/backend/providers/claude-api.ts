@@ -43,8 +43,8 @@ import type { ContentBlockParam, JSONOutputFormat, Message, MessageCreateParamsN
 import type { z } from "zod";
 import { abortError, createLimiter } from "./claude";
 import type { ClaudeCli, ClaudeRequest } from "./claude";
-import { ProviderError } from "./memo";
-import type { UsageReport } from "./memo";
+import { BudgetHeld, ProviderError } from "./memo";
+import type { Admitted, SendContext, UsageReport } from "./memo";
 
 /** The only two models this backend serves. Ids carry no date suffix. */
 export const API_MODELS = { opus: "claude-opus-5-5", sonnet: "claude-sonnet-5-5" } as const;
@@ -450,8 +450,14 @@ function textOfError(err: unknown): string {
   }
 }
 
-/** What a client call returns, held in an object so that returning it from an async function never reads a field of it a second time. */
-type Untrusted = { readonly value: unknown };
+/**
+ * What a client call returns, held in an object so that returning it from an async function never reads a field of it a second time.
+ * `admitted` is the budget's handle on that one request, priced once the response is read.
+ */
+type Untrusted = { readonly value: unknown; readonly admitted: Admitted };
+
+/** What a request turned away before any model ran costs. */
+const NOT_BILLED_REQUEST = { kind: "estimated", usd: 0, basis: "rejected before any model ran" } as const;
 
 export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
   if (opts.apiKey === "") throw new Error("createClaudeApi needs a non-empty apiKey");
@@ -481,9 +487,22 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
     return new ApiCallError(`claude api call failed: ${text}`, null, false, "maybe_billed", null);
   }
 
-  /** The slot, the timeout and the abort wrapped around one request. An abort rejects the way the CLI adapter's does. */
-  async function call(req: ClaudeRequest, signal: AbortSignal, work: (callSignal: AbortSignal, began: () => void) => Promise<unknown>): Promise<Untrusted> {
+  /**
+   * The slot, the budget, the timeout and the abort wrapped around one request. An abort rejects the way the CLI adapter's does.
+   * Every request this adapter sends goes through here, and `send.admit()` runs after the slot is granted and before the request
+   * is sent, so a request that waited in the queue meets the stop switch as it is when it leaves. A refusal is thrown as it is.
+   */
+  async function call(req: ClaudeRequest, send: SendContext, work: (callSignal: AbortSignal, began: () => void) => Promise<unknown>): Promise<Untrusted> {
+    const signal = send.signal;
     const release = await limiter.acquire(signal);
+    let admitted: Admitted;
+    try {
+      signal.throwIfAborted();
+      admitted = send.admit();
+    } catch (err) {
+      release();
+      throw signal.aborted ? abortError() : err;
+    }
     const ctl = new AbortController();
     let timedOut = false;
     const timer = setTimeout(() => {
@@ -494,12 +513,13 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
     signal.addEventListener("abort", onAbort, { once: true });
     let responseStarted = false;
     try {
-      signal.throwIfAborted();
-      return { value: await work(ctl.signal, () => (responseStarted = true)) };
+      return { value: await work(ctl.signal, () => (responseStarted = true)), admitted };
     } catch (err) {
       if (signal.aborted) throw abortError();
       if (timedOut) throw new ApiCallError(`claude api timed out after ${req.timeoutMs}ms`, null, true, "maybe_billed", null);
-      throw failureOf(err, responseStarted);
+      const failure = failureOf(err, responseStarted);
+      if (failure.billing === "not_billed") admitted.priced(NOT_BILLED_REQUEST);
+      throw failure;
     } finally {
       clearTimeout(timer);
       signal.removeEventListener("abort", onAbort);
@@ -517,11 +537,12 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
     return { model, system, messages: [{ role: "user", content: userContent(req, req.prompt + promptSuffix) }] as const, tools: req.webTools ? WEB_TOOLS : null };
   }
 
-  /** Parse the response and report it. Throws only for a response that cannot be read. */
-  function read1(raw: unknown): Parsed {
+  /** Parse the response, report it, and price its request. Throws only for a response that cannot be read, whose request stays unpriced. */
+  function read1({ value: raw, admitted }: Untrusted): Parsed {
     try {
       const parsed = parseMessage(raw, opts.apiKey);
       const cost = usageOf(parsed).cost;
+      admitted.priced(cost);
       opts.onResponse?.({ model: parsed.model, stopReason: parsed.stop, usage: parsed.usage, costUsd: cost.kind === "estimated" ? cost.usd : null });
       return parsed;
     } catch {
@@ -537,7 +558,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
     throw new ProviderError(`claude stopped with ${parsed.stop === null ? "no stop reason" : parsed.stop}, not a finished answer`, usage, false);
   }
 
-  const settle = (raw: unknown) => judge(read1(raw));
+  const settle = (response: Untrusted) => judge(read1(response));
 
   /**
    * The usage of several responses of one logical call as one report. Each was priced with its own model by `usageOf`, so the cost is
@@ -574,7 +595,8 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
    * the ledger sees the whole cost. The paused response's blocks go back unchanged and are never read for anything else. A failure after
    * a response was billed carries the usage so far and is maybe billed, because that response was billed whatever the failure says.
    */
-  async function structuredWithTools(req: ClaudeRequest, model: string, system: TextBlockParam[], first: readonly MessageParam[], tools: ToolUnion[], signal: AbortSignal): Promise<{ readonly parsed: Parsed; readonly usage: UsageReport }> {
+  async function structuredWithTools(req: ClaudeRequest, model: string, system: TextBlockParam[], first: readonly MessageParam[], tools: ToolUnion[], send: SendContext): Promise<{ readonly parsed: Parsed; readonly usage: UsageReport }> {
+    const signal = send.signal;
     let messages: MessageParam[] = [...first];
     const reports: UsageReport[] = [];
     /**
@@ -585,6 +607,8 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
     const afterBilled = (err: unknown): unknown => {
       if (reports.length === 0) return err;
       const known = combine(reports);
+      // A continuation the budget refused was never sent, so the earlier responses are the whole cost.
+      if (err instanceof BudgetHeld) return new BudgetHeld(err.hold, known);
       const refusedBeforeAnyModelRan = !signal.aborted && err instanceof ApiCallError && err.billing === "not_billed";
       const usage: UsageReport = refusedBeforeAnyModelRan
         ? known
@@ -600,10 +624,11 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
       let parsed: Parsed;
       let value: unknown;
       try {
-        ({ value } = await call(req, signal, async (callSignal) =>
+        const response = await call(req, send, async (callSignal) =>
           client.messages.create({ model, max_tokens: STRUCTURED_MAX_TOKENS, system, messages: sent, tools, output_config: { effort: req.effort } }, { signal: callSignal }),
-        ));
-        parsed = read1(value);
+        );
+        value = response.value;
+        parsed = read1(response);
       } catch (err) {
         throw afterBilled(err);
       }
@@ -617,7 +642,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
   }
 
   return {
-    async structured<O>(req: ClaudeRequest, schema: z.ZodType<O>, signal: AbortSignal) {
+    async structured<O>(req: ClaudeRequest, schema: z.ZodType<O>, send: SendContext) {
       if (req.webTools) {
         // Citations are always on for web search and the docs do not say output_config.format works with them, so a web request
         // sends no format. It asks for the JSON in the prompt, reads it from the final text and validates it like any other reply.
@@ -629,7 +654,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
         }
         const suffix = `\n\nWhen you have finished searching, end your reply with only one JSON object that matches this JSON Schema, and nothing after it:\n${schemaText}`;
         const prepared = prepare(req, suffix);
-        const { parsed: reply, usage } = await structuredWithTools(req, prepared.model, prepared.system, prepared.messages, prepared.tools!, signal);
+        const { parsed: reply, usage } = await structuredWithTools(req, prepared.model, prepared.system, prepared.messages, prepared.tools!, send);
         const payload = extractJsonObject(reply.tail);
         if (payload === undefined) throw new ProviderError("claude returned text that is not JSON", usage, false);
         const checked = schema.safeParse(payload);
@@ -643,10 +668,10 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
       } catch (err) {
         throw new ApiCallError(`output schema cannot be expressed as JSON Schema: ${safe(textOfError(err))}`, null, false, "not_billed", null);
       }
-      const { value } = await call(req, signal, async (callSignal) =>
+      const response = await call(req, send, async (callSignal) =>
         client.messages.create({ model, max_tokens: STRUCTURED_MAX_TOKENS, system, messages: [...messages], output_config: { effort: req.effort, format } }, { signal: callSignal }),
       );
-      const { parsed: reply, usage } = settle(value);
+      const { parsed: reply, usage } = settle(response);
       let payload: unknown;
       try {
         payload = JSON.parse(reply.text);
@@ -658,10 +683,10 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
       return { output: parsed.data, usage };
     },
 
-    async streamText(req, onText, signal) {
+    async streamText(req, onText, send) {
       const { model, system, messages, tools } = prepare(req);
       const sink = redactingSink(opts.apiKey, onText);
-      const { value } = await call(req, signal, async (callSignal, began) => {
+      const response = await call(req, send, async (callSignal, began) => {
         const stream = client.messages.stream(
           { model, max_tokens: STREAM_MAX_TOKENS, system, messages: [...messages], ...(tools ? { tools } : {}), output_config: { effort: req.effort } },
           { signal: callSignal },
@@ -672,7 +697,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
         });
         return stream.finalMessage();
       });
-      const { parsed: reply, usage } = settle(value);
+      const { parsed: reply, usage } = settle(response);
       sink.flush();
       return { text: reply.text, usage };
     },

@@ -476,7 +476,7 @@ export const reviewViewResponse = z.object({
 
 export const budgetHoldz = z.union([
   z.object({ reason: z.literal("stopped") }),
-  z.object({ reason: z.enum(["user_budget", "total_budget"]), resetsAtMs: z.number() }),
+  z.object({ reason: z.enum(["user_budget", "total_budget"]), resetsAtMs: z.number(), usedUp: z.boolean() }),
 ]) satisfies z.ZodType<BudgetHold>;
 
 export const tutorStreamEvent = z.discriminatedUnion("type", [

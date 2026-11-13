@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { allowanceHeldMessage } from "../shared/allowance";
+import { heldMessage } from "../shared/allowance";
 import { randomId } from "../shared/ids";
 import type { CaptureId, ReviewId } from "../shared/ids";
 import type { ReviewOptions, StartChoice, UsageSummary } from "../shared/domain";
@@ -161,7 +161,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
   // A budget that holds back new model calls holds back preparation too. Read again while it does, so the note goes when it lifts.
   const usage = usePolled(useCallback(() => api.usage(), [api]), isHeld, POLL_MS);
   const allowance = usage.data?.allowance ?? null;
-  const held = allowance === null ? null : allowanceHeldMessage(allowance);
+  const held = allowance?.held ? heldMessage(allowance.held) : null;
   const [startError, setStartError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [refused, setRefused] = useState<ReviewOptions | null>(null);

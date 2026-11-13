@@ -207,19 +207,6 @@ describe("stop switch", () => {
   });
 });
 
-describe("a process that ends between reserve and settle", () => {
-  test("leaves a hold that counts at its reservation for the rest of its month, and not after", () => {
-    const db = testUserDb();
-    let at = NOV_10;
-    const crashed = createBudget(db, { limits: { userUsd: 5, totalUsd: 50 }, stopped: () => false, now: () => at });
-    expect(crashed.reserve(db.userId, "interpretation", "key_crashed" as MemoKey).kind).toBe("reserved");
-    const restarted = createBudget(db, { limits: { userUsd: 5, totalUsd: 50 }, stopped: () => false, now: () => at });
-    expect(restarted.allowance(db.userId).usedUsd).toBe(ESTIMATE_USD.interpretation);
-    at = DEC_1;
-    expect(restarted.allowance(db.userId).usedUsd).toBe(0);
-  });
-});
-
 describe("R17", () => {
   test("R17: \"Every paid call records a usage event; unknown cost is stored as unknown, not zero.\" Every attempt that ran has one, and the holds settle to the ledger's figures", async () => {
     const w = world({ userUsd: 5, totalUsd: 50 });
@@ -296,8 +283,11 @@ describe("held preparation", () => {
 
 describe("what the learner sees", () => {
   test("the held messages are plain and name the day the allowance comes back", () => {
-    expect(heldMessage({ reason: "user_budget", resetsAtMs: DEC_1 })).toBe("This month's AI allowance is used up. It resets on December 1.");
-    expect(heldMessage({ reason: "total_budget", resetsAtMs: DEC_1 })).toBe("After Class has used this month's AI allowance for everyone. It resets on December 1.");
+    expect(heldMessage({ reason: "user_budget", resetsAtMs: DEC_1, usedUp: true })).toBe("This month's AI allowance is used up. It resets on December 1.");
+    expect(heldMessage({ reason: "total_budget", resetsAtMs: DEC_1, usedUp: true })).toBe("After Class has used this month's AI allowance for everyone. It resets on December 1.");
+    for (const reason of ["user_budget", "total_budget"] as const) {
+      expect(heldMessage({ reason, resetsAtMs: DEC_1, usedUp: false })).toBe("Not enough of this month's AI allowance is left for another AI step. It resets on December 1.");
+    }
     expect(heldMessage({ reason: "stopped" })).toBe("AI features are paused for now. Nothing you have done is lost. Try again later.");
     expect(periodEndMs(Date.UTC(2026, 11, 31, 23, 59))).toBe(Date.UTC(2027, 0, 1));
   });
@@ -379,20 +369,44 @@ describe("what the learner sees", () => {
       held: null,
     });
     expect(allowanceView({ usedUsd: 0.001, limitUsd: null, resetsAtMs: DEC_1, held: null })!.line).toBe("<$0.01 counted this month, with no monthly cap. The month resets on December 1.");
-    const html = renderToStaticMarkup(createElement(AllowanceNote, { allowance: { usedUsd: 5, limitUsd: 5, resetsAtMs: DEC_1, held: { reason: "user_budget", resetsAtMs: DEC_1 } } }));
+    const html = renderToStaticMarkup(createElement(AllowanceNote, { allowance: { usedUsd: 5, limitUsd: 5, resetsAtMs: DEC_1, held: { reason: "user_budget", resetsAtMs: DEC_1, usedUp: true } } }));
     expect(html).toContain("$5.00 of your $5.00 AI allowance used this month.");
     expect(html).toContain("This month&#x27;s AI allowance is used up. It resets on December 1.");
   });
 
-  test("held with money left, the page says not enough is left for another step, not that the allowance is used up", () => {
-    const held = { reason: "user_budget" as const, resetsAtMs: DEC_1 };
-    expect(allowanceView({ usedUsd: 4.79, limitUsd: 5, resetsAtMs: DEC_1, held })!.held).toBe("Not enough of this month's AI allowance is left for another AI step. It resets on December 1.");
-    expect(allowanceView({ usedUsd: 5.2, limitUsd: 5, resetsAtMs: DEC_1, held })!.held).toBe("This month's AI allowance is used up. It resets on December 1.");
-    expect(allowanceView({ usedUsd: 1, limitUsd: 5, resetsAtMs: DEC_1, held: { reason: "total_budget", resetsAtMs: DEC_1 } })!.held).toBe("After Class has used this month's AI allowance for everyone. It resets on December 1.");
+  test("a hold says used up only once spend has reached that cap, for the user's cap and for the total", async () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    const spend = (db: UserDb, usd: number) => w.memoFor(db).run(claudeTask("claim_revision", () => ok("x", { usage: usage({ kind: "measured", usd }) })), { n: usd });
+    const [someLeft, spentAll, bystander] = [w.db, otherUserDb(w.db, "spent-all"), otherUserDb(w.db, "bystander")];
+    await spend(someLeft, 4.5);
+    await spend(spentAll, 5);
+    expect(w.budget.allowance(someLeft.userId).held).toEqual({ reason: "user_budget", resetsAtMs: DEC_1, usedUp: false });
+    expect(w.budget.allowance(spentAll.userId).held).toEqual({ reason: "user_budget", resetsAtMs: DEC_1, usedUp: true });
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) await spend(otherUserDb(w.db, `spender-${n}`), 5);
+    // A wrap-up passes the caps, so it can bring the month to $49.75 and then to exactly $50.
+    const wrapUp = (n: number) => w.memoFor(otherUserDb(w.db, "finisher")).run(claudeTask("wrap_up", () => ok("x", { usage: usage({ kind: "measured", usd: 0.25 }) })), { n });
+    await wrapUp(1);
+    expect(w.budget.allowance(bystander.userId)).toMatchObject({ usedUsd: 0, held: { reason: "total_budget", resetsAtMs: DEC_1, usedUp: false } });
+    await wrapUp(2);
+    expect(w.budget.allowance(bystander.userId).held).toEqual({ reason: "total_budget", resetsAtMs: DEC_1, usedUp: true });
+  });
+
+  test("a tutor turn held with money left says so in the chat, not that the allowance is used up", async () => {
+    const r = startedRig();
+    const tutor = heldTutor(r.db, { userUsd: 5, totalUsd: 50 }, () => reply(askMain(r.claim), "What is the main idea?"));
+    const spent = claudeTask("claim_revision", () => ok("x", { usage: usage({ kind: "measured", usd: 4.5 }) }));
+    await createMemo(r.db, "live", { budget: tutor.budget }).run(spent, { n: 1 });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: tutor.runTutor, clearFailures: tutor.clearFailures }, { tutor: kit, now: () => 1 });
+    const turnId = randomId("turn");
+    const events = await collect(reviews.turn(r.reviewId, turnId, answer()));
+    expect(events.at(-1)).toEqual({ type: "turn_held", hold: { reason: "user_budget", resetsAtMs: DEC_1, usedUp: false } });
+    expect(events.reduce(reduceLive, startLive(turnId)).error).toBe("Not enough of this month's AI allowance is left for another AI step. It resets on December 1.");
   });
   test("the wire carries turn_held and the allowance, and an older backend's usage without one decodes as no budget", () => {
     expect(tutorStreamEvent.parse({ type: "turn_held", hold: { reason: "stopped" } })).toEqual({ type: "turn_held", hold: { reason: "stopped" } });
-    expect(() => tutorStreamEvent.parse({ type: "turn_held", hold: { reason: "user_budget" } })).toThrow();
+    const held = { type: "turn_held", hold: { reason: "user_budget", resetsAtMs: DEC_1, usedUp: false } } as const;
+    expect(tutorStreamEvent.parse(held)).toEqual(held);
+    expect(() => tutorStreamEvent.parse({ type: "turn_held", hold: { reason: "user_budget", resetsAtMs: DEC_1 } })).toThrow();
     const allowance = { usedUsd: 1, limitUsd: 5, resetsAtMs: DEC_1, held: null };
     expect(usageResponse.parse({ byKind: {}, byPurpose: {}, allowance }).allowance).toEqual(allowance);
     expect(usageResponse.parse({ byKind: {}, byPurpose: {} }).allowance).toBeNull();

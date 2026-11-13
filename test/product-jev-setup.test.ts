@@ -13,7 +13,7 @@ import { PRODUCT_JEV_SETUP } from "../src/backend/jev-setup";
 import type { JevClient, JevRequest } from "../src/backend/providers/jev";
 import { QUESTIONS, THRESHOLDS, boundaryTask, frameChangeTask, productBoundaryTask, productFrameChangeTask } from "../src/backend/providers/jev-tasks";
 import type { BoundaryInput, FrameChangeInput } from "../src/backend/providers/jev-tasks";
-import { createMemo } from "../src/backend/providers/memo";
+import { createMemo, unbudgeted } from "../src/backend/providers/memo";
 import type { UsageReport } from "../src/backend/providers/memo";
 import { SEGMENTATION_DEFAULTS } from "../src/backend/segmentation";
 import { buildWindows, planChunks } from "../src/backend/segmentation/core";
@@ -21,7 +21,7 @@ import { testUserDb } from "./fakes";
 
 const SRC = stableId("src", "youtube", "lectureA") as SourceId;
 const CAP = randomId("cap");
-const ctx = { signal: new AbortController().signal, streamTo: null };
+const ctx = { ...unbudgeted(new AbortController().signal), streamTo: null };
 const p = (x: number) => ({ type: "noul" as const, p: x });
 const passageAt = (id: string, start: number, end: number) => ({ kind: "passage", id, sourceId: SRC, interval: { start, end }, text: `caption ${start}` }) as unknown as Passage;
 const frameAt = (id: string, mediaS: number) => ({ kind: "frame", id, sourceId: SRC, mediaS, width: 8, height: 8, teaching: "kept" }) as unknown as Frame;
