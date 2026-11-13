@@ -11,8 +11,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages";
 import { openDb } from "../src/backend/db";
 import type { ApiClient } from "../src/backend/providers/claude-api";
-import { STREAM_MAX_TOKENS, worstCaseUsd } from "../src/backend/providers/claude-api";
-import { allowedFromPrompt, loadCalls, main, parseArgs } from "../scripts/experiments/api-tutor-replay";
+import { STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, worstCaseUsd } from "../src/backend/providers/claude-api";
+import { allowedFromPrompt, loadCalls, main, parseArgs, reservationUsd } from "../scripts/experiments/api-tutor-replay";
 import type { Results } from "../scripts/experiments/api-tutor-replay";
 
 const scratch: string[] = [];
@@ -290,7 +290,7 @@ describe("a live run on a fake client", () => {
     // The first call is cheap in the cap's terms to begin with and then reports 20000 output tokens, $0.40.
     const path = fixtureDb(seeds);
     const out = join(dir(), "out");
-    const worst = worstCaseUsd("claude-opus-5-5", Buffer.byteLength(SYSTEM) + Buffer.byteLength(TUTOR_PROMPT), STREAM_MAX_TOKENS)!;
+    const worst = worstCaseUsd("claude-opus-5-5", Buffer.byteLength(SYSTEM) + Buffer.byteLength(TUTOR_PROMPT), STREAM_MAX_TOKENS, 0)!;
     const cap = worst + 0.1;
     const api = fakeApi([{ text: `{"kind":"wrap_up"}\nok`, input: 0, output: 20_000 }, { text: "never" }, { text: "never" }]);
     const { code, logs } = await run(["--db", path, "--since", "2026-11-11", "--out", out, "--cap-usd", String(cap)], api.client);
@@ -320,7 +320,7 @@ describe("a live run on a fake client", () => {
   test("a call that fails without usage is counted at its worst case, so the cap still holds", async () => {
     const path = fixtureDb(seeds);
     const out = join(dir(), "out");
-    const worst = worstCaseUsd("claude-opus-5-5", Buffer.byteLength(SYSTEM) + Buffer.byteLength(TUTOR_PROMPT), STREAM_MAX_TOKENS)!;
+    const worst = worstCaseUsd("claude-opus-5-5", Buffer.byteLength(SYSTEM) + Buffer.byteLength(TUTOR_PROMPT), STREAM_MAX_TOKENS, 0)!;
     const api = fakeApi([{ text: "", fail: new TypeError("socket") }, { text: "never" }]);
     await run(["--db", path, "--since", "2026-11-11", "--out", out, "--cap-usd", String(worst * 1.5)], api.client);
     expect(api.calls()).toBe(1);
@@ -373,5 +373,45 @@ describe("the key in a recorded failure", () => {
       const { logs, errors } = await run(["--db", path, "--since", "2026-11-11", "--out", out], client);
       for (const text of [readFileSync(join(out, "results.json"), "utf8"), readFileSync(join(out, "results.md"), "utf8"), logs.join("\n"), errors.join("\n")]) expect(leaks(text)).toBe(false);
     }
+  });
+});
+
+describe("the spend cap is an upper bound", () => {
+  const tiny = () => fixtureDb([{ key: "t1", purpose: "tutor_turn", atMs: T0, input: { system: "a", prompt: "b", effort: "medium" } }, { key: "t2", purpose: "tutor_turn", atMs: T0 + 1000, input: { system: "a", prompt: "b", effort: "medium" } }]);
+  const header = `{"kind":"wrap_up"}\nok`;
+
+  test("two text bytes and a cap at the old estimate make no call, because the request has overhead the old estimate left out", async () => {
+    // The verifier's case: 2 bytes, cap $0.640016, and a response of 100 fresh input tokens and 32,000 output tokens, which prices at $0.6404.
+    const api = fakeApi([{ text: header, input: 100, output: 32_000 }, { text: "never" }]);
+    const out = join(dir(), "out");
+    const { code } = await run(["--db", tiny(), "--since", "2026-11-11", "--out", out, "--cap-usd", "0.640016"], api.client);
+    expect(code).toBe(0);
+    expect(api.calls()).toBe(0);
+    const results = JSON.parse(readFileSync(join(out, "results.json"), "utf8")) as Results;
+    expect(results.stoppedAtCap).toMatchObject({ beforeCall: 1 });
+  });
+
+  test("a wrap-up is reserved for its serialized schema too", () => {
+    const call = { key: "w", purpose: "wrap_up" as const, version: "v", atMs: T0, system: "a", prompt: "b", effort: "medium" as const, inputBytes: 2, cliNotionalUsd: null, cliAttempts: 0 };
+    expect(reservationUsd("opus", call)).toBeGreaterThan(worstCaseUsd("claude-opus-5-5", 2, STRUCTURED_MAX_TOKENS, 0)! + 0.001);
+  });
+
+  test("a response that costs more than its reservation stops the run at once and says so plainly", async () => {
+    // A surprising usage report on a call the reservation allowed: 1,000,000 fresh input tokens on a 2 byte input.
+    // The cap is large enough that the next call's reservation would still fit, so only the second guard stops the run.
+    const api = fakeApi([{ text: header, input: 1_000_000, output: 100 }, { text: header }]);
+    const out = join(dir(), "out");
+    const { code, errors, logs } = await run(["--db", tiny(), "--since", "2026-11-11", "--out", out, "--cap-usd", "5"], api.client);
+    expect(code).toBe(4);
+    expect(api.calls()).toBe(1);
+    const results = JSON.parse(readFileSync(join(out, "results.json"), "utf8")) as Results;
+    expect(results.rows).toHaveLength(1);
+    expect(results.overrun).toMatchObject({ atCall: 1, capUsd: 5 });
+    expect(results.overrun!.actualUsd).toBeCloseTo(4.002, 6);
+    expect(results.overrun!.actualUsd).toBeGreaterThan(results.overrun!.reservedUsd);
+    const text = [...errors, ...logs].join("\n");
+    expect(text).toContain("more than the");
+    expect(text).toContain("stopped");
+    expect(readFileSync(join(out, "results.md"), "utf8")).toContain("OVERRUN at call 1");
   });
 });

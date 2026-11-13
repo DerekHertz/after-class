@@ -75,9 +75,29 @@ export function priceUsage(model: string, u: UsageParts): number | null {
   return (u.fresh * price.input + u.creation5m * price.input * CACHE_WRITE_5M + u.creation1h * price.input * CACHE_WRITE_1H + u.read * price.cacheRead + u.output * price.output) / 1_000_000;
 }
 
-/** The most one call can cost: every input byte priced as a token written to the 1 hour cache, and the whole output limit spent. */
-export function worstCaseUsd(model: string, inputBytes: number, maxTokens: number): number | null {
-  return priceUsage(model, { fresh: 0, creation5m: 0, creation1h: inputBytes, read: 0, output: maxTokens });
+/** The fixed allowance, in input tokens, for what a request adds around its text. See `worstCaseUsd`. */
+export const REQUEST_OVERHEAD_TOKENS = 4_096;
+
+/**
+ * An upper bound on what this adapter can be billed for one call, in USD. The assumptions, all of them:
+ *   1. A token covers at least one byte of UTF-8 text, so the bytes of the system text, the prompt and the serialized
+ *      output schema (zero for a streamed tutor turn) bound the tokens those texts become above.
+ *   2. Everything the request adds around that text is covered by REQUEST_OVERHEAD_TOKENS: role and message framing, the
+ *      cache_control marker, and the instruction text the API adds to the prompt for structured output. This is an
+ *      allowance chosen to be generous, not a measured figure, which is why the runner also checks each finished call.
+ *   3. Every one of those tokens costs the most any input token can: a write to the 1 hour cache.
+ *   4. The call spends its whole `max_tokens` on output. Thinking tokens are output tokens and are inside that limit.
+ *   5. Nothing else is billed: the request has no tools or web search, and the client makes no retry of its own (maxRetries 0).
+ * Prices are the table's. This is a bound on the estimate the table produces, not on Derek's invoice.
+ */
+export function worstCaseUsd(model: string, inputBytes: number, maxTokens: number, schemaBytes: number): number | null {
+  return priceUsage(model, { fresh: 0, creation5m: 0, creation1h: inputBytes + schemaBytes + REQUEST_OVERHEAD_TOKENS, read: 0, output: maxTokens });
+}
+
+/** The `output_config.format` a structured call sends, shared so the runner reserves for exactly the schema that goes on the wire. */
+export function outputFormatOf(schema: z.ZodType): JSONOutputFormat {
+  const { parse: _parse, ...rest } = zodOutputFormat(schema);
+  return rest;
 }
 
 /** The parts of the SDK client this adapter uses, so a test can fake the network away. */
@@ -253,8 +273,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
       const { model, system, messages } = prepare(req);
       let format: JSONOutputFormat;
       try {
-        const { parse: _parse, ...rest } = zodOutputFormat(schema);
-        format = rest;
+        format = outputFormatOf(schema);
       } catch (err) {
         throw new ApiCallError(`output schema cannot be expressed as JSON Schema: ${safe(err instanceof Error ? err.message : String(err))}`, null, false, "not_billed", null);
       }

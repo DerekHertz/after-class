@@ -9,7 +9,7 @@ import type { Message, MessageCreateParamsNonStreaming } from "@anthropic-ai/sdk
 import { z } from "zod";
 import type { ClaudeRequest } from "../src/backend/providers/claude";
 import {
-  API_MODELS, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, clientOptions, createClaudeApi, priceUsage,
+  API_MODELS, REQUEST_OVERHEAD_TOKENS, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, clientOptions, createClaudeApi, outputFormatOf, priceUsage, worstCaseUsd,
 } from "../src/backend/providers/claude-api";
 import type { ApiCallDetail, ApiClient, ApiStream } from "../src/backend/providers/claude-api";
 import { ProviderError } from "../src/backend/providers/memo";
@@ -273,6 +273,27 @@ describe("usage and cost", () => {
     await claude.streamText(req(), () => {}, NEVER);
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ model: "claude-opus-5-5", stopReason: "end_turn", fresh: 10, creation5m: 5, creation1h: 15, read: 30, output: 40 });
+  });
+});
+
+describe("worstCaseUsd", () => {
+  test("prices every byte of input and schema as a 1 hour cache write, plus the fixed overhead, plus the whole output limit", () => {
+    // (100 + 40 + overhead) * 8 + 1000 * 20, per million, on opus
+    expect(worstCaseUsd("claude-opus-5-5", 100, 1000, 40)).toBeCloseTo(((140 + REQUEST_OVERHEAD_TOKENS) * 8 + 1000 * 20) / 1_000_000, 12);
+    expect(worstCaseUsd("claude-sonnet-5-5", 0, 0, 0)).toBeCloseTo((REQUEST_OVERHEAD_TOKENS * 4) / 1_000_000, 12);
+    expect(worstCaseUsd("claude-mystery-9", 1, 1, 1)).toBeNull();
+  });
+
+  test("is above the cost of a response that reports more input tokens than the text has bytes", () => {
+    // The old estimate counted only the text, so 2 bytes and 100 reported input tokens went over it.
+    const reported = priceUsage("claude-opus-5-5", { fresh: 100, creation5m: 0, creation1h: 0, read: 0, output: 32_000 })!;
+    expect(worstCaseUsd("claude-opus-5-5", 2, 32_000, 0)!).toBeGreaterThan(reported);
+  });
+
+  test("the schema the runner reserves for is the one the adapter sends", async () => {
+    const { claude, seen } = api({ final: message({ text: '{"concepts":[]}' }) });
+    await claude.structured(req(), Out, NEVER);
+    expect(seen[0]!.params.output_config?.format).toEqual(outputFormatOf(Out));
   });
 });
 

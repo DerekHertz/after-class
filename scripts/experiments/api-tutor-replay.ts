@@ -26,13 +26,15 @@ import { join, resolve } from "node:path";
 import { z } from "zod";
 import { readKeys } from "../../src/backend/main";
 import type { ApiCallDetail, ApiClient } from "../../src/backend/providers/claude-api";
-import { API_MODELS, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, createClaudeApi, redactThenClip, worstCaseUsd } from "../../src/backend/providers/claude-api";
+import { API_MODELS, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, createClaudeApi, outputFormatOf, redactThenClip, worstCaseUsd } from "../../src/backend/providers/claude-api";
 import type { ClaudeCli, ClaudeRequest, Effort } from "../../src/backend/providers/claude";
 import { ProviderError } from "../../src/backend/providers/memo";
 import { parseMoveHeader, wrapUpSchema } from "../../src/backend/review/tutor";
 
 export const DEFAULT_KEYS_PATH = join(homedir(), ".config", "afterclass", "keys.env");
 export const DEFAULT_CAP_USD = 5;
+/** Exit codes: 0 done or stopped at the cap, 1 refused to start, 2 bad arguments, 4 a finished call cost more than its reservation. */
+const EXIT = { overrun: 4 } as const;
 /** The key a run with an injected fake client hands the adapter. */
 const FAKE_CLIENT_KEY = "fake-client-key";
 
@@ -180,6 +182,9 @@ export type Row = {
   readonly error: string | null;
 };
 
+/** A finished call whose measured cost was above what it was reserved at. The cap may be exceeded by the difference. */
+export type Overrun = { readonly atCall: number; readonly reservedUsd: number; readonly actualUsd: number; readonly totalUsd: number; readonly capUsd: number };
+
 export type Stop = { readonly beforeCall: number; readonly cumulativeUsd: number; readonly worstCaseUsd: number; readonly capUsd: number };
 
 const median = (xs: readonly number[]): number | null => {
@@ -235,6 +240,7 @@ export type Results = {
   readonly costBasis: "estimated from response usage and list prices, not a bill";
   readonly checkNote: "tutor turns: the header parses and its move kind is among the allowed moves the stored prompt names (weaker than validateMove)";
   readonly stoppedAtCap: Stop | null;
+  readonly overrun: Overrun | null;
   readonly totals: ReturnType<typeof totalsOf>;
   readonly rows: readonly Row[];
 };
@@ -267,6 +273,10 @@ export function markdownOf(r: Results): string {
     `- Cache read from the second turn of a context on: ${t.cacheReadFromTurn2.withCacheRead} of ${t.cacheReadFromTurn2.tutorTurnsAfterFirst} tutor turns.`,
     `- Time to first text delta on tutor turns, in ms: median ${ms(t.firstTextDeltaMs.tutorTurnMedian)}, max ${ms(t.firstTextDeltaMs.tutorTurnMax)}. This is the first streamed text, which is not the first sentence.`,
   ];
+  if (r.overrun !== null) {
+    const o = r.overrun;
+    lines.push(`- OVERRUN at call ${o.atCall}: it cost ${usd(o.actualUsd)}, more than the ${usd(o.reservedUsd)} it was reserved at, so the computed total ${usd(o.totalUsd)} may be above the cap of ${usd(o.capUsd)}. The run stopped there and made no later call.`);
+  }
   if (r.stoppedAtCap !== null) {
     const s = r.stoppedAtCap;
     lines.push(`- STOPPED before call ${s.beforeCall}: cumulative ${usd(s.cumulativeUsd)} plus a worst case of ${usd(s.worstCaseUsd)} for it could pass the cap of ${usd(s.capUsd)}. Later calls were not made.`);
@@ -286,7 +296,14 @@ export type Deps = {
 };
 
 const maxTokensOf = (purpose: Purpose) => (purpose === "tutor_turn" ? STREAM_MAX_TOKENS : STRUCTURED_MAX_TOKENS);
-const worstOf = (model: Options["model"], call: StoredCall): number => worstCaseUsd(API_MODELS[model], call.inputBytes, maxTokensOf(call.purpose)) ?? Number.POSITIVE_INFINITY;
+/** The serialized wrap-up schema as it goes on the wire. A tutor turn sends none. */
+const WRAP_UP_SCHEMA_BYTES = Buffer.byteLength(JSON.stringify(outputFormatOf(wrapUpSchema)));
+const schemaBytesOf = (purpose: Purpose) => (purpose === "wrap_up" ? WRAP_UP_SCHEMA_BYTES : 0);
+
+/** What one call is reserved at: the upper bound in `worstCaseUsd`. Infinite for a model with no price, so it never runs. */
+export const reservationUsd = (model: Options["model"], call: StoredCall): number =>
+  worstCaseUsd(API_MODELS[model], call.inputBytes, maxTokensOf(call.purpose), schemaBytesOf(call.purpose)) ?? Number.POSITIVE_INFINITY;
+const worstOf = reservationUsd;
 
 function writeResults(out: string, results: Results): void {
   mkdirSync(out, { recursive: true });
@@ -326,7 +343,7 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
       worstTotal += worst;
       log(`${i + 1}. ${new Date(c.atMs).toISOString()} ${c.purpose} effort=${c.effort} input=${c.inputBytes} bytes worst-case=${usd(worst)} CLI notional=${usd(c.cliNotionalUsd)}`);
     }
-    log(`total input ${calls.reduce((s, c) => s + c.inputBytes, 0)} bytes. Worst case for every call ${usd(worstTotal)}, which is a bound and not a forecast (every input byte priced as a 1 hour cache write, every output limit spent). The run stops before any call that could pass the cap.`);
+    log(`total input ${calls.reduce((s, c) => s + c.inputBytes, 0)} bytes. Worst case for every call ${usd(worstTotal)}, which is a bound and not a forecast (every input and schema byte plus a fixed request overhead priced as a 1 hour cache write, every output limit spent). The run stops before any call that could pass the cap.`);
     return 0;
   }
 
@@ -366,6 +383,7 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
   /** Cost counted against the cap: known cost, or the worst case for a call that left none. */
   let committed = 0;
   let stoppedAtCap: Stop | null = null;
+  let overrun: Overrun | null = null;
   const snapshot = (): Results => ({
     label: "live",
     experiment: "08-api-tutor",
@@ -378,6 +396,7 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
     costBasis: "estimated from response usage and list prices, not a bill",
     checkNote: "tutor turns: the header parses and its move kind is among the allowed moves the stored prompt names (weaker than validateMove)",
     stoppedAtCap,
+    overrun,
     totals: totalsOf(rows),
     rows,
   });
@@ -422,6 +441,9 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
     const detail = last as ApiCallDetail | null;
     const costUsd = usageCost ?? detail?.costUsd ?? null;
     committed += costUsd ?? worst;
+    // The second guard. The reservation fits under the cap, so a call that costs no more than its reservation cannot take the
+    // total over it. A call that does cost more has broken that, so it is recorded and the run stops here.
+    if (costUsd !== null && costUsd > worst) overrun = { atCall: i + 1, reservedUsd: worst, actualUsd: costUsd, totalUsd: committed, capUsd: options.capUsd };
 
     let header: Row["header"] = null;
     if (call.purpose === "tutor_turn" && text !== null) {
@@ -463,12 +485,16 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
     // Written after every call, so an interrupted run keeps what it paid for.
     writeResults(out, snapshot());
     log(`call ${i + 1} of ${calls.length} ${call.purpose}: ${failure === null ? "ok" : `failed (${redactThenClip(failure, secret, 120)})`}, ${usd(costUsd)}, cumulative ${usd(committed)}`);
+    if (overrun !== null) {
+      error(`call ${i + 1} cost ${usd(overrun.actualUsd)}, more than the ${usd(overrun.reservedUsd)} it was reserved at. The computed total is ${usd(overrun.totalUsd)} against a cap of ${usd(overrun.capUsd)}. The run stopped and made no further call. Check the cost in the console.`);
+      break;
+    }
     if (deps.signal?.aborted) break;
   }
 
   writeResults(out, snapshot());
   log(`wrote ${join(out, "results.json")} and ${join(out, "results.md")}`);
-  return 0;
+  return overrun === null ? 0 : EXIT.overrun;
 }
 
 if (import.meta.main) {
