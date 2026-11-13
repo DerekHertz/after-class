@@ -1,6 +1,6 @@
 /** The test-only autostart (AFTERCLASS_TEST_AUTOSTART=1): only a watch page opened with ac_autostart=1 starts capture, and only when the flag is on. */
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { boot, connectPort, newEnv, restoreGlobals, sendPopup, wait } from "./worker-harness";
+import { answeringFlush, boot, connectPort, newEnv, restoreGlobals, sendPopup, wait } from "./worker-harness";
 
 afterAll(restoreGlobals);
 const flag = globalThis as unknown as { __AFTERCLASS_TEST_AUTOSTART__?: boolean };
@@ -19,7 +19,7 @@ async function openTabFull(url: string, on: boolean, before?: (c: Awaited<Return
   const env = newEnv();
   env.urls[1] = url;
   const { c } = await boot(env);
-  connectPort(c, 1);
+  answeringFlush(connectPort(c, 1), null);
   await before?.(c);
   c.tabs.onUpdated.fire(1, { status: "complete" }, { url, windowId: 7 });
   await wait(80);

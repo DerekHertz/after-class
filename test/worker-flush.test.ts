@@ -1,19 +1,9 @@
 /** Pause and stop must not lose the span the content script closes in response (pass bar 1). */
 import { afterAll, describe, expect, test } from "bun:test";
-import { boot, connectPort, feed, kindsOf, newEnv, restoreGlobals, sendPopup, span, wait } from "./worker-harness";
+import { answeringFlush, boot, connectPort, feed, kindsOf, newEnv, restoreGlobals, sendPopup, span, wait } from "./worker-harness";
 import type { FakePort } from "./worker-harness";
 
 afterAll(restoreGlobals);
-
-/** A content script that, asked to flush, sends its open span and then says so. */
-const answeringFlush = (p: FakePort, closing = span(5, 8)) => {
-  p.onPost = (m) => {
-    if (m.type === "flush") {
-      feed(p, closing);
-      feed(p, { type: "flushed" });
-    }
-  };
-};
 
 async function capturing() {
   const env = newEnv();

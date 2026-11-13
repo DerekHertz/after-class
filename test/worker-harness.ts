@@ -244,6 +244,16 @@ export function connectPort(c: FakeChrome, tabId: number): FakePort {
 /** The content script sending the worker a message. */
 export const feed = (p: FakePort, msg: Any): void => void p.onMessage.l.forEach((f: Any) => f(msg));
 
+/** A content script that, asked to flush, sends its open span (when it has one) and then says so. */
+export const answeringFlush = (p: FakePort, closing: CaptureFactBody | null = span(5, 8)): void => {
+  p.onPost = (m) => {
+    if (m.type === "flush") {
+      if (closing) feed(p, closing);
+      feed(p, { type: "flushed" });
+    }
+  };
+};
+
 export const wait = (ms = 30) => new Promise<void>((r) => setTimeout(r, ms));
 
 export const sendPopup = (c: FakeChrome, msg: Any) =>
