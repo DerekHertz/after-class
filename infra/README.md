@@ -1,6 +1,6 @@
 # Infrastructure
 
-Terraform for the hosted skeleton (`docs/architecture/plan.md`, Phase 4). It deploys the backend in replay mode, with no provider keys, behind a load balancer that Derek's address alone can reach. Region is `us-east-1`. Terraform 1.17.1 and the `hashicorp/aws` provider 6.71.0 are the tested versions.
+Terraform for the hosted skeleton (`docs/architecture/plan.md`, Phase 4). It deploys the backend in replay mode, with no provider keys, behind a load balancer that Derek's address alone can reach. Region is `us-east-2`, because the account's organization denies these services in every other region. Terraform 1.17.1 and the `hashicorp/aws` provider 6.71.0 are the tested versions.
 
 Nothing here has been planned or applied. Derek runs every command below, with `AWS_PROFILE=afterclass`.
 
@@ -68,7 +68,7 @@ Terraform does not own the running task definition revision. The deploy workflow
 
 ## Monthly cost estimate
 
-Prices are for `us-east-1`, 730 hours a month. Figures marked `decision.md` come from `docs/architecture/decision.md`, which took them from worked examples on the AWS pricing pages. Figures marked unverified are from memory and were not checked against a pricing page.
+Prices are for `us-east-1`, 730 hours a month. For these services `us-east-2` is assumed to match (unverified). Figures marked `decision.md` come from `docs/architecture/decision.md`, which took them from worked examples on the AWS pricing pages. Figures marked unverified are from memory and were not checked against a pricing page.
 
 | Resource | Estimate | Source |
 | --- | --- | --- |

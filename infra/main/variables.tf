@@ -1,7 +1,7 @@
 variable "region" {
   description = "AWS region. The backend block in versions.tf is pinned to the same value."
   type        = string
-  default     = "us-east-1"
+  default     = "us-east-2"
 }
 
 variable "name" {
@@ -21,7 +21,7 @@ variable "alb_ingress_cidrs" {
 }
 
 variable "certificate_arn" {
-  description = "ACM certificate ARN. Null serves HTTP only. When a domain exists, issue a certificate in us-east-1, set this, and the load balancer adds a 443 listener and redirects 80 to it."
+  description = "ACM certificate ARN. Null serves HTTP only. When a domain exists, issue a certificate in the same region as the load balancer, set this, and the load balancer adds a 443 listener and redirects 80 to it."
   type        = string
   default     = null
 }

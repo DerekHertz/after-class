@@ -11,7 +11,7 @@ terraform {
   # The bucket comes from the bootstrap stack: terraform init -backend-config="bucket=<state_bucket>"
   backend "s3" {
     key          = "main/terraform.tfstate"
-    region       = "us-east-1"
+    region       = "us-east-2"
     encrypt      = true
     use_lockfile = true
   }
