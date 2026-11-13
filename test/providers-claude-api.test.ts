@@ -548,7 +548,7 @@ describe("images and web tools", () => {
       { type: "image", source: { type: "base64", media_type: "image/png", data: "AQI=" } },
       { type: "text", text: "Ask a question." },
     ]);
-    expect(p.tools).toEqual([{ type: "web_search_20260209", name: "web_search" }, { type: "web_fetch_20260209", name: "web_fetch" }]);
+    expect(p.tools).toEqual([{ type: "web_search_20260209", name: "web_search", max_uses: 5 }, { type: "web_fetch_20260209", name: "web_fetch", max_uses: 5 }]);
   });
 });
 

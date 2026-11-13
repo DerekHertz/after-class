@@ -13,7 +13,7 @@ import { diagramSummaryTask } from "../src/backend/diagram/tasks";
 import { interpretTask, resourceSearchTask, reviseTask } from "../src/backend/preparation/tasks";
 import { claudeArgs } from "../src/backend/providers/claude";
 import type { ClaudeCli, ClaudeRequest } from "../src/backend/providers/claude";
-import { COST_BASIS, WEB_SEARCH_USD, createClaudeApi, parseUsage, priceUsage } from "../src/backend/providers/claude-api";
+import { COST_BASIS, MAX_PAUSE_CONTINUATIONS, WEB_SEARCH_USD, createClaudeApi, parseUsage, priceUsage } from "../src/backend/providers/claude-api";
 import type { ApiClient } from "../src/backend/providers/claude-api";
 import { createLedger } from "../src/backend/providers/ledger";
 import { createMemo } from "../src/backend/providers/memo";
@@ -98,7 +98,7 @@ describe("every Claude task on the Messages API", () => {
       const { client, calls } = fakeApi(c.reply);
       await createMemo(testDb(), "live", { retryDelayMs: () => 0 }).run(c.task(createClaudeApi({ apiKey: KEY, maxConcurrent: 1, client })), c.input as never);
       expect(calls).toHaveLength(1);
-      const params = calls[0]!.params as { messages: { role: string; content: unknown }[]; tools?: unknown };
+      const params = calls[0]!.params as { messages: { role: string; content: unknown }[]; tools?: unknown; output_config: Record<string, unknown> };
       const content = params.messages[0]!.content;
       if (c.images.length === 0) {
         expect(typeof content).toBe("string");
@@ -112,8 +112,12 @@ describe("every Claude task on the Messages API", () => {
         expect(blocks.at(-1)!.type).toBe("text");
         expect(blocks.at(-1)!.text).toContain("image attached");
       }
-      if (c.web) expect(params.tools).toEqual([{ type: "web_search_20260209", name: "web_search" }, { type: "web_fetch_20260209", name: "web_fetch" }]);
+      if (c.web) expect(params.tools).toEqual([{ type: "web_search_20260209", name: "web_search", max_uses: 5 }, { type: "web_fetch_20260209", name: "web_fetch", max_uses: 5 }]);
       else expect("tools" in params).toBe(false);
+      // Structured output is requested through output_config.format, except when web tools are on: citations are always on for web search.
+      const config = params.output_config as Record<string, unknown>;
+      if (c.web) expect("format" in config).toBe(false);
+      else expect("format" in config).toBe(true);
     });
 
     test(`${c.name}: usage is recorded as an estimate at list prices`, async () => {
@@ -178,5 +182,97 @@ describe("the default cli path", () => {
     const withImages = claudeArgs(req({ images: [{ label: "f", mediaType: "image/jpeg", bytes: JPEG_1 }] }), "json", null, "/tmp/images").join(" ");
     expect(withImages).toContain("--add-dir /tmp/images");
     expect(withImages).toContain("--tools Read --strict-mcp-config");
+  });
+});
+
+// ───────────────────────────── the web-tools request ─────────────────────────────
+
+/** A client that answers each create call from `script`, in order, and keeps the requests. */
+function scripted(script: readonly Message[]): { client: ApiClient; calls: Call[] } {
+  const calls: Call[] = [];
+  const client: ApiClient = {
+    messages: {
+      stream: () => {
+        throw new Error("no stream call expected");
+      },
+      create: (params) => {
+        calls.push({ params: JSON.parse(JSON.stringify(params)) as Record<string, unknown>, via: "create" });
+        const next = script[Math.min(calls.length - 1, script.length - 1)]!;
+        return Promise.resolve(next);
+      },
+    },
+  };
+  return { client, calls };
+}
+
+const reply = (blocks: unknown[], o: { stop?: string; input?: number; output?: number; searches?: number } = {}): Message =>
+  ({
+    id: "msg_x", type: "message", role: "assistant", model: "claude-opus-5-5", stop_reason: o.stop ?? "end_turn", stop_sequence: null, stop_details: null,
+    content: blocks,
+    usage: { input_tokens: o.input ?? 1_000, output_tokens: o.output ?? 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: { web_search_requests: o.searches ?? 0, web_fetch_requests: 0 } },
+  }) as unknown as Message;
+
+const text = (t: string) => ({ type: "text", text: t, citations: null });
+const searchBlocks = [{ type: "server_tool_use", id: "srv_1", name: "web_search", input: { query: "q" } }, { type: "web_search_tool_result", tool_use_id: "srv_1", content: [] }];
+
+describe("resource search without output_config.format", () => {
+  const c = CASES[2]!;
+  const run = async (script: readonly Message[]) => {
+    const { client, calls } = scripted(script);
+    const db = testDb();
+    const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
+    const task = c.task(createClaudeApi({ apiKey: KEY, maxConcurrent: 1, client }));
+    const result = await memo.run(task, c.input as never);
+    const events = createLedger(db).list({ memoKey: memo.key(task, c.input as never), limit: 20 });
+    return { result, calls, events };
+  };
+  const good = JSON.stringify(REPLIES.resources);
+
+  test("the request has max_uses on both tools, no format, and asks for the JSON in the prompt", async () => {
+    const { calls } = await run([reply([text(good)])]);
+    const params = calls[0]!.params as { tools: { max_uses: number }[]; output_config: Record<string, unknown>; messages: { content: string }[] };
+    expect(params.tools.map((t) => t.max_uses)).toEqual([5, 5]);
+    expect("format" in params.output_config).toBe(false);
+    expect(params.messages[0]!.content).toContain("only one JSON object that matches this JSON Schema");
+  });
+
+  test("prose around the JSON in the final text still parses, and text before the last tool result is ignored", async () => {
+    const { result, calls } = await run([reply([text('I will search. {"resources": []}'), ...searchBlocks, text("Here you go:\n"), text(`${good}\nHope that helps.`)], { searches: 2 })]);
+    expect(result.kind).toBe("hit");
+    expect(calls).toHaveLength(1);
+    const value = (result as unknown as { value: { url: string }[] }).value;
+    expect(value.map((r) => r.url)).toEqual(["https://example.org/clocks"]);
+  });
+
+  test("invalid JSON and schema mismatches fail through the normal path and are fail once, never stored", async () => {
+    for (const bad of ["no json here", '{"resources": "nope"}']) {
+      const { result, calls, events } = await run([reply([text(bad)])]);
+      expect(result.kind).toBe("failed");
+      // Same as a malformed reply on every other path: a non-retryable ProviderError, so one attempt, one error event, nothing stored.
+      expect(calls).toHaveLength(1);
+      expect(events.map((e) => e.outcome)).toEqual(["error"]);
+    }
+  });
+
+  test("a paused turn is continued with its blocks sent back unchanged, and every call's usage is summed", async () => {
+    const paused = reply(searchBlocks, { stop: "pause_turn", input: 500, output: 50, searches: 1 });
+    const { result, calls, events } = await run([paused, reply([text(good)], { input: 700, output: 100, searches: 2 })]);
+    expect(result.kind).toBe("hit");
+    expect(calls).toHaveLength(2);
+    const second = calls[1]!.params as { messages: { role: string; content: unknown }[] };
+    expect(second.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(second.messages[1]!.content).toEqual(searchBlocks);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.inputTokens).toBe(1_200);
+    expect(events[0]!.outputTokens).toBe(150);
+    const cost = events[0]!.cost;
+    expect(cost.kind).toBe("estimated");
+    if (cost.kind === "estimated") expect(cost.usd).toBeCloseTo((1_200 * 4 + 150 * 20) / 1_000_000 + 3 * WEB_SEARCH_USD, 10);
+  });
+
+  test("a turn that keeps pausing stops after the fixed number of continuations and fails", async () => {
+    const { result, calls } = await run([reply(searchBlocks, { stop: "pause_turn" })]);
+    expect(result.kind).toBe("failed");
+    expect(calls).toHaveLength(MAX_PAUSE_CONTINUATIONS + 1);
   });
 });
