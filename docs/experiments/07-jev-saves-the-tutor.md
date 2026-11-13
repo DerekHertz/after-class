@@ -1,6 +1,6 @@
 # Experiment 7: does Jev make the tutor's work cheaper without making it worse?
 
-**Tooling retired 2026-11-13.** The scripts this file names were removed from master after commit e197fd2, so check out that commit to run the commands below.
+**Tooling retired 2026-11-13.** The scripts this file names were removed from master after commit 1817f06, so check out that commit to run the commands below.
 
 Experiment 7 is outside the five approved in `docs/flows/after-class.md`; Derek's adoption below covers it.
 

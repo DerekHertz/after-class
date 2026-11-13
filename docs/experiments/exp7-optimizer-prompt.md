@@ -1,6 +1,6 @@
 # Experiment 7: the optimizer prompt template (DRAFT)
 
-**Tooling retired 2026-11-13.** The scripts this file names were removed from master after commit e197fd2, so check out that commit to run the commands below.
+**Tooling retired 2026-11-13.** The scripts this file names were removed from master after commit 1817f06, so check out that commit to run the commands below.
 
 **APPROVED by Derek in chat on 2026-11-05 ("Approve the draft").** The text between the markers below is the approved text, unchanged (SHA-256 `1595e63c4f869faca2bb1a3826c3164f2dd8530fe54ba30bcfa18314af19a8ff`, recorded as `APPROVED_EXP7_TEMPLATE_SHA256`). A live run reads an approved copy of it (`--approved-template`, kept at `data/lab/exp7/optimizer-prompt-approved-2026-11-05.md`); any change to the text needs his new approval. Earlier status: DRAFT — not approved by Derek; no live call may use it until an approved copy with matching SHA exists.
 

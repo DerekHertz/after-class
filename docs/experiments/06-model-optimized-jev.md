@@ -1,6 +1,6 @@
 # Experiment 6: can a slow model train Jev for After Class?
 
-**Tooling retired 2026-11-13.** The scripts this file names were removed from master after commit e197fd2, so check out that commit to run the commands below.
+**Tooling retired 2026-11-13.** The scripts this file names were removed from master after commit 1817f06, so check out that commit to run the commands below.
 
 Derek's question, 2026-11-04: the flow depends on Jev making the fast decisions and a Claude model (Opus or Fable) doing the deliberate work, so test that pairing directly. A Claude model first proposes where the boundaries, visual steps and duplicates are in a set of lecture clips, Derek verifies, Jev is run on his verified labels, and then Opus and Fable each try to improve Jev for After Class by rewriting its questions and thresholds. This file is the pre-registered protocol. It was written before any Claude or Jev call for this experiment, and nothing here is tuned after a result.
 
