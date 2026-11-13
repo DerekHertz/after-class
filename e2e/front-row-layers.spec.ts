@@ -54,3 +54,34 @@ for (const scene of Object.keys(SCENES)) {
     });
   }
 }
+
+const longLabels = [
+  "Process synchronisation with semaphores, monitors, condition variables and the readers and writers problem",
+  "Pneumonoultramicroscopicsilicovolcanoconiosisandotherunbrokentopiclabels",
+];
+for (const scene of Object.keys(SCENES)) {
+  for (const size of [...windows, { width: 390, height: 844 }, { width: 320, height: 700 }]) {
+    test(`in ${scene} at ${size.width}x${size.height} a long topic label wraps before it reaches Show diagram`, async ({ page }) => {
+      await page.setViewportSize(size);
+      await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene } });
+      await page.goto("/?scenario=review&clean=1");
+      await expect(page.locator(".front-row-heading .show-diagram")).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      for (const label of longLabels) {
+        const result = await page.evaluate((text) => {
+          const eyebrow = document.querySelector(".front-row-eyebrow")!;
+          eyebrow.lastChild!.textContent = text;
+          const range = document.createRange();
+          range.selectNodeContents(eyebrow.lastChild!);
+          const rects = [...range.getClientRects()];
+          const button = document.querySelector(".front-row-heading .show-diagram")!.getBoundingClientRect();
+          const heading = document.querySelector(".front-row-heading")!.getBoundingClientRect();
+          const hits = rects.some((r) => r.left < button.right && button.left < r.right && r.top < button.bottom && button.top < r.bottom);
+          const outside = rects.some((r) => r.left < heading.left - 1 || r.right > heading.right + 1);
+          return { hits, outside, lines: rects.length };
+        }, label);
+        expect({ scene, size, label, hits: result.hits, outside: result.outside }).toEqual({ scene, size, label, hits: false, outside: false });
+      }
+    });
+  }
+}
