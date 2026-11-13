@@ -18,7 +18,7 @@ import type { SpawnFn } from "../src/backend/providers/claude";
 import type { ClaimSupportInput, BoundaryInput, FrameChangeInput } from "../src/backend/providers/jev-tasks";
 import { canonicalInterpretation, canonicalResourceSearch, canonicalRevision } from "../src/backend/preparation/tasks";
 import type { InterpretationInput, InterpretationOutput } from "../src/backend/preparation/tasks";
-import { fail, fakeTask, ok } from "./fakes";
+import { deferred, fail, fakeTask, ok } from "./fakes";
 import type { FakeStep, FakeTask } from "./fakes";
 
 const CAP = stableId("cap", "main-test") as CaptureId;
@@ -172,6 +172,31 @@ describe("main, replay mode with fake tasks", () => {
     const html = await (await fetch(`${b.base}/app/`)).text();
     expect(html).toContain(`<meta name="afterclass-token" content="${b.r.token}">`);
     expect(existsSync(join(appDir, "index.html"))).toBe(true);
+  }, 30_000);
+
+  test('R6: "A pending resource search never blocks a review that is otherwise ready." A held search leaves the review offered, and it starts', async () => {
+    const fakes = fakeTasks();
+    const gate = deferred<FakeStep<never[]>>();
+    const searchResources = scripted("resource_search", "claude", canonicalResourceSearch, () => gate.promise);
+    const tasks = { ...fakes.tasks, preparation: { ...fakes.tasks.preparation, searchResources } } as unknown as TaskSet;
+    const b = await boot({ tasks }, { AFTERCLASS_MODE: "replay" });
+    const { modules } = b.r;
+    await ingest(b, fixture({ frames: false }));
+    await until(() => modules.segmentation.current(CAP).some((c) => modules.preparation.prep(c.id).finished));
+    await until(() => searchResources.calls.length === 1);
+
+    const chunk = modules.segmentation.current(CAP)[0]!;
+    const conceptId = modules.preparation.prep(chunk.id).claims[0]!.conceptId;
+    expect(modules.preparation.resources(conceptId).state).toBe("searching");
+    expect(modules.reviews.options(CAP)).toMatchObject({ kind: "ready", scope: { supportedClaims: 1 } });
+
+    const reviewId = stableId("rvw", "main-test-search-pending");
+    const started = await fetch(`${b.base}/captures/${CAP}/reviews`, { method: "POST", headers: authed(b.r.token), body: JSON.stringify({ reviewId, choice: "prepared_only" }) });
+    expect(((await started.json()) as { kind: string }).kind).toBe("started");
+    expect(modules.preparation.resources(conceptId).state).toBe("searching");
+
+    gate.resolve(ok([]));
+    await until(() => modules.preparation.resources(conceptId).state !== "searching");
   }, 30_000);
 
   test("a restart resumes: the stored capture is preparing again without a new post", async () => {

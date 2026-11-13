@@ -374,6 +374,23 @@ describe("the learning record", () => {
     expect(note.generated[0]!.author).toBe("source");
   });
 
+  test('R8: "Results from cancelled or outdated jobs never overwrite current preparation or my notes." A save and a re-save write no note_edits rows and leave the learner\'s edit as typed', async () => {
+    const h = harness();
+    const edits = () => h.db.sql.query("SELECT note_id, text, edited_ms FROM note_edits ORDER BY note_id").all();
+    await h.record.save(REVIEW);
+    expect(edits()).toEqual([]);
+
+    const id = stableId("note", REVIEW, concept(1));
+    h.record.editNote(id, "my wording");
+    const typed = edits();
+    expect(typed).toEqual([{ note_id: id, text: "my wording", edited_ms: expect.any(Number) }]);
+
+    await h.record.save(REVIEW);
+    expect(edits()).toEqual(typed);
+    expect(h.record.view({ reviewId: REVIEW }).notes.find((n) => n.id === id)!.userEdit).toBe("my wording");
+    expect(h.record.view({ reviewId: REVIEW }).notes.find((n) => n.id === stableId("note", REVIEW, concept(2)))!.userEdit).toBeNull();
+  });
+
   test("a deleted note stays deleted through a re-save", async () => {
     const h = harness();
     await h.record.save(REVIEW);
