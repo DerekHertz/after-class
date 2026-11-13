@@ -35,13 +35,31 @@ if [ ! -b "$device" ]; then
   exit 1
 fi
 
-# Format only a device with no filesystem. A volume that holds anything but xfs is left alone and the run fails.
-fstype=$(blkid -p -o value -s TYPE "$device" || true)
-if [ -z "$fstype" ]; then
+# Prints "empty" when the device carries no signature at all, or the name of what it holds. blkid exits 2 only when it
+# finds nothing. Any other failure is an error, never an empty disk, so the caller refuses to format.
+disk_signature() {
+  local probe rc=0 found
+  probe=$(blkid -p -o export "$1") || rc=$?
+  case "$rc" in
+    0)
+      found=$(sed -n -e 's/^TYPE=//p' -e 's/^PTTYPE=/partition table /p' <<<"$probe" | head -n 1)
+      echo "${found:-unrecognised signature}"
+      ;;
+    2) echo empty ;;
+    *) return 1 ;;
+  esac
+}
+
+# Format only a device with no signature. A volume that holds anything but xfs is left alone and the run fails.
+signature=$(disk_signature "$device") || {
+  say "blkid failed on ${device}, refusing to format it"
+  exit 1
+}
+if [ "$signature" = empty ]; then
   say "formatting ${device}"
   mkfs.xfs -L afterclass-data "$device"
-elif [ "$fstype" != "xfs" ]; then
-  say "${device} holds a ${fstype} filesystem, refusing to touch it"
+elif [ "$signature" != xfs ]; then
+  say "${device} holds ${signature}, refusing to touch it"
   exit 1
 fi
 

@@ -43,26 +43,32 @@ healthy() {
   return 1
 }
 
+# The previous tag goes back first, so a failed pull, restart or health check of the previous image still leaves it selected.
+rollback() {
+  write_tag "$previous"
+  /usr/local/sbin/afterclass-pull "$previous" || echo "afterclass-deploy: could not pull ${previous}, the app unit retries" >&2
+  systemctl restart afterclass-app.service || true
+  if healthy; then
+    echo "afterclass-deploy: rolled back to ${previous}" >&2
+  else
+    echo "afterclass-deploy: ${previous} is not healthy either" >&2
+  fi
+}
+
 /usr/local/sbin/afterclass-pull "$tag"
 
 write_tag "$tag"
-systemctl restart afterclass-app.service
-if healthy; then
+# A restart that fails is the same as one that never turns healthy. The condition keeps set -e from skipping the rollback.
+if systemctl restart afterclass-app.service && healthy; then
   echo "afterclass-deploy: ${tag} is healthy"
-  docker image prune --all --force --filter until=72h >/dev/null
+  # The deploy already worked, so a failed cleanup must not fail it.
+  docker image prune --all --force --filter until=72h >/dev/null || echo "afterclass-deploy: image prune failed, ignored" >&2
   exit 0
 fi
 
 echo "afterclass-deploy: ${tag} did not become healthy" >&2
 journalctl -u afterclass-app.service -n 30 --no-pager >&2 || true
 if [ -n "$previous" ] && [ "$previous" != "$tag" ]; then
-  /usr/local/sbin/afterclass-pull "$previous"
-  write_tag "$previous"
-  systemctl restart afterclass-app.service
-  if healthy; then
-    echo "afterclass-deploy: rolled back to ${previous}" >&2
-  else
-    echo "afterclass-deploy: ${previous} is not healthy either" >&2
-  fi
+  rollback
 fi
 exit 1
