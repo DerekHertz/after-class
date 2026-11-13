@@ -5,7 +5,7 @@ import type { AssessableClaim, DisputeState, LearnerAct, SubjectLinkSuggestion, 
 import { clampStatus, isLearningGap, threadDispute, threadFacts } from "../src/backend/review/clamp";
 import type { WrapUpOutput } from "../src/backend/review/tutor";
 import { createRecord } from "../src/backend/record";
-import { LOCAL_USER, ensureLocalUser } from "../src/backend/db";
+import { LOCAL_USER, ensureLocalUser, scopeDb } from "../src/backend/db";
 import type { Db } from "../src/backend/db";
 import { testDb, testSeq } from "./fakes";
 
@@ -203,8 +203,8 @@ const WRAP_UP: WrapUpOutput = {
 type Harness = ReturnType<typeof harness>;
 
 function harness(opts: { turns?: Turn[]; wrapUp?: () => Promise<WrapUpOutput>; claims?: () => AssessableClaim[]; db?: Db } = {}) {
-  const db = opts.db ?? testDb();
-  ensureLocalUser(db);
+  const base = opts.db ?? testDb();
+  const db = scopeDb(base, ensureLocalUser(base));
   const turns = opts.turns ?? finishedReview().turns;
   const calls = { wrapUp: 0, snapshots: [] as EvidenceId[][] };
   let failSnapshots = 0;
@@ -477,6 +477,17 @@ describe("a save never snapshots evidence the user let go", () => {
     await h.record.save(REVIEW);
     await h.record.save(REVIEW);
     expect(h.calls.snapshots).toEqual([[ev(2)]]);
+  });
+
+  test("another user's tombstone for the same evidence id neither skips the snapshot nor shows the evidence as deleted", async () => {
+    const base = testDb();
+    const h = harness({ db: base });
+    const bob = stableId("usr", "bob");
+    base.sql.run("INSERT INTO users (id, created_ms) VALUES (?, 0)", [bob]);
+    base.sql.run("INSERT INTO evidence_deletions (user_id, evidence_id, request_id, deleted_ms, seq) VALUES (?, ?, 'req', 42, ?)", [bob, ev(1), base.nextSeq()]);
+    await h.record.save(REVIEW);
+    expect(h.calls.snapshots[0]).toContain(ev(1));
+    expect(h.record.view({ reviewId: REVIEW }).unavailableEvidence).toEqual([]);
   });
 
   test("evidence the user deleted is not snapshotted, though a live note still cites it", async () => {

@@ -183,6 +183,29 @@ describe("two users in one database", () => {
     expect(existsSync(join(dir, bobFile))).toBe(false);
   });
 
+  test("a capture id stays its first user's after expiry deletes the facts, so the cited snapshot file cannot be shared", () => {
+    const { raw, clock, alice, bob } = twoUsers();
+    const a = lecture();
+    alice.evidence.ingest({ captureId: a.captureId, facts: a.facts });
+    const frame = frameIdOf(a.captureId);
+    alice.evidence.snapshotInTx([frame]);
+    raw.sql.run("INSERT INTO note_evidence (note_id, evidence_id) VALUES (?, ?)", [stableId("note", "cites"), frame]);
+    const original = alice.evidence.frameBytes(frame)!;
+
+    clock.t = NOW + 31 * DAY;
+    expect(alice.evidence.sweepExpired(clock.t, 30).factsDeleted).toBe(a.facts.length);
+    expect(countFor(raw, "capture_facts", alice.id)).toBe(0);
+    expect(countFor(raw, "evidence_snapshots", alice.id)).toBe(1);
+
+    expect(bob.evidence.capturedByAnotherUser(a.captureId)).toBe(true);
+    const other = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 9, 9, 9, 9]).toString("base64");
+    const claim = lecture(a.captureId, other);
+    expect(() => bob.evidence.ingest({ captureId: a.captureId, facts: claim.facts })).toThrow(RangeError);
+    bob.evidence.deleteByUser([frame], "req-b");
+    expect(alice.evidence.frameBytes(frame)).toEqual(original);
+    expect(alice.evidence.ingest({ captureId: a.captureId, facts: a.facts }).ackedThroughSeq).toBe(a.facts.length - 1);
+  });
+
   test('R16: "Evidence cited by a saved note is only deleted when I delete it, never by expiry." One user\'s unsaved review holds only that user\'s raw evidence', () => {
     const { raw, clock, alice, bob } = twoUsers();
     const a = lecture();
@@ -313,7 +336,7 @@ describe("the evidence routes with a second user", () => {
 });
 
 describe("a database from before evidence got user_id", () => {
-  const OLD = { ...MIGRATIONS, evidence: MIGRATIONS.evidence.filter((m) => m.id !== "003-user-id") };
+  const OLD = { ...MIGRATIONS, evidence: MIGRATIONS.evidence.filter((m) => m.id !== "003-user-id" && m.id !== "004-capture-owners") };
   const CAPTURE = stableId("cap", "old");
   const FRAME = stableId("ev", CAPTURE, "f1");
   const CITED = stableId("ev", "cited");
@@ -369,6 +392,7 @@ describe("a database from before evidence got user_id", () => {
       { seq: 2, capture_id: CAPTURE, client_seq: 1, kind: "span", received_ms: 700 },
     ]);
     expect(db.sql.query("SELECT evidence_id, request_id, deleted_ms, seq FROM evidence_deletions").all()).toEqual([{ evidence_id: GONE, request_id: "req", deleted_ms: 800, seq: 4 }]);
+    expect(db.sql.query("SELECT capture_id, user_id, claimed_ms FROM capture_owners").all()).toEqual([{ capture_id: CAPTURE, user_id: LOCAL_USER, claimed_ms: 500 }]);
     expect(db.sql.query("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(ensureLocalUser(db)).toBe(LOCAL_USER);
     expect(db.nextSeq()).toBe((lastSeq + 1) as typeof lastSeq);

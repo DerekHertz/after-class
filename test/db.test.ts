@@ -236,7 +236,7 @@ describe("users", () => {
 
   test("a database from before the users migration gains the table and one user, and keeps its data", () => {
     withFile((path) => {
-      const old = { ...MIGRATIONS, kernel: MIGRATIONS.kernel.filter((m) => m.id !== "002-users"), evidence: MIGRATIONS.evidence.filter((m) => m.id !== "003-user-id") };
+      const old = { ...MIGRATIONS, kernel: MIGRATIONS.kernel.filter((m) => m.id !== "002-users"), evidence: MIGRATIONS.evidence.filter((m) => m.id !== "003-user-id" && m.id !== "004-capture-owners") };
       const a = openDb(path, old);
       const seq = a.nextSeq();
       expect(a.sql.query("SELECT name FROM sqlite_master WHERE name = 'users'").all()).toEqual([]);

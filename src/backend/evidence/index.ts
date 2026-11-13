@@ -3,7 +3,7 @@
  * <dataDir>/frames/<sourceId>/<evidenceId>.jpg), evidence_snapshots, evidence_deletions.
  *
  * One store serves one user (the `UserDb` it is built on): every query reads or writes with that user_id. A capture id
- * belongs to the first user that ingests it, and another user's batch for it is refused, so a frame's evidence id and its
+ * belongs to the first user that ingests it (capture_owners, kept after expiry), and another user's batch for it is refused, so a frame's evidence id and its
  * file path (both derived from the capture id) are unique across users. Passage evidence ids are derived from the transcript
  * and are the same for two users who watch the same interval, so the tables that key by evidence id key by (user_id, evidence_id).
  *
@@ -59,7 +59,7 @@ export type EvidenceStore = {
   activeCaptures(): readonly CaptureId[];
   /** Every capture of this user that has stored facts, most recently captured first. Read-only. */
   captures(): readonly CaptureId[];
-  /** True when another user has facts under this capture id. The HTTP layer answers 404, as for an id that is not the caller's. */
+  /** True when another user owns this capture id, which they keep after its facts expire. The HTTP layer answers 404, as for an id that is not the caller's. */
   capturedByAnotherUser(captureId: CaptureId): boolean;
   /**
    * True when an id has a frame, snapshot or tombstone row for another user and nothing for this one. A passage id that this
@@ -270,14 +270,15 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     `INSERT INTO frames (user_id, evidence_id, capture_id, source_id, frame_id, media_s, width, height, path, seq)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
   );
-  const otherUsersFacts = db.sql.query<{ n: number }, [string, string]>(
-    "SELECT COUNT(*) AS n FROM capture_facts WHERE capture_id = ? AND user_id <> ?",
-  );
+  const otherOwner = db.sql.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM capture_owners WHERE capture_id = ? AND user_id <> ?");
+  const claimCapture = db.sql.query("INSERT INTO capture_owners (capture_id, user_id, claimed_ms) VALUES (?, ?, ?) ON CONFLICT DO NOTHING");
 
   const store: EvidenceStoreWithProbe = {
     ingest(batch) {
       const { captureId } = batch;
       if (store.capturedByAnotherUser(captureId)) throw new RangeError(`ingest: capture ${captureId} belongs to another user`);
+      // Before any file is written. The claim outlives the capture's facts, so expiry never frees a capture id for another user.
+      claimCapture.run(captureId, userId, now());
       for (const f of batch.facts) {
         if (f.captureId !== captureId) throw new RangeError(`ingest: fact ${f.clientSeq} belongs to ${f.captureId}, not ${captureId}`);
       }
@@ -365,7 +366,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
         .map((r) => r.capture_id as CaptureId);
     },
 
-    capturedByAnotherUser: (captureId) => otherUsersFacts.get(captureId, userId)!.n > 0,
+    capturedByAnotherUser: (captureId) => otherOwner.get(captureId, userId)!.n > 0,
 
     heldByAnotherUser(ids) {
       const held = (table: string, id: string, op: "=" | "<>") =>

@@ -418,6 +418,23 @@ WHEN ${PENDING_SAVE_HOLDS("OLD.capture_id")}
   AND NOT EXISTS (SELECT 1 FROM evidence_deletions d WHERE d.user_id = OLD.user_id AND d.evidence_id = OLD.evidence_id)
 BEGIN SELECT RAISE(ABORT, 'R16: frames of an unsaved review are held'); END;`,
     },
+    {
+      id: "004-capture-owners",
+      sql: `
+-- A capture id belongs to the first user that ingests it, for good. Frame evidence ids and file paths derive from the capture id,
+-- so this keeps them unique to one user even after expiry deletes the capture's facts. Backfilled from the rows that exist.
+CREATE TABLE capture_owners (
+  capture_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  claimed_ms INTEGER NOT NULL
+) STRICT;
+INSERT INTO capture_owners (capture_id, user_id, claimed_ms)
+SELECT capture_id, MIN(user_id), MIN(received_ms) FROM capture_facts GROUP BY capture_id;
+INSERT INTO capture_owners (capture_id, user_id, claimed_ms)
+SELECT capture_id, MIN(user_id), 0 FROM frames
+WHERE capture_id NOT IN (SELECT capture_id FROM capture_owners) GROUP BY capture_id;
+${appendOnly("capture_owners")}`,
+    },
   ],
 
   segmentation: [
@@ -660,6 +677,7 @@ export const TABLE_SCOPES: { readonly [table: string]: TableScope } = {
   frames: "user",
   evidence_snapshots: "user",
   evidence_deletions: "user",
+  capture_owners: "user",
   chunk_revisions: "user",
   claim_index: "user",
   concept_index: "user", // content-derived, but carries a per-pipeline seq
