@@ -15,14 +15,17 @@
  * same request (R15 for turns, not only for the final save).
  */
 import { z } from "zod";
-import type { CaptureId, ConceptId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, TurnId } from "../shared/ids";
+import type { CaptureId, ConceptId, DeviceId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, TurnId } from "../shared/ids";
 import type {
   EvidenceBundle, InviteAnswer, LearnerAct, TopicDiagram, LinkDecision, ObservationStatus, RecordView, ReviewOptions, ReviewView, SaveResult, StartChoice,
   StartResult, UsageSummary,
 } from "../shared/domain";
 import type { Material } from "../shared/time";
-import type { LecturesResponse, TutorStreamEvent } from "../shared/wire";
-import { ROUTES, diagramsResponse, lecturesResponse, parseStartReviewRequest, topicDiagramResponse, parseTurnRequest, routeUrl, voiceStatusResponse } from "../shared/wire";
+import type { DevicesResponse, LecturesResponse, TutorStreamEvent } from "../shared/wire";
+import {
+  ROUTES, connectCodeResponse, devicesResponse, diagramsResponse, lecturesResponse, parseStartReviewRequest, topicDiagramResponse, parseTurnRequest, routeUrl,
+  voiceStatusResponse,
+} from "../shared/wire";
 import {
   captureResponsez, encodeMaterial, evidenceBundlez, recordViewz, reviewOptionsz, reviewViewz, saveResultz, startResultz, usageSummaryz,
 } from "./decode";
@@ -67,6 +70,12 @@ export type AppApi = Api & {
   voiceAvailable(): Promise<boolean>;
   /** One tutor sentence as audio/mpeg. `signal` cancels the request, which cancels the upstream call. */
   speech(text: string, signal?: AbortSignal): Promise<Blob>;
+  /** Hosted only: a one-time code the connect page hands this browser's extension. */
+  createConnectCode(label: string): Promise<{ readonly code: string; readonly expiresMs: number }>;
+  /** Hosted only: the account's connected browsers. */
+  devices(): Promise<DevicesResponse["devices"]>;
+  /** Hosted only: the browser's extension is signed out of the account. */
+  revokeDevice(id: DeviceId): Promise<void>;
 };
 
 export class ApiError extends Error {
@@ -171,6 +180,9 @@ export function createApi(credential: Credential, options: ApiOptions = {}): App
     voiceAvailable: async () => (await call(voiceStatusResponse, ROUTES.voiceStatus.method, ROUTES.voiceStatus.path)).available,
     speech,
     deleteEvidence: (ids) => command("POST", "/record/evidence/delete", { evidenceIds: ids }),
+    createConnectCode: (label) => call(connectCodeResponse, ROUTES.createConnectCode.method, ROUTES.createConnectCode.path, { label }),
+    devices: async () => (await call(devicesResponse, ROUTES.devices.method, ROUTES.devices.path)).devices,
+    revokeDevice: (id) => command(ROUTES.revokeDevice.method, routeUrl(ROUTES.revokeDevice, { deviceId: id })),
   };
 }
 

@@ -564,6 +564,37 @@ export const ingestAckResponse = z.object({
   reviewAppUrl: z.string(),
 }) satisfies z.ZodType<IngestAck>;
 
+// ───────────────────────────── Connected browsers ───────────────────────────
+
+/** Body of POST /devices/connect-codes: how the connected browser is named in the list, such as "Chrome on Windows". */
+export const connectCodeRequest = z.object({ label: z.string().trim().min(1).max(60) });
+
+/** A one-time code the connect page hands the extension. It works once, before `expiresMs`. */
+export const connectCodeResponse = z.object({ code: z.string(), expiresMs: z.number() });
+
+export function parseConnectCodeRequest(raw: unknown): { readonly label: string } {
+  return parseWith(connectCodeRequest, raw);
+}
+
+/** Body of POST /devices/exchange. The code is the only credential. */
+export const exchangeRequest = z.object({ code: z.string().max(200) });
+
+export function parseExchangeRequest(raw: unknown): { readonly code: string } {
+  return parseWith(exchangeRequest, raw);
+}
+
+/** The device token the extension sends as its bearer, and the account it belongs to, so the extension never uploads one account's captures with another's token. */
+export const exchangeResponse = z.object({ token: z.string(), userId: idOf("usr") });
+
+/** What the connect page sends the extension with `chrome.runtime.sendMessage(<extension id>, ...)`, and its answer. */
+export type ConnectMessage = { readonly type: "afterclass_connect"; readonly code: string };
+export type ConnectReply = { readonly ok: true } | { readonly ok: false; readonly error: string };
+
+export const devicesResponse = z.object({
+  devices: z.array(z.object({ id: idOf("dev"), label: z.string(), createdMs: z.number(), lastUsedMs: z.number().nullable() })),
+});
+export type DevicesResponse = z.output<typeof devicesResponse>;
+
 // ───────────────────────────── Route table ──────────────────────────────────
 
 /** Query of GET /evidence: exactly one of `material`, `ids` or `captureId`. */
@@ -600,6 +631,12 @@ export type Method = "GET" | "POST" | "PATCH" | "DELETE";
 
 export type PathParams<P extends string> = P extends `${string}:${infer K}/${infer R}` ? K | PathParams<`/${R}`> : P extends `${string}:${infer K}` ? K : never;
 
+/**
+ * A bearer token in hosted mode: a Clerk `session` token from the review app, or a `device` token from a connected
+ * extension. Locally the pairing token stands for both.
+ */
+export type Bearer = "session" | "device";
+
 export type Route<P extends string = string> = {
   readonly method: Method;
   /** `:name` segments are path parameters (ids, percent-encoded on the wire). */
@@ -607,59 +644,78 @@ export type Route<P extends string = string> = {
   readonly query: z.ZodType | null;
   readonly request: z.ZodType | null;
   readonly reply: Reply;
+  /** The bearer tokens hosted mode accepts. Empty: no bearer at all, because the request body carries the credential. */
+  readonly bearer: readonly Bearer[];
 };
 
 function route<const P extends string>(
-  method: Method, path: P, spec: { readonly query?: z.ZodType; readonly request?: z.ZodType; readonly reply: Reply },
+  method: Method, path: P, spec: { readonly query?: z.ZodType; readonly request?: z.ZodType; readonly reply: Reply; readonly bearer: readonly Bearer[] },
 ): Route<P> {
-  return { method, path, query: spec.query ?? null, request: spec.request ?? null, reply: spec.reply };
+  return { method, path, query: spec.query ?? null, request: spec.request ?? null, reply: spec.reply, bearer: spec.bearer };
 }
 
 const json = (schema: z.ZodType): Reply => ({ kind: "json", schema });
 const EMPTY: Reply = { kind: "empty" };
 
+const APP: readonly Bearer[] = ["session"];
+/** Only the extension writes captures, so a script holding a session cannot make up watched evidence. R1: "Evidence only comes from intervals I actually watched while capture was on." */
+const EXTENSION: readonly Bearer[] = ["device"];
+const BOTH: readonly Bearer[] = ["session", "device"];
+const CODE_IN_BODY: readonly Bearer[] = [];
+
 /**
  * Every HTTP route the extension worker (src/extension/**) and the review app's `createApi` (src/app/**) call, plus
- * the request and response schemas the backend and both clients agree on. All routes need the pairing token
- * (`Authorization: Bearer`). A request body is JSON; a 4xx body is `{ "error": string }`.
+ * the request and response schemas the backend and both clients agree on. Locally every route needs the pairing token
+ * (`Authorization: Bearer`). Hosted, each route names the bearer tokens it accepts (`bearer`). A request body is JSON;
+ * a 4xx body is `{ "error": string }`.
  *
  * `clientSeq` starts at 0 per capture and rises by 1 per fact. `POST /ingest` is idempotent on (captureId, clientSeq)
  * and answers with `ackedThroughSeq`, the highest contiguous clientSeq stored, or -1 before clientSeq 0 has arrived.
  *
- * Callers: `ingest`, `answerInvite` and `usage` are called by the extension worker; the rest by the review app.
- * The invite answer returns the new InviteState because the extension reads it back; the app ignores it.
+ * Callers: `ingest`, `answerInvite` and `exchangeConnectCode` are called by the extension worker, and `usage` by the
+ * local extension's options page; the rest by the review app. The invite answer returns the new InviteState because
+ * the extension reads it back; the app ignores it. The four device routes exist in hosted mode only and answer 501
+ * locally.
  */
 export const ROUTES = {
-  ingest: route("POST", "/ingest", { request: ingestBatch, reply: json(ingestAckResponse) }),
+  ingest: route("POST", "/ingest", { request: ingestBatch, bearer: EXTENSION, reply: json(ingestAckResponse) }),
   /** The home page's list of lectures and their reviews. Read-only. */
-  lectures: route("GET", "/lectures", { reply: json(lecturesResponse) }),
-  captureView: route("GET", "/captures/:captureId", { reply: json(captureResponse) }),
-  answerInvite: route("POST", "/captures/:captureId/invite", { request: inviteAnswerRequest, reply: json(inviteState) }),
-  reviewOptions: route("GET", "/captures/:captureId/review-options", { reply: json(reviewOptionsResponse) }),
-  startReview: route("POST", "/captures/:captureId/reviews", { request: startReviewRequest, reply: json(startReviewResponse) }),
-  sendTurn: route("POST", "/reviews/:reviewId/turns", { request: turnRequest, reply: { kind: "ndjson", event: tutorStreamEvent } }),
-  review: route("GET", "/reviews/:reviewId", { reply: json(reviewViewResponse) }),
-  save: route("POST", "/reviews/:reviewId/save", { reply: json(saveResponse) }),
+  lectures: route("GET", "/lectures", { bearer: APP, reply: json(lecturesResponse) }),
+  captureView: route("GET", "/captures/:captureId", { bearer: APP, reply: json(captureResponse) }),
+  answerInvite: route("POST", "/captures/:captureId/invite", { request: inviteAnswerRequest, bearer: BOTH, reply: json(inviteState) }),
+  reviewOptions: route("GET", "/captures/:captureId/review-options", { bearer: APP, reply: json(reviewOptionsResponse) }),
+  startReview: route("POST", "/captures/:captureId/reviews", { request: startReviewRequest, bearer: APP, reply: json(startReviewResponse) }),
+  sendTurn: route("POST", "/reviews/:reviewId/turns", { request: turnRequest, bearer: APP, reply: { kind: "ndjson", event: tutorStreamEvent } }),
+  review: route("GET", "/reviews/:reviewId", { bearer: APP, reply: json(reviewViewResponse) }),
+  save: route("POST", "/reviews/:reviewId/save", { bearer: APP, reply: json(saveResponse) }),
   /** Frame and summary state of every topic in the review's frozen scope. Read-only: makes no model call. */
-  diagrams: route("GET", "/reviews/:reviewId/diagrams", { reply: json(diagramsResponse) }),
+  diagrams: route("GET", "/reviews/:reviewId/diagrams", { bearer: APP, reply: json(diagramsResponse) }),
   /** Starts the topic's state-change summary (one Claude call per topic and evidence set, memoized) and answers with where it stands. Asking again after a failure retries. */
-  requestDiagram: route("POST", "/reviews/:reviewId/diagrams/:topicId", { reply: json(topicDiagramResponse) }),
-  record: route("GET", "/record", { query: recordQuery, reply: json(recordViewResponse) }),
-  usage: route("GET", "/usage", { reply: json(usageResponse) }),
-  evidence: route("GET", "/evidence", { query: evidenceQuery, reply: json(evidenceBundleResponse) }),
-  frameImage: route("GET", "/frames/:evidenceId", { reply: { kind: "jpeg" } }),
-  editNote: route("PATCH", "/record/notes/:noteId", { request: noteEditRequest, reply: EMPTY }),
-  deleteNote: route("DELETE", "/record/notes/:noteId", { reply: EMPTY }),
-  decideLink: route("POST", "/record/links/:linkId", { request: linkDecisionRequest, reply: EMPTY }),
-  resolveDispute: route("POST", "/record/observations/:observationId/dispute-resolution", { request: disputeResolutionRequest, reply: EMPTY }),
-  overrideObservation: route("POST", "/record/observations/:observationId/override", { request: observationOverrideRequest, reply: EMPTY }),
-  deleteEvidence: route("POST", "/record/evidence/delete", { request: evidenceDeleteRequest, reply: EMPTY }),
+  requestDiagram: route("POST", "/reviews/:reviewId/diagrams/:topicId", { bearer: APP, reply: json(topicDiagramResponse) }),
+  record: route("GET", "/record", { query: recordQuery, bearer: APP, reply: json(recordViewResponse) }),
+  usage: route("GET", "/usage", { bearer: APP, reply: json(usageResponse) }),
+  evidence: route("GET", "/evidence", { query: evidenceQuery, bearer: APP, reply: json(evidenceBundleResponse) }),
+  frameImage: route("GET", "/frames/:evidenceId", { bearer: APP, reply: { kind: "jpeg" } }),
+  editNote: route("PATCH", "/record/notes/:noteId", { request: noteEditRequest, bearer: APP, reply: EMPTY }),
+  deleteNote: route("DELETE", "/record/notes/:noteId", { bearer: APP, reply: EMPTY }),
+  decideLink: route("POST", "/record/links/:linkId", { request: linkDecisionRequest, bearer: APP, reply: EMPTY }),
+  resolveDispute: route("POST", "/record/observations/:observationId/dispute-resolution", { request: disputeResolutionRequest, bearer: APP, reply: EMPTY }),
+  overrideObservation: route("POST", "/record/observations/:observationId/override", { request: observationOverrideRequest, bearer: APP, reply: EMPTY }),
+  deleteEvidence: route("POST", "/record/evidence/delete", { request: evidenceDeleteRequest, bearer: APP, reply: EMPTY }),
   /** Re-queues the capture's chunks that are unfinished or have no supported claim. No body; the app's "Check again". */
-  retryPreparation: route("POST", "/captures/:captureId/retry-preparation", { reply: EMPTY }),
+  retryPreparation: route("POST", "/captures/:captureId/retry-preparation", { bearer: APP, reply: EMPTY }),
   /** Whether tutor speech can come from ElevenLabs through the backend. */
-  voiceStatus: route("GET", "/voice", { reply: json(voiceStatusResponse) }),
+  voiceStatus: route("GET", "/voice", { bearer: APP, reply: json(voiceStatusResponse) }),
   /** The tutor's sentence as audio/mpeg, streamed from ElevenLabs. 503 when voice is unavailable, 502 or 504 when the upstream failed. */
-  speak: route("POST", "/voice/speech", { request: speakRequest, reply: { kind: "audio" } }),
+  speak: route("POST", "/voice/speech", { request: speakRequest, bearer: APP, reply: { kind: "audio" } }),
+  /** A one-time code for the signed-in account; the connect page hands it to the extension. */
+  createConnectCode: route("POST", "/devices/connect-codes", { request: connectCodeRequest, bearer: APP, reply: json(connectCodeResponse) }),
+  /** The extension trades a connect code for a device token. Only from the pinned extension's origin, and limited in how many wrong codes it takes. */
+  exchangeConnectCode: route("POST", "/devices/exchange", { request: exchangeRequest, bearer: CODE_IN_BODY, reply: json(exchangeResponse) }),
+  /** The account's connected browsers that are not revoked. */
+  devices: route("GET", "/devices", { bearer: APP, reply: json(devicesResponse) }),
+  /** Revokes a connected browser: its device token answers 401 from then on. */
+  revokeDevice: route("DELETE", "/devices/:deviceId", { bearer: APP, reply: EMPTY }),
 } as const;
 
 export type RouteName = keyof typeof ROUTES;

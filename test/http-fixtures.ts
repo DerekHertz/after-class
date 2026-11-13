@@ -447,6 +447,22 @@ export async function savedRig(db?: UserDb) {
 export const send = (base: string, method: string, path: string, body?: unknown, headers: Record<string, string> = JSON_HEADERS) =>
   fetch(`${base}${path}`, { method, headers, ...(body === undefined ? {} : { body: typeof body === "string" ? body : JSON.stringify(body) }) });
 
+export const EXTENSION_ORIGIN = { Origin: `chrome-extension://${EXT_ID}` };
+
+/**
+ * Hosted: what the connect page and the extension do together. A connect code for the session's user, traded from the
+ * pinned extension's origin, gives the headers the extension then sends.
+ */
+export async function connectDevice(base: string, session: Record<string, string>, label = "Chrome on Linux") {
+  const made = await send(base, "POST", "/devices/connect-codes", { label }, session);
+  expect(made.status).toBe(200);
+  const { code } = (await made.json()) as { code: string };
+  const traded = await send(base, "POST", "/devices/exchange", { code }, { "Content-Type": "application/json", ...EXTENSION_ORIGIN });
+  expect(traded.status).toBe(200);
+  const { token, userId } = (await traded.json()) as { token: string; userId: string };
+  return { token, userId, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...EXTENSION_ORIGIN } };
+}
+
 export function registerCleanup() {
   afterAll(async () => {
     for (const s of servers.splice(0)) await s.stop(true);

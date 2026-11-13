@@ -13,6 +13,7 @@ import {
 } from "../src/shared/wire";
 
 const captureId = randomId("cap");
+const dev = stableId("dev", "wire");
 const base = (clientSeq: number) => ({ clientSeq, wallMs: 1_700_000_000_000 + clientSeq });
 const span = { kind: "span", videoId: "QgWz_s7uugE", start: 10, end: 15, rate: 1, tabVisible: true, wallDurationMs: 5000 };
 const frame = {
@@ -201,6 +202,10 @@ const fixtures: Record<RouteName, Fixture> = {
   retryPreparation: { params: { captureId: cap } },
   voiceStatus: { response: { available: true } },
   speak: { request: { text: "What did the lecturer say about ordering?" } },
+  createConnectCode: { request: { label: "Chrome on Windows" }, response: { code: "acc_code", expiresMs: 1_700_000_120_000 } },
+  exchangeConnectCode: { request: { code: "acc_code" }, response: { token: "acd_token", userId: stableId("usr", "wire") } },
+  devices: { response: { devices: [{ id: dev, label: "Chrome on Windows", createdMs: 1_700_000_000_000, lastUsedMs: null }] } },
+  revokeDevice: { params: { deviceId: dev } },
 };
 
 const names = Object.keys(ROUTES) as RouteName[];
@@ -303,6 +308,10 @@ describe("both clients stay inside ROUTES", () => {
     deleteEvidence: (a) => a.deleteEvidence([ev1]),
     voiceStatus: (a) => a.voiceAvailable(),
     speak: (a) => a.speech("What did the lecturer say about ordering?"),
+    createConnectCode: (a) => a.createConnectCode("Chrome on Windows"),
+    exchangeConnectCode: null,
+    devices: (a) => a.devices(),
+    revokeDevice: (a) => a.revokeDevice(dev),
   };
 
   test("every createApi method calls a ROUTES route with a body its request schema accepts, and reads the fixture response", async () => {

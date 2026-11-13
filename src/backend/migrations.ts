@@ -6,6 +6,7 @@
  * refuses a migration whose text changed after it ran. db.ts runs them and re-exports this module's names.
  */
 import { stableId } from "../shared/ids";
+import { DEVICES_MIGRATION } from "./devices";
 import { OBSERVATION_STATUSES, RECORD_USER_ID } from "./migrations-record";
 
 export const OWNERS = ["kernel", "providers", "evidence", "segmentation", "preparation", "review", "record"] as const;
@@ -54,6 +55,7 @@ ALTER TABLE users ADD COLUMN auth_provider TEXT CHECK (auth_provider IN ('clerk'
 ALTER TABLE users ADD COLUMN auth_subject TEXT CHECK ((auth_subject IS NULL) = (auth_provider IS NULL));
 CREATE UNIQUE INDEX users_identity ON users (auth_provider, auth_subject);`,
     },
+    DEVICES_MIGRATION,
   ],
 
   providers: [
