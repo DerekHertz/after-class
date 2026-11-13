@@ -125,8 +125,8 @@ const RULES: readonly Rule[] = [
 
 const OWNERS = tableOwners();
 
-/** db.ts migration 003-diagram-purpose copies these two providers tables into rebuilt ones (a CHECK cannot be altered); no other write is allowed there. */
-const REBUILT_BY_MIGRATION = new Set(["memo_inputs", "usage_events"]);
+/** db.ts migrations 003-diagram-purpose and 004-user-id copy these providers tables into rebuilt ones (a CHECK cannot be altered, and a NOT NULL reference cannot be added); no other write is allowed there. */
+const REBUILT_BY_MIGRATION = new Set(["memo_inputs", "memo", "memo_failures", "usage_events", "voice_usage_events"]);
 
 /** evidence/003-user-id rebuilds its four tables to add user_id, so db.ts copies rows into them. 004 backfills capture_owners. */
 for (const table of ["capture_facts", "frames", "evidence_snapshots", "evidence_deletions", "capture_owners"]) REBUILT_BY_MIGRATION.add(table);

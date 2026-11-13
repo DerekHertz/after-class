@@ -209,6 +209,137 @@ ${appendOnly("usage_events", "R17")}
 CREATE TRIGGER usage_events_no_delete BEFORE DELETE ON usage_events
 BEGIN SELECT RAISE(ABORT, 'R17: usage events are never deleted'); END;`,
     },
+    {
+      id: "004-user-id",
+      sql: `
+-- Phase 1 tenancy: every row of the five per-user providers tables names its user. SQLite cannot add a NOT NULL column
+-- that references users(id), so each table is rebuilt: saved, dropped, recreated with user_id, refilled with every row
+-- under the local user, with every CHECK, index and trigger put back. The memo key stays a hash of the call alone, so a
+-- recorded key still hits; the row is keyed by (user_id, key), which is what keeps two users from sharing a memo row.
+-- The local user row exists before the copy: ensureLocalUser runs after openDb, so a database with rows gets it here.
+-- usage_events also gains capture_id, null when the caller had no capture.
+PRAGMA defer_foreign_keys = ON;
+
+INSERT INTO users (id, created_ms)
+SELECT '${stableId("usr", "local")}', CAST(strftime('%s', 'now') AS INTEGER) * 1000
+WHERE (EXISTS (SELECT 1 FROM memo_inputs) OR EXISTS (SELECT 1 FROM voice_usage_events))
+  AND NOT EXISTS (SELECT 1 FROM users WHERE id = '${stableId("usr", "local")}');
+
+CREATE TABLE memo_inputs_save AS SELECT key, provider, purpose, version, model, input_json, first_seen_ms FROM memo_inputs;
+CREATE TABLE memo_save AS SELECT key, output_json, seq, stored_ms FROM memo;
+CREATE TABLE memo_failures_save AS SELECT key, attempts, last_error, seq, terminal FROM memo_failures;
+CREATE TABLE usage_events_save AS SELECT id, memo_key, attempt_no, provider, model, purpose, outcome, input_tokens, output_tokens,
+  cache_read_tokens, cost_kind, cost_usd, cost_basis, cost_reason, started_ms, duration_ms FROM usage_events;
+CREATE TABLE voice_usage_events_save AS SELECT id, provider, model, voice_id, characters, outcome, cost_kind, cost_reason, started_ms, duration_ms
+  FROM voice_usage_events;
+DROP TABLE usage_events;
+DROP TABLE memo;
+DROP TABLE memo_failures;
+DROP TABLE memo_inputs;
+DROP TABLE voice_usage_events;
+
+CREATE TABLE memo_inputs (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  key TEXT NOT NULL,
+  provider TEXT NOT NULL CHECK (provider IN ('jev','claude')),
+  purpose TEXT NOT NULL CHECK (purpose IN (${PURPOSES_WITH_DIAGRAM})),
+  version TEXT NOT NULL,
+  model TEXT NOT NULL,
+  input_json TEXT NOT NULL,
+  first_seen_ms INTEGER NOT NULL,
+  PRIMARY KEY (user_id, key)
+) STRICT;
+INSERT INTO memo_inputs (user_id, key, provider, purpose, version, model, input_json, first_seen_ms)
+SELECT '${stableId("usr", "local")}', key, provider, purpose, version, model, input_json, first_seen_ms FROM memo_inputs_save;
+
+CREATE TABLE memo (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  key TEXT NOT NULL,
+  output_json TEXT NOT NULL,
+  seq INTEGER NOT NULL UNIQUE,
+  stored_ms INTEGER NOT NULL,
+  PRIMARY KEY (user_id, key),
+  FOREIGN KEY (user_id, key) REFERENCES memo_inputs(user_id, key)
+) STRICT;
+INSERT INTO memo (user_id, key, output_json, seq, stored_ms)
+SELECT '${stableId("usr", "local")}', key, output_json, seq, stored_ms FROM memo_save;
+${appendOnly("memo", "R8")}
+
+CREATE TABLE memo_failures (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  key TEXT NOT NULL,
+  attempts INTEGER NOT NULL CHECK (attempts > 0),
+  last_error TEXT NOT NULL,
+  seq INTEGER NOT NULL UNIQUE,
+  terminal INTEGER NOT NULL CHECK (terminal IN (0, 1)),
+  PRIMARY KEY (user_id, key),
+  FOREIGN KEY (user_id, key) REFERENCES memo_inputs(user_id, key)
+) STRICT;
+INSERT INTO memo_failures (user_id, key, attempts, last_error, seq, terminal)
+SELECT '${stableId("usr", "local")}', key, attempts, last_error, seq, terminal FROM memo_failures_save;
+
+-- R17: "Every paid call records a usage event; unknown cost is stored as unknown, not zero."
+CREATE TABLE usage_events (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  memo_key TEXT NOT NULL,
+  capture_id TEXT,
+  attempt_no INTEGER NOT NULL CHECK (attempt_no > 0),
+  provider TEXT NOT NULL CHECK (provider IN ('jev','claude')),
+  model TEXT NOT NULL,
+  purpose TEXT NOT NULL CHECK (purpose IN (${PURPOSES_WITH_DIAGRAM})),
+  outcome TEXT NOT NULL CHECK (outcome IN ('ok','error','aborted')),
+  input_tokens INTEGER CHECK (input_tokens IS NULL OR input_tokens >= 0),
+  output_tokens INTEGER CHECK (output_tokens IS NULL OR output_tokens >= 0),
+  cache_read_tokens INTEGER CHECK (cache_read_tokens IS NULL OR cache_read_tokens >= 0),
+  cost_kind TEXT NOT NULL CHECK (cost_kind IN ('measured','notional','estimated','unknown')),
+  cost_usd REAL CHECK (cost_usd IS NULL OR cost_usd >= 0),
+  cost_basis TEXT,
+  cost_reason TEXT,
+  started_ms INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0),
+  UNIQUE (user_id, memo_key, attempt_no),
+  FOREIGN KEY (user_id, memo_key) REFERENCES memo_inputs(user_id, key),
+  CHECK ((cost_kind = 'unknown') = (cost_usd IS NULL)),
+  CHECK ((cost_kind = 'unknown') = (cost_reason IS NOT NULL)),
+  CHECK ((cost_kind IN ('notional','estimated')) = (cost_basis IS NOT NULL))
+) STRICT;
+INSERT INTO usage_events (id, user_id, memo_key, capture_id, attempt_no, provider, model, purpose, outcome, input_tokens, output_tokens,
+  cache_read_tokens, cost_kind, cost_usd, cost_basis, cost_reason, started_ms, duration_ms)
+SELECT id, '${stableId("usr", "local")}', memo_key, NULL, attempt_no, provider, model, purpose, outcome, input_tokens, output_tokens,
+  cache_read_tokens, cost_kind, cost_usd, cost_basis, cost_reason, started_ms, duration_ms FROM usage_events_save;
+CREATE INDEX usage_events_by_purpose ON usage_events (user_id, purpose, started_ms);
+${appendOnly("usage_events", "R17")}
+CREATE TRIGGER usage_events_no_delete BEFORE DELETE ON usage_events
+BEGIN SELECT RAISE(ABORT, 'R17: usage events are never deleted'); END;
+
+-- R17: "Every paid call records a usage event; unknown cost is stored as unknown, not zero."
+CREATE TABLE voice_usage_events (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  provider TEXT NOT NULL CHECK (provider IN ('elevenlabs')),
+  model TEXT NOT NULL,
+  voice_id TEXT NOT NULL,
+  characters INTEGER NOT NULL CHECK (characters >= 0),
+  outcome TEXT NOT NULL CHECK (outcome IN ('ok','error','aborted')),
+  cost_kind TEXT NOT NULL CHECK (cost_kind = 'unknown'),
+  cost_reason TEXT NOT NULL,
+  started_ms INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0)
+) STRICT;
+INSERT INTO voice_usage_events (id, user_id, provider, model, voice_id, characters, outcome, cost_kind, cost_reason, started_ms, duration_ms)
+SELECT id, '${stableId("usr", "local")}', provider, model, voice_id, characters, outcome, cost_kind, cost_reason, started_ms, duration_ms
+FROM voice_usage_events_save;
+${appendOnly("voice_usage_events", "R17")}
+CREATE TRIGGER voice_usage_events_no_delete BEFORE DELETE ON voice_usage_events
+BEGIN SELECT RAISE(ABORT, 'R17: usage events are never deleted'); END;
+
+DROP TABLE usage_events_save;
+DROP TABLE memo_failures_save;
+DROP TABLE memo_save;
+DROP TABLE memo_inputs_save;
+DROP TABLE voice_usage_events_save;`,
+    },
   ],
 
   evidence: [

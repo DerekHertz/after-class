@@ -11,7 +11,7 @@ import type { CaptureId, EvidenceId, UserId } from "../src/shared/ids";
 import { stableId } from "../src/shared/ids";
 import { DAY, JPEG, VIDEO, keyOf, stream } from "./evidence-fixtures";
 import { CAP, EXT_ID, JSON_HEADERS, TOKEN, bearer, VIDEO as WIRE_VIDEO, fixtureApp, ingest, post, registerCleanup, wireFacts } from "./http-fixtures";
-import { testDb } from "./fakes";
+import { otherUserDb, testDb } from "./fakes";
 import { tmpDir } from "./tmp";
 
 registerCleanup();
@@ -24,9 +24,8 @@ function twoUsers() {
   const raw = testDb();
   const clock = { t: NOW };
   const user = (name: string) => {
-    const id = stableId("usr", name);
-    raw.sql.run("INSERT INTO users (id, created_ms) VALUES (?, 0)", [id]);
-    const db = scopeDb(raw, id);
+    const db = otherUserDb(raw, name);
+    const id = db.userId;
     const evidence = createEvidence(db, dir, {
       lookupFrameChange: (input) => ({ kind: "missing", key: keyOf(input) }),
       runFrameChange: async () => undefined,

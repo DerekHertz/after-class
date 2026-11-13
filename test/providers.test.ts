@@ -5,7 +5,7 @@ import type { ClaimSupportInput, FrameChangeInput } from "../src/backend/provide
 import { boundaryTask, claimSupportTask, frameChangeTask, THRESHOLDS, toVerdict } from "../src/backend/providers/jev-tasks";
 import type { Task } from "../src/backend/providers/memo";
 import { createMemo, ProviderError } from "../src/backend/providers/memo";
-import { testDb } from "./fakes";
+import { testUserDb } from "./fakes";
 import { answersBody, boundaryInput, claim, ctx, fakeJev, frame, jpeg, json, NEVER, noulReq, p, passage, png, scriptedFetch, withBytes } from "./providers-fixtures";
 
 // ───────────────────────────── Jev client ───────────────────────────────────
@@ -267,7 +267,7 @@ describe("boundaryTask", () => {
 
   test("the key follows the evidence and the wording, not the image bytes", () => {
     const task = boundaryTask(fakeJev(() => ({})).jev);
-    const memo = createMemo(testDb(), "live");
+    const memo = createMemo(testUserDb(), "live");
     const a = memo.key(task, boundaryInput({ frames: [withBytes(frame("ev_f1"), jpeg(1280, 720))] }));
     const b = memo.key(task, boundaryInput({ frames: [withBytes(frame("ev_f1"), jpeg(640, 360))] }));
     const c = memo.key(task, boundaryInput({ frames: [withBytes(frame("ev_f2"))] }));
@@ -285,7 +285,7 @@ describe("boundaryTask", () => {
 
 describe("Jev failures reach the caller as failed, never as a no-verdict", () => {
   const run = async (task: Task<any, any>, input: unknown) => {
-    const db = testDb();
+    const db = testUserDb();
     const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
     return { memo, db, result: await memo.run(task, input) };
   };
@@ -368,7 +368,7 @@ describe("claimSupportTask", () => {
 
   test("a different claim text or assumption is a different call", () => {
     const task = claimSupportTask(fakeJev(() => ({})).jev);
-    const memo = createMemo(testDb(), "live");
+    const memo = createMemo(testUserDb(), "live");
     const base = { passages: [passage("ev_p1", 1, "x")], frames: [] };
     const keys = [claim(), claim({ text: "changed" }), claim({ assumptions: [] })].map((c) => memo.key(task, { ...base, claim: c }));
     expect(new Set(keys).size).toBe(3);

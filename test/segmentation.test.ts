@@ -12,7 +12,7 @@ import { SEGMENTATION_DEFAULTS, createSegmentation } from "../src/backend/segmen
 import type { RoutingOptions } from "../src/backend/segmentation/core";
 import { PRODUCT_JEV_SETUP } from "../src/backend/jev-setup";
 import type { SegmentationConfig } from "../src/backend/segmentation";
-import { fakeTask, ok, testDb } from "./fakes";
+import { fakeTask, ok, testUserDb } from "./fakes";
 
 /** 30 s windows are three 10 s passages; the cap is five windows so cap tests stay short. */
 const CFG: SegmentationConfig = { windowNewS: 30, contextS: 60, timeCapS: 150, maxFramesPerWindow: 2, reviseOnNextNoNo: true };
@@ -346,10 +346,10 @@ describe("chunk revisions", () => {
 type Fixture = ReturnType<typeof fixture>;
 
 /** A segmentation over a scripted lecture of `windows` windows. Judgments are set per window ordinal. */
-function fixture(windows: number, opts: { cfg?: SegmentationConfig; captureId?: CaptureId; db?: ReturnType<typeof testDb>; routing?: RoutingOptions | undefined } = {}) {
+function fixture(windows: number, opts: { cfg?: SegmentationConfig; captureId?: CaptureId; db?: ReturnType<typeof testUserDb>; routing?: RoutingOptions | undefined } = {}) {
   const cfg = opts.cfg ?? CFG;
   const captureId = opts.captureId ?? CAP;
-  const db = opts.db ?? testDb();
+  const db = opts.db ?? testUserDb();
   const all = lecture(SRC_A, 0, windows * 30);
   const ids = buildWindows(captureId, watchOrder(all), cfg).map((w) => w.id);
   const lookups = new Map<WindowId, Lookup<BoundaryJudgment>>();
@@ -495,7 +495,7 @@ describe("segmentation over the database", () => {
 
 describe("rewatch and a second session reuse cached judgments", () => {
   test("identical material in a new capture is served from the memo with no new call and no demand", async () => {
-    const db = testDb();
+    const db = testUserDb();
     const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
     const scripted = new Map<WindowId, [Verdict, Verdict]>();
     const task = fakeTask<{ w: string }, BoundaryJudgment>({

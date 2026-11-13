@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Db, UserDb } from "../src/backend/db";
+import type { UserDb } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
 import { serve } from "../src/backend/http";
 import type { Preparation } from "../src/backend/preparation";
@@ -165,7 +165,7 @@ class World {
   pendingChunks = new Set<ChunkRevisionId>();
   revisions: ChunkRevision[] = [];
 
-  constructor(readonly db: Db) {}
+  constructor(readonly db: UserDb) {}
 
   close(ordinal: number, start: number, end: number): ChunkRevision {
     const rev: ChunkRevision = {
@@ -297,13 +297,13 @@ export function pick(input: TutorInput): TutorOutput {
     : { move: { kind: "ask_followup", threadId: open! }, say: "And why does that hold?" };
 }
 
-export const count = (db: Db, sql: string) => db.sql.query<{ n: number }, []>(sql).get()!.n;
+export const count = (db: UserDb, sql: string) => db.sql.query<{ n: number }, []>(sql).get()!.n;
 
-export const learnerRows = (db: Db) => count(db, "SELECT COUNT(*) AS n FROM review_turns WHERE actor = 'learner'");
+export const learnerRows = (db: UserDb) => count(db, "SELECT COUNT(*) AS n FROM review_turns WHERE actor = 'learner'");
 
-export const tutorRows = (db: Db) => count(db, "SELECT COUNT(*) AS n FROM review_turns WHERE actor = 'tutor'");
+export const tutorRows = (db: UserDb) => count(db, "SELECT COUNT(*) AS n FROM review_turns WHERE actor = 'tutor'");
 
-export const reviewRows = (db: Db) => count(db, "SELECT COUNT(*) AS n FROM reviews");
+export const reviewRows = (db: UserDb) => count(db, "SELECT COUNT(*) AS n FROM reviews");
 
 export async function until(done: () => boolean, ms = 3000): Promise<void> {
   const t0 = Date.now();

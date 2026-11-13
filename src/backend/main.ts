@@ -448,7 +448,7 @@ export async function main(options: MainOptions = {}): Promise<Running> {
           key: memo.key(tasks.boundary, input),
           purpose: "boundary",
           provider: "jev",
-          run: (signal) => memo.run(tasks.boundary, input, { signal }),
+          run: (signal) => memo.run(tasks.boundary, input, { signal, captureId }),
         })),
       ),
       perCapture("frame demand", evidence.frameDemand),

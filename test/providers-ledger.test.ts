@@ -4,7 +4,7 @@ import { boundaryTask, claimSupportTask, frameChangeTask } from "../src/backend/
 import { createLedger } from "../src/backend/providers/ledger";
 import type { Task } from "../src/backend/providers/memo";
 import { createMemo, ProviderError } from "../src/backend/providers/memo";
-import { testDb } from "./fakes";
+import { testUserDb } from "./fakes";
 import { boundaryInput, claim, cli, fakeJev, frame, Out, p, passage, req, successEnvelope, withBytes } from "./providers-fixtures";
 
 // ───────────────────────────── ledger + memo (R17) ──────────────────────────
@@ -25,7 +25,7 @@ describe("R17 and the ledger", () => {
   });
 
   test("Jev events are stored with cost unknown and usd NULL; Claude events are notional; totals never mix them", async () => {
-    const db = testDb();
+    const db = testUserDb();
     const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
     const ledger = createLedger(db);
 
@@ -67,7 +67,7 @@ describe("R17 and the ledger", () => {
 
   test("filters narrow summary and stages; list returns events newest first", async () => {
     let t = 1_000;
-    const db = testDb();
+    const db = testUserDb();
     const memo = createMemo(db, "live", { now: () => (t += 10) });
     const ledger = createLedger(db);
     const { jev } = fakeJev(() => ({ new_concept: p(0.9), stopping_point: p(0.1) }));
@@ -89,7 +89,7 @@ describe("R17 and the ledger", () => {
   });
 
   test("a kind with no calls reports usd null, not $0; a ledger of only unknown-cost calls prices nothing", async () => {
-    const db = testDb();
+    const db = testUserDb();
     const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
     const { jev } = fakeJev(() => ({ new_concept: p(0.9), stopping_point: p(0.1) }));
     await memo.run(boundaryTask(jev), boundaryInput());
@@ -99,7 +99,7 @@ describe("R17 and the ledger", () => {
   });
 
   test("an empty ledger reports zero calls and no invented money", () => {
-    const ledger = createLedger(testDb());
+    const ledger = createLedger(testUserDb());
     const s = ledger.summary();
     expect(s.byKind.unknown).toEqual({ calls: 0, usd: null });
     for (const k of ["measured", "notional", "estimated"] as const) expect(s.byKind[k]).toEqual({ calls: 0, usd: null });
