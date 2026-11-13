@@ -5,7 +5,7 @@ import type { Api } from "../src/app/api";
 import { ApiError } from "../src/app/api";
 import type { SessionState } from "../src/app/controller";
 import { createReviewController, needsChecklist, needsResume, resumeOnce } from "../src/app/controller";
-import { conversationLines, owedLearnerTurn, startLive, stepStartHandoff } from "../src/app/core";
+import { conversationLines, owedLearnerTurn, startLive, stepStartHandoff, strandedEndTurn } from "../src/app/core";
 import { reviewViewz } from "../src/app/decode";
 import { Composer, SaveBanner, TopicChecklist, UndeliveredNote } from "../src/app/review";
 import type { Speaker } from "../src/app/speech";
@@ -99,6 +99,31 @@ describe("review session controller", () => {
     await h.controller.load();
     await h.controller.retryTurn();
     expect(h.sends).toEqual([{ turnId: stableId("turn", "l2"), act: { kind: "answer", text: "An ordering of events.", modality: "speech" } }]);
+  });
+
+  test("R15: a finish whose wrap-up failed is resent under its own id, from the live failure and after a reload", async () => {
+    const stranded = (id = stableId("turn", "l2")) => parsedReview({ turns: [tutorAsk, { ...turnJson(2, "learner", { act: { kind: "end" } }), id }] });
+    const h = setup({
+      review: () => stranded(h.sends[0]?.turnId),
+      sendTurn: ({ turnId }, n) =>
+        n === 0
+          ? events({ type: "learner_turn_stored", turnId }, { type: "turn_failed", error: "tutor down", retryable: true })
+          : events({ type: "learner_turn_stored", turnId }, { type: "turn_complete", turnId }),
+    });
+    await h.controller.send({ kind: "end" });
+    expect(h.controller.getState().live).toMatchObject({ status: "failed", retryable: true });
+    expect(h.controller.getState().unsent).toEqual([]);
+    await h.controller.retryTurn();
+    expect(h.sends).toHaveLength(2);
+    expect(h.sends[1]).toEqual({ turnId: h.sends[0]!.turnId, act: { kind: "end" } });
+    expect(h.sends[0]!.act).toEqual({ kind: "end" });
+
+    const fresh = setup({ review: () => stranded(), sendTurn: ({ turnId }) => events({ type: "learner_turn_stored", turnId }, { type: "turn_complete", turnId }) });
+    await fresh.controller.load();
+    expect(strandedEndTurn(fresh.controller.getState().view!)?.id).toBe(stableId("turn", "l2"));
+    expect(needsResume(fresh.controller.getState())).toBe(false);
+    await fresh.controller.retryTurn();
+    expect(fresh.sends).toEqual([{ turnId: stableId("turn", "l2"), act: { kind: "end" } }]);
   });
 
   test("an HTTP failure before the stream starts leaves the turn unsent and marks it retryable by status", async () => {

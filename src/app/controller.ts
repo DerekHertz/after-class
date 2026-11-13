@@ -21,7 +21,7 @@ import { randomId } from "../shared/ids";
 import { learnerAct } from "../shared/wire";
 import { ApiError } from "./api";
 import type { Api } from "./api";
-import { owedLearnerTurn, reduceLive, startLive, unansweredLearnerTurn } from "./core";
+import { owedLearnerTurn, reduceLive, startLive, strandedEndTurn, unansweredLearnerTurn } from "./core";
 import type { Live } from "./core";
 import type { Speaker } from "./speech";
 import type { UnsentStore, UnsentTurn } from "./unsent";
@@ -222,6 +222,8 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
         if (waiting) return runTurn(waiting.id, waiting.act);
         const owed = state.view ? owedLearnerTurn(state.view) : null;
         if (owed) return runTurn(owed.id, owed.act);
+        const stranded = state.view ? strandedEndTurn(state.view) : null;
+        if (stranded) return runTurn(stranded.id, stranded.act);
       }),
     discardUnsent: async () => {
       await exclusive(async () => {
