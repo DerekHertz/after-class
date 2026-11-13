@@ -4,7 +4,7 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 
 | Module | Owner | Owned files | Owned tables | Frozen exports |
 | --- | --- | --- | --- | --- |
-| Kernel | W10 | `src/shared/*`, `src/backend/db.ts`, `src/backend/migrations.ts`, `src/backend/migrations-record.ts`, `src/backend/providers/memo.ts`, `test/fakes.ts`, `test/boundaries.test.ts`, `test/{ids,time,wire,db,memo,rules}.test.ts` | `schema_migrations`, `seq_counter`, `users` | everything in `shared/` (`domain.ts` types, `ids.ts`, `time.ts`, `wire.ts` schemas, `parse*`, `ROUTES`, `Route`, `routeUrl`, `matchRoute`, `encodeMaterial`, `decodeMaterial`), `Db`, `UserDb`, `openDb`, `scopeDb`, `ensureLocalUser`, `LOCAL_USER`, `TABLE_SCOPES`, `asSeq`, `MIGRATIONS`, `tableOwners`, `Task`, `Lookup`, `LookupFn`, `Memo`, `UsageReport`, `ProviderError`, `ReplayMiss`, `appliesBefore`, `createMemo` |
+| Kernel | W10 | `src/shared/*`, `src/backend/db.ts`, `src/backend/db-async.ts`, `src/backend/migrations.ts`, `src/backend/migrations-record.ts`, `src/backend/providers/memo.ts`, `test/fakes.ts`, `test/boundaries.test.ts`, `test/{ids,time,wire,db,db-async,memo,rules}.test.ts` | `schema_migrations`, `seq_counter`, `users` | everything in `shared/` (`domain.ts` types, `ids.ts`, `time.ts`, `wire.ts` schemas, `parse*`, `ROUTES`, `Route`, `routeUrl`, `matchRoute`, `encodeMaterial`, `decodeMaterial`), `Db`, `UserDb`, `openDb`, `scopeDb`, `AsyncDb`, `AsyncUserDb`, `Tx`, `Statements`, `Param`, `asAsync`, `scopeAsyncDb`, `ensureLocalUser`, `LOCAL_USER`, `TABLE_SCOPES`, `asSeq`, `MIGRATIONS`, `tableOwners`, `Task`, `Lookup`, `LookupFn`, `Memo`, `UsageReport`, `ProviderError`, `ReplayMiss`, `appliesBefore`, `createMemo` |
 | Composition | W10 (after W1 to W9) | `src/backend/http.ts`, `src/backend/main.ts`, `src/backend/scheduler.ts` | none | `WorkItem`, `Scheduler`, `Modules`, `AuthConfig`, `authorize` |
 | Playback and frames | W1 | `src/extension/content/capture.ts`, `src/extension/content/frames.ts` | none | `Emit`, `ControlMessage`, `ContentSignal`, `PlaybackTracker`, `AdSignals`, `isAdShowing`, `FrameSamplerConfig`, `FrameSampler`, `normalizedSize` |
 | Transcripts, worker, popup, build | W2 | `src/extension/content/transcript.ts`, `src/extension/content/main-world.ts`, `src/extension/content/content-entry.ts`, `src/extension/content/stream-id.ts`, `src/extension/worker/*`, `src/extension/popup/*`, `src/extension/manifest.json`, `scripts/build-extension.ts` | none (IndexedDB outbox, `chrome.storage.session`) | `TranscriptResult`, `TabCaptureState`, `PopupRequest`, `transition` |
@@ -25,6 +25,16 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 - Write SQL only against tables your row lists. `test/boundaries.test.ts` fails otherwise.
 - Quote Derek's rules as `Rn: "<exact text>"` wherever code enforces one. `test/rules.test.ts` fails on any wording that differs from `docs/flows/after-class.md`.
 - Every provider call is `memo.run(task, input)`. Derivations read `memo.lookup` and apply results only through `appliesBefore(lookup, cutoff)`.
+
+## The asynchronous database interface
+
+`src/backend/db-async.ts` holds `AsyncDb`, `AsyncUserDb`, `Tx` and `asAsync(db)`, which wraps a synchronous `Db`'s connection. Modules move to it one PR at a time and the synchronous `Db` stays until the last one has moved. The header of the file lists the rules. The ones a module author needs:
+
+- Every statement of a transaction goes through the `Tx` that `tx` passes in. A statement on the `AsyncDb` while a transaction is open throws, `db.tx` inside a transaction throws (use `t.tx`, a savepoint), and a handle used after its transaction ended throws.
+- After a failed statement, the handle throws on every later statement, as PostgreSQL does. Wrap a statement whose failure you want to survive in `t.tx`.
+- `nextSeq` exists only on `Tx`.
+- A command starts with `withUserLock(userId, fn)`, or `command(fn)` on an `AsyncUserDb`. The lock lasts until the outermost transaction ends. A command that crosses users, such as `sweepExpired`, finds its users, calls `t.lockUsers(...)` once for all of them, and only then reads and deletes.
+- Await nothing between a read and the write that depends on it unless both hold the user's lock.
 
 ## Users in the providers module
 
