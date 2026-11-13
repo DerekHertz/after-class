@@ -10,7 +10,7 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 | Transcripts, worker, popup, build | W2 | `src/extension/content/transcript.ts`, `src/extension/content/main-world.ts`, `src/extension/content/content-entry.ts`, `src/extension/content/stream-id.ts`, `src/extension/worker/*`, `src/extension/popup/*`, `src/extension/manifest.json`, `scripts/build-extension.ts` | none (IndexedDB outbox, `chrome.storage.session`) | `TranscriptResult`, `TabCaptureState`, `PopupRequest`, `transition` |
 | Evidence | W3 | `src/backend/evidence/*` | `capture_facts`, `frames`, `evidence_snapshots`, `evidence_deletions` | `WatchedPassage`, `WatchOrder`, `EvidenceStore`, `createEvidence` |
 | Segmentation | W4 | `src/backend/segmentation/*` | `chunk_revisions` | `SegmentationConfig`, `SEGMENTATION_DEFAULTS`, `Segmentation`, `WindowTrace`, `createSegmentation`, `buildWindows`, `planChunks` |
-| Providers | W5 | `src/backend/providers/{ledger,jev,jev-tasks,claude,claude-api}.ts` | `memo_inputs`, `memo`, `memo_failures`, `usage_events` (written only by `memo.ts`) | `Ledger`, `JevClient`, `JevRequest`, `JevAnswer`, `BoundaryInput`, `FrameChangeInput`, `ClaimSupportInput`, `toVerdict`, the three Jev task factories, `ClaudeCli`, `ClaudeRequest`, `claudeArgs`, `createClaudeApi` |
+| Providers | W5 | `src/backend/providers/{ledger,jev,jev-tasks,claude,claude-api}.ts` | `memo_inputs`, `memo`, `memo_failures`, `usage_events` (written only by `memo.ts`), `voice_usage_events` (written only by `elevenlabs.ts`); all five have `user_id` | `Ledger`, `JevClient`, `JevRequest`, `JevAnswer`, `BoundaryInput`, `FrameChangeInput`, `ClaimSupportInput`, `toVerdict`, the three Jev task factories, `ClaudeCli`, `ClaudeRequest`, `claudeArgs`, `createClaudeApi`, `MemoRunOptions` |
 | Preparation | W6 | `src/backend/preparation/*` | `claim_index`, `concept_index`, `prep_controls` | `Preparation`, `createPreparation`, `PreparationTasks`, `InterpretationInput`, `InterpretationOutput`, `RevisionInput`, `ResourceSearchInput` |
 | Review lifecycle | W7 | `src/backend/review/index.ts`, `src/backend/review/core.ts` | `invite_answers`, `reviews`, `review_turns` | `Reviews`, `createReviews` |
 | Tutor and record | W8 | `src/backend/review/tutor.ts`, `src/backend/review/clamp.ts`, `src/backend/review/detour.ts`, `src/backend/record/*` | `notes`, `note_edits`, `note_deletions`, `note_evidence`, `observations`, `observation_decisions`, `link_suggestions`, `link_decisions`, `saved_reviews`, `save_failures` | `TutorInput`, `TutorOutput`, `WrapUpInput`, `WrapUpOutput`, `parseMoveHeader`, `validateMove`, `allowedMoves`, `reviewState`, `clampStatus`, `isLearningGap`, `LearningRecord` (now with `saveState(reviewId)`), `createRecord`, `RecordBundle` |
@@ -25,6 +25,11 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 - Write SQL only against tables your row lists. `test/boundaries.test.ts` fails otherwise.
 - Quote Derek's rules as `Rn: "<exact text>"` wherever code enforces one. `test/rules.test.ts` fails on any wording that differs from `docs/flows/after-class.md`.
 - Every provider call is `memo.run(task, input)`. Derivations read `memo.lookup` and apply results only through `appliesBefore(lookup, cutoff)`.
+
+## Users in the providers module
+
+- `createMemo`, `createLedger` and `createVoice` take a `UserDb` and read and write only its `userId`'s rows. A memo is per user: its rows are keyed by (`user_id`, `key`), and the key stays a hash of the call alone. A `MemoKey` is therefore unique only within one user, so a module that stores one beside its own rows reads it back through that user's memo.
+- `memo.run` takes an optional `captureId`, stored on the call's usage events. `main.ts` passes it for boundary calls; the other callers do not know the capture yet and leave `usage_events.capture_id` null.
 
 ## Wire contract
 

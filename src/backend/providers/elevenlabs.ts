@@ -10,7 +10,7 @@
  * One `voice_usage_events` row per upstream call, written when the call ends (ok, error or aborted): the characters
  * sent, and a cost that is always unknown because the per-character rate depends on the plan.
  */
-import type { Db } from "../db";
+import type { UserDb } from "../db";
 
 export const DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
 export const DEFAULT_VOICE_MODEL = "eleven_flash_v2_5";
@@ -36,7 +36,8 @@ export type VoiceOptions = {
   readonly apiKey: string;
   readonly voiceId: string;
   readonly model: string;
-  readonly db: Db;
+  /** The user the calls are billed to. Each usage event carries its id. */
+  readonly db: UserDb;
   readonly fetch?: typeof fetch;
   readonly timeoutMs?: number;
 };
@@ -63,8 +64,8 @@ export function createVoice(options: VoiceOptions): Voice {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   checkVoiceSettings(voiceId, model);
   const insert = db.sql.query(
-    `INSERT INTO voice_usage_events (id, provider, model, voice_id, characters, outcome, cost_kind, cost_reason, started_ms, duration_ms)
-     VALUES (?, 'elevenlabs', ?, ?, ?, ?, 'unknown', ?, ?, ?)`,
+    `INSERT INTO voice_usage_events (id, user_id, provider, model, voice_id, characters, outcome, cost_kind, cost_reason, started_ms, duration_ms)
+     VALUES (?, ?, 'elevenlabs', ?, ?, ?, ?, 'unknown', ?, ?, ?)`,
   );
 
   async function speak(text: string, clientSignal: AbortSignal): Promise<SpeakResult> {
@@ -86,7 +87,7 @@ export function createVoice(options: VoiceOptions): Voice {
       clearTimeout(timer);
       clientSignal.removeEventListener("abort", onClientAbort);
       insert.run(
-        crypto.randomUUID(), model, voiceId, [...text].length, outcome,
+        crypto.randomUUID(), db.userId, model, voiceId, [...text].length, outcome,
         "ElevenLabs bills per character at a plan-dependent rate; the backend does not know it", startedMs, Date.now() - startedMs,
       );
     };

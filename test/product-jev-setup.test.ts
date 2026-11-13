@@ -17,7 +17,7 @@ import { createMemo } from "../src/backend/providers/memo";
 import type { UsageReport } from "../src/backend/providers/memo";
 import { SEGMENTATION_DEFAULTS } from "../src/backend/segmentation";
 import { buildWindows, planChunks } from "../src/backend/segmentation/core";
-import { testDb } from "./fakes";
+import { testUserDb } from "./fakes";
 
 const SRC = stableId("src", "youtube", "lectureA") as SourceId;
 const CAP = randomId("cap");
@@ -63,7 +63,7 @@ describe("product Jev setup, round 1", () => {
     expect(productBoundaryTask(NO_JEV).version).toBe("boundary.exp7-fable-1-r1+lesson_framing.exp7-fable-1-r1@0.5/0.3");
     expect(productFrameChangeTask(NO_JEV).version).toBe("frame_change.exp7-fable-1-r1@0.5/0.3");
     expect(productBoundaryTask(NO_JEV).version).not.toBe(boundaryTask(NO_JEV).version);
-    const memo = createMemo(testDb(), "live");
+    const memo = createMemo(testUserDb(), "live");
     expect(memo.key(productBoundaryTask(NO_JEV), boundaryInput())).not.toBe(memo.key(boundaryTask(NO_JEV), boundaryInput()));
   });
 
