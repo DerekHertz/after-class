@@ -95,6 +95,27 @@ jobs:
           echo "deploy command still running after 15 minutes"
           exit 1
 
+      # The ECR lifecycle policy never expires the 3 newest live- images. Only a deploy the server reported healthy gets
+      # the tag, so the running image and its rollback target survive any number of newer failed pushes. Tags are
+      # immutable, so this adds a second tag to the same manifest and re-tags nothing.
+      - name: Tag the healthy image live so ECR keeps it
+        env:
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          live_tag="live-${IMAGE_TAG}"
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=${live_tag}" >/dev/null 2>&1; then
+            echo "${live_tag} already exists"
+            exit 0
+          fi
+          aws ecr batch-get-image --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=${IMAGE_TAG}" --output json > image.json
+          manifest=$(jq -er '.images[0].imageManifest' image.json)
+          media_type=$(jq -er '.images[0].imageManifestMediaType' image.json)
+          aws ecr put-image --repository-name "$ECR_REPOSITORY" --image-tag "$live_tag" \
+            --image-manifest "$manifest" --image-manifest-media-type "$media_type" >/dev/null
+          echo "tagged ${live_tag}"
+
       # While ingress_cidrs holds only Derek's address, a GitHub runner cannot reach the server. Set the environment
       # variable BETA_PUBLIC_CHECK to false until ingress opens. The server's own /health check above still gates the deploy.
       - name: Poll /health through the public address
