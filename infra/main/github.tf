@@ -20,8 +20,8 @@ data "aws_iam_policy_document" "github_assume" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # Only a job that runs in this repository's protected environment gets the role, so the environment's
-    # required reviewers gate every deploy. A pull request or another branch's job has a different subject.
+    # Only a job that runs in this repository's protected environment gets the role. The subject carries no branch,
+    # so the environment itself must allow deployments from master only (infra/README.md, GitHub setup).
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"

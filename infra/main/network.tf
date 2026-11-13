@@ -112,6 +112,17 @@ resource "aws_vpc_security_group_egress_rule" "tasks_https" {
   cidr_ipv4         = "0.0.0.0/0"
 }
 
+resource "aws_vpc_security_group_egress_rule" "tasks_to_db" {
+  count = var.create_database ? 1 : 0
+
+  security_group_id            = aws_security_group.tasks.id
+  description                  = "PostgreSQL to the database"
+  ip_protocol                  = "tcp"
+  from_port                    = 5432
+  to_port                      = 5432
+  referenced_security_group_id = aws_security_group.db[0].id
+}
+
 resource "aws_security_group" "db" {
   count = var.create_database ? 1 : 0
 

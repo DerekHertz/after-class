@@ -55,7 +55,7 @@ Nothing here has been planned or applied. Derek runs every command below, with `
    terraform apply main.tfplan
    ```
 
-4. In GitHub, create the `production` environment with Derek as the required reviewer, then add these environment variables from the stack outputs. They are not secrets.
+4. In GitHub, create the `production` environment with Derek as the required reviewer and **Deployment branches** set to `master` only (the role trust cannot see the branch, so this setting is what keeps other branches out), then add these environment variables from the stack outputs. They are not secrets.
 
    - `AWS_ROLE_ARN` from `deploy_role_arn`
    - `ECR_REPOSITORY` from `ecr_repository_name`

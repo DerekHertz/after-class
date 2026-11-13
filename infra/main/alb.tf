@@ -5,8 +5,8 @@ resource "aws_lb" "api" {
   security_groups    = [aws_security_group.alb.id]
   subnets            = aws_subnet.public[*].id
 
-  # NDJSON turn streams are quiet while the model thinks. The backend sends a heartbeat line every 15 s, and this
-  # timeout is longer than the 5-minute turn deadline.
+  # NDJSON turn streams are quiet while the model thinks, and the backend sends no heartbeat yet. 300 s matches the
+  # 5-minute turn deadline; Bun's 255 s socket idle timeout can still end a silent stream first.
   idle_timeout               = var.alb_idle_timeout_seconds
   drop_invalid_header_fields = true
 }

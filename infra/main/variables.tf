@@ -39,7 +39,7 @@ variable "desired_count" {
 }
 
 variable "alb_idle_timeout_seconds" {
-  description = "Load balancer idle timeout. 300 exceeds the backend's 5-minute turn deadline (TURN_DEADLINE_MS) and its 255 s socket idle timeout, and the stream sends a heartbeat every 15 s."
+  description = "Load balancer idle timeout. 300 matches the backend's 5-minute turn deadline (TURN_DEADLINE_MS). The stream has no heartbeat yet, and Bun's 255 s socket idle timeout can end a silent stream first."
   type        = number
   default     = 300
 }

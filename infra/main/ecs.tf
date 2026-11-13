@@ -51,7 +51,7 @@ data "aws_iam_policy_document" "execution" {
   statement {
     sid       = "Logs"
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
-    resources = ["${aws_cloudwatch_log_group.api.arn}:*"]
+    resources = ["${aws_cloudwatch_log_group.api.arn}:log-stream:api/api/*"]
   }
 }
 
@@ -91,6 +91,7 @@ resource "aws_ecs_task_definition" "api" {
       essential = true
 
       portMappings = [{ containerPort = var.container_port, protocol = "tcp" }]
+      environment  = [{ name = "AFTERCLASS_PORT", value = tostring(var.container_port) }]
 
       # Fargate's maximum, so a rolling deploy lets a turn in progress finish.
       stopTimeout = 120
@@ -135,7 +136,8 @@ resource "aws_ecs_service" "api" {
     container_port   = var.container_port
   }
 
-  depends_on = [aws_lb_listener.http]
+  # With a certificate, HTTP only redirects and the HTTPS listener is what attaches the target group.
+  depends_on = [aws_lb_listener.http, aws_lb_listener.https]
 
   lifecycle {
     ignore_changes = [task_definition]
