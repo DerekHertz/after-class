@@ -320,4 +320,37 @@ describe("resource search without output_config.format", () => {
     const { events: unknown } = await run([odd, second]);
     expect(unknown[0]!.cost.kind).toBe("unknown");
   });
+  test("an abort during a continuation records an aborted event with the usage of the responses already billed", async () => {
+    const paused = reply(searchBlocks, { stop: "pause_turn", input: 500, output: 50, searches: 1 });
+    const ctl = new AbortController();
+    let n = 0;
+    const client: ApiClient = {
+      messages: {
+        stream: () => {
+          throw new Error("no stream call expected");
+        },
+        create: (_params, options) => {
+          n++;
+          if (n === 1) return Promise.resolve(paused);
+          // The second call waits until the caller cancels, then rejects the way the SDK does.
+          return new Promise((_resolve, reject) => {
+            options.signal.addEventListener("abort", () => reject(new Anthropic.APIUserAbortError()), { once: true });
+            queueMicrotask(() => ctl.abort());
+          });
+        },
+      },
+    };
+    const db = testDb();
+    const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
+    const task = c.task(createClaudeApi({ apiKey: KEY, maxConcurrent: 1, client }));
+    const result = await memo.run(task, c.input as never, { signal: ctl.signal });
+    expect(result.kind).toBe("missing");
+    const events = createLedger(db).list({ memoKey: memo.key(task, c.input as never), limit: 10 });
+    expect(events).toHaveLength(1);
+    expect(events[0]!.outcome).toBe("aborted");
+    expect(events[0]!.inputTokens).toBe(500);
+    const cost = events[0]!.cost;
+    expect(cost.kind).toBe("estimated");
+    if (cost.kind === "estimated") expect(cost.usd).toBeCloseTo((500 * 4 + 50 * 20) / 1_000_000 + WEB_SEARCH_USD, 10);
+  });
 });

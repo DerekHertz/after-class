@@ -576,7 +576,11 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
     const reports: UsageReport[] = [];
     /** The failure as the ledger should see it: the adapter's own error, with what was already spent. */
     const afterBilled = (err: unknown): unknown => {
-      if (reports.length === 0 || !(err instanceof ApiCallError)) return err;
+      if (reports.length === 0) return err;
+      // An abort carries the usage too. memo.ts records an aborted attempt with the usage of whatever ProviderError ended it, and
+      // checks the signal before the error, so this still ends the attempt as aborted.
+      if (signal.aborted) return new ApiCallError("claude api call aborted after a billed response", combine(reports), false, "maybe_billed", null);
+      if (!(err instanceof ApiCallError)) return err;
       return new ApiCallError(err.message, combine(reports), err.retryable, "maybe_billed", err.status);
     };
     for (let n = 0; ; n++) {
