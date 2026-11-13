@@ -35,9 +35,9 @@ const P = Array.from({ length: 6 }, (_, k) => ({
 const span = (start: number, end: number) => Material.of([[SRC, [interval(start, end)]]]);
 const draft = (text: string, ...evidence: Passage[]): ClaimDraft => ({ text, evidence: evidence.map((e) => e.id) as unknown as ClaimDraft["evidence"], visualDependent: false, assumptions: [] });
 
-type Concept = { readonly label: string; readonly claims: readonly ClaimDraft[] };
+type Concept = { readonly label: string; readonly claims: readonly ClaimDraft[]; readonly confusions?: InterpretationOutput["concepts"][number]["confusions"] };
 const output = (concepts: readonly Concept[], links: InterpretationOutput["links"] = []): InterpretationOutput => ({
-  concepts: concepts.map((c) => ({ label: c.label, summary: `${c.label} summary`, claims: c.claims, confusions: [] })),
+  concepts: concepts.map((c) => ({ label: c.label, summary: `${c.label} summary`, claims: c.claims, confusions: c.confusions ?? [] })),
   links,
   supersedes: [],
 });
@@ -150,8 +150,9 @@ describe("two users watch one lecture in one database", () => {
     const a = testUserDb();
     const b = otherUserDb(a);
     const link = { fromLabel: "Pivots", toLabel: "Rank", type: "prerequisite_of" as const, evidence: [P[0]!.id], rationale: "rank counts pivots" };
-    const wa = preparationOf(a, { interpret: () => ok(output([...POINTS, { label: "Rank", claims: [draft("rank is the pivot count", P[1]!)] }], [link])) });
-    const wb = preparationOf(b, { interpret: () => ok(output(POINTS)) });
+    const confused = (text: string): Concept => ({ ...POINTS[0]!, confusions: [{ text, evidence: [P[0]!.id] as unknown as ClaimDraft["evidence"] }] });
+    const wa = preparationOf(a, { interpret: () => ok(output([confused("A's mix-up"), ...POINTS.slice(1), { label: "Rank", claims: [draft("rank is the pivot count", P[1]!)] }], [link])) });
+    const wb = preparationOf(b, { interpret: () => ok(output([confused("B's mix-up"), ...POINTS.slice(1)])) });
     const ra = wa.close(0, 20);
     wb.close(0, 20);
     await wa.drain();
@@ -161,6 +162,8 @@ describe("two users watch one lecture in one database", () => {
     const rank = stableId("cpt", "rank") as ConceptId;
     expect(wa.prep.concepts([pivots, rank]).map((c) => c.label).sort()).toEqual(["Pivots", "Rank"]);
     expect(wb.prep.concepts([pivots, rank]).map((c) => c.label)).toEqual(["Pivots"]);
+    expect(wa.prep.confusions([pivots]).map((c) => c.text)).toEqual(["A's mix-up"]);
+    expect(wb.prep.confusions([pivots]).map((c) => c.text)).toEqual(["B's mix-up"]);
     expect(wa.prep.linkSuggestions([pivots])).toHaveLength(1);
     expect(wb.prep.linkSuggestions([pivots, rank])).toEqual([]);
     expect(wa.prep.claimsIn(CAP, ra.material)).toHaveLength(2);

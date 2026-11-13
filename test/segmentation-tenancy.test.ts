@@ -142,7 +142,7 @@ describe("two users share one database and one capture id", () => {
     const retries: string[] = [];
     const preparation = { prep: () => ({ finished: false, supportedCount: 0 }), retry: (id: string) => void retries.push(id) } as unknown as Preparation;
     const server = serve({
-      modules: { ledger: createLedger(b), evidence: {} as never, reviews: {} as never, preparation, segmentation: segmentationOf(b, 90).seg },
+      modules: { ledger: createLedger(b), evidence: { capturedByAnotherUser: () => false } as never, reviews: {} as never, preparation, segmentation: segmentationOf(b, 90).seg },
       auth: { port: 0, extensionId: "abcdefghijklmnopabcdefghijklmnop", token },
       appDir: tmpdir(),
     });
