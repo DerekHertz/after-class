@@ -1,8 +1,12 @@
 /**
  * The Claude Messages API adapter, the second `ClaudeCli` implementation (the first is claude.ts, which spawns
- * `claude -p` on Derek's subscription). It exists for a paid trial of the tutor turn and the wrap-up, and
- * main.ts routes only those two tasks here, and only when AFTERCLASS_CLAUDE_BACKEND=api. Importable only
+ * `claude -p` on Derek's subscription). It runs every Claude task on the Messages API, so a machine without Claude Code
+ * can run the product. main.ts routes every task here when AFTERCLASS_CLAUDE_BACKEND=api, and none otherwise. Importable only
  * inside providers/ and by main.ts (and the experiment runner under scripts/).
+ *
+ * Images and web tools follow the request, so each task keeps one code path. A request's images become base64 image blocks in the
+ * user message, each after a text block naming its label, ahead of the prompt. A request with `webTools` adds the server tools
+ * web_search_20260209 and web_fetch_20260209, and no other request carries any tool.
  *
  * Sources for every SDK call (the claude-api skill's reference files, read 2026-11-12):
  *   client.messages.stream(...), stream.on("text"), stream.finalMessage()   typescript/claude-api/streaming.md
@@ -35,7 +39,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { ParseableMessageCreateParams as MessageStreamParams } from "@anthropic-ai/sdk";
-import type { JSONOutputFormat, Message, MessageCreateParamsNonStreaming, TextBlockParam } from "@anthropic-ai/sdk/resources/messages";
+import type { ContentBlockParam, JSONOutputFormat, Message, MessageCreateParamsNonStreaming, TextBlockParam, ToolUnion } from "@anthropic-ai/sdk/resources/messages";
 import type { z } from "zod";
 import { abortError, createLimiter } from "./claude";
 import type { ClaudeCli, ClaudeRequest } from "./claude";
@@ -62,6 +66,16 @@ const PRICES = {
 const CACHE_WRITE_5M = 1.25;
 const CACHE_WRITE_1H = 2;
 
+/**
+ * USD per web search request, $10 per 1,000 searches. This figure comes from Anthropic's public pricing as the agent knew it on
+ * 2026-11-13. It is not in the SDK types or in the claude-api skill, so Derek should check it against the console before relying on it.
+ * Counted: every search the response's usage reports, at that rate, plus all tokens at the price table's rates (the text web search
+ * and web fetch results add to the prompt arrives as input tokens, so it is already in `input_tokens`). Not counted: web fetch has no
+ * per-request fee that this file knows of, so a fetch adds only its tokens. A response that reports no server tool usage counts zero
+ * searches, and one that reports an invalid count makes the whole call's cost unknown.
+ */
+export const WEB_SEARCH_USD = 0.01;
+
 export const COST_BASIS = "anthropic_api_list_price";
 
 export type UsageParts = {
@@ -71,6 +85,8 @@ export type UsageParts = {
   readonly creation1h: number;
   readonly read: number;
   readonly output: number;
+  /** Web searches the response reports in usage.server_tool_use.web_search_requests. Absent when there were none. */
+  readonly webSearches?: number;
 };
 
 function priceOf(model: string): (typeof PRICES)[keyof typeof PRICES] | null {
@@ -82,7 +98,8 @@ function priceOf(model: string): (typeof PRICES)[keyof typeof PRICES] | null {
 export function priceUsage(model: string, u: UsageParts): number | null {
   const price = priceOf(model);
   if (price === null) return null;
-  const usd = (u.fresh * price.input + u.creation5m * price.input * CACHE_WRITE_5M + u.creation1h * price.input * CACHE_WRITE_1H + u.read * price.cacheRead + u.output * price.output) / 1_000_000;
+  const tokens = (u.fresh * price.input + u.creation5m * price.input * CACHE_WRITE_5M + u.creation1h * price.input * CACHE_WRITE_1H + u.read * price.cacheRead + u.output * price.output) / 1_000_000;
+  const usd = tokens + (u.webSearches ?? 0) * WEB_SEARCH_USD;
   // A figure that is not a finite non-negative number is not a cost. Callers read null as unknown.
   return Number.isFinite(usd) && usd >= 0 ? usd : null;
 }
@@ -100,6 +117,8 @@ export const REQUEST_OVERHEAD_TOKENS = 4_096;
  *   3. Every one of those tokens costs the most any input token can: a write to the 1 hour cache.
  *   4. The call spends its whole `max_tokens` on output. Thinking tokens are output tokens and are inside that limit.
  *   5. Nothing else is billed: the request has no tools or web search, and the client makes no retry of its own (maxRetries 0).
+ *      This holds for the tutor turn and the wrap-up, the only calls the replay runner makes. A request with web tools can add
+ *      searches, which this bound does not include.
  * Prices are the table's. This is a bound on the estimate the table produces, not on Derek's invoice.
  */
 export function worstCaseUsd(model: string, inputBytes: number, maxTokens: number, schemaBytes: number): number | null {
@@ -111,6 +130,27 @@ export function outputFormatOf(schema: z.ZodType): JSONOutputFormat {
   const { parse: _parse, ...rest } = zodOutputFormat(schema);
   return rest;
 }
+
+/**
+ * The user turn. Text only when there are no images, so a tutor request is the plain string it always was. With images, each is a
+ * base64 block after a text block that names its label, because the task prompts cite frames by that label, and the prompt follows them.
+ */
+function userContent(req: ClaudeRequest): string | ContentBlockParam[] {
+  if (req.images.length === 0) return req.prompt;
+  return [
+    ...req.images.flatMap((img): ContentBlockParam[] => [
+      { type: "text", text: `Image ${img.label}:` },
+      { type: "image", source: { type: "base64", media_type: img.mediaType, data: Buffer.from(img.bytes).toString("base64") } },
+    ]),
+    { type: "text", text: req.prompt },
+  ];
+}
+
+/** The server tools a `webTools` request adds, the API's counterpart of the CLI's WebSearch and WebFetch. Anthropic runs them. */
+const WEB_TOOLS: ToolUnion[] = [
+  { type: "web_search_20260209", name: "web_search" },
+  { type: "web_fetch_20260209", name: "web_fetch" },
+];
 
 /** The parts of the SDK client this adapter uses, so a test can fake the network away. */
 export type ApiStream = {
@@ -240,8 +280,17 @@ export function parseUsage(raw: unknown): UsageParts | null {
     creation5m = m5;
     creation1h = Math.max(h1, total - m5);
   }
+  const tools = raw.server_tool_use;
+  let webSearches = 0;
+  if (tools !== undefined && tools !== null) {
+    if (!isRecord(tools)) return null;
+    const n = optionalCountOf(tools.web_search_requests);
+    if (n === null || optionalCountOf(tools.web_fetch_requests) === null) return null;
+    webSearches = n;
+  }
   const parts = { fresh, creation5m, creation1h, read, output };
-  return Object.values(parts).every((n) => countOf(n) !== null) ? parts : null;
+  if (!Object.values(parts).every((n) => countOf(n) !== null)) return null;
+  return webSearches > 0 ? { ...parts, webSearches } : parts;
 }
 
 /** Everything the adapter takes from a response, each field already parsed. The reply text has the key removed. */
@@ -421,11 +470,9 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
     const model = (API_MODELS as Readonly<Record<string, string>>)[req.model];
     // Nothing has been sent when these throw, so none of them can be billed.
     if (model === undefined) throw new ApiCallError(`claude api backend serves only "opus" and "sonnet", got "${safe(req.model, 80)}"`, null, false, "not_billed", null);
-    if (req.webTools) throw new ApiCallError("claude api backend does not support web tools; this trial covers the tutor turn and the wrap-up only", null, false, "not_billed", null);
-    if (req.images.length > 0) throw new ApiCallError("claude api backend does not support images; this trial covers the tutor turn and the wrap-up only", null, false, "not_billed", null);
     // One stable block, cached for an hour, so a review's lecture context is read from cache on its later turns.
     const system: TextBlockParam[] = [{ type: "text", text: req.system, cache_control: { type: "ephemeral", ttl: "1h" } }];
-    return { model, system, messages: [{ role: "user", content: req.prompt }] as const };
+    return { model, system, messages: [{ role: "user", content: userContent(req) }] as const, tools: req.webTools ? WEB_TOOLS : null };
   }
 
   /** Parse the response, report it, then check the stop reason: only a finished answer is an answer. Runs after the client call, outside its `try`. */
@@ -446,7 +493,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
 
   return {
     async structured<O>(req: ClaudeRequest, schema: z.ZodType<O>, signal: AbortSignal) {
-      const { model, system, messages } = prepare(req);
+      const { model, system, messages, tools } = prepare(req);
       let format: JSONOutputFormat;
       try {
         format = outputFormatOf(schema);
@@ -454,7 +501,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
         throw new ApiCallError(`output schema cannot be expressed as JSON Schema: ${safe(textOfError(err))}`, null, false, "not_billed", null);
       }
       const { value } = await call(req, signal, async (callSignal) =>
-        client.messages.create({ model, max_tokens: STRUCTURED_MAX_TOKENS, system, messages: [...messages], output_config: { effort: req.effort, format } }, { signal: callSignal }),
+        client.messages.create({ model, max_tokens: STRUCTURED_MAX_TOKENS, system, messages: [...messages], ...(tools ? { tools } : {}), output_config: { effort: req.effort, format } }, { signal: callSignal }),
       );
       const { parsed: reply, usage } = settle(value);
       let payload: unknown;
@@ -469,11 +516,11 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
     },
 
     async streamText(req, onText, signal) {
-      const { model, system, messages } = prepare(req);
+      const { model, system, messages, tools } = prepare(req);
       const sink = redactingSink(opts.apiKey, onText);
       const { value } = await call(req, signal, async (callSignal, began) => {
         const stream = client.messages.stream(
-          { model, max_tokens: STREAM_MAX_TOKENS, system, messages: [...messages], output_config: { effort: req.effort } },
+          { model, max_tokens: STREAM_MAX_TOKENS, system, messages: [...messages], ...(tools ? { tools } : {}), output_config: { effort: req.effort } },
           { signal: callSignal },
         );
         stream.on("text", (delta) => {
