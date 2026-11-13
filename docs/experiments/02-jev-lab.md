@@ -1,5 +1,7 @@
 # Experiment 2: the Jev boundary and visual lab
 
+**Tooling retired 2026-11-13.** The scripts this file names were removed from master after commit e197fd2, so check out that commit to run the commands below.
+
 The lab measures whether Jev, asked the product's own questions about windows of a real lecture and about changes between frames, finds the topic boundaries and keeps the visual steps that Derek labeled. It runs the product's windowing and the product's `boundaryTask` and `frameChangeTask` through `scripts/jev-lab.ts`.
 
 This file is a pre-registered protocol. It was written before any Jev call, and nothing here is tuned after a result. The numbers in the bar text and the budget are Derek's, adopted 2026-11-03. Every other definition was proposed, and Derek adopted all ten as proposed on 2026-11-04 (see "Decisions").

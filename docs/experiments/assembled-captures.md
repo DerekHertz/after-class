@@ -1,5 +1,7 @@
 # Assembled captures (support for experiment 2, the Jev lab)
 
+**Tooling retired 2026-11-13.** The scripts this file names were removed from master after commit e197fd2, so check out that commit to run the commands below.
+
 The lab needs more clip joins than one capture gives. `scripts/assemble-capture.ts` replays the recorded facts of several captures into ONE capture in a NEW data dir. This is replay of recorded live data, never new lecture content, and the result is always labeled: data origin "assembled (replayed live data)", not one live session.
 
 ```

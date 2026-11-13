@@ -1,5 +1,7 @@
 # Experiment 7: does Jev make the tutor's work cheaper without making it worse?
 
+**Tooling retired 2026-11-13.** The scripts this file names were removed from master after commit e197fd2, so check out that commit to run the commands below.
+
 Experiment 7 is outside the five approved in `docs/flows/after-class.md`; Derek's adoption below covers it.
 
 Status: ADOPTED by Derek on 2026-11-05 ("Adopt as written"): the design, bars and budget below, which were marked PROPOSED in the draft. No call has been made. The routing change in task 3 is tested here but changes the product only after Derek approves it in `docs/flows/after-class.md`. The build prerequisites (below) come first, each in its own verified PR.
