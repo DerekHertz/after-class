@@ -9,7 +9,7 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 | Playback and frames | W1 | `src/extension/content/capture.ts`, `src/extension/content/frames.ts` | none | `Emit`, `ControlMessage`, `ContentSignal`, `PlaybackTracker`, `AdSignals`, `isAdShowing`, `FrameSamplerConfig`, `FrameSampler`, `normalizedSize` |
 | Transcripts, worker, popup, build | W2 | `src/extension/content/transcript.ts`, `src/extension/content/main-world.ts`, `src/extension/content/content-entry.ts`, `src/extension/content/stream-id.ts`, `src/extension/worker/*`, `src/extension/popup/*`, `src/extension/manifest.json`, `scripts/build-extension.ts` | none (IndexedDB outbox, `chrome.storage.session`) | `TranscriptResult`, `TabCaptureState`, `PopupRequest`, `transition` |
 | Evidence | W3 | `src/backend/evidence/*` | `capture_facts`, `frames`, `evidence_snapshots`, `evidence_deletions` | `WatchedPassage`, `WatchOrder`, `EvidenceStore`, `createEvidence` |
-| Segmentation | W4 | `src/backend/segmentation/*` | `chunk_revisions` | `SegmentationConfig`, `SEGMENTATION_DEFAULTS`, `Segmentation`, `WindowTrace`, `createSegmentation`, `buildWindows`, `planChunks` |
+| Segmentation | W4 | `src/backend/segmentation/*` | `chunk_revisions` (has `user_id`) | `SegmentationConfig`, `SEGMENTATION_DEFAULTS`, `Segmentation` (now with `heldByAnotherUser(captureId)`), `WindowTrace`, `createSegmentation` (takes a `UserDb`), `buildWindows`, `planChunks` |
 | Providers | W5 | `src/backend/providers/{ledger,jev,jev-tasks,claude,claude-api}.ts` | `memo_inputs`, `memo`, `memo_failures`, `usage_events` (written only by `memo.ts`), `voice_usage_events` (written only by `elevenlabs.ts`); all five have `user_id` | `Ledger`, `JevClient`, `JevRequest`, `JevAnswer`, `BoundaryInput`, `FrameChangeInput`, `ClaimSupportInput`, `toVerdict`, the three Jev task factories, `ClaudeCli`, `ClaudeRequest`, `claudeArgs`, `createClaudeApi`, `MemoRunOptions` |
 | Preparation | W6 | `src/backend/preparation/*` | `claim_index`, `concept_index`, `prep_controls` | `Preparation`, `createPreparation`, `PreparationTasks`, `InterpretationInput`, `InterpretationOutput`, `RevisionInput`, `ResourceSearchInput` |
 | Review lifecycle | W7 | `src/backend/review/index.ts`, `src/backend/review/core.ts` | `invite_answers`, `reviews`, `review_turns` | `Reviews`, `createReviews` |
@@ -30,6 +30,11 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 
 - `createMemo`, `createLedger` and `createVoice` take a `UserDb` and read and write only its `userId`'s rows. A memo is per user: its rows are keyed by (`user_id`, `key`), and the key stays a hash of the call alone. A `MemoKey` is therefore unique only within one user, so a module that stores one beside its own rows reads it back through that user's memo.
 - `memo.run` takes an optional `captureId`, stored on the call's usage events. `main.ts` passes it for boundary calls; the other callers do not know the capture yet and leave `usage_events.capture_id` null.
+
+## Users in segmentation
+
+- `createSegmentation` takes a `UserDb` and reads and writes only its `userId`'s chunk revisions. A chunk id derives from the capture id and a revision id from the chunk and its material, so two users who hold one capture id make identical ids. The table is keyed by (`user_id`, `id`) and unique on (`user_id`, `chunk_id`, `revision_no`), and `supersedes` is a composite foreign key to the same user's revision. The derivations are unchanged, so every stored id, scope and memo key stays valid.
+- `Segmentation.heldByAnotherUser(captureId)` is true when another user has chunks of the capture and the caller has none. `POST /captures/:captureId/retry-preparation` answers 404 then. A capture nobody holds keeps its 204 no-op.
 
 ## Wire contract
 

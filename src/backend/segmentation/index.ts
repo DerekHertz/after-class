@@ -7,6 +7,9 @@
  * ChunkRevision only when a chunk's derived material differs from its latest
  * revision, under a content-derived ID, so running sync twice is a no-op.
  *
+ * Rows are per user. Chunk and revision ids derive from the capture and its material, so two users holding one
+ * capture id make identical ids; every query carries the handle's userId and the keys lead with it.
+ *
  *   const { closed, demand } = segmentation.sync(captureId);   // in scheduler.pump
  *   segmentation.current(captureId)                              // latest revision per chunk
  */
@@ -14,7 +17,7 @@ import type { CaptureId, ChunkId, ChunkRevisionId, WindowId } from "../../shared
 import type { BoundaryJudgment, BoundaryWindow, ChunkProvenance, ChunkRevision, Route, Seq } from "../../shared/domain";
 import { Material } from "../../shared/time";
 import { asSeq } from "../db";
-import type { Db } from "../db";
+import type { UserDb } from "../db";
 import type { WatchOrder } from "../evidence";
 import type { BoundaryInput } from "../providers/jev-tasks";
 import { appliesBefore } from "../providers/memo";
@@ -57,6 +60,8 @@ export type Segmentation = {
   history(chunkId: ChunkId): readonly ChunkRevision[];
   /** Inspectability: window inputs, judgments, route per window (PRD acceptance 2). */
   trace(captureId: CaptureId): readonly WindowTrace[];
+  /** True when another user holds chunks of this capture and this user holds none: the caller's id is another user's. */
+  heldByAnotherUser(captureId: CaptureId): boolean;
 };
 
 type Row = {
@@ -86,23 +91,26 @@ function describeInput(w: BoundaryWindow): string {
   return `new ${Math.round(Material.duration(w.newMaterial))}s (${material}), ${w.contextPassages.length} context passages, ${w.frames.length} frames`;
 }
 
-export function createSegmentation(db: Db, deps: {
+export function createSegmentation(db: UserDb, deps: {
   watchOrder(captureId: CaptureId): WatchOrder;
   lookupBoundary(input: BoundaryInput): Lookup<BoundaryJudgment>;
   boundaryInput(w: BoundaryWindow): BoundaryInput;
   nextSeq(): Seq;
 }, cfg: SegmentationConfig, routing: RoutingOptions | undefined): Segmentation {
+  const { userId } = db;
+  const COLUMNS = "id, chunk_id, capture_id, ordinal, revision_no, material_json, windows_json, provenance, closed_at_seq, supersedes";
   const insert = db.sql.query(
-    `INSERT INTO chunk_revisions (id, chunk_id, capture_id, ordinal, revision_no, material_json, windows_json, provenance, closed_at_seq, supersedes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO chunk_revisions (user_id, ${COLUMNS})
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  const byCapture = db.sql.query<Row, [CaptureId]>("SELECT * FROM chunk_revisions WHERE capture_id = ? ORDER BY ordinal, revision_no");
-  const byChunk = db.sql.query<Row, [ChunkId]>("SELECT * FROM chunk_revisions WHERE chunk_id = ? ORDER BY revision_no");
-  const byId = db.sql.query<Row, [ChunkRevisionId]>("SELECT * FROM chunk_revisions WHERE id = ?");
+  const byCapture = db.sql.query<Row, [string, CaptureId]>(`SELECT ${COLUMNS} FROM chunk_revisions WHERE user_id = ? AND capture_id = ? ORDER BY ordinal, revision_no`);
+  const byChunk = db.sql.query<Row, [string, ChunkId]>(`SELECT ${COLUMNS} FROM chunk_revisions WHERE user_id = ? AND chunk_id = ? ORDER BY revision_no`);
+  const byId = db.sql.query<Row, [string, ChunkRevisionId]>(`SELECT ${COLUMNS} FROM chunk_revisions WHERE user_id = ? AND id = ?`);
+  const otherHolds = db.sql.query<{ n: number }, [string, CaptureId]>("SELECT 1 AS n FROM chunk_revisions WHERE user_id <> ? AND capture_id = ? LIMIT 1");
 
   const latestPerChunk = (captureId: CaptureId): ChunkRevision[] => {
     const latest = new Map<ChunkId, ChunkRevision>();
-    for (const r of byCapture.all(captureId)) latest.set(r.chunk_id, fromRow(r));
+    for (const r of byCapture.all(userId, captureId)) latest.set(r.chunk_id, fromRow(r));
     return [...latest.values()];
   };
 
@@ -124,9 +132,9 @@ export function createSegmentation(db: Db, deps: {
     sync(captureId) {
       return db.tx(() => {
         const { looked, plan } = derive(captureId);
-        const closed = reconcile(captureId, plan, byCapture.all(captureId).map(fromRow), deps.nextSeq);
+        const closed = reconcile(captureId, plan, byCapture.all(userId, captureId).map(fromRow), deps.nextSeq);
         for (const r of closed) {
-          insert.run(r.id, r.chunkId, r.captureId, r.ordinal, r.revisionNo, JSON.stringify(Material.canonical(r.material)), JSON.stringify(r.windows), r.provenance, r.closedAtSeq, r.supersedes);
+          insert.run(userId, r.id, r.chunkId, r.captureId, r.ordinal, r.revisionNo, JSON.stringify(Material.canonical(r.material)), JSON.stringify(r.windows), r.provenance, r.closedAtSeq, r.supersedes);
         }
         return { closed, demand: looked.filter((l) => l.lookup.kind === "missing" || l.lookup.kind === "inflight").map((l) => l.input) };
       });
@@ -135,13 +143,15 @@ export function createSegmentation(db: Db, deps: {
     current: latestPerChunk,
 
     revision(id) {
-      const row = byId.get(id);
+      const row = byId.get(userId, id);
       return row ? fromRow(row) : null;
     },
 
     history(chunkId) {
-      return byChunk.all(chunkId).map(fromRow);
+      return byChunk.all(userId, chunkId).map(fromRow);
     },
+
+    heldByAnotherUser: (captureId) => byCapture.all(userId, captureId).length === 0 && otherHolds.get(userId, captureId) !== null,
 
     trace(captureId) {
       const { looked, judged, plan } = derive(captureId);
