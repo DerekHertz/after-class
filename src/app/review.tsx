@@ -10,7 +10,7 @@ import { FrontRowScene, reserveNavSpace } from "./front-row";
 import { reactToCompanion } from "./companion-reaction";
 import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
-import { ACTION_LABEL, END_CONFIRM_TEXT, composerActions, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow, softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, strandedEndTurn, selectedEvidenceIds, shouldSubmitAnswer, } from "./core";
+import { ACTION_LABEL, END_CONFIRM_TEXT, composerActions, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow, softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, strandedEndTurn, selectedEvidenceIds, shouldSubmitAnswer, questionScrollTop, } from "./core";
 import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, StartHandoff, TurnStatus } from "./core";
 import type { Speaker, SpeechInput } from "./speech";
 import type { UnsentStore } from "./unsent";
@@ -123,9 +123,41 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   }
 
   const view = state.view;
-  if (view === null) {
+  const exchange = view === null ? null : currentExchange(conversationLines(view.turns, view.topics));
+  const questionKey = exchange?.current.findLast((l) => l.speaker === "tutor")?.key;
+  const replyPending = state.live !== null && state.live.status !== "complete";
+  const revealed = useRef<string | undefined>(undefined);
+  /**
+   * The question is the end of the tutor's reply, and the board scrolls on its own. On open and once a new reply has
+   * finished, the board scrolls to the question. A learner who scrolls up while the reply streams is left alone, and
+   * a short reply that already fits does not move.
+   */
+  useEffect(() => {
+    if (questionKey === undefined || replyPending || revealed.current === questionKey) return;
+    const first = revealed.current === undefined;
+    let frame = 0;
+    let cancelled = false;
+    const reveal = () => {
+      frame = requestAnimationFrame(() => {
+        const area = board.current;
+        const line = questionLine.current;
+        if (cancelled || area === null || line === null) return;
+        const areaRect = area.getBoundingClientRect();
+        const lineRect = line.getBoundingClientRect();
+        const top = lineRect.top - areaRect.top + area.scrollTop;
+        const to = questionScrollTop(area, { top, bottom: top + lineRect.height });
+        revealed.current = questionKey;
+        if (to === null) return;
+        const still = first || appearance.motion === "reduced" || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        area.scrollTo({ top: to, behavior: still ? "auto" : "smooth" });
+      });
+    };
+    void (document.fonts?.ready ?? Promise.resolve()).then(() => { if (!cancelled) reveal(); });
+    return () => { cancelled = true; cancelAnimationFrame(frame); };
+  }, [questionKey, replyPending, appearance.motion]);
+  if (view === null || exchange === null) {
     return (
-      <main className="notebook-page review-loading room-paper" {...objectFrame("source")}>
+      <main className="notebook-page review-loading">
         <h1>Review</h1>
         <ErrorNote error={state.loadError} retry={() => void controller.load()} />
         {state.loadError === null && <p className="muted">Loading...</p>}
@@ -133,9 +165,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     );
   }
 
-  const lines = currentExchange(conversationLines(view.turns, view.topics));
+  const lines = exchange;
   const live = state.live && state.live.status !== "complete" ? state.live : null;
-  const questionKey = lines.current.findLast((l) => l.speaker === "tutor")?.key;
   const questionTopic = currentQuestionTopic(view, diagrams.topics ?? []);
   const shownDiagram = diagrams.topics?.find((t) => t.topicId === diagramTopic) ?? null;
   const soft = softTargetPrompt(view.turns);

@@ -351,6 +351,24 @@ export function currentExchange(lines: readonly Line[]): { readonly earlier: rea
   return { earlier: lines.slice(0, start), current: lines.slice(start) };
 }
 
+/** What the board needs to place a line: its scroll box and the line's edges measured from the top of the scrolled content. */
+export type RevealBox = { readonly scrollTop: number; readonly clientHeight: number; readonly scrollHeight: number };
+
+/**
+ * Where to scroll a board so the tutor's question is in view, or null when nothing should move. A question is the end of
+ * the tutor's reply, so a line that fits the board must be wholly in view and a line taller than the board must show its
+ * last lines. The bottom edge is the anchor in both cases, and `gap` leaves a little room under it.
+ */
+export function questionScrollTop(box: RevealBox, line: { readonly top: number; readonly bottom: number }, gap = 12): number | null {
+  const viewTop = box.scrollTop;
+  const viewBottom = box.scrollTop + box.clientHeight;
+  const fits = line.bottom - line.top <= box.clientHeight;
+  const inView = fits ? line.top >= viewTop && line.bottom <= viewBottom : line.bottom > viewTop && line.bottom <= viewBottom;
+  if (inView) return null;
+  const target = Math.min(Math.max(line.bottom + gap - box.clientHeight, 0), Math.max(box.scrollHeight - box.clientHeight, 0));
+  return target === box.scrollTop ? null : target;
+}
+
 /** Acts that expect a tutor reply. Pause, resume and end do not. */
 const EXPECTS_REPLY = (act: LearnerAct): boolean => act.kind !== "pause" && act.kind !== "resume" && act.kind !== "end";
 

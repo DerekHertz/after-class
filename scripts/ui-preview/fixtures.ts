@@ -26,7 +26,7 @@ export const ids = {
   chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait"), ordering: id("cpt", "ordering"), earlierCapture: id("cap", "earlier-capture"),
   otherCapture: id("cap", "other-capture"), pendingReview: id("rvw", "pending-review"), unsavedReview: id("rvw", "unsaved-review"),
 };
-export const scenarios = ["review", "long-history", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "capture-ready", "capture-processing", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "usage", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
+export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "capture-ready", "capture-processing", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "usage", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
 export type Scenario = typeof scenarios[number];
 export const scenarioFrom = (search: string): Scenario => scenarios.find(s => s === new URLSearchParams(search).get("scenario")) ?? "review";
 
@@ -51,6 +51,9 @@ export function createFixture(scenario: Scenario): Fixture {
     { id: ids.concept, label: "Circular wait", summary: "Each thread holds a resource while waiting for one another thread holds." },
     { id: ids.ordering, label: "Resource ordering", summary: "Acquiring resources in one global order removes the circular wait." },
   ];
+  /** A reply long enough that its question, the last sentence, starts below the bottom of the board. */
+  const longReplyQuestion = "What would have to change for either thread to continue?";
+  const longReply = `${Array.from({ length: 14 }, (_, n) => `Step ${n + 1}. Thread 1 holds lock A and waits for lock B, while thread 2 holds lock B and waits for lock A, so neither can release what the other needs.`).join(" ")} ${longReplyQuestion}`;
   const firstQuestion = "Two threads are waiting on each other. How could that happen?";
   /**
    * A review view as the backend sends it. A saved review also has a quick check on a second topic and the observations
@@ -76,7 +79,7 @@ export function createFixture(scenario: Scenario): Fixture {
       turns.push(mainAnswer);
       const help = turn("tutor", turns.length + 1, { move: { kind: "explain", threadId: ids.thread, evidence: [ids.frame, ids.passage] }, say: "The lecture calls this circular wait. Each thread is holding a resource while waiting for the other." });
       turns.push(help);
-      turns.push(turn("tutor", turns.length + 1, { move: { kind: "ask_followup", threadId: ids.thread }, say: "What would have to change for either thread to continue?" }));
+      turns.push(turn("tutor", turns.length + 1, { move: { kind: "ask_followup", threadId: ids.thread }, say: s === "long-reply" ? longReply : longReplyQuestion }));
       if (disputes) {
         turns.push(turn("learner", turns.length + 1, { act: { kind: "dispute", text: "I did name circular wait: each thread holds one lock and waits for the other." } }));
         turns.push(turn("tutor", turns.length + 1, { move: { kind: "answer_dispute", threadId: ids.thread, evidence: [ids.passage], settled: false }, say: "Your answer described the waiting but not why neither thread can release its lock, which the lecture names as the condition." }));

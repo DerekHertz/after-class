@@ -55,6 +55,11 @@
 .front-row-scene :is(button, input, textarea, summary):focus-visible { outline: 3px solid var(--fr-focus); outline-offset: 3px; }
 .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) :is(button, input, summary, .current-exchange, .line):focus-visible { outline-color: var(--fr-board-ink); }
 
+/* Until the review loads there is no board to write on, so the wait notice is its own small board in the room's board
+   colours. It never depends on a folio image that may not have arrived, and its ink is the board's ink. */
+.scene-shell .review-loading { --fg: var(--fr-board-ink); --muted: var(--fr-board-ink-soft); --accent: var(--fr-board-ink); --border: var(--fr-board-ink-soft); width: min(100% - 24px, 40rem); margin: 16px auto; padding: 12px 20px 16px; background: var(--fr-board-fill); border: 5px solid var(--fr-frame); box-shadow: inset 0 0 0 2px #00000033, 0 4px 0 #00000040; color: var(--fr-board-ink); font-family: 'After Class Pixel', var(--font); }
+.scene-shell .review-loading h1 { color: var(--fr-board-ink); }
+.scene-shell .review-loading .muted { color: var(--fr-board-ink-soft); }
 .front-row-scene .current-exchange { margin: 0; padding: 0; background: none; border: 0; }
 .front-row-scene .current-exchange:focus-visible { outline: 3px dashed var(--fr-board-ink); outline-offset: 6px; }
 /* The topic heading shares its row with Show diagram, so the diagram costs the board no extra line. */
