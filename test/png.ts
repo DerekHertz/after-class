@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { inflateSync } from "node:zlib";
 
 /** An 8-bit, non-interlaced PNG decoded to RGBA, so tests can check the real art instead of its filename. */
-export type Png = { readonly width: number; readonly height: number; readonly alpha: boolean; readonly rgba: Uint8Array };
-export type Rgba = readonly [number, number, number, number];
+type Png = { readonly width: number; readonly height: number; readonly alpha: boolean; readonly rgba: Uint8Array };
+type Rgba = readonly [number, number, number, number];
 
 const CHANNELS: Readonly<Record<number, number>> = { 0: 1, 2: 3, 4: 2, 6: 4 };
 

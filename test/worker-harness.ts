@@ -98,7 +98,7 @@ export type Backend = {
   calls: number;
   readonly stored: Map<string, Map<number, WireFact>>;
 };
-export const newBackend = (): Backend => ({ down: false, refuses: () => false, lostAckOnce: false, calls: 0, stored: new Map() });
+const newBackend = (): Backend => ({ down: false, refuses: () => false, lostAckOnce: false, calls: 0, stored: new Map() });
 
 function ackFor(b: Backend, cap: string) {
   const m = b.stored.get(cap) ?? new Map();
@@ -153,7 +153,7 @@ export type Env = {
 export const WATCH = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
 export const newEnv = (): Env => ({ idb: new FakeIDB(), session: {}, local: { pairingToken: "tok" }, urls: { 1: WATCH, 2: WATCH }, backend: newBackend() });
 
-export type FakeChrome = Any;
+type FakeChrome = Any;
 export type FakePort = {
   readonly posted: Any[];
   onPost: ((m: Any) => void) | null;
