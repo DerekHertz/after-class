@@ -4,12 +4,26 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { currentExchange, reduceLive, shouldAutoSendSpeech, startLive, turnStatus } from "../src/app/core";
 import type { Line, Live } from "../src/app/core";
+import { FrontRowScene } from "../src/app/front-row";
 import { Composer, TurnStatusNote } from "../src/app/review";
 import type { SpeechInput } from "../src/app/speech";
 import type { TutorMove } from "../src/shared/domain";
 
 const ask: TutorMove = { kind: "wrap_up" };
 const quiet: SpeechInput = { supported: true, start() {}, stop() {} };
+
+describe("the review scene", () => {
+  test("renders the board content it is given, ahead of the desk, with the earlier lines one tap away", () => {
+    const html = renderToStaticMarkup(createElement(FrontRowScene, {
+      scene: "last-desk", appearance: { companion: "mote", visible: true, motion: "system" }, activity: "idle",
+      layout: { kind: "review", board: createElement("section", { className: "current-exchange" }, "Why does the cache miss?"), desk: "Your answer", objects: { cited: 0, open() {} } },
+    }));
+    expect(html).toContain("Why does the cache miss?");
+    expect(html.indexOf('data-area="board"')).toBeLessThan(html.indexOf("Why does the cache miss?"));
+    expect(html.indexOf("Why does the cache miss?")).toBeLessThan(html.indexOf('data-area="desk"'));
+    expect(html).toContain('aria-label="Earlier in this review"');
+  });
+});
 
 describe("the current question stays with the composer", () => {
   const line = (key: string, speaker: Line["speaker"]): Line => ({ key, speaker, label: speaker, text: key, evidenceIds: [] });
