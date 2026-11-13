@@ -128,8 +128,8 @@ const OWNERS = tableOwners();
 /** db.ts migrations 003-diagram-purpose and 004-user-id copy these providers tables into rebuilt ones (a CHECK cannot be altered, and a NOT NULL reference cannot be added); no other write is allowed there. */
 const REBUILT_BY_MIGRATION = new Set(["memo_inputs", "memo", "memo_failures", "usage_events", "voice_usage_events"]);
 
-/** segmentation/002-user-id rebuilds its table to add user_id, so db.ts copies rows into them. */
-for (const table of ["chunk_revisions"]) REBUILT_BY_MIGRATION.add(table);
+/** segmentation/002-user-id and preparation/003-user-id rebuild their tables to add user_id, so db.ts copies rows into them. */
+for (const table of ["chunk_revisions", "claim_index", "concept_index", "prep_controls", "prep_inputs"]) REBUILT_BY_MIGRATION.add(table);
 
 function ownerOfFile(path: string): Owner | "none" {
   if (path === "src/backend/db.ts") return "kernel";

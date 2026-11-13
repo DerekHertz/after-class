@@ -549,6 +549,96 @@ CREATE INDEX prep_inputs_by_capture ON prep_inputs (capture_id, kind, seq);
 CREATE INDEX prep_inputs_by_key ON prep_inputs (memo_key);
 ${appendOnly("prep_inputs")}`,
     },
+    {
+      id: "003-user-id",
+      sql: `
+-- Phase 1 tenancy: the four preparation tables name their user, by the same save, drop, recreate and refill as
+-- segmentation/002. Claim ids hash the interpretation's memo key and concept ids hash a label, so two users who watch one
+-- lecture make identical ids; every key therefore leads with user_id and the derivations stay. prep_inputs.memo_key has no
+-- foreign key: a frozen input is written before its memo row exists. It is read back through the same user's memo.
+PRAGMA defer_foreign_keys = ON;
+
+INSERT INTO users (id, created_ms)
+SELECT '${stableId("usr", "local")}', CAST(strftime('%s', 'now') AS INTEGER) * 1000
+WHERE (EXISTS (SELECT 1 FROM claim_index) OR EXISTS (SELECT 1 FROM concept_index)
+       OR EXISTS (SELECT 1 FROM prep_controls) OR EXISTS (SELECT 1 FROM prep_inputs))
+  AND NOT EXISTS (SELECT 1 FROM users WHERE id = '${stableId("usr", "local")}');
+
+CREATE TABLE claim_index_save AS SELECT id, capture_id, source_chunk_id, interpretation_key, ordinal, concept_id, seq FROM claim_index;
+CREATE TABLE concept_index_save AS SELECT id, label, summary, seq FROM concept_index;
+CREATE TABLE prep_controls_save AS SELECT seq, capture_id, action, chunk_revision_id, at_ms FROM prep_controls;
+CREATE TABLE prep_inputs_save AS SELECT kind, subject_id, capture_id, memo_key, input_json, seq FROM prep_inputs;
+DROP TABLE claim_index;
+DROP TABLE concept_index;
+DROP TABLE prep_controls;
+DROP TABLE prep_inputs;
+
+-- Index over interpretation memo outputs, so claims of a capture are found without scanning the memo.
+CREATE TABLE claim_index (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  id TEXT NOT NULL,
+  capture_id TEXT NOT NULL,
+  source_chunk_id TEXT NOT NULL,
+  interpretation_key TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+  concept_id TEXT NOT NULL,
+  seq INTEGER NOT NULL UNIQUE,
+  PRIMARY KEY (user_id, id),
+  UNIQUE (user_id, interpretation_key, ordinal)
+) STRICT;
+INSERT INTO claim_index (user_id, id, capture_id, source_chunk_id, interpretation_key, ordinal, concept_id, seq)
+SELECT '${stableId("usr", "local")}', id, capture_id, source_chunk_id, interpretation_key, ordinal, concept_id, seq FROM claim_index_save;
+CREATE INDEX claim_index_by_capture ON claim_index (user_id, capture_id);
+
+CREATE TABLE concept_index (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  seq INTEGER NOT NULL UNIQUE,
+  PRIMARY KEY (user_id, id)
+) STRICT;
+INSERT INTO concept_index (user_id, id, label, summary, seq) SELECT '${stableId("usr", "local")}', id, label, summary, seq FROM concept_index_save;
+
+-- Stop early / retry facts. A result counts only if its memo seq precedes the covering stop_early.
+CREATE TABLE prep_controls (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  seq INTEGER NOT NULL,
+  capture_id TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('stop_early','retry')),
+  chunk_revision_id TEXT NOT NULL,
+  at_ms INTEGER NOT NULL,
+  PRIMARY KEY (user_id, seq, chunk_revision_id)
+) STRICT;
+INSERT INTO prep_controls (user_id, seq, capture_id, action, chunk_revision_id, at_ms)
+SELECT '${stableId("usr", "local")}', seq, capture_id, action, chunk_revision_id, at_ms FROM prep_controls_save;
+CREATE INDEX prep_controls_by_capture ON prep_controls (user_id, capture_id, seq);
+${appendOnly("prep_controls")}
+
+-- A job's input, frozen when the job first runs: later evidence changes (frame judgments, deletions,
+-- a retried check) never re-key work that already started. One row per (user, kind, subject).
+-- R4: "A claim gets at most one revision; after that it's unverified." A revision row's subject is its claim.
+CREATE TABLE prep_inputs (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  kind TEXT NOT NULL CHECK (kind IN ('interpretation','revision','resource_search')),
+  subject_id TEXT NOT NULL,
+  capture_id TEXT NOT NULL,
+  memo_key TEXT NOT NULL,
+  input_json TEXT NOT NULL,
+  seq INTEGER NOT NULL UNIQUE,
+  PRIMARY KEY (user_id, kind, subject_id)
+) STRICT;
+INSERT INTO prep_inputs (user_id, kind, subject_id, capture_id, memo_key, input_json, seq)
+SELECT '${stableId("usr", "local")}', kind, subject_id, capture_id, memo_key, input_json, seq FROM prep_inputs_save;
+CREATE INDEX prep_inputs_by_capture ON prep_inputs (user_id, capture_id, kind, seq);
+CREATE INDEX prep_inputs_by_key ON prep_inputs (user_id, memo_key);
+${appendOnly("prep_inputs")}
+
+DROP TABLE claim_index_save;
+DROP TABLE concept_index_save;
+DROP TABLE prep_controls_save;
+DROP TABLE prep_inputs_save;`,
+    },
   ],
 
   review: [
