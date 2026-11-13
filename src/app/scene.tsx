@@ -34,12 +34,14 @@ function AppearancePicker() {
     </div>
   </details>;
 }
-export function SceneShell({ children }: { readonly children: ReactNode }) {
+/** `account` is the hosted app's sign-out control, shown after the appearance picker. The local app has none. */
+export function SceneShell({ children, account }: { readonly children: ReactNode; readonly account?: ReactNode }) {
   const { appearance, activity } = useAppearance();
   return <div className="scene-shell" data-scene={appearance.scene} data-motion={appearance.motion} data-detail={appearance.detail} style={roomStyle(appearance.scene)}>
     <header className="scene-masthead">
       <Link to={{ page: "home" }}><span className="bell-mark" aria-hidden="true" /><span>After Class</span></Link>
       <AppearancePicker />
+      {account}
     </header>
     <div className="scene-content">{children}</div>
     <footer className="scene-footer">
