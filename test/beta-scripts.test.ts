@@ -140,6 +140,216 @@ describe("afterclass-deploy", () => {
     expect(run.tag).toBe(NEW);
     expect(run.log.some((line) => line.startsWith("docker image prune"))).toBe(true);
   });
+
+  test("a healthy deploy saves the new image and keeps the one it replaced", () => {
+    const run = runDeploy({ previous: OLD, next: NEW });
+    expect(run.log).toContain(`save ${NEW} ${OLD}`);
+    expect(run.stdout).not.toContain("WARNING");
+  });
+
+  test("the first deploy saves only the new image", () => {
+    const run = runDeploy({ previous: "", next: NEW });
+    expect(run.status).toBe(0);
+    expect(run.log).toContain(`save ${NEW}`);
+  });
+
+  test("a failed save does not break a healthy deploy and is reported as a warning on stdout", () => {
+    const run = runDeploy({ previous: OLD, next: NEW, saveFails: true });
+    expect(run.status).toBe(0);
+    expect(run.tag).toBe(NEW);
+    expect(run.stdout).toContain(`WARNING ${NEW} is not saved on /data`);
+    expect(run.log.some((line) => line.startsWith("docker image prune"))).toBe(true);
+  });
+
+  test("a rollback saves the image it restored, and a tag that failed is never saved", () => {
+    const run = runDeploy({ previous: OLD, next: NEW, unhealthy: [NEW] });
+    expect(run.log).toContain(`save ${OLD}`);
+    expect(run.log.some((line) => line.startsWith(`save ${NEW}`))).toBe(false);
+  });
+
+  test("a failed save after a rollback is still reported, and the run still fails", () => {
+    const run = runDeploy({ previous: OLD, next: NEW, unhealthy: [NEW], saveFails: true });
+    expect(run.status).toBe(1);
+    expect(run.tag).toBe(OLD);
+    expect(run.stdout).toContain(`WARNING ${OLD} is not saved on /data`);
+  });
+});
+
+const imageName = (tag: string): string => `registry.test/afterclass-api:${tag}`;
+const storeKey = (tag: string): string => imageName(tag).replace(/[/:]/g, "_");
+
+/**
+ * A stand-in for the docker CLI. Its image store is a folder of marker files, so a save on one host followed by a load on
+ * another behaves like the real round trip. `pullFails` stands for an image ECR no longer holds, `saveFails` leaves a half
+ * file and exits 1, and `size` is what `image inspect --format` reports.
+ */
+function fakeDocker(host: Host, opts: { store: string; pullFails?: boolean | undefined; saveFails?: boolean | undefined; size?: number }): void {
+  mkdirSync(opts.store, { recursive: true });
+  stub(
+    host.bin,
+    "docker",
+    `echo "docker $*" >> ${host.log}
+key() { echo "$1" | tr '/:' '__'; }
+case "$1 $2" in
+  "image inspect")
+    image="\${@: -1}"
+    [ -e "${opts.store}/$(key "$image")" ] || exit 1
+    [ "$3" = --format ] && echo ${opts.size ?? 1000}
+    exit 0;;
+  "save --output")
+    echo partial > "$3"
+    ${opts.saveFails ? "exit 1" : ""}
+    [ -e "${opts.store}/$(key "$4")" ] || exit 1
+    echo "$4" > "$3"; exit 0;;
+  "load --input")
+    grep -q corrupt "$3" && exit 1
+    touch "${opts.store}/$(key "$(cat "$3")")"; exit 0;;
+  "pull "*)
+    ${opts.pullFails ? "exit 1" : ""}
+    touch "${opts.store}/$(key "$2")"; exit 0;;
+  "login "*) cat >/dev/null; exit 0;;
+esac
+exit 0`,
+  );
+  stub(host.bin, "aws", "echo token");
+}
+
+function addLocalImage(store: string, tag: string): void {
+  mkdirSync(store, { recursive: true });
+  writeFileSync(join(store, storeKey(tag)), "");
+}
+
+function runSave(opts: {
+  keep: string[];
+  have?: string[];
+  tarballs?: string[];
+  strays?: string[];
+  freeBytes?: number;
+  saveFails?: boolean;
+}): { status: number; stderr: string; files: string[]; log: string[] } {
+  const host = makeHost("afterclass-save-test-");
+  const store = join(host.root, "store");
+  fakeDocker(host, { store, saveFails: opts.saveFails });
+  for (const tag of opts.have ?? [opts.keep[0]!]) addLocalImage(store, tag);
+  const dir = join(host.root, "data/afterclass/images");
+  for (const tag of opts.tarballs ?? []) writeFileSync(join(dir, `${tag}.tar`), `${imageName(tag)}\n`);
+  for (const name of opts.strays ?? []) writeFileSync(join(dir, name), "stray");
+  stub(host.bin, "df", `printf 'Avail\\n%s\\n' ${opts.freeBytes ?? 10_000_000_000}`);
+
+  const run = runScript(host, "afterclass-save-image", opts.keep);
+  return { status: run.status, stderr: run.stderr, files: readdirSync(dir).sort(), log: readLog(host) };
+}
+
+describe("afterclass-save-image", () => {
+  test("saves the running image as <tag>.tar and leaves no temporary file", () => {
+    const run = runSave({ keep: [NEW] });
+    expect(run.status).toBe(0);
+    expect(run.files).toEqual([`${NEW}.tar`]);
+  });
+
+  test("keeps the two named tarballs and prunes every other one, a crashed save's temporary file included", () => {
+    const run = runSave({ keep: [NEW, OLD], tarballs: [OLD, OLDER, OLDEST], strays: [`${OLDER}.tar.new`] });
+    expect(run.status).toBe(0);
+    expect(run.files).toEqual([`${NEW}.tar`, `${OLD}.tar`].sort());
+  });
+
+  test("a save that fails part way leaves the kept tarball, no half file, and a nonzero status", () => {
+    const run = runSave({ keep: [NEW, OLD], tarballs: [OLD, OLDER], saveFails: true });
+    expect(run.status).not.toBe(0);
+    expect(run.files).toEqual([`${OLD}.tar`]);
+  });
+
+  test("a disk with too little room is refused without writing anything, so the database keeps its space", () => {
+    const run = runSave({ keep: [NEW, OLD], tarballs: [OLD], freeBytes: 500_000_000 });
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain("bytes free on /data");
+    expect(run.log.some((line) => line.startsWith("docker save"))).toBe(false);
+    expect(run.files).toEqual([`${OLD}.tar`]);
+  });
+
+  test("a tarball that already exists is not written again", () => {
+    const run = runSave({ keep: [NEW], tarballs: [NEW] });
+    expect(run.status).toBe(0);
+    expect(run.log.some((line) => line.startsWith("docker save"))).toBe(false);
+  });
+
+  test("an image that is not on the host is an error, not an empty tarball", () => {
+    const run = runSave({ keep: [NEW], have: [] });
+    expect(run.status).not.toBe(0);
+    expect(run.files).toEqual([]);
+  });
+
+  test("anything but a full commit hash is refused, so a tag cannot name a path", () => {
+    const run = runSave({ keep: ["../../etc/passwd"], have: [] });
+    expect(run.status).toBe(2);
+  });
+});
+
+function runPull(opts: { tag: string; have?: string[]; tarball?: { content?: string }; pullFails?: boolean }): {
+  status: number;
+  log: string[];
+  hasImage: boolean;
+} {
+  const host = makeHost("afterclass-pull-test-");
+  const store = join(host.root, "store");
+  fakeDocker(host, { store, pullFails: opts.pullFails });
+  for (const tag of opts.have ?? []) addLocalImage(store, tag);
+  if (opts.tarball) {
+    writeFileSync(join(host.root, "data/afterclass/images", `${opts.tag}.tar`), opts.tarball.content ?? `${imageName(opts.tag)}\n`);
+  }
+  const run = runScript(host, "afterclass-pull", [opts.tag]);
+  return { status: run.status, log: readLog(host), hasImage: existsSync(join(store, storeKey(opts.tag))) };
+}
+
+describe("afterclass-pull", () => {
+  test("an image already on the host is neither loaded nor pulled", () => {
+    const run = runPull({ tag: NEW, have: [NEW], tarball: {} });
+    expect(run.status).toBe(0);
+    expect(run.log.some((line) => line.startsWith("docker load") || line.startsWith("docker pull"))).toBe(false);
+  });
+
+  test("an image ECR has expired starts from the tarball on the data volume", () => {
+    const run = runPull({ tag: NEW, tarball: {}, pullFails: true });
+    expect(run.status).toBe(0);
+    expect(run.hasImage).toBe(true);
+    expect(run.log.some((line) => line.startsWith("docker pull"))).toBe(false);
+  });
+
+  test("an expired image with no tarball fails, rather than starting something else", () => {
+    const run = runPull({ tag: NEW, pullFails: true });
+    expect(run.status).not.toBe(0);
+    expect(run.hasImage).toBe(false);
+  });
+
+  test("a tarball that does not load falls back to ECR", () => {
+    const run = runPull({ tag: NEW, tarball: { content: "corrupt" } });
+    expect(run.status).toBe(0);
+    expect(run.hasImage).toBe(true);
+    expect(run.log.some((line) => line.startsWith("docker pull"))).toBe(true);
+  });
+
+  test("an image with no tarball is pulled from ECR", () => {
+    const run = runPull({ tag: NEW });
+    expect(run.status).toBe(0);
+    expect(run.log.some((line) => line.startsWith("docker pull"))).toBe(true);
+  });
+});
+
+describe("a replaced instance", () => {
+  test("starts the image the old instance saved to /data, after ECR expired it", () => {
+    const old = makeHost("afterclass-replace-old-");
+    fakeDocker(old, { store: join(old.root, "store") });
+    addLocalImage(join(old.root, "store"), NEW);
+    stub(old.bin, "df", "printf 'Avail\\n10000000000\\n'");
+    expect(runScript(old, "afterclass-save-image", [NEW, OLD]).status).toBe(0);
+
+    const fresh = makeHost("afterclass-replace-new-");
+    rmSync(join(fresh.root, "data"), { recursive: true });
+    renameSync(join(old.root, "data"), join(fresh.root, "data"));
+    fakeDocker(fresh, { store: join(fresh.root, "store"), pullFails: true });
+    expect(runScript(fresh, "afterclass-pull", [NEW]).status).toBe(0);
+    expect(existsSync(join(fresh.root, "store", storeKey(NEW)))).toBe(true);
+  });
 });
 
 /** The named functions of afterclass-bootstrap, so a test can run them alone against stubbed disk tools. */

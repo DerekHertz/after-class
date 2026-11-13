@@ -2,6 +2,7 @@
 # Usage: afterclass-deploy <commit hash>. Run by the Systems Manager deploy document as root.
 # Pulls the image first, so the running container keeps serving during the download. Then it records the tag, restarts the
 # app and waits for /health. A tag that never turns healthy is rolled back to the previous one, and the run still fails.
+# A healthy image is saved to the data volume, so a replacement instance never depends on ECR still holding the tag.
 set -euo pipefail
 
 . /etc/afterclass/settings.env
@@ -43,6 +44,13 @@ healthy() {
   return 1
 }
 
+# The save is a safety copy. A failure leaves the running app alone and shows up as a WARNING in the command output.
+save_running_image() {
+  if ! /usr/local/sbin/afterclass-save-image "$@"; then
+    echo "afterclass-deploy: WARNING ${1} is not saved on /data, so a replacement instance needs ECR to still hold it. Free space on /data and deploy again."
+  fi
+}
+
 # The previous tag goes back first, so a failed pull, restart or health check of the previous image still leaves it selected.
 rollback() {
   write_tag "$previous"
@@ -50,6 +58,7 @@ rollback() {
   systemctl restart afterclass-app.service || true
   if healthy; then
     echo "afterclass-deploy: rolled back to ${previous}" >&2
+    save_running_image "$previous"
   else
     echo "afterclass-deploy: ${previous} is not healthy either" >&2
   fi
@@ -61,6 +70,7 @@ write_tag "$tag"
 # A restart that fails is the same as one that never turns healthy. The condition keeps set -e from skipping the rollback.
 if systemctl restart afterclass-app.service && healthy; then
   echo "afterclass-deploy: ${tag} is healthy"
+  save_running_image "$tag" ${previous:+"$previous"}
   # The deploy already worked, so a failed cleanup must not fail it.
   docker image prune --all --force --filter until=72h >/dev/null || echo "afterclass-deploy: image prune failed, ignored" >&2
   exit 0

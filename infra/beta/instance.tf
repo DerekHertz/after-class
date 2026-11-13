@@ -142,6 +142,7 @@ locals {
     { path = "/etc/systemd/system/afterclass-caddy.service", mode = "0644", content = file("${path.module}/files/afterclass-caddy.service") },
     { path = "/usr/local/sbin/afterclass-bootstrap", mode = "0755", content = file("${path.module}/files/afterclass-bootstrap.sh") },
     { path = "/usr/local/sbin/afterclass-pull", mode = "0755", content = file("${path.module}/files/afterclass-pull.sh") },
+    { path = "/usr/local/sbin/afterclass-save-image", mode = "0755", content = file("${path.module}/files/afterclass-save-image.sh") },
     { path = "/usr/local/sbin/afterclass-app-start", mode = "0755", content = file("${path.module}/files/afterclass-app-start.sh") },
     { path = "/usr/local/sbin/afterclass-deploy", mode = "0755", content = file("${path.module}/files/afterclass-deploy.sh") },
   ]
