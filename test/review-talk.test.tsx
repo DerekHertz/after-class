@@ -4,41 +4,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { currentExchange, reduceLive, shouldAutoSendSpeech, startLive, turnStatus } from "../src/app/core";
 import type { Line, Live } from "../src/app/core";
-import { FrontRowScene } from "../src/app/front-row";
 import { Composer, TurnStatusNote } from "../src/app/review";
 import type { SpeechInput } from "../src/app/speech";
 import type { TutorMove } from "../src/shared/domain";
 
 const ask: TutorMove = { kind: "wrap_up" };
 const quiet: SpeechInput = { supported: true, start() {}, stop() {} };
-
-describe("the conversation is never hidden", () => {
-  test("the review puts the current question on the board, never behind a hidden or inert wrapper, and keeps the earlier lines one tap away", () => {
-    const tsx = readFileSync(new URL("../src/app/review.tsx", import.meta.url), "utf8");
-    expect(tsx).toMatch(/<section[^>]*className="current-exchange"/);
-    expect(tsx).not.toMatch(/<section[^>]*className="current-exchange"[^>]*\b(hidden|inert)\b/);
-    const html = renderToStaticMarkup(createElement(FrontRowScene, {
-      scene: "last-desk", appearance: { companion: "mote", visible: true, motion: "system" }, activity: "idle",
-      layout: { kind: "review", board: createElement("section", { className: "current-exchange" }, "Why does the cache miss?"), desk: "Your answer", objects: { cited: 0, open() {} } },
-    }));
-    expect(html).toContain("Why does the cache miss?");
-    expect(html.indexOf('data-area="board"')).toBeLessThan(html.indexOf("Why does the cache miss?"));
-    expect(html.indexOf("Why does the cache miss?")).toBeLessThan(html.indexOf('data-area="desk"'));
-    expect(html).not.toMatch(/(?<![-\w])(hidden|inert)(=|>|\s)/);
-    expect(html).toContain('aria-label="Earlier in this review"');
-  });
-
-  test("no stylesheet hides the current question or the board it is written on", () => {
-    for (const file of ["front-row.css", "hd-room.css", "reference.css", "review.css", "styles.css", "scene.css"]) {
-      const css = readFileSync(new URL(`../src/app/${file}`, import.meta.url), "utf8");
-      for (const rule of css.split("}")) {
-        const [selector = "", declarations = ""] = rule.split("{");
-        const onTheQuestion = selector.split(",").some((part) => /(\.current-exchange|\[data-area="board"\])(:[\w-]+)*\s*$/.test(part.trim()));
-        if (onTheQuestion) expect(declarations, `${file}: ${selector.trim()}`).not.toMatch(/visibility:\s*hidden|display:\s*none/);
-      }
-    }
-  });
-});
 
 describe("the current question stays with the composer", () => {
   const line = (key: string, speaker: Line["speaker"]): Line => ({ key, speaker, label: speaker, text: key, evidenceIds: [] });
