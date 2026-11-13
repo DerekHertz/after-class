@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { LOCAL_USER } from "../src/backend/db";
+import { ConnectionBusyError, LOCAL_USER } from "../src/backend/db";
 import { asAsync, scopeAsyncDb } from "../src/backend/db-async";
 import type { AsyncDb, Tx } from "../src/backend/db-async";
 import { stableId } from "../src/shared/ids";
@@ -405,14 +405,114 @@ describe("async Db: a transaction body awaits only the database", () => {
     expect(sync.nextSeq()).toBe((other + 1) as typeof other);
   });
 
-  test("a statement on the connection from another task is not refused once the open transaction expired", async () => {
+  test("expiry rejects the transaction and frees the queue at once, even if the body never resumes", async () => {
     const { db } = setup();
-    const open = db.tx(async () => {
-      await delay(20);
+    const stuck = db.tx(async (t) => {
+      await put(t, "a");
+      await new Promise<never>(() => undefined);
     });
+    await expect(stuck).rejects.toThrow(/awaited something other than the database/);
+    await db.tx((t) => put(t, "b"));
+    expect(await keys(db)).toEqual(["b"]);
+  });
+
+  test("a statement from the abandoned body after expiry throws and cannot touch the next transaction", async () => {
+    const { db } = setup();
+    let late!: Tx;
+    const gate = Promise.withResolvers<void>();
+    const expired = db.tx(async (t) => {
+      late = t;
+      await gate.promise;
+    });
+    await expect(expired).rejects.toThrow(/awaited something other than the database/);
+    await db.tx(async (t) => {
+      await put(t, "next");
+      gate.resolve();
+      await ticks(3);
+      await expect(put(late, "late")).rejects.toThrow(/awaited something other than the database/);
+    });
+    expect(await keys(db)).toEqual(["next"]);
+  });
+
+  test("a statement on the connection from another task is allowed once the open transaction expired", async () => {
+    const { db } = setup();
+    const outcome = db
+      .tx(async () => {
+        await delay(20);
+      })
+      .then(
+        () => "committed",
+        (e: Error) => e.message,
+      );
     await delay(5);
     expect(await keys(db)).toEqual([]);
-    await expect(open).rejects.toThrow(/awaited something other than the database/);
+    expect(await outcome).toMatch(/awaited something other than the database/);
+  });
+});
+
+describe("async Db: a descendant savepoint cannot outlive a failed ancestor", () => {
+  test("an unawaited grandchild whose parent failed cannot write, and the root still commits its own work", async () => {
+    const { db } = setup();
+    await db.tx(async (t) => {
+      await t
+        .tx(async (child) => {
+          child
+            .tx(async (grand) => {
+              await ticks(3);
+              await put(grand, "grand");
+            })
+            .catch(() => undefined);
+        })
+        .then(
+          () => expect.unreachable("the child should fail with its grandchild still running"),
+          (e: Error) => expect(e.message).toMatch(/savepoint still running/),
+        );
+      await ticks(10);
+      await put(t, "root");
+    });
+    expect(await keys(db)).toEqual(["root"]);
+  });
+});
+
+describe("the raw connection during an async transaction", () => {
+  test("an unrelated promise continuation writing through db.sql, the shape of an HTTP handler, throws and is not acknowledged", async () => {
+    const { sync, db } = setup();
+    const outcome: string[] = [];
+    await db.tx(async (t) => {
+      await put(t, "mine");
+      const handler = Promise.resolve().then(() => {
+        sync.sql.run("INSERT INTO scratch (k, v) VALUES ('handler', 1)");
+        outcome.push("acknowledged");
+      });
+      handler.catch((e: Error) => outcome.push(e.name));
+      await ticks(5);
+    });
+    expect(outcome).toEqual(["ConnectionBusyError"]);
+    expect(await keys(db)).toEqual(["mine"]);
+  });
+
+  test("query, prepare, exec, transaction and a statement prepared earlier all throw while a transaction is open, and work after", async () => {
+    const { sync, db } = setup();
+    const earlier = sync.sql.query("INSERT INTO scratch (k, v) VALUES ('earlier', 1)");
+    const prepared = sync.sql.prepare("SELECT k FROM scratch");
+    await db.tx(async (t) => {
+      await put(t, "mine");
+      expect(() => sync.sql.query("SELECT 1")).toThrow(/asynchronous transaction is open/);
+      expect(() => sync.sql.prepare("SELECT 1")).toThrow(/asynchronous transaction is open/);
+      expect(() => sync.sql.exec("SELECT 1")).toThrow(/asynchronous transaction is open/);
+      expect(() => sync.sql.transaction(() => 1)()).toThrow(/asynchronous transaction is open/);
+      expect(() => earlier.run()).toThrow(/asynchronous transaction is open/);
+      expect(() => prepared.all()).toThrow(/asynchronous transaction is open/);
+    });
+    earlier.run();
+    expect(prepared.all()).toEqual([{ k: "earlier" }, { k: "mine" }]);
+  });
+
+  test("the refusal is the named error", async () => {
+    const { sync, db } = setup();
+    await db.tx(async () => {
+      expect(() => sync.sql.query("SELECT 1")).toThrow(ConnectionBusyError);
+    });
   });
 });
 

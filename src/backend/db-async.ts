@@ -19,11 +19,12 @@
  * 4. A handle is dead once its transaction ends, and so is every savepoint handle under it. A handle that has an open
  *    savepoint refuses statements itself.
  * 5. `nextSeq` exists only on `Tx`, so a Seq is always taken inside a transaction and rolls back with it.
- * 6. A transaction body awaits only database calls. On bun:sqlite every statement is synchronous and a database call
- *    resolves as a microtask, so no timer, I/O callback or HTTP handler can run until the transaction settles, and
- *    nothing else can observe or join it. The SQLite implementation enforces the rule with a macrotask marker: if it
- *    fires while the transaction is open, the body awaited something else, the transaction is rolled back at once and
- *    the call rejects. On Postgres the same rule keeps a pooled connection from being held across a model call.
+ * 6. A transaction body awaits only database calls, never a timer, I/O or a model call, which on Postgres would hold a
+ *    pooled connection. The SQLite implementation detects a violation on a best-effort basis with a macrotask marker
+ *    and then rolls back and rejects at once. It does not isolate anything: other tasks can still run between two
+ *    awaited database calls. On one SQLite connection that is made safe by refusal. While a transaction is open, any
+ *    other use of the connection throws `ConnectionBusyError` (see `asAsync`), so a writer is never acknowledged and
+ *    then rolled back.
  * 7. Every command starts with `withUserLock(userId, fn)` (or `lockUsers` inside a longer transaction). See `Tx.lockUsers`.
  *
  * Statements use `?` placeholders. The PostgreSQL implementation rewrites them to `$n`.
@@ -31,8 +32,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Seq } from "../shared/domain";
 import type { UserId } from "../shared/ids";
-import { asSeq } from "./db";
-import type { Db } from "./db";
+import { asSeq, connectionOf } from "./db";
+import type { Db, Gate } from "./db";
 
 export type Param = string | number | bigint | null | Uint8Array;
 
@@ -95,9 +96,6 @@ type Conn = Db["sql"];
 /** State of one open transaction, shared by its handle and every savepoint handle under it. */
 type Core = { dead: Error | null; expired: boolean; ended: boolean; handles: Set<SqliteTx>; locks: UserId[] };
 
-/** Per connection, not per wrapper, so two `asAsync` wrappers of one `Db` share one queue and one refusal. */
-type Gate = { open: Core | null; tail: Promise<void>; savepoints: number };
-const gates = new WeakMap<Conn, Gate>();
 
 const EXPIRED =
   "transaction body awaited something other than the database (a timer, I/O or another task), so it was rolled back; load what the command needs before the transaction";
@@ -184,6 +182,12 @@ class SqliteTx implements Tx {
     return [...this.core.locks];
   }
 
+  /** Kill this handle and, recursively, every savepoint handle running under it. */
+  close(): void {
+    this.closed = true;
+    this.child?.close();
+  }
+
   async tx<T>(fn: (t: Tx) => Promise<T>): Promise<T> {
     this.usable();
     const name = `sp_${++this.gate.savepoints}`;
@@ -193,13 +197,13 @@ class SqliteTx implements Tx {
     try {
       const value = await fn(inner);
       inner.settle();
-      inner.closed = true;
+      inner.close();
       this.child = null;
       this.exec(() => this.conn.run(`RELEASE ${name}`));
       return value;
     } catch (error) {
-      inner.closed = true;
-      if (!this.core.ended && !this.core.dead && !this.core.expired) {
+      inner.close();
+      if (!this.closed && !this.core.ended && !this.core.dead && !this.core.expired) {
         try {
           this.conn.run(`ROLLBACK TO ${name}`);
           this.conn.run(`RELEASE ${name}`);
@@ -220,18 +224,16 @@ const inside = new AsyncLocalStorage<true>();
 
 /**
  * Wrap a synchronous `Db`'s connection. Both interfaces share the connection and the Seq counter, and every wrapper of
- * one connection shares one transaction queue. The synchronous `tx` and `nextSeq` throw while an async transaction is
- * open. Raw `db.sql` use cannot be guarded, but rule 6 keeps other tasks from running in that window. The coexistence
- * lasts only until the last module has moved.
+ * one connection shares one transaction queue. While an async transaction is open, every use of the raw `db.sql` (and
+ * of statements prepared from it), and the synchronous `tx` and `nextSeq`, throws `ConnectionBusyError`. An
+ * interleaving writer therefore fails loudly and is never acknowledged and then rolled back.
+ *
+ * Mixing the two interfaces on one SQLite connection is NOT production-safe: a task that runs while a transaction
+ * yields fails with `ConnectionBusyError` instead of waiting. It is only for the migration. Module conversions land
+ * together, so no deployment runs a mix.
  */
 export function asAsync(db: Db): AsyncDb {
-  const conn = db.sql;
-  let gate = gates.get(conn);
-  if (!gate) {
-    gate = { open: null, tail: Promise.resolve(), savepoints: 0 };
-    gates.set(conn, gate);
-  }
-  const g = gate;
+  const { raw: conn, gate: g } = connectionOf(db.sql);
 
   const outside = <R>(fn: () => R): R => {
     if (g.open) throw new Error("statement issued outside the transaction handle while a transaction is open; use the handle passed to tx");
@@ -250,13 +252,18 @@ export function asAsync(db: Db): AsyncDb {
     try {
       conn.run("BEGIN IMMEDIATE");
       g.open = core;
-      marker = setImmediate(() => {
-        core.expired = true;
-        if (g.open === core) g.open = null;
-        if (conn.inTransaction) conn.run("ROLLBACK");
+      // Best effort detector of a non-database await, not isolation. On expiry the transaction rejects and frees the
+      // queue at once, whatever the body is still waiting for. The body's later statements throw.
+      const expiry = new Promise<never>((_, reject) => {
+        marker = setImmediate(() => {
+          core.expired = true;
+          if (conn.inTransaction) conn.run("ROLLBACK");
+          g.open = null;
+          reject(new Error(EXPIRED));
+        });
       });
       try {
-        const value = await inside.run(true, () => fn(t));
+        const value = await Promise.race([inside.run(true, () => fn(t)), expiry]);
         t.settle();
         conn.run("COMMIT");
         return value;

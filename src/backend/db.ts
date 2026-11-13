@@ -8,7 +8,7 @@
  * Single process, synchronous bun:sqlite, WAL: every command is one `tx`, so
  * writers serialize without locks. Nested `tx` calls become savepoints.
  */
-import { Database } from "bun:sqlite";
+import { Database, Statement } from "bun:sqlite";
 import type { Seq } from "../shared/domain";
 import { stableId } from "../shared/ids";
 import type { UserId } from "../shared/ids";
@@ -149,28 +149,69 @@ export function openDb(path: string, migrations: typeof MIGRATIONS = MIGRATIONS)
   }
 
   const bump = sql.query<{ value: number }, []>("UPDATE seq_counter SET value = value + 1 WHERE id = 1 RETURNING value");
-  // An asynchronous transaction (db-async.ts) is open on this connection when it is in a transaction outside any sync `tx`.
-  let syncDepth = 0;
-  const refuseDuringAsyncTx = (what: string) => {
-    if (syncDepth === 0 && sql.inTransaction) throw new Error(`sync ${what} while an asynchronous transaction is open on this connection`);
-  };
+  const gate: Gate = { open: null, tail: Promise.resolve(), savepoints: 0 };
+  const guarded = guardObject(sql, () => refuseDuringAsyncTx(gate, "db.sql"));
+  connections.set(guarded, { raw: sql, gate });
   return {
-    sql,
+    sql: guarded,
     nextSeq: () => {
-      refuseDuringAsyncTx("nextSeq");
+      refuseDuringAsyncTx(gate, "nextSeq");
       return asSeq(bump.get()!.value);
     },
     tx: <T>(fn: () => T): T => {
-      refuseDuringAsyncTx("tx");
-      return sql.transaction(() => {
-        syncDepth++;
-        try {
-          return fn();
-        } finally {
-          syncDepth--;
-        }
-      })();
+      refuseDuringAsyncTx(gate, "tx");
+      return sql.transaction(fn)();
     },
     close: () => sql.close(),
   };
+}
+
+/**
+ * State of one connection's asynchronous transactions (db-async.ts). `open` is set while one is open.
+ * `tail` queues the next one.
+ */
+export type Gate = { open: object | null; tail: Promise<void>; savepoints: number };
+
+/** Thrown by any raw access to a connection while an asynchronous transaction is open on it. */
+export class ConnectionBusyError extends Error {
+  override name = "ConnectionBusyError";
+}
+
+/** The unguarded connection and gate behind a `Db.sql`, for db-async.ts only. */
+const connections = new WeakMap<object, { readonly raw: Database; readonly gate: Gate }>();
+export function connectionOf(sql: Database): { readonly raw: Database; readonly gate: Gate } {
+  const found = connections.get(sql);
+  if (!found) throw new Error("connectionOf: not a Db.sql");
+  return found;
+}
+
+function refuseDuringAsyncTx(gate: Gate, what: string): void {
+  if (gate.open) {
+    throw new ConnectionBusyError(`${what} used while an asynchronous transaction is open on this connection; use the transaction's handle, or wait until it ends`);
+  }
+}
+
+/**
+ * A view of the connection whose every method, and every statement it hands out, throws while an asynchronous
+ * transaction is open. On one SQLite connection a task that runs while such a transaction yields would otherwise join
+ * it, be acknowledged and then be rolled back with it. The transaction's own handle uses the unguarded connection.
+ */
+function guardObject<T extends object>(target: T, check: () => void, cache = new WeakMap<object, object>()): T {
+  return new Proxy(target, {
+    get(t, p) {
+      const value = Reflect.get(t, p, t);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => {
+        check();
+        const result = value.apply(t, args);
+        if (result instanceof Statement) {
+          let wrapped = cache.get(result);
+          if (!wrapped) cache.set(result, (wrapped = guardObject(result, check, cache)));
+          return wrapped;
+        }
+        if (typeof result === "function") return (...inner: unknown[]) => (check(), result(...inner));
+        return result;
+      };
+    },
+  });
 }

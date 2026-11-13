@@ -32,9 +32,10 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 
 - Every statement of a transaction goes through the `Tx` that `tx` passes in. A statement on the `AsyncDb` while a transaction is open throws, `db.tx` inside a transaction throws (use `t.tx`, a savepoint), and a handle used after its transaction ended throws.
 - After a failed statement, the handle throws on every later statement, as PostgreSQL does. Wrap a statement whose failure you want to survive in `t.tx`.
-- A transaction body awaits only database calls. A timer, I/O or another task inside it rolls the transaction back and rejects, which is what keeps sync code from another task out of an open transaction. Load what the command needs before `tx`, and never hold a transaction across a model call.
-- Await every `t.tx`. A savepoint still running when its parent settles fails the transaction.
-- The synchronous `db.tx` and `db.nextSeq` throw while an async transaction is open on the connection. Every `asAsync` wrapper of one `Db` shares one queue.
+- A transaction body awaits only database calls. Load what the command needs before `tx`, and never hold a transaction across a model call. The SQLite implementation detects a timer or I/O wait on a best-effort basis, rolls the transaction back and rejects at once. That detection does not isolate anything.
+- Await every `t.tx`. A savepoint still running when its parent settles fails the transaction, and every savepoint handle under a failed one is dead.
+- While an async transaction is open, every use of the raw `db.sql` (including statements prepared from it) and the synchronous `db.tx` and `db.nextSeq` throw `ConnectionBusyError`. A task that interleaves fails loudly and is never acknowledged and then rolled back. Every `asAsync` wrapper of one `Db` shares one queue.
+- Mixing the sync and async interfaces on one SQLite connection is not production-safe, because an interleaving request fails instead of waiting. The module conversions land on an integration branch, `phase2/async`, and merge to master together, so master never runs a mix.
 - `nextSeq` exists only on `Tx`.
 - A command starts with `withUserLock(userId, fn)`, or `command(fn)` on an `AsyncUserDb`. The lock lasts until the outermost transaction ends. A command that crosses users, such as `sweepExpired`, finds its users, calls `t.lockUsers(...)` once for all of them (locks are taken in ascending user id, and a lower id after a higher one throws), and only then reads and deletes.
 - Await nothing between a read and the write that depends on it unless both hold the user's lock.
