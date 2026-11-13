@@ -14,6 +14,9 @@
  *   token    ~/.config/afterclass/pairing-token (0600), created on first boot, printed with "listening on 127.0.0.1:<port>".
  *   data     $AFTERCLASS_DATA (default ./data): afterclass.sqlite, frames/
  *   mode     AFTERCLASS_MODE=live | replay. Unset: live when a keys file exists, replay otherwise.
+ *   hosted   The container image sets AFTERCLASS_HOST=0.0.0.0, AFTERCLASS_HEALTH_ANY_HOST=1, AFTERCLASS_BUILD_APP=0 and
+ *            AFTERCLASS_CONFIG_DIR. Unset, the backend binds 127.0.0.1 and every route keeps the localhost Host check.
+ *            AFTERCLASS_HEALTH_ANY_HOST=1 relaxes the Host check for GET /health only, for the load balancer's health check.
  *
  * Replay mode builds no Jev client and no `claude` adapter. Its providers refuse every call, and the memo is in replay
  * mode, so a lookup that misses throws ReplayMiss before any task runs: nothing opens a socket or spawns a process,
@@ -86,9 +89,9 @@ export type TaskSet = {
 export type Env = Readonly<Record<string, string | undefined>>;
 
 export type MainOptions = {
-  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_CLAUDE_BACKEND, AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_EXTENSION_ID, AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL. */
+  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_CLAUDE_BACKEND, AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_HOST, AFTERCLASS_HEALTH_ANY_HOST, AFTERCLASS_BUILD_APP, AFTERCLASS_CONFIG_DIR, AFTERCLASS_EXTENSION_ID, AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL. */
   readonly env?: Env;
-  /** Holds keys.env and pairing-token. Defaults to ~/.config/afterclass. */
+  /** Holds keys.env and pairing-token. Defaults to AFTERCLASS_CONFIG_DIR, then ~/.config/afterclass. */
   readonly configDir?: string;
   /** Overrides AFTERCLASS_PORT; 0 binds a free port. */
   readonly port?: number;
@@ -231,7 +234,7 @@ export async function main(options: MainOptions = {}): Promise<Running> {
   const log = options.log ?? ((text: string) => console.log(text));
   const logError = options.error ?? ((text: string) => console.error(text));
 
-  const configDir = options.configDir ?? join(homedir(), ".config", "afterclass");
+  const configDir = options.configDir ?? (env.AFTERCLASS_CONFIG_DIR || join(homedir(), ".config", "afterclass"));
   const keysPath = join(configDir, "keys.env");
   const keysFile = existsSync(keysPath);
   const mode = resolveMode(env.AFTERCLASS_MODE, keysFile);
@@ -471,7 +474,7 @@ export async function main(options: MainOptions = {}): Promise<Running> {
   };
 
   const appDir = resolve(options.appDir ?? join(ROOT, "dist", "app"));
-  if (options.buildApp !== false) {
+  if (options.buildApp !== false && env.AFTERCLASS_BUILD_APP !== "0") {
     try {
       await buildApp(appDir);
     } catch (e) {
@@ -484,7 +487,14 @@ export async function main(options: MainOptions = {}): Promise<Running> {
       ? unavailableVoice
       : createVoice({ apiKey: keys.ELEVENLABS_API_KEY, voiceId, model: voiceModel, db, ...(options.fetch ? { fetch: options.fetch } : {}) });
 
-  const server = serve({ modules: { ledger, evidence: served, reviews, record, preparation, segmentation, voice, diagrams }, auth: { port, extensionId, token }, appDir });
+  const hostname = env.AFTERCLASS_HOST || "127.0.0.1";
+  const server = serve({
+    modules: { ledger, evidence: served, reviews, record, preparation, segmentation, voice, diagrams },
+    auth: { port, extensionId, token },
+    appDir,
+    hostname,
+    healthAnyHost: env.AFTERCLASS_HEALTH_ANY_HOST === "1",
+  });
   const boundPort = server.port as number;
 
   if (extensionId === "") logError("backend: AFTERCLASS_EXTENSION_ID is not set, so the extension's requests are refused (403) until it is");
@@ -494,7 +504,8 @@ export async function main(options: MainOptions = {}): Promise<Running> {
       : `mode: replay (${keysFile ? "AFTERCLASS_MODE=replay" : "no keys file"}: Jev unavailable, Claude unavailable, every live call is refused)`,
   );
   log(voice.available ? `voice: ElevenLabs (model ${voice.model}, voice ${voice.voiceId})` : "voice: unavailable (no ELEVENLABS_API_KEY in keys.env, or replay mode); the app speaks with Chrome's voice");
-  log(`listening on 127.0.0.1:${boundPort}\npairing token: ${token}`);
+  // The token is printed only for a loopback bind. A hosted container's log goes to CloudWatch, which is not a place for a secret.
+  log(hostname === "127.0.0.1" ? `listening on 127.0.0.1:${boundPort}\npairing token: ${token}` : `listening on ${hostname}:${boundPort}`);
 
   pump();
 
