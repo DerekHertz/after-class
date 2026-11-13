@@ -57,7 +57,7 @@ exec 9>&-
 # One bridge network for Caddy and the app, so Caddy reaches the app by name and neither runs on the host network.
 docker network inspect afterclass >/dev/null 2>&1 || docker network create afterclass
 
-mkdir -p /data/db /data/config /data/afterclass/images /data/caddy/data /data/caddy/config
+mkdir -p /data/db /data/afterclass/images /data/caddy/data /data/caddy/config
 
 systemctl daemon-reload
 systemctl enable afterclass-caddy.service afterclass-app.service

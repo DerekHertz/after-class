@@ -56,6 +56,39 @@ data "aws_iam_policy_document" "instance" {
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = ["${aws_cloudwatch_log_group.beta.arn}:log-stream:*"]
   }
+
+  statement {
+    sid       = "ReadAppKeys"
+    actions   = ["ssm:GetParameter"]
+    resources = [local.key_parameters_arn]
+  }
+
+  # AmazonSSMManagedInstanceCore allows ssm:GetParameter and ssm:GetParameters on every parameter, and the aws/ssm key
+  # policy lets any principal in the account decrypt through Systems Manager. Without this deny the instance could read
+  # every SecureString in the account.
+  statement {
+    sid           = "NoOtherParameters"
+    effect        = "Deny"
+    actions       = ["ssm:GetParameter*"]
+    not_resources = [local.key_parameters_arn]
+  }
+
+  statement {
+    sid       = "DecryptAppKeys"
+    actions   = ["kms:Decrypt"]
+    resources = [data.aws_kms_alias.ssm.target_key_arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["ssm.${var.region}.amazonaws.com"]
+    }
+  }
+}
+
+# Exists once the account holds a SecureString parameter, so create the key parameters before the first plan.
+data "aws_kms_alias" "ssm" {
+  name = "alias/aws/ssm"
 }
 
 resource "aws_iam_role_policy" "instance" {
@@ -108,6 +141,10 @@ resource "aws_ebs_volume" "data" {
 }
 
 locals {
+  # The app's keys are SecureString parameters under this path (infra/README.md). ElevenLabs stays off in the beta.
+  key_parameter_prefix = "/afterclass/beta"
+  key_parameters_arn   = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${local.key_parameter_prefix}/*"
+
   # The name Caddy serves and gets a certificate for. Empty means plain HTTP on the Elastic IP.
   site_name = var.domain != null ? var.domain : (var.sslip_https ? "${replace(aws_eip.beta.public_ip, ".", "-")}.sslip.io" : "")
 
@@ -124,16 +161,30 @@ locals {
     "LOG_GROUP=${aws_cloudwatch_log_group.beta.name}",
     "DATA_VOLUME_ID=${aws_ebs_volume.data.id}",
     "APP_PORT=${var.app_port}",
+    "KEY_PARAMETER_PREFIX=${local.key_parameter_prefix}",
     "",
   ])
 
-  # The Dockerfile already sets these. Listing the three that depend on how the server is wired keeps them explicit.
-  app_env = join("\n", [
+  public_origin = local.site_name == "" ? "http://${aws_eip.beta.public_ip}" : "https://${local.site_name}"
+  # A Clerk publishable key is pk_live_ or pk_test_ and the base64 of the Frontend API host followed by "$".
+  clerk_frontend_api = "https://${trimsuffix(base64decode(regex("^pk_(?:live|test)_(.+)$", var.clerk_publishable_key)[0]), "$")}"
+
+  # The Dockerfile sets the replay skeleton's defaults. The beta runs live, with the keys from Parameter Store, Claude
+  # through the Messages API only, and Clerk sign-in (docs/architecture/hosted-sign-in.md).
+  app_env = join("\n", concat([
     "AFTERCLASS_HOST=0.0.0.0",
     "AFTERCLASS_PORT=${var.app_port}",
     "AFTERCLASS_HEALTH_ANY_HOST=1",
+    "AFTERCLASS_MODE=live",
+    "AFTERCLASS_CLAUDE_BACKEND=api",
+    "AFTERCLASS_AUTH=clerk",
+    "AFTERCLASS_PUBLIC_ORIGIN=${local.public_origin}",
+    "AFTERCLASS_CLERK_PUBLISHABLE_KEY=${var.clerk_publishable_key}",
+    "AFTERCLASS_CLERK_ISSUER=${local.clerk_frontend_api}",
+    "AFTERCLASS_CLERK_JWKS_URL=${local.clerk_frontend_api}/.well-known/jwks.json",
+    ], var.extension_id == null ? [] : ["AFTERCLASS_EXTENSION_ID=${var.extension_id}"], [
     "",
-  ])
+  ]))
 
   files = [
     { path = "/etc/afterclass/settings.env", mode = "0644", content = local.settings },
@@ -146,6 +197,7 @@ locals {
     { path = "/usr/local/sbin/afterclass-pull", mode = "0755", content = file("${path.module}/files/afterclass-pull.sh") },
     { path = "/usr/local/sbin/afterclass-save-image", mode = "0755", content = file("${path.module}/files/afterclass-save-image.sh") },
     { path = "/usr/local/sbin/afterclass-app-start", mode = "0755", content = file("${path.module}/files/afterclass-app-start.sh") },
+    { path = "/usr/local/sbin/afterclass-fetch-keys", mode = "0755", content = file("${path.module}/files/afterclass-fetch-keys.sh") },
     { path = "/usr/local/sbin/afterclass-deploy", mode = "0755", content = file("${path.module}/files/afterclass-deploy.sh") },
   ]
 
