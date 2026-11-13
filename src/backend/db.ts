@@ -149,10 +149,28 @@ export function openDb(path: string, migrations: typeof MIGRATIONS = MIGRATIONS)
   }
 
   const bump = sql.query<{ value: number }, []>("UPDATE seq_counter SET value = value + 1 WHERE id = 1 RETURNING value");
+  // An asynchronous transaction (db-async.ts) is open on this connection when it is in a transaction outside any sync `tx`.
+  let syncDepth = 0;
+  const refuseDuringAsyncTx = (what: string) => {
+    if (syncDepth === 0 && sql.inTransaction) throw new Error(`sync ${what} while an asynchronous transaction is open on this connection`);
+  };
   return {
     sql,
-    nextSeq: () => asSeq(bump.get()!.value),
-    tx: <T>(fn: () => T): T => sql.transaction(fn)(),
+    nextSeq: () => {
+      refuseDuringAsyncTx("nextSeq");
+      return asSeq(bump.get()!.value);
+    },
+    tx: <T>(fn: () => T): T => {
+      refuseDuringAsyncTx("tx");
+      return sql.transaction(() => {
+        syncDepth++;
+        try {
+          return fn();
+        } finally {
+          syncDepth--;
+        }
+      })();
+    },
     close: () => sql.close(),
   };
 }

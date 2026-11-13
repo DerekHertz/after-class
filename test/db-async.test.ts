@@ -15,6 +15,10 @@ function setup() {
 const keys = async (db: AsyncDb) => (await db.all<{ k: string }>("SELECT k FROM scratch ORDER BY k")).map((r) => r.k);
 const put = (t: Tx, k: string) => t.run("INSERT INTO scratch (k, v) VALUES (?, 1)", k);
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+/** Yield to other promise continuations without leaving the microtask queue, as a database call does. */
+const ticks = async (n: number) => {
+  for (let i = 0; i < n; i++) await Promise.resolve();
+};
 
 describe("async Db: transactions", () => {
   test("a transaction that returns commits its writes and returns the callback's value", async () => {
@@ -73,7 +77,7 @@ describe("async Db: transactions", () => {
       db.tx(async (t) => {
         trace.push(`${name} start`);
         await put(t, name);
-        await delay(5);
+        await ticks(5);
         trace.push(`${name} end`);
       });
     await Promise.all([run("a"), run("b")]);
@@ -128,14 +132,26 @@ describe("async Db: the handle discipline", () => {
     expect(await keys(db)).toEqual(["a", "b"]);
   });
 
-  test("a statement on the connection is refused even while another command's transaction is waiting on a timer", async () => {
-    const { db } = setup();
-    const open = db.tx(async () => {
-      await delay(10);
+  test("a second wrapper of the same Db shares the open transaction's refusal and the queue", async () => {
+    const sync = testDb();
+    sync.sql.run("CREATE TABLE scratch (k TEXT PRIMARY KEY, v INTEGER NOT NULL) STRICT");
+    const a = asAsync(sync);
+    const b = asAsync(sync);
+    await a.tx(async (t) => {
+      await put(t, "a");
+      await expect(b.run("INSERT INTO scratch (k, v) VALUES ('b', 1)")).rejects.toThrow(/outside the transaction handle/);
     });
-    await delay(1);
-    await expect(db.all("SELECT k FROM scratch")).rejects.toThrow(/outside the transaction handle/);
-    await open;
+    const trace: string[] = [];
+    const run = (db: AsyncDb, name: string) =>
+      db.tx(async (t) => {
+        trace.push(`${name} start`);
+        await ticks(5);
+        await put(t, name);
+        trace.push(`${name} end`);
+      });
+    await Promise.all([run(a, "x"), run(b, "y")]);
+    expect(trace).toEqual(["x start", "x end", "y start", "y end"]);
+    expect(await keys(a)).toEqual(["a", "x", "y"]);
   });
 
   test("db.tx inside a transaction is refused instead of waiting on itself", async () => {
@@ -232,14 +248,26 @@ describe("async Db: the per-user command lock", () => {
     });
   });
 
-  test("one lockUsers call takes every listed user once, whatever the order or repeats", async () => {
+  test("one lockUsers call takes every listed user once, in ascending order, whatever the order or repeats", async () => {
     const { db } = setup();
+    const [low, high] = [A, B].sort() as [typeof A, typeof A];
     await db.tx(async (t) => {
-      await t.lockUsers(B, A, B);
-      expect(t.holdsUserLock(A) && t.holdsUserLock(B)).toBe(true);
-      await t.lockUsers(A);
-      expect(t.holdsUserLock(A)).toBe(true);
+      await t.lockUsers(high, low, high);
+      expect(t.heldUserLocks()).toEqual([low, high]);
+      await t.lockUsers(low);
+      expect(t.heldUserLocks()).toEqual([low, high]);
     });
+  });
+
+  test("a user below one already held is refused, so no transaction takes locks in descending order", async () => {
+    const { db } = setup();
+    const [low, high] = [A, B].sort() as [typeof A, typeof A];
+    await expect(
+      db.withUserLock(high, async (t) => {
+        await t.lockUsers(low);
+      }),
+    ).rejects.toThrow(/lock order/);
+    await db.withUserLock(low, (t) => t.lockUsers(high));
   });
 
   test("a second command for the same user does not start until the first one's transaction has ended", async () => {
@@ -248,7 +276,7 @@ describe("async Db: the per-user command lock", () => {
     const command = (name: string) =>
       db.withUserLock(A, async (t) => {
         trace.push(`${name} start`);
-        await delay(5);
+        await ticks(5);
         await put(t, name);
         trace.push(`${name} end`);
       });
@@ -272,6 +300,136 @@ describe("async Db: the per-user command lock", () => {
     const udb = scopeAsyncDb(db, B);
     const held = await udb.command(async (t) => [t.holdsUserLock(B), t.holdsUserLock(A)]);
     expect(held).toEqual([true, false]);
+  });
+});
+
+describe("async Db: savepoint lifetime and a rollback SQLite does on its own", () => {
+  test("a savepoint left running when its transaction settles fails the transaction, and its later work never lands", async () => {
+    const { db } = setup();
+    let child!: Promise<unknown>;
+    await expect(
+      db.tx(async (t) => {
+        child = t.tx(async (inner) => {
+          await ticks(3);
+          await put(inner, "child");
+        });
+        child.catch(() => undefined);
+      }),
+    ).rejects.toThrow(/savepoint still running/);
+    await expect(child).rejects.toThrow(/after its transaction ended|rolled back/);
+    await delay(5);
+    expect(await keys(db)).toEqual([]);
+  });
+
+  test("a failure that makes SQLite roll the whole transaction back kills the transaction, so nothing after it autocommits", async () => {
+    const { db } = setup();
+    await expect(
+      db.tx(async (t) => {
+        await put(t, "x");
+        await t.tx((inner) => inner.run("INSERT OR ROLLBACK INTO scratch (k, v) VALUES ('x', 1)")).catch(() => undefined);
+        await put(t, "after");
+      }),
+    ).rejects.toThrow(/transaction was rolled back/);
+    expect(await keys(db)).toEqual([]);
+  });
+
+  test("a body that catches that failure and returns still rejects and leaves nothing behind", async () => {
+    const { db } = setup();
+    await expect(
+      db.tx(async (t) => {
+        await put(t, "x");
+        await t.tx((inner) => inner.run("INSERT OR ROLLBACK INTO scratch (k, v) VALUES ('x', 1)")).catch(() => undefined);
+      }),
+    ).rejects.toThrow(/transaction was rolled back: .*UNIQUE/);
+    expect(await keys(db)).toEqual([]);
+  });
+});
+
+describe("async Db: a transaction body awaits only the database", () => {
+  test("a long chain of database calls and microtasks finishes before any timer or immediate runs", async () => {
+    const { db } = setup();
+    let fired = false;
+    setImmediate(() => (fired = true));
+    setTimeout(() => (fired = true), 0);
+    await db.tx(async (t) => {
+      for (let i = 0; i < 200; i++) await t.get("SELECT 1 AS one");
+      await ticks(1000);
+      await t.nextSeq();
+      expect(fired).toBe(false);
+    });
+    expect(fired).toBe(false);
+  });
+
+  test.each([
+    ["a timer", () => delay(0)],
+    ["an immediate", () => new Promise<void>((resolve) => setImmediate(resolve))],
+  ])("awaiting %s rolls the transaction back at once and rejects with the named error", async (_, wait) => {
+    const { db } = setup();
+    await expect(
+      db.tx(async (t) => {
+        await put(t, "a");
+        await wait();
+        await put(t, "b");
+      }),
+    ).rejects.toThrow(/awaited something other than the database/);
+    expect(await keys(db)).toEqual([]);
+  });
+
+  test("a body that awaits a timer and then returns without another statement still rejects and keeps nothing", async () => {
+    const { db } = setup();
+    await expect(
+      db.tx(async (t) => {
+        await put(t, "a");
+        await delay(5);
+      }),
+    ).rejects.toThrow(/awaited something other than the database/);
+    expect(await keys(db)).toEqual([]);
+  });
+
+  test("another task's sync command that runs while such a body waits is acknowledged and is not rolled back", async () => {
+    const { sync, db } = setup();
+    const before = sync.nextSeq();
+    let other = before;
+    setTimeout(() => {
+      other = sync.nextSeq();
+      sync.sql.run("INSERT INTO scratch (k, v) VALUES ('sync', 1)");
+    }, 2);
+    await expect(
+      db.tx(async (t) => {
+        await t.nextSeq();
+        await delay(20);
+      }),
+    ).rejects.toThrow(/awaited something other than the database/);
+    expect(other).toBe((before + 1) as typeof before);
+    expect(await keys(db)).toEqual(["sync"]);
+    expect(sync.nextSeq()).toBe((other + 1) as typeof other);
+  });
+
+  test("a statement on the connection from another task is not refused once the open transaction expired", async () => {
+    const { db } = setup();
+    const open = db.tx(async () => {
+      await delay(20);
+    });
+    await delay(5);
+    expect(await keys(db)).toEqual([]);
+    await expect(open).rejects.toThrow(/awaited something other than the database/);
+  });
+});
+
+describe("the synchronous Db during an async transaction", () => {
+  test("sync tx and sync nextSeq throw while an async transaction is open, and work after it", async () => {
+    const { sync, db } = setup();
+    await db.tx(async (t) => {
+      await put(t, "a");
+      expect(() => sync.nextSeq()).toThrow(/asynchronous transaction is open/);
+      expect(() => sync.tx(() => 1)).toThrow(/asynchronous transaction is open/);
+    });
+    expect(sync.tx(() => sync.nextSeq())).toBeGreaterThan(0);
+  });
+
+  test("a sync tx may still nest sync txs and take Seqs inside itself", () => {
+    const { sync } = setup();
+    expect(sync.tx(() => sync.tx(() => sync.nextSeq()))).toBeGreaterThan(0);
   });
 });
 

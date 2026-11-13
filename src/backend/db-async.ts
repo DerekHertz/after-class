@@ -15,10 +15,16 @@
  *    open transaction, which hides the bug until PostgreSQL runs it on another connection.
  * 3. A nested `t.tx` is a savepoint. A failed statement poisons the handle it ran on, as PostgreSQL does: later
  *    statements on that handle throw until a savepoint around it rolls back. A caller that wants to carry on after a
- *    failure wraps the statement in `t.tx`.
- * 4. A handle is dead once its transaction ends, and a handle that has an open savepoint refuses statements itself.
+ *    failure wraps the statement in `t.tx`. A savepoint must be awaited before its parent settles.
+ * 4. A handle is dead once its transaction ends, and so is every savepoint handle under it. A handle that has an open
+ *    savepoint refuses statements itself.
  * 5. `nextSeq` exists only on `Tx`, so a Seq is always taken inside a transaction and rolls back with it.
- * 6. Every command starts with `withUserLock(userId, fn)` (or `lockUsers` inside a longer transaction). See `Tx.lockUsers`.
+ * 6. A transaction body awaits only database calls. On bun:sqlite every statement is synchronous and a database call
+ *    resolves as a microtask, so no timer, I/O callback or HTTP handler can run until the transaction settles, and
+ *    nothing else can observe or join it. The SQLite implementation enforces the rule with a macrotask marker: if it
+ *    fires while the transaction is open, the body awaited something else, the transaction is rolled back at once and
+ *    the call rejects. On Postgres the same rule keeps a pooled connection from being held across a model call.
+ * 7. Every command starts with `withUserLock(userId, fn)` (or `lockUsers` inside a longer transaction). See `Tx.lockUsers`.
  *
  * Statements use `?` placeholders. The PostgreSQL implementation rewrites them to `$n`.
  */
@@ -41,8 +47,10 @@ export type Tx = Statements & {
   /** Monotonic across every fact table. Rolled back with its transaction, so a Seq is never handed out twice. */
   nextSeq(): Promise<Seq>;
   /**
-   * Take the per-user command lock of each user, in ascending id order whatever order they are passed in (two
-   * transactions that lock overlapping sets cannot deadlock), skipping users this transaction already holds.
+   * Take the per-user command lock of each user, in ascending id order whatever order they are passed in, skipping
+   * users this transaction already holds. Order holds across calls too: a user whose id is lower than one already
+   * held is refused, because two transactions that lock the same users in different orders deadlock on Postgres.
+   * A command that needs several users names them all in its first call.
    *
    * Contract, which the PostgreSQL implementation meets with `pg_advisory_xact_lock`:
    * - The lock is held until the outermost transaction commits or rolls back. Call it on the transaction's own handle,
@@ -57,6 +65,8 @@ export type Tx = Statements & {
    */
   lockUsers(...userIds: readonly UserId[]): Promise<void>;
   holdsUserLock(userId: UserId): boolean;
+  /** The users this transaction has locked, in acquisition order, which is ascending. */
+  heldUserLocks(): readonly UserId[];
   /** A savepoint. A throw rolls back to it and rethrows. */
   tx<T>(fn: (t: Tx) => Promise<T>): Promise<T>;
 };
@@ -82,29 +92,41 @@ export function scopeAsyncDb(db: AsyncDb, userId: UserId): AsyncUserDb {
 
 type Conn = Db["sql"];
 
-/** Shared state of one connection: which transaction is open and the queue behind it. */
-type Gate = { open: SqliteTx | null; tail: Promise<void>; savepoints: number };
+/** State of one open transaction, shared by its handle and every savepoint handle under it. */
+type Core = { dead: Error | null; expired: boolean; ended: boolean; handles: Set<SqliteTx>; locks: UserId[] };
+
+/** Per connection, not per wrapper, so two `asAsync` wrappers of one `Db` share one queue and one refusal. */
+type Gate = { open: Core | null; tail: Promise<void>; savepoints: number };
+const gates = new WeakMap<Conn, Gate>();
+
+const EXPIRED =
+  "transaction body awaited something other than the database (a timer, I/O or another task), so it was rolled back; load what the command needs before the transaction";
 
 class SqliteTx implements Tx {
-  private closed = false;
+  closed = false;
   private poisoned: Error | null = null;
   private child: SqliteTx | null = null;
-  private readonly locks: Set<UserId>;
 
   constructor(
     private readonly conn: Conn,
     private readonly gate: Gate,
+    private readonly core: Core,
     private readonly parent: SqliteTx | null,
   ) {
-    this.locks = parent ? parent.locks : new Set();
+    core.handles.add(this);
   }
 
-  /** PostgreSQL refuses to commit or release a transaction that has a failed statement, even if the code caught the error. */
+  /** Throws when the transaction cannot commit: a rollback already happened, a savepoint is unfinished, or a failure was caught. */
   settle(): void {
+    if (this.core.expired) throw new Error(EXPIRED);
+    if (this.core.dead) throw new Error(`transaction was rolled back: ${this.core.dead.message}`);
+    if (this.child) throw new Error("savepoint still running when its transaction handle settled; await every t.tx");
     if (this.poisoned) throw new Error(`transaction has a failed statement that was caught and ignored: ${this.poisoned.message}`);
   }
 
   private usable(): void {
+    if (this.core.expired) throw new Error(EXPIRED);
+    if (this.core.dead) throw new Error(`transaction was rolled back: ${this.core.dead.message}`);
     if (this.closed) throw new Error("transaction handle used after its transaction ended");
     if (this.child) throw new Error("statement on a handle that has an open savepoint; use the savepoint's handle");
     if (this.poisoned) throw new Error(`statement after a failed statement in the same transaction: ${this.poisoned.message}`);
@@ -115,7 +137,10 @@ class SqliteTx implements Tx {
     try {
       return fn();
     } catch (error) {
-      this.poisoned = error instanceof Error ? error : new Error(String(error));
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.poisoned = err;
+      // SQLite rolls the whole transaction back on some failures (OR ROLLBACK, disk errors). Nothing may autocommit after that.
+      if (!this.conn.inTransaction) this.core.dead = err;
       throw error;
     }
   }
@@ -140,80 +165,111 @@ class SqliteTx implements Tx {
   async lockUsers(...userIds: readonly UserId[]): Promise<void> {
     this.usable();
     if (this.parent) throw new Error("lockUsers inside a savepoint; take the lock on the transaction's own handle");
-    for (const id of [...new Set(userIds)].sort()) this.locks.add(id);
+    const held = this.core.locks;
+    for (const id of [...new Set(userIds)].sort()) {
+      if (held.includes(id)) continue;
+      const highest = held[held.length - 1];
+      if (highest !== undefined && id < highest) {
+        throw new Error(`lock order: ${id} is below ${highest}, which this transaction already holds; name every user in the first lockUsers call`);
+      }
+      held.push(id);
+    }
   }
 
   holdsUserLock(userId: UserId): boolean {
-    return this.locks.has(userId);
+    return this.core.locks.includes(userId);
+  }
+
+  heldUserLocks(): readonly UserId[] {
+    return [...this.core.locks];
   }
 
   async tx<T>(fn: (t: Tx) => Promise<T>): Promise<T> {
     this.usable();
     const name = `sp_${++this.gate.savepoints}`;
-    this.conn.run(`SAVEPOINT ${name}`);
-    const inner = new SqliteTx(this.conn, this.gate, this);
+    this.exec(() => this.conn.run(`SAVEPOINT ${name}`));
+    const inner = new SqliteTx(this.conn, this.gate, this.core, this);
     this.child = inner;
     try {
       const value = await fn(inner);
       inner.settle();
       inner.closed = true;
-      this.conn.run(`RELEASE ${name}`);
+      this.child = null;
+      this.exec(() => this.conn.run(`RELEASE ${name}`));
       return value;
     } catch (error) {
       inner.closed = true;
-      this.conn.run(`ROLLBACK TO ${name}`);
-      this.conn.run(`RELEASE ${name}`);
+      if (!this.core.ended && !this.core.dead && !this.core.expired) {
+        try {
+          this.conn.run(`ROLLBACK TO ${name}`);
+          this.conn.run(`RELEASE ${name}`);
+        } catch (cleanup) {
+          // The savepoint is gone, so the transaction's state is unknown. Nothing in it may commit or autocommit.
+          this.core.dead = cleanup instanceof Error ? cleanup : new Error(String(cleanup));
+          this.poisoned = this.core.dead;
+        }
+      }
       throw error;
     } finally {
       this.child = null;
     }
-  }
-
-  /** Called by the connection when the outermost transaction ends. */
-  end(): void {
-    this.closed = true;
-    this.locks.clear();
   }
 }
 
 const inside = new AsyncLocalStorage<true>();
 
 /**
- * Wrap a synchronous `Db`'s connection. Both interfaces share the connection and the Seq counter. While an async
- * transaction is open, do not call the synchronous `db.tx` or `db.sql` on the same `Db`: they cannot be told apart
- * from the handle and would join the transaction. That coexistence lasts only until the last module has moved.
+ * Wrap a synchronous `Db`'s connection. Both interfaces share the connection and the Seq counter, and every wrapper of
+ * one connection shares one transaction queue. The synchronous `tx` and `nextSeq` throw while an async transaction is
+ * open. Raw `db.sql` use cannot be guarded, but rule 6 keeps other tasks from running in that window. The coexistence
+ * lasts only until the last module has moved.
  */
 export function asAsync(db: Db): AsyncDb {
   const conn = db.sql;
-  const gate: Gate = { open: null, tail: Promise.resolve(), savepoints: 0 };
+  let gate = gates.get(conn);
+  if (!gate) {
+    gate = { open: null, tail: Promise.resolve(), savepoints: 0 };
+    gates.set(conn, gate);
+  }
+  const g = gate;
 
   const outside = <R>(fn: () => R): R => {
-    if (gate.open) throw new Error("statement issued outside the transaction handle while a transaction is open; use the handle passed to tx");
+    if (g.open) throw new Error("statement issued outside the transaction handle while a transaction is open; use the handle passed to tx");
     return fn();
   };
 
   const transaction = async <T>(fn: (t: Tx) => Promise<T>): Promise<T> => {
     if (inside.getStore()) throw new Error("db.tx called inside a transaction; use the handle's t.tx for a savepoint");
-    const prior = gate.tail;
+    const prior = g.tail;
     let release!: () => void;
-    gate.tail = new Promise<void>((resolve) => (release = resolve));
+    g.tail = new Promise<void>((resolve) => (release = resolve));
     await prior;
-    const t = new SqliteTx(conn, gate, null);
+    const core: Core = { dead: null, expired: false, ended: false, handles: new Set(), locks: [] };
+    const t = new SqliteTx(conn, g, core, null);
+    let marker: ReturnType<typeof setImmediate> | undefined;
     try {
       conn.run("BEGIN IMMEDIATE");
-      gate.open = t;
+      g.open = core;
+      marker = setImmediate(() => {
+        core.expired = true;
+        if (g.open === core) g.open = null;
+        if (conn.inTransaction) conn.run("ROLLBACK");
+      });
       try {
         const value = await inside.run(true, () => fn(t));
         t.settle();
         conn.run("COMMIT");
         return value;
       } catch (error) {
-        conn.run("ROLLBACK");
+        if (conn.inTransaction) conn.run("ROLLBACK");
         throw error;
       }
     } finally {
-      t.end();
-      gate.open = null;
+      if (marker !== undefined) clearImmediate(marker);
+      core.ended = true;
+      for (const h of core.handles) h.closed = true;
+      core.locks.length = 0;
+      if (g.open === core) g.open = null;
       release();
     }
   };

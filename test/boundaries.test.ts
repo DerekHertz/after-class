@@ -139,11 +139,13 @@ for (const table of ["invite_answers", "reviews", "review_turns"]) REBUILT_BY_MI
 /** record/004-user-id rebuilds its ten tables to add user_id, so its migration copies rows into them. */
 for (const table of ["notes", "note_edits", "note_deletions", "note_evidence", "observations", "observation_decisions", "link_suggestions", "link_decisions", "saved_reviews", "save_failures"]) REBUILT_BY_MIGRATION.add(table);
 
-/** The kernel files that hold schema text or write kernel tables (db-async.ts bumps `seq_counter`); migrations-record.ts holds the record's last migration because migrations.ts is at the line limit. */
-const MIGRATION_FILES = new Set(["src/backend/db.ts", "src/backend/db-async.ts", "src/backend/migrations.ts", "src/backend/migrations-record.ts"]);
+/** The kernel files that hold schema text; migrations-record.ts holds the record's last migration because migrations.ts is at the line limit. Only these may copy rows into a rebuilt table. */
+const MIGRATION_FILES = new Set(["src/backend/db.ts", "src/backend/migrations.ts", "src/backend/migrations-record.ts"]);
+/** Kernel files that write kernel tables only: db-async.ts bumps `seq_counter`. They have no migration exemption. */
+const KERNEL_FILES = new Set([...MIGRATION_FILES, "src/backend/db-async.ts"]);
 
 function ownerOfFile(path: string): Owner | "none" {
-  if (MIGRATION_FILES.has(path)) return "kernel";
+  if (KERNEL_FILES.has(path)) return "kernel";
   const dir = path.match(/^src\/backend\/(\w+)\//)?.[1];
   return dir !== undefined && ((MODULES as readonly string[]).includes(dir) || dir === "providers") ? (dir as Owner) : "none";
 }
@@ -176,16 +178,23 @@ describe("module boundaries", () => {
     expect(violations).toEqual([]);
   });
 
+  const writeViolations = (f: SourceFile): string[] =>
+    writtenTables(f.code).flatMap((table) => {
+      const owner = OWNERS.get(table);
+      const writer = ownerOfFile(f.path);
+      if (MIGRATION_FILES.has(f.path) && REBUILT_BY_MIGRATION.has(table)) return [];
+      return owner !== undefined && owner === writer ? [] : [`${f.path} writes ${table} (owner ${owner ?? "unknown"})`];
+    });
+
   test("each module's SQL writes only tables it owns; http, main and scheduler write none", () => {
-    const violations = SRC.flatMap((f) =>
-      writtenTables(f.code).flatMap((table) => {
-        const owner = OWNERS.get(table);
-        const writer = ownerOfFile(f.path);
-        if (MIGRATION_FILES.has(f.path) && REBUILT_BY_MIGRATION.has(table)) return [];
-        return owner !== undefined && owner === writer ? [] : [`${f.path} writes ${table} (owner ${owner ?? "unknown"})`];
-      }),
-    );
-    expect(violations).toEqual([]);
+    expect(SRC.flatMap(writeViolations)).toEqual([]);
+  });
+
+  test("db-async.ts may write kernel tables but has no migration exemption", () => {
+    const asyncDb = (code: string): SourceFile => ({ path: "src/backend/db-async.ts", code, imports: [] });
+    expect(writeViolations(asyncDb(`UPDATE seq_counter SET value = 1`))).toEqual([]);
+    expect(writeViolations(asyncDb(`DELETE FROM notes`))).toEqual(["src/backend/db-async.ts writes notes (owner record)"]);
+    expect(writeViolations({ path: "src/backend/migrations.ts", code: `INSERT INTO notes SELECT 1`, imports: [] })).toEqual([]);
   });
 
   test("the rules catch a violation when one is present", () => {
