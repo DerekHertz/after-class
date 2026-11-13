@@ -14,7 +14,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { openDb } from "../src/backend/db";
+import { ensureLocalUser, openDb, scopeDb } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
 import type { EvidenceBundleJson } from "../src/backend/evidence";
 import { stableId } from "../src/shared/ids";
@@ -133,7 +133,8 @@ export function pickCapture(candidates: readonly { readonly captureId: string; r
 
 export function exportCapture(opts: { readonly dataDir: string; readonly outDir: string; readonly captureId?: string | undefined }): Sampling & { readonly captureId: string } {
   const scratch = scratchCopy(opts.dataDir);
-  const db = openDb(scratch.path);
+  const rawDb = openDb(scratch.path);
+  const db = scopeDb(rawDb, ensureLocalUser(rawDb));
   try {
     const keyOf = (input: { readonly after: { readonly frame: { readonly id: string } } }): MemoKey => stableId("key", "frame_change", "probe", input.after.frame.id);
     const evidence = createEvidence(db, opts.dataDir, {
@@ -143,7 +144,7 @@ export function exportCapture(opts: { readonly dataDir: string; readonly outDir:
       onChange: () => {},
     });
 
-    const all = db.sql.query<{ capture_id: string }, []>("SELECT capture_id FROM capture_facts GROUP BY capture_id ORDER BY MAX(seq) DESC").all().map((r) => r.capture_id);
+    const all = evidence.captures();
     const candidates = all.map((id) => {
       const b = evidence.captureBundle(id as CaptureId);
       return { captureId: id, watchedSeconds: b.watchedSeconds, hasEvidence: hasEvidence(b) };

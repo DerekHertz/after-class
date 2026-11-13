@@ -5,6 +5,7 @@ import type { AssessableClaim, DisputeState, LearnerAct, SubjectLinkSuggestion, 
 import { clampStatus, isLearningGap, threadDispute, threadFacts } from "../src/backend/review/clamp";
 import type { WrapUpOutput } from "../src/backend/review/tutor";
 import { createRecord } from "../src/backend/record";
+import { LOCAL_USER, ensureLocalUser } from "../src/backend/db";
 import type { Db } from "../src/backend/db";
 import { testDb, testSeq } from "./fakes";
 
@@ -203,6 +204,7 @@ type Harness = ReturnType<typeof harness>;
 
 function harness(opts: { turns?: Turn[]; wrapUp?: () => Promise<WrapUpOutput>; claims?: () => AssessableClaim[]; db?: Db } = {}) {
   const db = opts.db ?? testDb();
+  ensureLocalUser(db);
   const turns = opts.turns ?? finishedReview().turns;
   const calls = { wrapUp: 0, snapshots: [] as EvidenceId[][] };
   let failSnapshots = 0;
@@ -221,8 +223,8 @@ function harness(opts: { turns?: Turn[]; wrapUp?: () => Promise<WrapUpOutput>; c
       calls.snapshots.push([...ids]);
       for (const id of ids) {
         db.sql.run(
-          `INSERT OR IGNORE INTO evidence_snapshots (evidence_id, kind, source_id, start_s, end_s, text, created_ms) VALUES (?, 'passage', 'src', 0, 1, 'text', 0)`,
-          [id],
+          `INSERT INTO evidence_snapshots (user_id, evidence_id, kind, source_id, start_s, end_s, text, created_ms) VALUES (?, ?, 'passage', 'src', 0, 1, 'text', 0) ON CONFLICT DO NOTHING`,
+          [LOCAL_USER, id],
         );
       }
     },
@@ -413,7 +415,7 @@ describe("the learning record", () => {
   test("evidence the user deleted shows as unavailable on the note that cites it", async () => {
     const h = harness();
     await h.record.save(REVIEW);
-    h.db.sql.run(`INSERT INTO evidence_deletions (evidence_id, request_id, deleted_ms, seq) VALUES (?, 'req', 42, 1)`, [ev(1)]);
+    h.db.sql.run(`INSERT INTO evidence_deletions (user_id, evidence_id, request_id, deleted_ms, seq) VALUES (?, ?, 'req', 42, 1)`, [LOCAL_USER, ev(1)]);
     expect(h.record.view({ reviewId: REVIEW }).unavailableEvidence).toEqual([{ kind: "deleted", id: ev(1), deletedAtMs: 42 }]);
   });
 });
@@ -479,7 +481,7 @@ describe("a save never snapshots evidence the user let go", () => {
 
   test("evidence the user deleted is not snapshotted, though a live note still cites it", async () => {
     const h = harness();
-    h.db.sql.run(`INSERT INTO evidence_deletions (evidence_id, request_id, deleted_ms, seq) VALUES (?, 'req', 42, 1)`, [ev(2)]);
+    h.db.sql.run(`INSERT INTO evidence_deletions (user_id, evidence_id, request_id, deleted_ms, seq) VALUES (?, ?, 'req', 42, 1)`, [LOCAL_USER, ev(2)]);
     await h.record.save(REVIEW);
     await h.record.save(REVIEW);
     expect(h.calls.snapshots).toEqual([[ev(1)]]);
@@ -516,8 +518,9 @@ describe("TLC counterexamples from docs/flows/model/out-record/report.md", () =>
 
   test("R16: end with a failed save, expiry is refused while pending, retry saves, cited evidence is held until the user deletes the note", async () => {
     const db = testDb();
+    ensureLocalUser(db);
     db.sql.run(`INSERT INTO reviews (id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, 'prepared_only', '{}', 1, 0)`, [REVIEW, CAPTURE]);
-    db.sql.run(`INSERT INTO capture_facts (seq, capture_id, client_seq, wall_ms, kind, body_json, received_ms) VALUES (2, ?, 0, 0, 'span', '{}', 0)`, [CAPTURE]);
+    db.sql.run(`INSERT INTO capture_facts (user_id, seq, capture_id, client_seq, wall_ms, kind, body_json, received_ms) VALUES (?, 2, ?, 0, 0, 'span', '{}', 0)`, [LOCAL_USER, CAPTURE]);
     const h = harness({ db });
     const expireRaw = () => db.sql.run(`DELETE FROM capture_facts WHERE capture_id = ?`, [CAPTURE]);
     const expireSnapshots = () => db.sql.run(`DELETE FROM evidence_snapshots`);

@@ -128,6 +128,9 @@ const OWNERS = tableOwners();
 /** db.ts migration 003-diagram-purpose copies these two providers tables into rebuilt ones (a CHECK cannot be altered); no other write is allowed there. */
 const REBUILT_BY_MIGRATION = new Set(["memo_inputs", "usage_events"]);
 
+/** evidence/003-user-id rebuilds its four tables to add user_id, so db.ts copies rows into them. */
+for (const table of ["capture_facts", "frames", "evidence_snapshots", "evidence_deletions"]) REBUILT_BY_MIGRATION.add(table);
+
 function ownerOfFile(path: string): Owner | "none" {
   if (path === "src/backend/db.ts") return "kernel";
   const dir = path.match(/^src\/backend\/(\w+)\//)?.[1];

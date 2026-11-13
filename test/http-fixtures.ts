@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Db } from "../src/backend/db";
+import type { Db, UserDb } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
 import { serve } from "../src/backend/http";
 import type { Preparation } from "../src/backend/preparation";
@@ -23,7 +23,7 @@ import type { Interval } from "../src/shared/time";
 import { Material, interval } from "../src/shared/time";
 import { recordViewResponse, saveResponse, tutorStreamEvent } from "../src/shared/wire";
 import type { FakeStep } from "./fakes";
-import { fakeTask, ok, testDb } from "./fakes";
+import { fakeTask, ok, testUserDb } from "./fakes";
 
 export const TOKEN = "tok-9f3a1c77e0b24d5aa8c1";
 
@@ -55,7 +55,7 @@ export function fixtureApp(): string {
   return dir;
 }
 
-function evidenceOn(db: Db) {
+function evidenceOn(db: UserDb) {
   return createEvidence(db, scratchDir("afterclass-data-"), {
     lookupFrameChange: (input) => ({ kind: "missing", key: stableId("key", input.after.frame.id) }),
     runFrameChange: async () => undefined,
@@ -66,7 +66,7 @@ function evidenceOn(db: Db) {
 
 /** The real evidence module on an in-memory db; reviews is a fake whose invite state a test sets. */
 export function world() {
-  const db = testDb();
+  const db = testUserDb();
   const evidence = evidenceOn(db);
   const invite = { state: { state: "none" } as InviteState, answers: [] as InviteAnswer[] };
   const reviews = {
@@ -320,7 +320,7 @@ export const said = (words: string): LearnerAct => ({ kind: "answer", text: word
  * answered from `world`; the tutor and wrap-up are scripted. `retries` records preparation.retry calls.
  */
 export function reviewRig(script: Script = pick, extra: { turnDeadlineMs?: number } = {}) {
-  const db = testDb();
+  const db = testUserDb();
   const world = new World(db);
   const model = modelTask(script);
   const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
