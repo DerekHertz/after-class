@@ -4,7 +4,7 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
@@ -413,5 +413,104 @@ describe("the spend cap is an upper bound", () => {
     expect(text).toContain("more than the");
     expect(text).toContain("stopped");
     expect(readFileSync(join(out, "results.md"), "utf8")).toContain("OVERRUN at call 1");
+  });
+});
+
+describe("the input database and earlier results are never overwritten", () => {
+  const seeded = () => fixtureDb([{ key: "t1", purpose: "tutor_turn", atMs: T0 }]);
+  const args = (db: string, out: string) => ["--db", db, "--since", "2026-11-11", "--out", out];
+  const okReply = { text: `{"kind":"wrap_up"}\nok` };
+
+  async function refused(db: string, out: string, watch: readonly string[], pattern: string) {
+    const before = watch.map(sha);
+    const api = fakeApi([okReply, okReply]);
+    const { code, errors } = await run(args(db, out), api.client);
+    expect(code).toBe(1);
+    expect(errors.join("\n")).toContain(pattern);
+    expect(api.calls()).toBe(0);
+    expect(watch.map(sha)).toEqual(before);
+  }
+
+  test("--db <out>/results.json --out <out>, the verifier's case, is refused and the database is untouched", async () => {
+    const out = dir();
+    const db = join(out, "results.json");
+    copyFileSync(seeded(), db);
+    await refused(db, out, [db], "inside the output directory");
+  });
+
+  test("a database anywhere inside the output directory is refused", async () => {
+    const out = dir();
+    mkdirSync(join(out, "sub"));
+    const db = join(out, "sub", "afterclass.sqlite");
+    copyFileSync(seeded(), db);
+    await refused(db, out, [db], "inside the output directory");
+  });
+
+  test("a symlink to a file the runner writes is refused, whichever side the link is on", async () => {
+    const out = dir();
+    const real = join(out, "results.md");
+    copyFileSync(seeded(), real);
+    const link = join(dir(), "db-link.sqlite");
+    symlinkSync(real, link);
+    await refused(link, out, [real], "inside the output directory");
+  });
+
+  test("an output directory that is a symlink to the database's folder is refused", async () => {
+    const folder = dir();
+    const db = join(folder, "afterclass.sqlite");
+    copyFileSync(seeded(), db);
+    const link = join(dir(), "out-link");
+    symlinkSync(folder, link);
+    await refused(db, link, [db], "inside the output directory");
+  });
+
+  test("a relative path with dot segments is normalized before the check", async () => {
+    const out = dir();
+    const db = join(out, "x", "..", "results.json");
+    mkdirSync(join(out, "x"));
+    copyFileSync(seeded(), join(out, "results.json"));
+    await refused(db, out, [join(out, "results.json")], "inside the output directory");
+  });
+
+  test("a database elsewhere is fine", async () => {
+    const out = join(dir(), "out");
+    const { code } = await run(args(seeded(), out), fakeApi([okReply]).client);
+    expect(code).toBe(0);
+    expect(existsSync(join(out, "results.json"))).toBe(true);
+  });
+
+  test("an existing results.json from an earlier run is never overwritten", async () => {
+    const out = join(dir(), "out");
+    const db = seeded();
+    expect((await run(args(db, out), fakeApi([okReply]).client)).code).toBe(0);
+    const files = [join(out, "results.json"), join(out, "results.md")];
+    await refused(db, out, files, "already holds results");
+  });
+
+  test("an existing results.md alone is enough to refuse, and results.json is not created", async () => {
+    const out = dir();
+    writeFileSync(join(out, "results.md"), "earlier\n");
+    const { code, errors } = await run(args(seeded(), out), fakeApi([okReply]).client);
+    expect(code).toBe(1);
+    expect(errors.join("\n")).toContain("already holds results");
+    expect(existsSync(join(out, "results.json"))).toBe(false);
+    expect(readFileSync(join(out, "results.md"), "utf8")).toBe("earlier\n");
+  });
+
+  test("a dangling symlink where results.json goes is refused, not written through", async () => {
+    const out = dir();
+    const target = join(dir(), "elsewhere.json");
+    symlinkSync(target, join(out, "results.json"));
+    const { code } = await run(args(seeded(), out), fakeApi([okReply]).client);
+    expect(code).toBe(1);
+    expect(existsSync(target)).toBe(false);
+  });
+
+  test("a dry run needs neither check and writes nothing", async () => {
+    const out = dir();
+    writeFileSync(join(out, "results.json"), "earlier\n");
+    const { code } = await run([...args(seeded(), out), "--dry-run"]);
+    expect(code).toBe(0);
+    expect(readFileSync(join(out, "results.json"), "utf8")).toBe("earlier\n");
   });
 });

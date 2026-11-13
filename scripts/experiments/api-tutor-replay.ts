@@ -11,6 +11,8 @@
  * Every call is a live paid Messages API call, so every row is labelled live. Cost is computed from the response's usage
  * and list prices in claude-api.ts, so it is an estimate and not a bill. A call that could take the cumulative cost over
  * the cap is never made: the run stops before it and says so. `--dry-run` lists the calls and makes none, and needs no key.
+ * A live run refuses to start when the database (symlinks resolved) is inside `--out` or is a file the runner writes, and when `--out`
+ * already holds a results.json or results.md. It creates both result files exclusively, so an earlier run's results are never overwritten.
  *
  * What the checks cover: `validateMove` needs the original `TutorInput`, and the memo stores only its rendered system and
  * prompt text. Rebuilding it needs the review's usable claims and evidence bundle as they stood at the time of each call.
@@ -20,9 +22,9 @@
  * It does not check thread ids, claim ids, evidence scope or the question counts that `validateMove` also checks.
  */
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { readKeys } from "../../src/backend/main";
 import type { ApiCallDetail, ApiClient } from "../../src/backend/providers/claude-api";
@@ -305,10 +307,73 @@ export const reservationUsd = (model: Options["model"], call: StoredCall): numbe
   worstCaseUsd(API_MODELS[model], call.inputBytes, maxTokensOf(call.purpose), schemaBytesOf(call.purpose)) ?? Number.POSITIVE_INFINITY;
 const worstOf = reservationUsd;
 
-function writeResults(out: string, results: Results): void {
-  mkdirSync(out, { recursive: true });
-  writeFileSync(join(out, "results.json"), `${JSON.stringify(results, null, 2)}\n`);
-  writeFileSync(join(out, "results.md"), markdownOf(results));
+// ───────────────────────────── paths ─────────────────────────────
+
+/** The absolute path with every symlink resolved. The part that does not exist yet is resolved against its nearest existing parent. */
+export function canonicalPath(path: string): string {
+  const abs = resolve(path);
+  try {
+    return realpathSync(abs);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    const parent = dirname(abs);
+    return parent === abs ? abs : join(canonicalPath(parent), basename(abs));
+  }
+}
+
+const isInside = (dir: string, file: string): boolean => {
+  const rel = relative(dir, file);
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+};
+
+export type Paths = { readonly db: string; readonly out: string; readonly resultsJson: string; readonly resultsMd: string };
+
+/**
+ * The paths a live run uses, each normalized once here and checked only in this form: the database and the output
+ * directory with symlinks resolved, and the two files the runner writes. A one-line reason when the run must not start.
+ */
+export function resolvePaths(dbArg: string, outArg: string): Paths | string {
+  const db = canonicalPath(dbArg);
+  const out = canonicalPath(outArg);
+  const paths: Paths = { db, out, resultsJson: join(out, "results.json"), resultsMd: join(out, "results.md") };
+  if (isInside(out, db) || db === paths.resultsJson || db === paths.resultsMd) {
+    return `--db ${db} is inside the output directory ${out}, so a run could overwrite it. Put the database copy somewhere else or choose another --out.`;
+  }
+  // lstat, not existsSync: a dangling symlink at either name would be written through.
+  for (const file of [paths.resultsJson, paths.resultsMd]) {
+    try {
+      lstatSync(file);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw e;
+    }
+    return `${out} already holds results (${basename(file)} exists). A paid run's results are never overwritten. Choose a new --out or move the earlier results.`;
+  }
+  return paths;
+}
+
+/**
+ * Creates both result files empty, failing if either exists, so a file that appeared since `resolvePaths` still cannot be
+ * overwritten. A null on success, else the reason.
+ */
+function claimOutputs(paths: Paths): string | null {
+  const made: string[] = [];
+  try {
+    mkdirSync(paths.out, { recursive: true });
+    for (const file of [paths.resultsJson, paths.resultsMd]) {
+      writeFileSync(file, "", { flag: "wx" });
+      made.push(file);
+    }
+    return null;
+  } catch (e) {
+    for (const file of made) unlinkSync(file);
+    return (e as NodeJS.ErrnoException).code === "EEXIST" ? `${paths.out} already holds results. A paid run's results are never overwritten.` : `cannot create the results in ${paths.out}: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+function writeResults(paths: Paths, results: Results): void {
+  writeFileSync(paths.resultsJson, `${JSON.stringify(results, null, 2)}\n`);
+  writeFileSync(paths.resultsMd, markdownOf(results));
 }
 
 /** Returns the process exit code. */
@@ -316,10 +381,22 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
   const log = deps.log ?? ((t: string) => console.log(t));
   const error = deps.error ?? ((t: string) => console.error(t));
   const now = deps.now ?? (() => performance.now());
-  const options = parseArgs(argv);
-  if (typeof options === "string") {
-    error(options);
+  const parsed = parseArgs(argv);
+  if (typeof parsed === "string") {
+    error(parsed);
     return 2;
+  }
+  // A live run's paths are normalized once, here, and every later use and check is on these values. A dry run writes nothing, so it needs only the database.
+  let paths: Paths | null = null;
+  let options: Options = parsed;
+  if (!parsed.dryRun) {
+    const resolved = resolvePaths(parsed.db, parsed.out!);
+    if (typeof resolved === "string") {
+      error(resolved);
+      return 1;
+    }
+    paths = resolved;
+    options = { ...parsed, db: resolved.db, out: resolved.out };
   }
 
   let calls: StoredCall[];
@@ -366,7 +443,11 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
     }
   }
 
-  const out = options.out!;
+  const claimed = claimOutputs(paths!);
+  if (claimed !== null) {
+    error(claimed);
+    return 1;
+  }
   const secret = apiKey ?? FAKE_CLIENT_KEY;
   let last: ApiCallDetail | null = null;
   const claude: ClaudeCli = createClaudeApi({
@@ -483,7 +564,7 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
       error: failure,
     });
     // Written after every call, so an interrupted run keeps what it paid for.
-    writeResults(out, snapshot());
+    writeResults(paths!, snapshot());
     log(`call ${i + 1} of ${calls.length} ${call.purpose}: ${failure === null ? "ok" : `failed (${redactThenClip(failure, secret, 120)})`}, ${usd(costUsd)}, cumulative ${usd(committed)}`);
     if (overrun !== null) {
       error(`call ${i + 1} cost ${usd(overrun.actualUsd)}, more than the ${usd(overrun.reservedUsd)} it was reserved at. The computed total is ${usd(overrun.totalUsd)} against a cap of ${usd(overrun.capUsd)}. The run stopped and made no further call. Check the cost in the console.`);
@@ -492,8 +573,8 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
     if (deps.signal?.aborted) break;
   }
 
-  writeResults(out, snapshot());
-  log(`wrote ${join(out, "results.json")} and ${join(out, "results.md")}`);
+  writeResults(paths!, snapshot());
+  log(`wrote ${paths!.resultsJson} and ${paths!.resultsMd}`);
   return overrun === null ? 0 : EXIT.overrun;
 }
 
