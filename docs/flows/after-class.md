@@ -187,7 +187,7 @@ Supply-chain policy: exact pins, committed `bun.lock`, frozen installs, `minimum
 | --- | --- | --- |
 | zod | 4.6.7 | runtime |
 | react, react-dom | 19.3.1 | runtime |
-| @anthropic-ai/sdk | 1.3.0 | runtime |
+| @anthropic-ai/sdk | 1.5.0 | runtime |
 | typescript | 7.0.2 | dev |
 | @types/chrome | 0.3.6 | dev |
 | @types/react | 19.3.0 | dev |
@@ -205,6 +205,8 @@ Models: interpretation and tutor default to Claude Opus 5.5 ($4/$20 per MTok, ca
 ## Live-call scope (approved 2026-11-03)
 
 Five named experiments. Claude calls go through `claude -p` on Derek's subscription, with cost recorded as notional. Jev runs on `TYPESAFE_API_KEY`, with cost recorded as unknown until reported. Anything outside the five needs Derek's OK first. Sizes and pass bars are proposals pending Derek's adoption (see the experiments section once approved).
+
+Amendment (2026-11-12), Derek: "Approve both", then "merge 160". The agent proposed `@anthropic-ai/sdk` at exactly 1.5.0 and experiment 8, a replay of one review through the Messages API under a $5 cap. The stack table listed 1.3.0, which was never installed, and now lists the installed 1.5.0. With `AFTERCLASS_CLAUDE_BACKEND=api`, the tutor turn and the wrap-up call the Messages API with `AFTERCLASS_ANTHROPIC_API_KEY` from `keys.env`, and their cost is recorded as estimated from usage at list prices. The default is unchanged: every Claude call goes through `claude -p` on Derek's subscription. Experiment 8 is a sixth experiment, and its protocol and results are in `docs/experiments/08-api-tutor.md`. No rule text changed.
 
 ## Experiments and pass bars (adopted by Derek, 2026-11-03)
 
