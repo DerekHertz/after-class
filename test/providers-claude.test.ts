@@ -165,10 +165,10 @@ describe("claude structured", () => {
   });
 
   test("abort kills the process and rejects with an abort, so the memo records it as aborted", async () => {
-    const { claude, calls } = cli({ hold: new Promise(() => {}) });
+    const { claude, calls, spawned } = cli({ hold: new Promise(() => {}) });
     const c = new AbortController();
     const pending = claude.structured(req(), Out, c.signal).catch((e) => e);
-    await Bun.sleep(5);
+    await spawned();
     c.abort();
     const err = await pending;
     expect(err.name).toBe("AbortError");
@@ -177,10 +177,10 @@ describe("claude structured", () => {
 
   test("a child that ignores SIGTERM is SIGKILLed after the grace, so the call ends and the slot is released", async () => {
     const stubborn = { hold: new Promise<void>(() => {}), ignoreSigterm: true };
-    const { claude, calls } = cli((n) => (n === 1 ? stubborn : { stdout: [JSON.stringify(successEnvelope)] }), { maxConcurrent: 1, killGraceMs: 20 });
+    const { claude, calls, spawned } = cli((n) => (n === 1 ? stubborn : { stdout: [JSON.stringify(successEnvelope)] }), { maxConcurrent: 1, killGraceMs: 20 });
     const c = new AbortController();
     const first = claude.structured(req(), Out, c.signal).catch((e) => e);
-    await Bun.sleep(5);
+    await spawned();
     c.abort();
     expect((await first).name).toBe("AbortError");
     expect(calls[0]!.signals).toEqual([undefined, "SIGKILL"]);
@@ -196,13 +196,14 @@ describe("claude structured", () => {
   });
 
   test("a child that exits on SIGTERM is never SIGKILLed", async () => {
-    const { claude, calls } = cli({ hold: new Promise(() => {}) }, { killGraceMs: 20 });
+    const { claude, calls, spawned } = cli({ hold: new Promise(() => {}) }, { killGraceMs: 5 });
     const c = new AbortController();
     const pending = claude.structured(req(), Out, c.signal).catch((e) => e);
-    await Bun.sleep(5);
+    await spawned();
     c.abort();
     await pending;
-    await Bun.sleep(40);
+    // Timers fire in deadline order, so a SIGKILL still armed at the 5 ms grace lands before this 50 ms sleep ends.
+    await Bun.sleep(50);
     expect(calls[0]!.signals).toEqual([undefined]);
   });
 
@@ -353,8 +354,9 @@ describe("claude system prompt file", () => {
 describe("claude concurrency", () => {
   test("never runs more than maxConcurrent processes, and serves everyone", async () => {
     const gates = Array.from({ length: 5 }, () => deferred<void>());
-    const { claude, live, peak, calls } = cli((n) => ({ stdout: [JSON.stringify(successEnvelope)], hold: gates[n - 1]!.promise }), { maxConcurrent: 2 });
+    const { claude, live, peak, calls, spawned } = cli((n) => ({ stdout: [JSON.stringify(successEnvelope)], hold: gates[n - 1]!.promise }), { maxConcurrent: 2 });
     const all = Array.from({ length: 5 }, () => claude.structured(req(), Out, NEVER));
+    await spawned(2);
     await Bun.sleep(10);
     expect(live()).toBe(2);
     for (const g of gates) {
@@ -384,11 +386,11 @@ describe("claude concurrency", () => {
   });
 
   test("a killed call releases its slot", async () => {
-    const { claude } = cli((n) => (n === 1 ? { hold: new Promise(() => {}) } : { stdout: [JSON.stringify(successEnvelope)] }), { maxConcurrent: 1 });
+    const { claude, spawned } = cli((n) => (n === 1 ? { hold: new Promise(() => {}) } : { stdout: [JSON.stringify(successEnvelope)] }), { maxConcurrent: 1 });
     const c = new AbortController();
     const first = claude.structured(req(), Out, c.signal).catch((e) => e);
     const second = claude.structured(req(), Out, NEVER);
-    await Bun.sleep(5);
+    await spawned();
     c.abort();
     await first;
     expect((await second).output.concepts).toHaveLength(2);
@@ -485,10 +487,10 @@ describe("claude streamText", () => {
   });
 
   test("abort mid-stream kills the process", async () => {
-    const { claude, calls } = cli({ stdout: [delta("start")], hold: new Promise(() => {}) });
+    const { claude, calls, spawned } = cli({ stdout: [delta("start")], hold: new Promise(() => {}) });
     const c = new AbortController();
     const pending = claude.streamText(req(), () => {}, c.signal).catch((e) => e);
-    await Bun.sleep(5);
+    await spawned();
     c.abort();
     expect((await pending).name).toBe("AbortError");
     expect(calls[0]!.killed).toBe(true);

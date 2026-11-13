@@ -128,14 +128,16 @@ type Script = { readonly stdout?: readonly (string | Uint8Array)[]; readonly std
 
 type Spawned = { argv: readonly string[]; cwd: string; env: Record<string, string>; stdin: string[]; killed: boolean; signals: (string | number | undefined)[]; ended: boolean };
 
-export function fakeSpawn(script: Script | ((n: number) => Script)): { spawn: SpawnFn; calls: Spawned[]; live: () => number; peak: () => number } {
+export function fakeSpawn(script: Script | ((n: number) => Script)): { spawn: SpawnFn; calls: Spawned[]; live: () => number; peak: () => number; spawned: (n?: number) => Promise<Spawned> } {
   const calls: Spawned[] = [];
+  const waiting: { n: number; resolve: (call: Spawned) => void }[] = [];
   let live = 0;
   let peak = 0;
   const spawn: SpawnFn = (argv, opts) => {
     const s = typeof script === "function" ? script(calls.length + 1) : script;
     const call: Spawned = { argv, cwd: opts.cwd, env: opts.env, stdin: [], killed: false, signals: [], ended: false };
     calls.push(call);
+    for (const w of waiting.filter((x) => x.n <= calls.length)) w.resolve(calls[w.n - 1]!);
     live++;
     peak = Math.max(peak, live);
     const enc = new TextEncoder();
@@ -175,7 +177,9 @@ export function fakeSpawn(script: Script | ((n: number) => Script)): { spawn: Sp
     };
     return proc;
   };
-  return { spawn, calls, live: () => live, peak: () => peak };
+  /** Resolves once the nth child (the first by default) has been spawned. A test waits on this, never on a fixed sleep, because the spawn follows a slot wait and file staging. */
+  const spawned = (n = 1): Promise<Spawned> => (calls.length >= n ? Promise.resolve(calls[n - 1]!) : new Promise((resolve) => void waiting.push({ n, resolve })));
+  return { spawn, calls, live: () => live, peak: () => peak, spawned };
 }
 
 export const cli = (s: Script | ((n: number) => Script), extra: { maxConcurrent?: number; env?: Record<string, string | undefined>; killGraceMs?: number } = {}) => {
