@@ -1,10 +1,9 @@
 # ReviewEnd
 
-TLC reached 36 states and 90 steps. The chart draws 15 states and 19 arrows.
-The chart does not draw 36 steps that stay in one chart state.
-The view hides 2 steps, so the chart does not draw them.
-The step you go home changes Finish and Screen at the same time.
-The step the tutor wraps up changes Finish and Save at the same time.
+TLC reached 76 states and 211 steps. The chart draws 37 states and 77 arrows.
+The chart does not draw 74 steps that stay in one chart state.
+The view hides 4 steps, so the chart does not draw them.
+The model goes from Finish Finishing, App no end, Save Not saved, Screen Review screen to Finish Finish failed after delivery, App no end, Save Not saved, Screen Review screen by the tutor's wrap-up fails, which the regions chart cannot show. So the chart draws parent states in place of regions.
 
 ## Rules that hold
 TypeOK, RetryAlwaysResends, FinishIsNeverSilentlyDropped, EndedUnsavedIsReachableFromHome, NoDeadlock, AFinishedReviewEventuallySaves

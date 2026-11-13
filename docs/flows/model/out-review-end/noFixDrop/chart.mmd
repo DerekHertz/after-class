@@ -2,66 +2,338 @@
 title: "Finishing and saving a review (code, not flow)"
 ---
 stateDiagram-v2
-  direction LR
   state "Legend" as legend {
     lg0: Breaks FinishIsNeverSilentlyDropped
     lg1: Path to the FinishIsNeverSilentlyDropped bug
   }
   class lg0 breaks
   class lg1 bugPath
-  state "At the same time" as all {
-    state "Finish" as r0 {
-      s0: Reviewing
-      s1: Reviewing, last reply settling
-      s2: Finish confirmed, nothing happened
-      s3: Finishing
-      s4: Finish failed, not delivered
-      s5: Finish failed after delivery
-      s6: Finish not delivered
-      s7: Review ended
-      s8: Finish delivered, no wrap-up
-      [*] --> s0
-      [*] --> s1
-      s0 --> s3: you confirm Finish [when Screen is Review screen]
-      s1 --> s0: the last reply settles
-      s1 --> s2: you confirm Finish and nothing happens
-      s3 --> s4: the request fails
-      s3 --> s7: the tutor wraps up
-      s3 --> s5: the tutor's wrap-up fails
-      s4 --> s3: you press Retry
-      s4 --> s6: you go home
-      s5 --> s3: you press Finish again or you press Retry
-      s5 --> s8: you go home
-      s6 --> s3: you press Retry [when Screen is Review screen]
-      s8 --> s3: you press Finish again or you press Retry [when Screen is Review screen]
-    }
-    --
-    state "Save" as r1 {
-      s9: Not saved
-      s10: Saving
-      s11: Saved
-      s12: Save failed, failure cached
-      s13: Saving, failure cached
-      [*] --> s9
-      s9 --> s10: the tutor wraps up [when Finish is one of Finish confirmed, nothing happened, Finishing and Screen is Review screen]
-      s10 --> s11: the save succeeds
-      s10 --> s12: the save fails
-      s12 --> s13: you press Retry save [when Screen is Review screen]
-      s13 --> s12: the save returns the cached failure
-      s13 --> s11: the save succeeds
-    }
-    --
-    state "Screen" as r2 {
-      s14: Review screen
-      s15: Home
-      [*] --> s14
-      s14 --> s15: you go home [when Finish is none of Finishing, Reviewing, last reply settling and Save is none of Saving, Saving, failure cached]
-      s15 --> s14: you open the review from home [when Save is not Saved]
+  state "Finish Reviewing" as s0 {
+    state "App no end" as s1 {
+      state "Save Not saved" as s2 {
+        s3: Screen Review screen
+        s4: Screen Home
+      }
     }
   }
+  state "Finish Reviewing, last reply settling" as s5 {
+    state "App no end" as s6 {
+      state "Save Not saved" as s7 {
+        s8: Screen Review screen
+      }
+    }
+  }
+  state "Finish Finish confirmed, nothing happened" as s9 {
+    state "App no end" as s10 {
+      state "Save Not saved" as s11 {
+        s12: Screen Review screen
+        s13: Screen Home
+      }
+      state "Save Save pending" as s14 {
+        s15: Screen Review screen
+        s16: Screen Home
+      }
+    }
+    state "App end stored" as s17 {
+      state "Save Not saved" as s18 {
+        s19: Screen Review screen
+        s20: Screen Home
+      }
+      state "Save Save pending" as s21 {
+        s22: Screen Review screen
+        s23: Screen Home
+      }
+    }
+    state "App review ended" as s24 {
+      state "Save Saving" as s25 {
+        s26: Screen Review screen
+      }
+      state "Save Save pending" as s27 {
+        s28: Screen Review screen
+        s29: Screen Home
+      }
+      state "Save Saved" as s30 {
+        s31: Screen Review screen
+        s32: Screen Home
+      }
+      state "Save Save failed, failure cached" as s33 {
+        s34: Screen Review screen
+        s35: Screen Home
+      }
+      state "Save Saving, failure cached" as s36 {
+        s37: Screen Review screen
+      }
+    }
+  }
+  state "Finish Finishing" as s38 {
+    state "App no end" as s39 {
+      state "Save Not saved" as s40 {
+        s41: Screen Review screen
+      }
+    }
+    state "App end stored" as s42 {
+      state "Save Not saved" as s43 {
+        s44: Screen Review screen
+      }
+    }
+  }
+  state "Finish Finish failed, not delivered" as s45 {
+    state "App no end" as s46 {
+      state "Save Not saved" as s47 {
+        s48: Screen Review screen
+      }
+    }
+  }
+  state "Finish Finish failed after delivery" as s49 {
+    state "App no end" as s50 {
+      state "Save Not saved" as s51 {
+        s52: Screen Review screen
+      }
+    }
+    state "App end stored" as s53 {
+      state "Save Not saved" as s54 {
+        s55: Screen Review screen
+      }
+    }
+  }
+  state "Finish Finish not delivered" as s56 {
+    state "App no end" as s57 {
+      state "Save Not saved" as s58 {
+        s59: Screen Home
+        s60: Screen Review screen
+      }
+    }
+  }
+  state "Finish Review ended" as s61 {
+    state "App review ended" as s62 {
+      state "Save Saving" as s63 {
+        s64: Screen Review screen
+      }
+      state "Save Saved" as s65 {
+        s66: Screen Review screen
+        s67: Screen Home
+      }
+      state "Save Save pending" as s68 {
+        s69: Screen Home
+        s70: Screen Review screen
+      }
+      state "Save Save failed, failure cached" as s71 {
+        s72: Screen Review screen
+        s73: Screen Home
+      }
+      state "Save Saving, failure cached" as s74 {
+        s75: Screen Review screen
+      }
+    }
+    state "App no end" as s76 {
+      state "Save Save pending" as s77 {
+        s78: Screen Home
+      }
+    }
+    state "App end stored" as s79 {
+      state "Save Save pending" as s80 {
+        s81: Screen Home
+      }
+    }
+  }
+  state "Finish Review ended, last request failed" as s82 {
+    state "App no end" as s83 {
+      state "Save Save pending" as s84 {
+        s85: Screen Review screen
+      }
+    }
+    state "App review ended" as s86 {
+      state "Save Save pending" as s87 {
+        s88: Screen Review screen
+      }
+      state "Save Saving" as s89 {
+        s90: Screen Review screen
+      }
+      state "Save Save failed, failure cached" as s91 {
+        s92: Screen Review screen
+      }
+      state "Save Saved" as s93 {
+        s94: Screen Review screen
+      }
+      state "Save Saving, failure cached" as s95 {
+        s96: Screen Review screen
+      }
+    }
+    state "App end stored" as s97 {
+      state "Save Save pending" as s98 {
+        s99: Screen Review screen
+      }
+    }
+  }
+  state "Finish Finish delivered, no wrap-up" as s100 {
+    state "App no end" as s101 {
+      state "Save Not saved" as s102 {
+        s103: Screen Home
+      }
+    }
+    state "App end stored" as s104 {
+      state "Save Not saved" as s105 {
+        s106: Screen Home
+        s107: Screen Review screen
+      }
+    }
+  }
+  state "Finish Review ended, request in flight" as s108 {
+    state "App no end" as s109 {
+      state "Save Save pending" as s110 {
+        s111: Screen Review screen
+      }
+    }
+    state "App review ended" as s112 {
+      state "Save Save pending" as s113 {
+        s114: Screen Review screen
+      }
+      state "Save Saving" as s115 {
+        s116: Screen Review screen
+      }
+      state "Save Save failed, failure cached" as s117 {
+        s118: Screen Review screen
+      }
+      state "Save Saved" as s119 {
+        s120: Screen Review screen
+      }
+      state "Save Saving, failure cached" as s121 {
+        s122: Screen Review screen
+      }
+    }
+    state "App end stored" as s123 {
+      state "Save Save pending" as s124 {
+        s125: Screen Review screen
+      }
+    }
+  }
+  [*] --> s3
+  [*] --> s8
+  s3 --> s4: you go home
+  s3 --> s41: you confirm Finish
+  s8 --> s3: the last reply settles
+  s8 --> s12: you confirm Finish and nothing happens
+  s4 --> s3: you open the review from home
+  s41 --> s48: the request fails
+  s12 --> s13: you go home
+  s41 --> s52: the tutor's wrap-up fails
+  s41 --> s85: the wrap-up is saved but the reply is lost
+  s48 --> s41: you press Retry
+  s48 --> s59: you go home
+  s13 --> s12: you open the review from home
+  s52 --> s41: you press Finish again or you press Retry
+  s52 --> s103: you go home
+  s55 --> s106: you go home
+  s55 --> s44: you press Finish again or you press Retry
+  s64 --> s66: the save succeeds
+  s85 --> s78: you go home
+  s85 --> s111: you press Finish again or you press Retry
+  s88 --> s69: you go home
+  s88 --> s114: you press Retry
+  s88 --> s90: you press Retry save
+  s12 --> s26: the tutor wraps up
+  s44 --> s99: the wrap-up is saved but the reply is lost
+  s12 --> s19: the tutor's wrap-up fails
+  s12 --> s15: the wrap-up is saved but the reply is lost
+  s12 --> s28: the wrap-up is saved but the reply is lost
+  s59 --> s60: you open the review from home
+  s66 --> s67: you go home
+  s111 --> s85: the request after the wrap-up fails
+  s111 --> s88: the request after the wrap-up fails
+  s114 --> s88: the request after the wrap-up fails
+  s114 --> s116: you press Retry save
+  s90 --> s116: you press Retry
+  s90 --> s92: the save fails
+  s64 --> s72: the save fails
+  s103 --> s107: you open the review from home
+  s106 --> s107: you open the review from home
+  s19 --> s20: you go home
+  s60 --> s41: you press Retry
+  s60 --> s59: you go home
+  s78 --> s70: you open the review from home
+  s69 --> s70: you open the review from home
+  s111 --> s64: the replay ends and the app saves
+  s114 --> s64: the replay ends and the app saves
+  s90 --> s94: the save succeeds
+  s26 --> s31: the save succeeds
+  s99 --> s81: you go home
+  s99 --> s125: you press Finish again or you press Retry
+  s116 --> s90: the request after the wrap-up fails
+  s116 --> s118: the save fails
+  s15 --> s16: you go home
+  s28 --> s29: you go home
+  s28 --> s26: you press Retry save or the replay ends and the app saves
+  s92 --> s73: you go home
+  s92 --> s118: you press Retry
+  s92 --> s96: you press Retry save
+  s72 --> s73: you go home
+  s72 --> s75: you press Retry save
+  s107 --> s106: you go home
+  s107 --> s44: you press Finish again or you press Retry
+  s19 --> s28: the wrap-up is saved but the reply is lost
+  s19 --> s22: the wrap-up is saved but the reply is lost
+  s94 --> s67: you go home
+  s94 --> s120: you press Retry
+  s31 --> s32: you go home
+  s70 --> s64: you press Retry save
+  s70 --> s69: you go home
+  s116 --> s64: the replay ends and the app saves
+  s116 --> s120: the save succeeds
+  s125 --> s88: the request after the wrap-up fails
+  s125 --> s99: the request after the wrap-up fails
+  s15 --> s28: the request after the wrap-up fails
+  s26 --> s34: the save fails
+  s118 --> s92: the request after the wrap-up fails
+  s118 --> s122: you press Retry save
+  s96 --> s92: the save returns the cached failure
+  s96 --> s122: you press Retry
+  s75 --> s72: the save returns the cached failure
+  s13 --> s19: you open the review from home
+  s20 --> s19: you open the review from home
+  s19 --> s26: the tutor wraps up
+  s120 --> s66: the replay ends and the app saves
+  s120 --> s94: the request after the wrap-up fails
+  s81 --> s70: you open the review from home
+  s125 --> s64: the replay ends and the app saves
+  s16 --> s28: you open the review from home
+  s29 --> s28: you open the review from home
+  s15 --> s26: the replay ends and the app saves
+  s73 --> s72: you open the review from home
+  s118 --> s72: the replay ends and the app saves
+  s96 --> s94: the save succeeds
+  s75 --> s66: the save succeeds
+  s22 --> s23: you go home
+  s122 --> s118: the save returns the cached failure
+  s122 --> s96: the request after the wrap-up fails
+  s34 --> s35: you go home
+  s34 --> s37: you press Retry save
+  s122 --> s72: the replay ends and the app saves
+  s122 --> s120: the save succeeds
+  s22 --> s28: the request after the wrap-up fails
+  s37 --> s34: the save returns the cached failure or the replay ends and the app saves
+  s23 --> s28: you open the review from home
+  s22 --> s26: the replay ends and the app saves
+  s35 --> s34: you open the review from home
+  s37 --> s31: the save succeeds
+  s38 --> s64: the tutor wraps up
+  s38 --> s55: the tutor's wrap-up fails
+  s38 --> s88: the wrap-up is saved but the reply is lost
   classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
-  class s1 bugPath
-  class s2 breaks
-  class s2 bugPath
-  class s9 bugPath
-  class s14 bugPath
+  class s8 bugPath
+  class s12 breaks
+  class s12 bugPath
+  class s13 breaks
+  class s15 breaks
+  class s16 breaks
+  class s19 breaks
+  class s20 breaks
+  class s22 breaks
+  class s23 breaks
+  class s26 breaks
+  class s28 breaks
+  class s29 breaks
+  class s31 breaks
+  class s32 breaks
+  class s34 breaks
+  class s35 breaks
+  class s37 breaks

@@ -33,8 +33,8 @@ run() { # CFG EXPECTED, where EXPECTED is "holds" or the name of the rule that m
 }
 
 run ReviewEnd.cfg holds
-run ReviewEnd-noFixRetry.cfg RetryAlwaysResends
 run ReviewEnd-noFixCache.cfg AFinishedReviewEventuallySaves
 run ReviewEnd-noFixHome.cfg EndedUnsavedIsReachableFromHome
 run ReviewEnd-noFixDrop.cfg FinishIsNeverSilentlyDropped
+run ReviewEnd-noFixLive.cfg RetryAlwaysResends
 exit $bad

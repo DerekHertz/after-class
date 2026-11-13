@@ -1,32 +1,27 @@
 # ReviewEnd
 
-TLC reached 32 states and 78 steps. The chart draws 15 states and 19 arrows.
-The chart does not draw 32 steps that stay in one chart state.
-The view hides 2 steps, so the chart does not draw them.
-The step you go home changes Finish and Screen at the same time.
-The step the tutor wraps up changes Finish and Save at the same time.
+TLC reached 70 states and 191 steps. The chart draws 36 states and 73 arrows.
+The chart does not draw 66 steps that stay in one chart state.
+The view hides 4 steps, so the chart does not draw them.
+The model goes from Finish Finishing, App no end, Save Not saved, Screen Review screen to Finish Finish failed after delivery, App no end, Save Not saved, Screen Review screen by the tutor's wrap-up fails, which the regions chart cannot show. So the chart draws parent states in place of regions.
 
 ## EndedUnsavedIsReachableFromHome breaks
-The shortest path has 6 steps:
-0. Finish Reviewing, Save Not saved, Screen Review screen
-1. you confirm Finish: Finish Finishing, Save Not saved, Screen Review screen
-2. the backend stores your finish: Finish Finishing, Save Not saved, Screen Review screen
-3. the tutor wraps up: Finish Review ended, Save Saving, Screen Review screen
-4. the model or network starts failing: Finish Review ended, Save Saving, Screen Review screen
-5. the save fails: Finish Review ended, Save Save failed, failure cached, Screen Review screen
-6. you go home: Finish Review ended, Save Save failed, failure cached, Screen Home
+The shortest path has 4 steps:
+0. Finish Reviewing, App no end, Save Not saved, Screen Review screen
+1. you confirm Finish: Finish Finishing, App no end, Save Not saved, Screen Review screen
+2. the backend stores your finish: Finish Finishing, App no end, Save Not saved, Screen Review screen
+3. the wrap-up is saved but the reply is lost: Finish Review ended, last request failed, App no end, Save Save pending, Screen Review screen
+4. you go home: Finish Review ended, App no end, Save Save pending, Screen Home
 
 ## AFinishedReviewEventuallySaves breaks
-TLC's counterexample is in tlc-AFinishedReviewEventuallySaves.out. It has 7 steps:
-0. Finish Reviewing, Save Not saved, Screen Review screen
-1. you confirm Finish: Finish Finishing, Save Not saved, Screen Review screen
-2. the backend stores your finish: Finish Finishing, Save Not saved, Screen Review screen
-3. the tutor wraps up: Finish Review ended, Save Saving, Screen Review screen
-4. the model or network starts failing: Finish Review ended, Save Saving, Screen Review screen
-5. the save fails: Finish Review ended, Save Save failed, failure cached, Screen Review screen
-6. you go home: Finish Review ended, Save Save failed, failure cached, Screen Home
-7. the model or network recovers: Finish Review ended, Save Save failed, failure cached, Screen Home
-The run stops in "Finish Review ended, Save Save failed, failure cached, Screen Home" forever.
+TLC's counterexample is in tlc-AFinishedReviewEventuallySaves.out. It has 5 steps:
+0. Finish Reviewing, App no end, Save Not saved, Screen Review screen
+1. you confirm Finish: Finish Finishing, App no end, Save Not saved, Screen Review screen
+2. the backend stores your finish: Finish Finishing, App no end, Save Not saved, Screen Review screen
+3. the wrap-up is saved but the reply is lost: Finish Review ended, last request failed, App review ended, Save Save pending, Screen Review screen
+4. the model or network recovers: Finish Review ended, last request failed, App review ended, Save Save pending, Screen Review screen
+5. you go home: Finish Review ended, App review ended, Save Save pending, Screen Home
+The run stops in "Finish Review ended, App review ended, Save Save pending, Screen Home" forever.
 
 ## Rules that hold
 TypeOK, RetryAlwaysResends, FinishIsNeverSilentlyDropped, NoDeadlock
