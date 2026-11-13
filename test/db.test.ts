@@ -265,4 +265,9 @@ describe("users", () => {
     expect(Object.keys(TABLE_SCOPES).sort()).toEqual(tables.sort());
     expect(Object.entries(TABLE_SCOPES).filter(([, s]) => s === "identity").map(([t]) => t)).toEqual(["users"]);
   });
+
+  test("only tables that hold no learner's data are shared", () => {
+    const shared = Object.entries(TABLE_SCOPES).filter(([, s]) => s === "shared").map(([t]) => t).sort();
+    expect(shared).toEqual(["schema_migrations", "seq_counter"]);
+  });
 });

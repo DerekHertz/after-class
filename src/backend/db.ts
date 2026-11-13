@@ -527,10 +527,11 @@ export const TABLE_SCOPES: { readonly [table: string]: TableScope } = {
   users: "identity",
   seq_counter: "shared", // becomes a per-user sequence row in the Postgres phase
   schema_migrations: "shared",
-  // The memo is shared by design, but tutor_turn and wrap_up rows hold learner text and must be split out in the budget phase.
-  memo_inputs: "shared",
-  memo: "shared",
-  memo_failures: "shared",
+  // The memo mixes lecture-derived rows with tutor_turn and wrap_up rows that hold a learner's answers, dialogue and notes,
+  // so it is per-user until the budget phase moves lecture-only purposes into a separate shared cache.
+  memo_inputs: "user",
+  memo: "user",
+  memo_failures: "user",
   usage_events: "user",
   voice_usage_events: "user",
   capture_facts: "user",
