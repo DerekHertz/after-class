@@ -4,9 +4,7 @@
  * "newest capture" default exported that one ("has no evidence") while the
  * 10-minute run sat unseen.
  */
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { openDb } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
@@ -15,14 +13,10 @@ import type { CaptureId, MemoKey } from "../src/shared/ids";
 import type { CaptureFact, CaptureFactBody } from "../src/shared/domain";
 import { media } from "../src/shared/time";
 import { exportCapture, pickCapture } from "../scripts/probe-export";
+import { tmpDir } from "./tmp";
 
 const VIDEO = "aaaaaaaaaaa";
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]).toString("base64");
-
-const cleanup: string[] = [];
-afterEach(() => {
-  for (const d of cleanup.splice(0)) rmSync(d, { recursive: true, force: true });
-});
 
 describe("pickCapture", () => {
   const c = (captureId: string, watchedSeconds: number, hasEvidence = true) => ({ captureId, watchedSeconds, hasEvidence });
@@ -47,8 +41,7 @@ describe("pickCapture", () => {
 
 describe("exportCapture default capture", () => {
   function twoCaptures() {
-    const dir = mkdtempSync(join(tmpdir(), "afterclass-probe-export-"));
-    cleanup.push(dir);
+    const dir = tmpDir("afterclass-probe-export-");
     const db = openDb(join(dir, "afterclass.sqlite"));
     const keyOf = (input: { readonly after: { readonly frame: { readonly id: string } } }): MemoKey => stableId("key", "frame_change", input.after.frame.id);
     const evidence = createEvidence(db, dir, {

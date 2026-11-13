@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { openDb } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
@@ -10,6 +9,7 @@ import type { CaptureFact, CaptureFactBody } from "../src/shared/domain";
 import { media } from "../src/shared/time";
 import { AD_WINDOW_SLACK_S, adCandidates, buildReport, parseBundle } from "../scripts/probe-report";
 import type { PerfInput, ProbeInputs, SpotInput } from "../scripts/probe-report";
+import { tmpDir } from "./tmp";
 import { exportCapture, sampleExport } from "../scripts/probe-export";
 
 const SRC = "src_a";
@@ -316,14 +316,9 @@ describe("probe-export sampling", () => {
 describe("probe-export on a data dir", () => {
   const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]).toString("base64");
   const VIDEO = "aaaaaaaaaaa";
-  const dirs: string[] = [];
-  afterEach(() => {
-    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-  });
 
   function fabricate(): string {
-    const dataDir = mkdtempSync(join(tmpdir(), "afterclass-probe-test-"));
-    dirs.push(dataDir);
+    const dataDir = tmpDir("afterclass-probe-test-");
     const db = openDb(join(dataDir, "afterclass.sqlite"));
     const evidence = createEvidence(db, dataDir, {
       lookupFrameChange: () => ({ kind: "missing", key: stableId("key", "x") }),
@@ -375,8 +370,7 @@ describe("probe-export on a data dir", () => {
   test("an unknown capture id or an empty data dir is an error, not an empty export", () => {
     const dataDir = fabricate();
     expect(() => exportCapture({ dataDir, outDir: join(dataDir, "o"), captureId: "cap_nope" })).toThrow("no evidence");
-    const empty = mkdtempSync(join(tmpdir(), "afterclass-probe-test-"));
-    dirs.push(empty);
+    const empty = tmpDir("afterclass-probe-test-");
     expect(() => exportCapture({ dataDir: empty, outDir: join(empty, "o") })).toThrow("does not exist");
   });
 });
