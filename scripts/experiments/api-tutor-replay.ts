@@ -330,7 +330,9 @@ export const fitsUnderCap = (spent: number, added: number, cap: number): boolean
 
 /**
  * What the run has counted against the cap, in two parts: cost measured from a response's usage, and the worst case held for
- * calls that may have been billed. The only way to change either is to add a cost, so neither can go down or become NaN.
+ * calls that may have been billed. The only way to change either is to add a cost, and an addition is refused unless the amount
+ * is a cost and the resulting part and the resulting total are finite and no lower than before. So neither part can go down,
+ * become NaN or reach Infinity, and a refused addition changes nothing.
  */
 export class Spend {
   #measured = 0;
@@ -345,14 +347,18 @@ export class Spend {
     return this.#measured + this.#reserved;
   }
   addMeasured(usd: number): void {
-    this.#measured += Spend.#valid(usd);
+    this.#measured = Spend.#add(usd, this.#measured, this.#reserved);
   }
   hold(usd: number): void {
-    this.#reserved += Spend.#valid(usd);
+    this.#reserved = Spend.#add(usd, this.#reserved, this.#measured);
   }
-  static #valid(usd: number): number {
+  /** `part` plus `usd`, where `other` is the part not being changed. Throws instead of returning a figure the total could not survive. */
+  static #add(usd: number, part: number, other: number): number {
     if (!isCost(usd)) throw new Error(`${String(usd)} is not a finite non-negative cost`);
-    return usd;
+    const next = part + usd;
+    const total = next + other;
+    if (!Number.isFinite(next) || !Number.isFinite(total) || next < part || total < part + other) throw new Error(`adding ${usd} would make the total ${total}, which is not a finite figure at least the ${part + other} it was`);
+    return next;
   }
 }
 
@@ -595,7 +601,7 @@ export async function main(argv: readonly string[], deps: Deps = {}): Promise<nu
       if (e instanceof ApiCallError) {
         notBilled = e.billing === "not_billed";
         // No later call can succeed with a key or a permission the API has refused.
-        if (e.status === 401 || e.status === 403) fatalStatus = e.status;
+        if (notBilled && (e.status === 401 || e.status === 403)) fatalStatus = e.status;
       }
     }
     const totalMs = now() - started;

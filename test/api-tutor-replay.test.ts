@@ -11,7 +11,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages";
 import { openDb } from "../src/backend/db";
 import type { ApiClient } from "../src/backend/providers/claude-api";
-import { STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, worstCaseUsd } from "../src/backend/providers/claude-api";
+import { ApiCallError, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, worstCaseUsd } from "../src/backend/providers/claude-api";
+import { ProviderError } from "../src/backend/providers/memo";
 import { Spend, allowedFromPrompt, fitsUnderCap, isCost, loadCalls, main, parseArgs, reservationUsd } from "../scripts/experiments/api-tutor-replay";
 import type { Results } from "../scripts/experiments/api-tutor-replay";
 
@@ -600,6 +601,24 @@ describe("failed calls and the cap", () => {
     expect(readFileSync(join(out, "results.md"), "utf8")).toContain("may have been billed");
   });
 
+  test("the reviewer's case: an ApiCallError the client throws, labelled not_billed, after text, is held at its worst case and the $0.70 cap stops the run", async () => {
+    const eight: Seed[] = Array.from({ length: 8 }, (_, i) => ({ key: `t${i}`, purpose: "tutor_turn", atMs: T0 + i * 1000 }));
+    const forged = () => new ApiCallError("fake-client-key", null, false, "not_billed", 400);
+    for (const fail of [forged(), Object.assign(new ProviderError("fake-client-key", null, false), { billing: "not_billed", status: 400 })]) {
+      const out = join(dir(), "out");
+      const api = fakeApi(eight.map(() => ({ text: "hello world", fail })));
+      const { code } = await run(["--db", fixtureDb(eight), "--since", "2026-11-11", "--out", out, "--cap-usd", "0.70"], api.client);
+      expect(code).toBe(0);
+      expect(api.calls()).toBe(1);
+      const r = results(out);
+      expect(r.rows[0]).toMatchObject({ billing: "failed, may have been billed (reserved)", costUsd: null });
+      expect(r.rows[0]!.reservedUsd).toBeCloseTo(worstTutor, 12);
+      expect(r.totals.callsNotBilled).toBe(0);
+      expect(r.stoppedAtCap).toMatchObject({ beforeCall: 2 });
+      expect(JSON.stringify(r)).not.toContain("fake-client-key");
+    }
+  });
+
   test("totals keep measured cost and reserved-for-unknown cost as two numbers", async () => {
     const out = join(dir(), "out");
     const api = fakeApi([{ ...ok, input: 0, output: 20_000 }, { text: "", fail: new Anthropic.APIConnectionError({ message: "x" }) }, { text: "", fail: new Anthropic.BadRequestError(400, body, undefined, headers) }]);
@@ -714,6 +733,22 @@ describe("the cap arithmetic fails closed", () => {
     spend.addMeasured(0);
     expect(spend.total).toBe(0.75);
   });
+
+  test("the total is checked as well as the amount: two amounts that are each finite cannot add up to infinity, and a refused amount changes nothing", () => {
+    const measured = new Spend();
+    measured.addMeasured(Number.MAX_VALUE);
+    expect(() => measured.addMeasured(Number.MAX_VALUE)).toThrow();
+    expect([measured.measured, measured.reserved, measured.total]).toEqual([Number.MAX_VALUE, 0, Number.MAX_VALUE]);
+    const mixed = new Spend();
+    mixed.addMeasured(Number.MAX_VALUE);
+    expect(() => mixed.hold(Number.MAX_VALUE)).toThrow();
+    expect([mixed.measured, mixed.reserved, Number.isFinite(mixed.total)]).toEqual([Number.MAX_VALUE, 0, true]);
+    const held = new Spend();
+    held.hold(Number.MAX_VALUE);
+    expect(() => held.hold(Number.MAX_VALUE)).toThrow();
+    expect(() => held.addMeasured(Number.MAX_VALUE)).toThrow();
+    expect(Number.isFinite(held.total)).toBe(true);
+  });
 });
 
 describe("a planted key never reaches an output", () => {
@@ -798,5 +833,41 @@ describe("a planted key never reaches an output", () => {
     }
     // The reply is not recorded, so it is in none of them either.
     for (const text of [json, md, logs.join("\n"), errors.join("\n")]) expect(text).not.toContain(REPLY);
+  });
+
+  test("every error shape a client can throw leaves the key in no output, and none of them can lower the count of reservations", async () => {
+    const boom = () => {
+      throw new Error(KEY);
+    };
+    const hostile = new Proxy({}, new Proxy({}, { get: () => boom }));
+    const withGetter = <T extends object>(target: T, key: string): T => Object.defineProperty(target, key, { get: boom, configurable: true });
+    const shapes: readonly unknown[] = [
+      new ProviderError(KEY, { model: KEY, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cost: { kind: "unknown", reason: KEY } }, false),
+      new ApiCallError(KEY, null, false, "not_billed", 400),
+      { message: KEY, status: 400 },
+      KEY,
+      null,
+      hostile,
+      new Proxy(apiError(400), { get: boom }),
+      withGetter(apiError(400), "status"),
+      withGetter(apiError(400), "message"),
+      withGetter(new Error(KEY), "name"),
+      withGetter(new Error(KEY), "cause"),
+    ];
+    const seeds: Seed[] = shapes.map((_, i) => ({ key: `s${i}`, purpose: i % 2 === 0 ? "tutor_turn" : "wrap_up", atMs: T0 + i * 1000 }));
+    const api = scripted(shapes.map((error) => ({ error })));
+    const out = join(dir(), "out");
+    const { code, logs, errors } = await run(["--db", fixtureDb(seeds), "--since", "2026-11-11", "--out", out, "--cap-usd", "500"], api.client);
+    expect(code).toBe(0);
+    expect(api.calls()).toBe(shapes.length);
+    const json = readFileSync(join(out, "results.json"), "utf8");
+    const md = readFileSync(join(out, "results.md"), "utf8");
+    const r = JSON.parse(json) as Results;
+    expect(r.rows).toHaveLength(shapes.length);
+    expect(r.totals.callsNotBilled).toBe(0);
+    expect(r.rows.every((row) => row.billing === "failed, may have been billed (reserved)")).toBe(true);
+    for (const [where, text] of [["stdout", logs.join("\n")], ["stderr", errors.join("\n")], ["results.json", json], ["results.md", md]] as const) {
+      expect([where, leaks(text)]).toEqual([where, false]);
+    }
   });
 });

@@ -23,6 +23,12 @@
  * below, into values this file made: a stop reason from a fixed set, usage as non-negative integers or nothing, strings
  * redacted and clipped. Nothing past those two functions (an error, `onResponse`, the usage report, a result) holds a raw field.
  *
+ * Nothing the client throws is trusted either, and the rule is structural. Every value caught from a client call, of any class
+ * (an SDK error, a ProviderError, an ApiCallError, a Proxy, a string, null), goes through `failureOf`, which builds a new ApiCallError
+ * from its redacted text and a status it read defensively. It never rethrows the caught value, never copies its billing, usage or
+ * retryable flag, and a getter that throws reads as absent. The adapter's own errors (a refusal, a bad stop, a schema mismatch,
+ * an unsupported model) are raised outside the `try` that wraps the client call, so no client can throw an error that looks like one.
+ *
  * Structured calls use `create` plus `zodOutputFormat`, not `messages.parse`: parse throws on text that is not
  * valid JSON before the caller can look at stop_reason, so a truncated or refused answer would hide its cause.
  */
@@ -192,7 +198,7 @@ export function billingOfStatus(status: number | null): Billing {
   return status !== null && REJECTED_BEFORE_ANY_MODEL_RAN.has(status) ? "not_billed" : "maybe_billed";
 }
 
-/** A call that failed in transport or at the API, with what the runner needs to price it. A refusal or a bad stop is a plain ProviderError that carries usage. */
+/** A call that failed in transport or at the API, with what the runner needs to price it. Built only by `failureOf` and the adapter's own checks, never from a caught value. A refusal or a bad stop is a plain ProviderError that carries usage. */
 export class ApiCallError extends ProviderError {
   constructor(message: string, usage: UsageReport | null, retryable: boolean, readonly billing: Billing, readonly status: number | null) {
     super(message, usage, retryable);
@@ -248,15 +254,33 @@ type Parsed = {
   readonly refusal: string;
 };
 
-/** The one place a response becomes values this adapter trusts. Reads each field it uses, and no other. */
+/**
+ * The one place a response becomes values this adapter trusts. Reads each field it uses once and no other, because a getter
+ * can answer differently the second time. A response whose accessor throws makes this throw, and `settle` turns that into a failed call.
+ */
 function parseMessage(raw: unknown, secret: string): Parsed {
   const msg = isRecord(raw) ? raw : {};
-  const model = typeof msg.model === "string" && msg.model !== "" ? redactThenClip(msg.model, secret, 80) : "unknown";
-  const stop = msg.stop_reason === null || msg.stop_reason === undefined ? null : ((KNOWN_STOPS as readonly unknown[]).includes(msg.stop_reason) ? (msg.stop_reason as StopLabel) : "unknown");
-  const content = Array.isArray(msg.content) ? (msg.content as readonly unknown[]) : [];
-  const text = content.map((b) => (isRecord(b) && b.type === "text" && typeof b.text === "string" ? b.text : "")).join("").split(secret).join("[redacted]");
-  const details = isRecord(msg.stop_details) ? msg.stop_details : {};
-  const refusal = [details.category, details.explanation].filter((x): x is string => typeof x === "string" && x !== "").join(": ");
+  const rawModel = msg.model;
+  const model = typeof rawModel === "string" && rawModel !== "" ? redactThenClip(rawModel, secret, 80) : "unknown";
+  const rawStop = msg.stop_reason;
+  const stop = rawStop === null || rawStop === undefined ? null : (KNOWN_STOPS as readonly unknown[]).includes(rawStop) ? (rawStop as StopLabel) : "unknown";
+  const rawContent = msg.content;
+  const content = Array.isArray(rawContent) ? (rawContent as readonly unknown[]) : [];
+  const text = content
+    .map((b) => {
+      if (!isRecord(b)) return "";
+      const type = b.type;
+      const blockText = b.text;
+      return type === "text" && typeof blockText === "string" ? blockText : "";
+    })
+    .join("")
+    .split(secret)
+    .join("[redacted]");
+  const rawDetails = msg.stop_details;
+  const details = isRecord(rawDetails) ? rawDetails : {};
+  const category = details.category;
+  const explanation = details.explanation;
+  const refusal = [category, explanation].filter((x): x is string => typeof x === "string" && x !== "").join(": ");
   return { model, stop, usage: parseUsage(msg.usage), text, refusal: redactThenClip(refusal, secret) };
 }
 
@@ -305,15 +329,38 @@ function redactingSink(secret: string, emit: (text: string) => void) {
 /** An HTTP status, or null for anything else a thrown value might carry in that field. */
 const statusOf = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 100 && v <= 599 ? v : null);
 
+/** One property of a value this adapter did not make. A getter or a proxy that throws reads as absent. */
+function read(v: unknown, key: string): unknown {
+  try {
+    return (v as Readonly<Record<string, unknown>>)[key];
+  } catch {
+    return undefined;
+  }
+}
+
+type Class = abstract new (...args: never[]) => object;
+
+/** `instanceof` that cannot throw, because a proxy's prototype trap can. */
+function isA(v: unknown, cls: Class): boolean {
+  try {
+    return v instanceof cls;
+  } catch {
+    return false;
+  }
+}
+
 /** The text of a thrown value, which may be anything, including a value whose own accessors throw. */
 function textOfError(err: unknown): string {
   try {
-    const text = err instanceof Error ? err.message : String(err);
+    const text = typeof err === "string" ? err : err instanceof Error ? err.message : String(err);
     return typeof text === "string" ? text : "unreadable error";
   } catch {
     return "unreadable error";
   }
 }
+
+/** What a client call returns, held in an object so that returning it from an async function never reads a field of it a second time. */
+type Untrusted = { readonly value: unknown };
 
 export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
   if (opts.apiKey === "") throw new Error("createClaudeApi needs a non-empty apiKey");
@@ -321,25 +368,30 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
   const limiter = createLimiter(opts.maxConcurrent);
   const safe = (text: string, max?: number) => redactThenClip(text, opts.apiKey, max);
 
-  /** Typed errors only, never message text: a retryable failure is overload, a rate limit, a 5xx or the connection. The only fields read from the error are its class, its status and its message. */
-  function failureOf(err: unknown): ProviderError {
-    if (err instanceof ProviderError) return err;
-    const text = safe(textOfError(err));
+  /**
+   * The only way a value caught from a client call leaves this file. It is never returned or rethrown: a new ApiCallError is built
+   * from its redacted text, a status read defensively, and its class, which only decides `retryable`. Billing comes from that status
+   * alone, so a caught object cannot name its own. A caught value with no status is maybe billed, and so is any failure that arrives
+   * after a text event, because a response had started.
+   */
+  function failureOf(caught: unknown, responseStarted: boolean): ApiCallError {
+    const text = safe(textOfError(caught));
     // The connection can fail before or after the request was sent, and nothing says which, so it may have been billed.
-    if (err instanceof Anthropic.APIConnectionError) return new ApiCallError(`claude api connection error: ${text}`, null, true, "maybe_billed", null);
-    if (err instanceof Anthropic.APIError) {
+    if (isA(caught, Anthropic.APIConnectionError)) return new ApiCallError(`claude api connection error: ${text}`, null, true, "maybe_billed", null);
+    if (isA(caught, Anthropic.APIError)) {
       // No status means the error arrived inside a stream that had started.
-      const status = statusOf(err.status);
-      const retryable = err instanceof Anthropic.RateLimitError || err instanceof Anthropic.RequestTimeoutError || err instanceof Anthropic.InternalServerError || (status !== null && status >= 500);
-      return new ApiCallError(`claude api error (${status ?? "no status"}): ${text}`, null, retryable, billingOfStatus(status), status);
+      const status = statusOf(read(caught, "status"));
+      const retryable = isA(caught, Anthropic.RateLimitError) || isA(caught, Anthropic.RequestTimeoutError) || isA(caught, Anthropic.InternalServerError) || (status !== null && status >= 500);
+      const billing = responseStarted ? "maybe_billed" : billingOfStatus(status);
+      return new ApiCallError(`claude api error (${status ?? "no status"}): ${text}`, null, retryable, billing, status);
     }
     // A stream that ended without a message is the SDK's own error for an interrupted connection.
-    if (err instanceof Anthropic.AnthropicError) return new ApiCallError(`claude api error: ${text}`, null, true, "maybe_billed", null);
+    if (isA(caught, Anthropic.AnthropicError)) return new ApiCallError(`claude api error: ${text}`, null, true, "maybe_billed", null);
     return new ApiCallError(`claude api call failed: ${text}`, null, false, "maybe_billed", null);
   }
 
   /** The slot, the timeout and the abort wrapped around one request. An abort rejects the way the CLI adapter's does. */
-  async function call<T>(req: ClaudeRequest, signal: AbortSignal, work: (callSignal: AbortSignal) => Promise<T>): Promise<T> {
+  async function call(req: ClaudeRequest, signal: AbortSignal, work: (callSignal: AbortSignal, began: () => void) => Promise<unknown>): Promise<Untrusted> {
     const release = await limiter.acquire(signal);
     const ctl = new AbortController();
     let timedOut = false;
@@ -349,13 +401,14 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
     }, req.timeoutMs);
     const onAbort = () => ctl.abort();
     signal.addEventListener("abort", onAbort, { once: true });
+    let responseStarted = false;
     try {
       signal.throwIfAborted();
-      return await work(ctl.signal);
+      return { value: await work(ctl.signal, () => (responseStarted = true)) };
     } catch (err) {
       if (signal.aborted) throw abortError();
       if (timedOut) throw new ApiCallError(`claude api timed out after ${req.timeoutMs}ms`, null, true, "maybe_billed", null);
-      throw failureOf(err);
+      throw failureOf(err, responseStarted);
     } finally {
       clearTimeout(timer);
       signal.removeEventListener("abort", onAbort);
@@ -375,9 +428,15 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
     return { model, system, messages: [{ role: "user", content: req.prompt }] as const };
   }
 
-  /** Parse the response, report it, then check the stop reason: only a finished answer is an answer. */
+  /** Parse the response, report it, then check the stop reason: only a finished answer is an answer. Runs after the client call, outside its `try`. */
   function settle(raw: unknown): { readonly parsed: Parsed; readonly usage: UsageReport } {
-    const parsed = parseMessage(raw, opts.apiKey);
+    let parsed: Parsed;
+    try {
+      parsed = parseMessage(raw, opts.apiKey);
+    } catch {
+      // A response that cannot be read is a response that may have been billed. Nothing of it is quoted.
+      throw new ApiCallError("claude api response could not be read", null, false, "maybe_billed", null);
+    }
     const usage = usageOf(parsed);
     opts.onResponse?.({ model: parsed.model, stopReason: parsed.stop, usage: parsed.usage, costUsd: usage.cost.kind === "estimated" ? usage.cost.usd : null });
     if (parsed.stop === "end_turn" || parsed.stop === "stop_sequence") return { parsed, usage };
@@ -394,38 +453,38 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
       } catch (err) {
         throw new ApiCallError(`output schema cannot be expressed as JSON Schema: ${safe(textOfError(err))}`, null, false, "not_billed", null);
       }
-      return call(req, signal, async (callSignal) => {
-        const message = await client.messages.create(
-          { model, max_tokens: STRUCTURED_MAX_TOKENS, system, messages: [...messages], output_config: { effort: req.effort, format } },
-          { signal: callSignal },
-        );
-        const { parsed: reply, usage } = settle(message);
-        let payload: unknown;
-        try {
-          payload = JSON.parse(reply.text);
-        } catch {
-          throw new ProviderError("claude returned text that is not JSON", usage, false);
-        }
-        const parsed = schema.safeParse(payload);
-        if (!parsed.success) throw new ProviderError(`claude output failed validation: ${safe(parsed.error.message)}`, usage, false);
-        return { output: parsed.data, usage };
-      });
+      const { value } = await call(req, signal, async (callSignal) =>
+        client.messages.create({ model, max_tokens: STRUCTURED_MAX_TOKENS, system, messages: [...messages], output_config: { effort: req.effort, format } }, { signal: callSignal }),
+      );
+      const { parsed: reply, usage } = settle(value);
+      let payload: unknown;
+      try {
+        payload = JSON.parse(reply.text);
+      } catch {
+        throw new ProviderError("claude returned text that is not JSON", usage, false);
+      }
+      const parsed = schema.safeParse(payload);
+      if (!parsed.success) throw new ProviderError(`claude output failed validation: ${safe(parsed.error.message)}`, usage, false);
+      return { output: parsed.data, usage };
     },
 
     async streamText(req, onText, signal) {
       const { model, system, messages } = prepare(req);
-      return call(req, signal, async (callSignal) => {
+      const sink = redactingSink(opts.apiKey, onText);
+      const { value } = await call(req, signal, async (callSignal, began) => {
         const stream = client.messages.stream(
           { model, max_tokens: STREAM_MAX_TOKENS, system, messages: [...messages], output_config: { effort: req.effort } },
           { signal: callSignal },
         );
-        const sink = redactingSink(opts.apiKey, onText);
-        stream.on("text", (delta) => sink.push(delta));
-        const message = await stream.finalMessage();
-        const { parsed: reply, usage } = settle(message);
-        sink.flush();
-        return { text: reply.text, usage };
+        stream.on("text", (delta) => {
+          began();
+          sink.push(delta);
+        });
+        return stream.finalMessage();
       });
+      const { parsed: reply, usage } = settle(value);
+      sink.flush();
+      return { text: reply.text, usage };
     },
   };
 }

@@ -843,3 +843,157 @@ describe("usage is parsed into non-negative safe integers or it is unknown", () 
     }
   });
 });
+
+describe("nothing caught from the client is rethrown or trusted", () => {
+  const headers = new Headers();
+  const boom = () => {
+    throw new Error(KEY);
+  };
+  /** An object whose every trap throws, so any property read, prototype check or key listing on it throws the key. */
+  const hostile = (target: object = {}) => new Proxy(target, new Proxy({}, { get: () => boom }));
+  /** The same, but only `get` throws, so `instanceof` still sees the target's class. */
+  const hostileGet = (target: object) => new Proxy(target, { get: boom });
+  const getter = <T extends object>(target: T, key: string): T => Object.defineProperty(target, key, { get: boom, configurable: true });
+  const runs = [
+    ["streamText", (c: ReturnType<typeof api>["claude"]) => c.streamText(req(), () => {}, NEVER)],
+    ["structured", (c: ReturnType<typeof api>["claude"]) => c.structured(req(), Out, NEVER)],
+  ] as const;
+  const clean = (err: ApiCallError) => {
+    expect(err).toBeInstanceOf(ApiCallError);
+    expect(err.usage).toBeNull();
+    expect(JSON.stringify([err.message, err.usage, err.status])).not.toContain(KEY);
+  };
+
+  test("a ProviderError the client throws is rebuilt: its text is redacted, its usage is dropped, and it is maybe billed", async () => {
+    const usage = { model: KEY, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cost: { kind: "unknown", reason: KEY } } as const;
+    const fail = new ProviderError(KEY, usage, false);
+    for (const [, run] of runs) {
+      const err = await run(api({ fail }).claude).catch((e) => e);
+      expect(err).not.toBe(fail);
+      clean(err);
+      expect(err.message).toContain("[redacted]");
+      expect(err.billing).toBe("maybe_billed");
+    }
+  });
+
+  test("an ApiCallError the client throws cannot claim not_billed or a status, before or after text", async () => {
+    const forged = () => new ApiCallError(KEY, null, false, "not_billed", 400);
+    for (const [, run] of runs) {
+      const err = await run(api({ fail: forged() }).claude).catch((e) => e);
+      clean(err);
+      expect(err.billing).toBe("maybe_billed");
+      expect(err.status).toBeNull();
+    }
+    const after = await api({ deltas: ["some text"], fail: forged() }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    clean(after);
+    expect(after.billing).toBe("maybe_billed");
+  });
+
+  test("a real 4xx that arrives after text was streamed is maybe billed, because a response had started", async () => {
+    const fail = new Anthropic.BadRequestError(400, body("x"), undefined, headers);
+    const seen: string[] = [];
+    const err = await api({ deltas: ["some text"], fail }).claude.streamText(req(), (t) => seen.push(t), NEVER).catch((e) => e);
+    expect(seen.join("")).toBe("some text");
+    expect(err.billing).toBe("maybe_billed");
+    const before = await api({ fail }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    expect(before.billing).toBe("not_billed");
+    expect(before.status).toBe(400);
+  });
+
+  test.each([
+    ["a plain object with a message and a free-looking status", { message: KEY, status: 400, billing: "not_billed" }],
+    ["a string", KEY],
+    ["null", null],
+    ["a number", 0],
+    ["a proxy whose every trap throws", hostile()],
+    ["a proxy over an SDK error whose gets throw", hostileGet(new Anthropic.BadRequestError(400, body(KEY), undefined, headers))],
+  ])("%s is rebuilt as a maybe-billed error with no status and no key", async (_name, fail) => {
+    for (const [, run] of runs) {
+      const err = await run(api({ fail }).claude).catch((e) => e);
+      clean(err);
+      expect(err.billing).toBe("maybe_billed");
+      expect(err.status).toBeNull();
+    }
+  });
+
+  test.each(["status", "message", "name", "cause"])("an error whose %s getter throws the key does not escape", async (key) => {
+    const fails = [getter(new Anthropic.BadRequestError(400, body("x"), "x", headers), key), getter(new Error("plain"), key), getter(new Anthropic.APIConnectionError({ message: "x" }), key)];
+    for (const fail of fails) {
+      for (const [, run] of runs) {
+        const err = await run(api({ fail }).claude).catch((e) => e);
+        clean(err);
+        expect(err.billing === "maybe_billed" || err.status === 400).toBe(true);
+      }
+    }
+  });
+
+  test("a throwing status getter is no status, so it is maybe billed", async () => {
+    const err = await api({ fail: getter(new Anthropic.BadRequestError(400, body("x"), "x", headers), "status") }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    clean(err);
+    expect(err.status).toBeNull();
+    expect(err.billing).toBe("maybe_billed");
+  });
+
+  test("the adapter's own errors are not told apart from a client's by class: refusal, max_tokens, schema and refused features all come from outside the client call", async () => {
+    const swallowed = new ProviderError("claude refused the request", null, false);
+    for (const [, run] of runs) {
+      const err = await run(api({ fail: swallowed }).claude).catch((e) => e);
+      expect(err).not.toBe(swallowed);
+      expect(err).toBeInstanceOf(ApiCallError);
+    }
+    const refusal = await api({ deltas: ["x"], final: message({ stop: "refusal" }) }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    expect(refusal).toBeInstanceOf(ProviderError);
+    expect(refusal).not.toBeInstanceOf(ApiCallError);
+    expect(refusal.usage).not.toBeNull();
+    const schema = await api({ final: message({ text: '{"concepts":1}' }) }).claude.structured(req(), Out, NEVER).catch((e) => e);
+    expect(schema.message).toContain("failed validation");
+    expect(schema.usage).not.toBeNull();
+  });
+
+  test("a response whose fields throw is a maybe-billed failed call with no key and nothing reported", async () => {
+    const reported: ApiCallDetail[] = [];
+    const responses = [
+      getter({ model: "claude-opus-5-5", content: [], stop_reason: "end_turn", usage: {} }, "stop_reason"),
+      getter({ model: "claude-opus-5-5", content: [], stop_reason: "end_turn" }, "usage"),
+      { model: "claude-opus-5-5", stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 }, content: [getter({ type: "text" }, "text")] },
+      { model: "claude-opus-5-5", stop_reason: "end_turn", usage: getter({ input_tokens: 1 }, "output_tokens"), content: [] },
+      hostile(),
+      hostileGet(message({})),
+    ];
+    for (const final of responses) {
+      for (const [, run] of runs) {
+        const err = await run(api({ deltas: ["t"], final: final as Message }, { onResponse: (d) => reported.push(d) }).claude).catch((e) => e);
+        clean(err);
+        expect(err.billing).toBe("maybe_billed");
+      }
+    }
+    expect(JSON.stringify(reported)).not.toContain(KEY);
+  });
+
+  test("a client, a stream or a method that throws on access is a maybe-billed error with no key", async () => {
+    const stream = (over: object) => hostile({ ...over });
+    const shapes: readonly [string, () => ApiClient][] = [
+      ["messages", () => ({ get messages(): never { return boom(); } }) as ApiClient],
+      ["stream method", () => ({ messages: { get stream(): never { return boom(); }, get create(): never { return boom(); } } }) as ApiClient],
+      ["stream object", () => ({ messages: { stream: () => stream({}), create: () => Promise.reject(hostile()) } }) as unknown as ApiClient],
+      ["stream.on", () => ({ messages: { stream: () => ({ get on(): never { return boom(); }, finalMessage: () => Promise.resolve(message({})), abort() {} }), create: boom } }) as unknown as ApiClient],
+      ["stream.finalMessage", () => ({ messages: { stream: () => ({ on: () => ({}), get finalMessage(): never { return boom(); }, abort() {} }), create: boom } }) as unknown as ApiClient],
+      ["a thenable that throws", () => ({ messages: { stream: () => ({ on: () => ({}), finalMessage: () => hostile(), abort() {} }), create: () => hostile() } }) as unknown as ApiClient],
+    ];
+    for (const [, make] of shapes) {
+      for (const [, run] of runs) {
+        const err = await run(createClaudeApi({ apiKey: KEY, maxConcurrent: 1, client: make() })).catch((e) => e);
+        clean(err);
+        expect(err.billing).toBe("maybe_billed");
+      }
+    }
+  });
+
+  test("a delta that is not a string is dropped, and the deltas and the text that were streamed stay complete and in order", async () => {
+    const seen: string[] = [];
+    const { claude } = api({ deltas: ["a", "b", "c"] });
+    const out = await claude.streamText(req(), (t) => seen.push(t), NEVER);
+    expect(seen.join("")).toBe("abc");
+    expect(out.text).toBe("abc");
+  });
+});
