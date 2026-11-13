@@ -104,6 +104,13 @@ export type ServeOptions = {
   readonly maxBodyBytes?: number;
   /** How long a turn stream may run before it ends with `turn_failed` (retryable). Defaults to `TURN_DEADLINE_MS`; tests shorten it. */
   readonly turnDeadlineMs?: number;
+  /** Address to bind. Defaults to 127.0.0.1. A container binds 0.0.0.0 so the load balancer can reach it. */
+  readonly hostname?: string;
+  /**
+   * True lets GET /health skip the Host check, because a load balancer's health check carries the task's address as Host.
+   * Every other route keeps the localhost Host check, so a request through the load balancer's name is still a 403.
+   */
+  readonly healthAnyHost?: boolean;
 };
 
 export const DEFAULT_PORT = 4317;
@@ -576,6 +583,7 @@ async function handle(req: Request, opts: ServeOptions, auth: AuthConfig, guard:
   if (req.method === "OPTIONS") return preflight(req, auth);
 
   if (req.method === "GET" && path === "/health") {
+    if (opts.healthAnyHost === true) return json(200, { ok: true });
     const v = authorize(req.headers, auth, { requireToken: false });
     return v.ok ? json(200, { ok: true }) : failure(v.status, "forbidden");
   }
@@ -605,7 +613,7 @@ export function serve(opts: ServeOptions): Bun.Server<undefined> {
   let auth = opts.auth;
   const guard: TurnGuard = { inFlight: new Map(), deadlineMs: opts.turnDeadlineMs ?? TURN_DEADLINE_MS };
   const server = Bun.serve({
-    hostname: "127.0.0.1",
+    hostname: opts.hostname ?? "127.0.0.1",
     port: opts.auth.port,
     // A tutor turn can be silent for a long while before its first word; Bun's default of 10 s would cut the stream.
     idleTimeout: 255,

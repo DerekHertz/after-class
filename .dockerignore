@@ -1,0 +1,8 @@
+*
+!package.json
+!bun.lock
+!bunfig.toml
+!tsconfig.json
+!src/shared
+!src/backend
+!scripts/build-app.ts

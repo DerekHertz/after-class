@@ -1,0 +1,90 @@
+name: deploy
+
+# Manual only. The job runs in the protected `production` environment, so Derek approves each run, and the AWS role's
+# trust policy accepts only that environment's token. It never runs on pull requests.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: aws
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+
+      - name: Build and push the arm64 image, tagged by commit
+        env:
+          ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          registry="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          image="${registry}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          echo "IMAGE=${image}" >> "$GITHUB_ENV"
+          # Tags are immutable, so a rerun of the same commit reuses the image it already pushed.
+          if out=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=${IMAGE_TAG}" 2>&1); then
+            echo "image ${image} already exists, not rebuilding"
+            exit 0
+          elif ! grep -q ImageNotFoundException <<<"$out"; then
+            echo "$out"
+            exit 1
+          fi
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
+          docker build --platform linux/arm64 --tag "$image" .
+          docker push "$image"
+
+      - name: Register a task definition revision and update the service
+        env:
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+        run: |
+          set -euo pipefail
+          current=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].taskDefinition' --output text)
+          aws ecs describe-task-definition --task-definition "$current" --query taskDefinition > current.json
+          jq --arg image "$IMAGE" '
+            del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
+            | .containerDefinitions[0].image = $image
+          ' current.json > next.json
+          next=$(aws ecs register-task-definition --cli-input-json file://next.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "registered ${next}"
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" --task-definition "$next" > /dev/null
+          echo "NEXT_TASK_DEFINITION=${next}" >> "$GITHUB_ENV"
+
+      - name: Wait for the service to be stable on the new revision
+        env:
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+        run: |
+          set -euo pipefail
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
+          # A failed deployment rolls back and the service is then stable on the old revision, so check which one it runs.
+          running=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].taskDefinition' --output text)
+          if [ "$running" != "$NEXT_TASK_DEFINITION" ]; then
+            echo "service runs ${running}, not ${NEXT_TASK_DEFINITION}: the deployment rolled back"
+            exit 1
+          fi
+          echo "service is stable on ${running}"

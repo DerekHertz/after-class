@@ -83,7 +83,7 @@ export function world() {
   return { db, evidence, reviews, invite, stored };
 }
 
-export function start(appDir = fixtureApp(), extra: { maxBodyBytes?: number } = {}) {
+export function start(appDir = fixtureApp(), extra: { maxBodyBytes?: number; healthAnyHost?: boolean } = {}) {
   const w = world();
   const server = serve({
     modules: { ledger: createLedger(w.db), evidence: w.evidence, reviews: w.reviews },

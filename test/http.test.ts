@@ -69,6 +69,19 @@ describe("health and the API", () => {
     expect((await raw(port, "/health", { Host: `localhost:${port}` })).body).toBe('{"ok":true}');
   });
 
+  test("healthAnyHost answers /health for a load balancer's Host and leaves every other route on the localhost Host check", async () => {
+    const { port } = start(undefined, { healthAnyHost: true });
+    const lb = { Host: "10.0.1.7:4317" };
+    expect((await raw(port, "/health", lb)).body).toBe('{"ok":true}');
+    expect((await raw(port, "/usage", { ...lb, Authorization: `Bearer ${TOKEN}` })).status).toBe(403);
+    expect((await raw(port, "/app/", lb)).status).toBe(403);
+  });
+
+  test("without healthAnyHost a foreign Host on /health is 403", async () => {
+    const { port } = start();
+    expect((await raw(port, "/health", { Host: "10.0.1.7:4317" })).status).toBe(403);
+  });
+
   test("a rebinding Host or a page Origin gets 403 on every kind of route", async () => {
     const { port } = start();
     for (const path of ["/health", "/usage", "/app/", "/app/main.js", `/captures/${CAP}`]) {
