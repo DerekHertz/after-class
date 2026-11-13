@@ -1,6 +1,6 @@
 # Architecture decision: After Class as a hosted, multi-user product
 
-Status: proposal for Derek's review, written 2026-11-13 against `master` at `476d2a4`. Nothing here is approved. Nothing was built, installed, deployed or signed up for. The approved stack in `docs/flows/after-class.md` is unchanged until Derek amends it.
+Status: written 2026-11-13 against `master` at `476d2a4`. Derek approved the recommendation as written on 2026-11-13, and said he will pay for model calls within a cap. Whether Jev stays is under review in `docs/architecture/jev.md`. Nothing was built, installed, deployed or signed up for. The approved stack in `docs/flows/after-class.md` is unchanged until Derek approves an amendment. Each new dependency still needs his approval by name, version and reason.
 
 ## What Derek asked for
 

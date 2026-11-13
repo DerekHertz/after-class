@@ -1,6 +1,6 @@
 # Migration plan: from the local app to the hosted stack
 
-Status: proposal for Derek's review, written 2026-11-13 against `master` at `476d2a4`. It follows `docs/architecture/decision.md` and assumes that document's recommendations. If Derek changes a recommendation, the phase that implements it changes and the others mostly stand.
+Status: written 2026-11-13 against `master` at `476d2a4`; Derek approved `decision.md` as written on 2026-11-13 and asked for Phase 0 and Phase 1 to start in parallel. It follows `docs/architecture/decision.md` and assumes that document's recommendations. If Derek changes a recommendation, the phase that implements it changes and the others mostly stand.
 
 No phase starts before Derek approves it. No dependency is added before Derek approves its name, exact version and reason. Nothing deploys without Derek's explicit authorization.
 
@@ -185,7 +185,7 @@ Approvals:
 
 Product and policy decisions:
 
-- Who pays for model calls: Derek within a cap, each learner with their own key, or a paid plan. The per-user and global budget amounts follow from this.
+- Who pays for model calls: decided 2026-11-13, Derek pays within a cap. The per-user and global budget amounts are still his to set.
 - Who is invited, and when sign-up opens.
 - Whether preparation may be shared across users at all, given that the PRD says cross-user source-cache sharing is not required.
 - Retention for other people's data. The 30-day default for uncited raw captures was set for a local, single-user record.
