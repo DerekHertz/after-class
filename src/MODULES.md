@@ -4,7 +4,7 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 
 | Module | Owner | Owned files | Owned tables | Frozen exports |
 | --- | --- | --- | --- | --- |
-| Kernel | W10 | `src/shared/*`, `src/backend/db.ts`, `src/backend/migrations.ts`, `src/backend/migrations-record.ts`, `src/backend/providers/memo.ts`, `test/fakes.ts`, `test/boundaries.test.ts`, `test/{ids,time,wire,db,memo,rules}.test.ts` | `schema_migrations`, `seq_counter`, `users` | everything in `shared/` (`domain.ts` types, `ids.ts`, `time.ts`, `wire.ts` schemas, `parse*`, `ROUTES`, `Route`, `routeUrl`, `matchRoute`, `encodeMaterial`, `decodeMaterial`), `Db`, `UserDb`, `openDb`, `scopeDb`, `ensureLocalUser`, `LOCAL_USER`, `TABLE_SCOPES`, `asSeq`, `MIGRATIONS`, `tableOwners`, `Task`, `Lookup`, `LookupFn`, `Memo`, `UsageReport`, `ProviderError`, `ReplayMiss`, `appliesBefore`, `createMemo` |
+| Kernel | W10 | `src/shared/*`, `src/backend/db.ts`, `src/backend/migrations.ts`, `src/backend/migrations-record.ts`, `src/backend/pg.ts`, `src/backend/pg-schema.ts`, `src/backend/providers/memo.ts`, `scripts/dev/pg.sh`, `test/fakes.ts`, `test/pg-fixtures.ts`, `test/boundaries.test.ts`, `test/{ids,time,wire,db,memo,rules,pg,pg-schema}.test.ts` | `schema_migrations`, `seq_counter`, `users` | everything in `shared/` (`domain.ts` types, `ids.ts`, `time.ts`, `wire.ts` schemas, `parse*`, `ROUTES`, `Route`, `routeUrl`, `matchRoute`, `encodeMaterial`, `decodeMaterial`), `Db`, `UserDb`, `openDb`, `scopeDb`, `ensureLocalUser`, `LOCAL_USER`, `TABLE_SCOPES`, `asSeq`, `MIGRATIONS`, `tableOwners`, `PgDb`, `UserPgDb`, `Tx`, `Param`, `openPgDb`, `scopePgDb`, `ensurePgUser`, `PG_MIGRATIONS`, `Task`, `Lookup`, `LookupFn`, `Memo`, `UsageReport`, `ProviderError`, `ReplayMiss`, `appliesBefore`, `createMemo` |
 | Composition | W10 (after W1 to W9) | `src/backend/http.ts`, `src/backend/main.ts`, `src/backend/scheduler.ts` | none | `WorkItem`, `Scheduler`, `Modules`, `AuthConfig`, `authorize` |
 | Playback and frames | W1 | `src/extension/content/capture.ts`, `src/extension/content/frames.ts` | none | `Emit`, `ControlMessage`, `ContentSignal`, `PlaybackTracker`, `AdSignals`, `isAdShowing`, `FrameSamplerConfig`, `FrameSampler`, `normalizedSize` |
 | Transcripts, worker, popup, build | W2 | `src/extension/content/transcript.ts`, `src/extension/content/main-world.ts`, `src/extension/content/content-entry.ts`, `src/extension/content/stream-id.ts`, `src/extension/worker/*`, `src/extension/popup/*`, `src/extension/manifest.json`, `scripts/build-extension.ts` | none (IndexedDB outbox, `chrome.storage.session`) | `TranscriptResult`, `TabCaptureState`, `PopupRequest`, `transition` |
@@ -25,6 +25,56 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 - Write SQL only against tables your row lists. `test/boundaries.test.ts` fails otherwise.
 - Quote Derek's rules as `Rn: "<exact text>"` wherever code enforces one. `test/rules.test.ts` fails on any wording that differs from `docs/flows/after-class.md`.
 - Every provider call is `memo.run(task, input)`. Derivations read `memo.lookup` and apply results only through `appliesBefore(lookup, cutoff)`.
+
+## PostgreSQL kernel
+
+Every module moves from `UserDb` (`db.ts`, SQLite) to `UserPgDb` (`pg.ts`, PostgreSQL on `Bun.sql`) in one wave. SQLite stays only until that wave lands. The interface:
+
+```ts
+type Param = string | number | boolean | null | object;   // an object or array is stored as jsonb
+type Tx = {
+  all<R>(strings: TemplateStringsArray, ...values: Param[]): Promise<R[]>;          // t.all<Row>`SELECT a, b FROM t WHERE id = ${id}`
+  get<R>(strings: TemplateStringsArray, ...values: Param[]): Promise<R | null>;     // first row or null
+  run(strings: TemplateStringsArray, ...values: Param[]): Promise<{ changes: number }>;
+  nextSeq(userId?: UserId): Promise<Seq>;     // the locked user's next Seq; name the user when several are locked
+  lockUsers(...userIds: UserId[]): Promise<void>;
+  holdsUserLock(userId: UserId): boolean;
+  heldUserLocks(): readonly UserId[];
+  tx<T>(fn: (t: Tx) => Promise<T>): Promise<T>;   // savepoint
+};
+type PgDb = {
+  tx<T>(fn: (t: Tx) => Promise<T>): Promise<T>;                       // no lock
+  command<T>(userId: UserId, fn: (t: Tx) => Promise<T>): Promise<T>;  // locks userId first
+  read<T>(fn: (t: Tx) => Promise<T>): Promise<T>;                     // read only, one snapshot, no lock
+  close(): Promise<void>;
+};
+type UserPgDb = { userId: UserId; command<T>(fn: (t: Tx) => Promise<T>): Promise<T>; read<T>(fn: (t: Tx) => Promise<T>): Promise<T> };
+openPgDb(url: string, opts?: { max?: number; idleInTransactionMs?: number }): Promise<PgDb>;   // runs pending migrations
+scopePgDb(db: PgDb, userId: UserId): Promise<UserPgDb>;
+ensurePgUser(db: PgDb, userId: UserId, createdMs: number): Promise<void>;
+```
+
+Rules for every module:
+
+- Every command starts with `udb.command(async (t) => …)`. The lock comes first, then every read the command decides on. A user's commands run one at a time, and different users never wait on each other. Reads that decide nothing go through `udb.read`.
+- A command over several users, such as the expiry sweep, finds its candidate users, then opens `db.tx`, calls `t.lockUsers(...all of them)` once, reads again under the locks, and deletes. Never delete a user's rows without that user's lock: on PostgreSQL the R16 trigger cannot see an uncommitted review, so the lock is what keeps an unsaved review's evidence (`test/pg.test.ts`, "R16 needs the lock").
+- Statements run only through the handle `t`. `PgDb` and `UserPgDb` have no statement methods. A helper that touches the database takes `t: Tx` as a parameter. Calling `command`, `tx` or `read` while your own transaction is open throws.
+- No non-database await inside a transaction: no model call, `fetch`, file read or timer. Load inputs in one command, call the model outside any transaction, then write the result in a new command that checks again, under the lock, the state it relies on. The server ends a transaction idle for 10 s, and its commit fails.
+- Explicit column lists in every `SELECT` and `INSERT`. No `SELECT *`.
+- `INSERT OR IGNORE` becomes `INSERT … ON CONFLICT (key columns) DO NOTHING`. SQLite's `OR IGNORE` also swallowed CHECK and NOT NULL failures, and PostgreSQL raises them.
+- A failed statement poisons its handle, and a transaction whose body caught a failure does not commit. A statement you expect may fail and want to recover from goes inside `t.tx(async (sp) => …)`.
+- Seqs are per user. Take them with `t.nextSeq()` inside a command. A user's Seqs commit in the order they were taken. Seqs of two users are not comparable, and every Seq column is unique per `(user_id, seq)`.
+
+Dialect, each line checked in `test/pg.test.ts` or `test/pg-schema.test.ts`:
+
+- Values go in `${…}` and are always bound parameters. A nullable filter needs a type: `${x}::text IS NULL OR col = ${x}`.
+- `*_json` columns are `jsonb`. Bind the value itself, never `JSON.stringify(value)`, which stores a JSON string. Rows come back parsed, so drop `JSON.parse`. jsonb reorders keys and respells numbers, so hash a value with `canonicalJson`, never the text read back.
+- `json_each(col)` becomes `jsonb_array_elements_text(col)`, and `json_extract(col, '$.k')` becomes `col ->> 'k'`. A list of ids binds as one value: `id IN (SELECT jsonb_array_elements_text(${ids}))`.
+- `bigint` columns and `COUNT(*)` arrive as numbers. `SUM` is `numeric` and arrives as a string, so write `SUM(x)::bigint`. `EXISTS (…)` is `true` or `false`, not 1 or 0, and `SUM(boolean)` becomes `COUNT(*) FILTER (WHERE …)`.
+- Text sorts by bytes as on SQLite, because every text column is `COLLATE "C"`.
+- Trigger refusals keep their SQLite messages (`R16: …`, `R17: …`, `… is append-only`) and reject with a `PostgresError`. Every append-only table also refuses `TRUNCATE`.
+
+The schema is `src/backend/pg-schema.ts`, one append-only array per owner as in `migrations.ts`. Append to your own array to change your tables. `test/pg-schema.test.ts` holds it to the SQLite schema until SQLite is removed. Tests reach PostgreSQL through `AFTERCLASS_TEST_PG_URL` and use `pgDatabases()` from `test/pg-fixtures.ts`, which gives each test its own database. Locally, `scripts/dev/pg.sh start` runs the one shared container, and `export AFTERCLASS_TEST_PG_URL="$(scripts/dev/pg.sh url)"` points the tests at it. Without the variable the PostgreSQL test files skip and say so.
 
 ## Users in the providers module
 
