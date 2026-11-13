@@ -28,11 +28,11 @@
 .scene-shell::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--fr-plate) 50% 100% / cover no-repeat; }
 .scene-shell:has(:is(.front-row, .review-loading))::before { background: var(--fr-bg) var(--fr-phone-x) 0 / cover no-repeat; }
 .scene-shell .scene-masthead { height: auto; max-width: none; margin: 0; padding: 8px 12px; gap: 8px; background: none; border: 0; color: var(--fr-bar-ink); }
-.scene-shell :is(.scene-masthead > a, .appearance-picker > summary) { display: flex; align-items: center; min-height: 44px; padding: 0 12px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); color: var(--fr-bar-ink); box-shadow: 0 3px 0 #00000040; }
+.scene-shell :is(.scene-masthead > a, .appearance-picker > summary, .scene-masthead > .sign-out) { display: flex; align-items: center; min-height: 44px; padding: 0 12px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); color: var(--fr-bar-ink); box-shadow: 0 3px 0 #00000040; }
 .scene-shell .scene-masthead > a { gap: 8px; font: 600 1.3rem/1 'After Class Pixel', var(--font); }
 .scene-shell .scene-masthead .bell-mark { width: 22px; height: 28px; }
-.scene-shell .appearance-picker > summary { font: 500 1.05rem/1 'After Class Pixel', var(--font); }
-.scene-shell :is(.scene-masthead a, .appearance-picker > summary):focus-visible { outline: 3px solid var(--fr-bar-ink); outline-offset: 2px; }
+.scene-shell :is(.appearance-picker > summary, .scene-masthead > .sign-out) { font: 500 1.05rem/1 'After Class Pixel', var(--font); }
+.scene-shell :is(.scene-masthead a, .appearance-picker > summary, .scene-masthead > .sign-out):focus-visible { outline: 3px solid var(--fr-bar-ink); outline-offset: 2px; }
 
 /* --fr-nav-reserve is measured by reserveNavSpace(); these values only cover the first paint. */
 .scene-shell .review.front-row { --fr-nav-reserve: 64px; position: relative; max-width: none; min-height: 0; margin: 0; padding: 0; border: 0; background: transparent; color: var(--fr-bar-ink); font-family: var(--font); }
@@ -325,6 +325,11 @@
   .front-row-scene .front-row-object[data-object="source"] { right: calc(var(--fr-side-inset) + var(--fr-book-w) * .05); bottom: calc(var(--fr-book-bottom) + var(--fr-book-h) + var(--fr-u) * 8); width: calc(var(--fr-book-w) * .9); aspect-ratio: 1180 / 976; }
 }
 
+/* Wide windows, signed in: the review's navigation also leaves room for Sign out beside the picker. */
+@media (min-width: 1360px) and (min-height: 560px) {
+  .scene-shell:has(.scene-masthead > .sign-out) .front-row .front-row-bar { right: calc(20px + 21rem); }
+}
+
 /* Mid-width windows: the review's navigation takes a second row under the masthead chips. */
 @media (min-width: 900px) and (max-width: 1359px) and (min-height: 560px) {
   .scene-shell .review.front-row { --fr-nav-reserve: 120px; }
@@ -335,9 +340,11 @@
    the desk with Your thinking, and the companion with the notebook stack over it. Every text keeps a readable size. */
 @media (max-width: 899px), (max-height: 559px) {
   .scene-shell .scene-masthead { min-height: 0; padding: 8px 8px 6px; flex-wrap: nowrap; }
-  .scene-shell :is(.scene-masthead > a, .appearance-picker > summary) { padding: 0 10px; }
+  /* Signed in, the three chips do not fit one phone row, so the picker and Sign out wrap to a second row at the right. */
+  .scene-shell .scene-masthead:has(> .sign-out) { flex-wrap: wrap; row-gap: 6px; }
+  .scene-shell :is(.scene-masthead > a, .appearance-picker > summary, .scene-masthead > .sign-out) { padding: 0 10px; }
   .scene-shell .scene-masthead > a { font-size: 1.15rem; }
-  .scene-shell .appearance-picker > summary { font-size: .95rem; }
+  .scene-shell :is(.appearance-picker > summary, .scene-masthead > .sign-out) { font-size: .95rem; }
   .scene-shell .front-row .front-row-bar { padding: 0 8px; gap: 6px; }
   .front-row .front-row-title { flex: 1 1 100%; }
   .front-row .front-row-bar .review-navigation { justify-content: flex-start; gap: 6px; }
