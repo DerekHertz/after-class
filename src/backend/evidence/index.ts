@@ -156,17 +156,22 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
 
   let projections = new Map<CaptureId, Projection>();
   let captureIds: CaptureId[] | null = null;
-  let rawIndex: Map<EvidenceId, Raw> | null = null;
+  /** Every evidence id with the captures that hold it, built once and then kept current one capture at a time. */
+  let rawIndex: Map<EvidenceId, Map<CaptureId, Raw>> | null = null;
+  const rawIds = new Map<CaptureId, EvidenceId[]>();
+  const rawDirty = new Set<CaptureId>();
   /** One capture's facts changed: only its projection is stale. The ids of the others stay cached. */
   const invalidateCapture = (captureId: CaptureId) => {
     projections.delete(captureId);
     if (captureIds && !captureIds.includes(captureId)) captureIds.push(captureId);
-    rawIndex = null;
+    if (rawIndex) rawDirty.add(captureId);
   };
   const invalidate = () => {
     projections = new Map();
     captureIds = null;
     rawIndex = null;
+    rawIds.clear();
+    rawDirty.clear();
   };
 
   const loadFacts = db.sql.query<
@@ -223,15 +228,40 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     );
   }
 
-  function raw(): Map<EvidenceId, Raw> {
-    if (rawIndex) return rawIndex;
-    const index = new Map<EvidenceId, Raw>();
-    for (const p of allProjections()) {
-      for (const w of p.passages) if (!index.has(w.passage.id)) index.set(w.passage.id, { kind: "passage", passage: w.passage });
-      for (const entry of p.frames) if (!index.has(entry.frame.id)) index.set(entry.frame.id, { kind: "frame", entry });
+  function indexCapture(index: Map<EvidenceId, Map<CaptureId, Raw>>, captureId: CaptureId): void {
+    const ids: EvidenceId[] = [];
+    const put = (id: EvidenceId, entry: Raw) => {
+      let owners = index.get(id);
+      if (!owners) index.set(id, (owners = new Map()));
+      owners.set(captureId, entry);
+      ids.push(id);
+    };
+    const p = project(captureId);
+    for (const w of p.passages) put(w.passage.id, { kind: "passage", passage: w.passage });
+    for (const entry of p.frames) put(entry.frame.id, { kind: "frame", entry });
+    rawIds.set(captureId, ids);
+  }
+
+  /** A capture's own upload re-indexes that capture only. A passage id shared by captures names the same transcript text in each. */
+  function raw(): { get(id: EvidenceId): Raw | undefined; has(id: EvidenceId): boolean } {
+    if (!rawIndex) {
+      rawIndex = new Map();
+      for (const id of allCaptureIds()) indexCapture(rawIndex, id);
+      rawDirty.clear();
+    } else if (rawDirty.size > 0) {
+      for (const captureId of rawDirty) {
+        for (const id of rawIds.get(captureId) ?? []) {
+          const owners = rawIndex.get(id);
+          owners?.delete(captureId);
+          if (owners?.size === 0) rawIndex.delete(id);
+        }
+        rawIds.delete(captureId);
+        indexCapture(rawIndex, captureId);
+      }
+      rawDirty.clear();
     }
-    rawIndex = index;
-    return index;
+    const index = rawIndex;
+    return { get: (id) => index.get(id)?.values().next().value, has: (id) => index.has(id) };
   }
 
   const withBytes = (e: FrameEntry) => ({ frame: e.frame, bytes: (): Uint8Array => bytes(e.frame.id) ?? new Uint8Array() });

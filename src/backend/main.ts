@@ -403,6 +403,8 @@ type UserGraph = Omit<Modules, "scheduler"> & {
   readonly live: Set<CaptureId>;
   /** The captures that left `live`, each with the keys its last derivation read (`Dep`). A change to one of those keys wakes it. */
   readonly asleep: Map<CaptureId, ReadonlySet<Dep>>;
+  /** Takes a capture out of `live` and files it under each key it read, so a change finds its sleepers without scanning them all. */
+  readonly sleep: (captureId: CaptureId, keys: ReadonlySet<Dep>) => void;
   /** Runs `fn` and returns the keys its stores reported reading. */
   readonly reading: <T>(fn: () => T) => { readonly value: T; readonly keys: ReadonlySet<Dep> };
 };
@@ -521,9 +523,30 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     const tasks: TaskSet = options.tasks ?? buildTasks(providers.jev, providers.claude, frameBytes, tutorCache(db), tutorModel);
     const live = new Set<CaptureId>();
     const asleep = new Map<CaptureId, ReadonlySet<Dep>>();
-    const wake = (captureId: CaptureId) => {
+    const sleepersOf = new Map<Dep, Set<CaptureId>>();
+    const unfile = (captureId: CaptureId) => {
+      const keys = asleep.get(captureId);
+      if (keys === undefined) return;
       asleep.delete(captureId);
+      for (const k of keys) {
+        const sleepers = sleepersOf.get(k);
+        sleepers?.delete(captureId);
+        if (sleepers?.size === 0) sleepersOf.delete(k);
+      }
+    };
+    const wake = (captureId: CaptureId) => {
+      unfile(captureId);
       live.add(captureId);
+    };
+    const sleep = (captureId: CaptureId, keys: ReadonlySet<Dep>) => {
+      unfile(captureId);
+      live.delete(captureId);
+      asleep.set(captureId, keys);
+      for (const k of keys) {
+        let sleepers = sleepersOf.get(k);
+        if (!sleepers) sleepersOf.set(k, (sleepers = new Set()));
+        sleepers.add(captureId);
+      }
     };
     /**
      * A capture that sleeps keeps the keys its last derivation read, and every store reports a read where it makes one and
@@ -532,14 +555,10 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
      * Waking every capture of the user instead would derive every lecture on each job result and each upload.
      */
     const changed = (keys: readonly Dep[]): boolean => {
-      let woke = false;
-      for (const [captureId, read] of asleep) {
-        if (keys.some((k) => read.has(k))) {
-          wake(captureId);
-          woke = true;
-        }
-      }
-      return woke;
+      const hit = new Set<CaptureId>();
+      for (const k of keys) for (const captureId of sleepersOf.get(k) ?? []) hit.add(captureId);
+      for (const captureId of hit) wake(captureId);
+      return hit.size > 0;
     };
     let readDeps: Set<Dep> | null = null;
     const read: ReadDep = (dep) => {
@@ -712,7 +731,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
         ? unavailableVoice
         : createVoice({ apiKey: voiceKey, voiceId, model: voiceModel, db, ...(options.fetch ? { fetch: options.fetch } : {}) });
 
-    return { tasks, evidence, segmentation, preparation, reviews, record, ledger, memo, diagrams, voice, live, asleep, reading, db };
+    return { tasks, evidence, segmentation, preparation, reviews, record, ledger, memo, diagrams, voice, live, asleep, sleep, reading, db };
   }
 
   const graphs = new Map<UserId, UserGraph>();
@@ -763,8 +782,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
           }),
         );
         if (items.length === 0 && !failed) {
-          graph.live.delete(captureId);
-          graph.asleep.set(captureId, keys);
+          graph.sleep(captureId, keys);
         }
         return items;
       }),

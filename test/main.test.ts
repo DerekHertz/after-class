@@ -282,6 +282,38 @@ describe("main, the pump an upload triggers", () => {
     await until(() => derived.includes(CAP));
   });
 
+  test("an upload probes no sleeping capture's keys, however many lectures sleep", async () => {
+    const b = await boot({ tasks: fakeTasks().tasks, ingestPumpMs: 60_000 }, { AFTERCLASS_MODE: "replay" });
+    const { scheduler } = b.r.modules;
+    const target = stableId("cap", "scaling-target") as CaptureId;
+    const start = (id: CaptureId, clientSeq: number) => ingestInto(b, id, [{ kind: "control", action: "start", reason: "user", clientSeq, wallMs: 1000 + clientSeq }]);
+    const probesDuringUpload = async (seq: number): Promise<number> => {
+      const has = Set.prototype.has;
+      let probes = 0;
+      Set.prototype.has = function (this: Set<unknown>, v: unknown) {
+        if (typeof v === "string" && (v.startsWith("capture:") || v.startsWith("source:"))) probes++;
+        return has.call(this, v);
+      };
+      try {
+        await start(target, seq);
+      } finally {
+        Set.prototype.has = has;
+      }
+      return probes;
+    };
+    let seeded = 0;
+    let seq = 0;
+    const counts: number[] = [];
+    for (const size of [5, 50]) {
+      while (seeded < size) await start(stableId("cap", `scaling-${seeded++}`) as CaptureId, 0);
+      scheduler.pump();
+      await start(target, seq++);
+      scheduler.pump();
+      counts.push(await probesDuringUpload(seq++));
+    }
+    expect(counts[1]).toBe(counts[0]!);
+  });
+
   test("retry wakes a capture whose failed job had left the working set", async () => {
     const fakes = fakeTasks();
     let attempts = 0;
