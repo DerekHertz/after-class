@@ -19,7 +19,7 @@ Leave `AFTERCLASS_HOST` unset so the backend listens on 127.0.0.1 and only Caddy
 
 ## Clerk dashboard
 
-Steps 1 and 4 come from memory of Clerk's dashboard. Steps 2 and 3 were checked against the live instance and Clerk's docs on 2026-11-14.
+Step 4 comes from memory of Clerk's dashboard. On 2026-11-14, steps 1 and 2 were checked against the live instance, and step 3 and the Invitations page in step 2 against Clerk's docs.
 
 1. Create an application and turn on Google and email as sign-in methods.
 2. Limit who can sign up. The beta sets Access mode to Invite-only and invites each friend under Users, Invitations. Clerk then refuses an uninvited sign-up with `sign_up_mode_restricted`, checked live on 2026-11-14. Clerk's [restricting access guide](https://clerk.com/docs/guides/secure/restricting-access) says the allowlist needs a paid plan in production. After Class has no invitation list of its own.
