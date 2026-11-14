@@ -1,9 +1,10 @@
 name: release
 
-# A pushed v<major>.<minor>.<patch> tag becomes a GitHub Release with generated notes. The tag must be on master and equal
-# the version in package.json at the tagged commit. A tag push runs this file and the check as the tag has them, so the
-# tag ruleset (infra/github/tag-ruleset.json) decides who can cut a release. Deploying it is a separate, approved run of
-# deploy-beta (infra/README.md, Releases).
+# A pushed v<major>.<minor>.<patch> tag becomes a GitHub Release with generated notes and an arm64 image on GHCR. The tag
+# must be on master and equal the version in package.json at the tagged commit. A tag push runs this file and the check as
+# the tag has them, so the tag ruleset (infra/github/tag-ruleset.json) decides who can cut a release. The image holds no
+# keys, since the server reads them from Parameter Store at start. Derek deploys it with scripts/deploy-beta.sh
+# (infra/README.md, Releases).
 on:
   push:
     tags: ["v*"]
@@ -17,6 +18,8 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
+    outputs:
+      commit: ${{ steps.check.outputs.commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -25,12 +28,51 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
-      - name: The tag is on master and equals the package version
+      - id: check
+        name: The tag is on master and equals the package version
         env:
           TAG: ${{ github.ref_name }}
-        run: bun scripts/check-release-tag.ts "$TAG"
+        run: |
+          set -euo pipefail
+          commit=$(bun scripts/check-release-tag.ts "$TAG")
+          echo "commit=${commit}" >> "$GITHUB_OUTPUT"
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "$TAG"
+
+  image:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release.outputs.commit }}
+      # The Dockerfile builds its dependency stages on the runner's own platform and its last stage runs nothing, so an
+      # x86 runner builds the arm64 image without emulation.
+      - name: Push the arm64 image to GHCR, tagged by commit and by release
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ needs.release.outputs.commit }}
+        run: |
+          set -euo pipefail
+          image=ghcr.io/derekhertz/after-class
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
+          # A rerun keeps the image it already pushed, so the digest a server saved never changes under the same commit.
+          if docker manifest inspect "${image}:${COMMIT}" >/dev/null 2>&1; then
+            echo "${image}:${COMMIT} already exists, not rebuilding"
+          else
+            docker build --platform linux/arm64 \
+              --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+              --tag "${image}:${COMMIT}" .
+            docker push "${image}:${COMMIT}"
+          fi
+          docker buildx imagetools create --tag "${image}:${TAG}" "${image}:${COMMIT}"
