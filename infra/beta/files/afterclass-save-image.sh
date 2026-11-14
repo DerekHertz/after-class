@@ -1,40 +1,42 @@
 #!/bin/bash
-# Usage: afterclass-save-image <running commit hash> [<other commit hash to keep>]. Saves the running image to the data
+# Usage: afterclass-save-image <running image digest> [<other image digest to keep>]. Saves the running image to the data
 # volume, so a replacement instance can start it even when GHCR no longer holds it, and deletes every other saved image.
-# An existing tarball is never trusted. The image is saved from Docker every time, under a temporary name, and renamed
-# over the old file, so a crash or a full disk leaves the old file whole. The data volume also holds the database, so a
-# save that would leave less than the reserve free is refused.
+# The image is saved by the ID afterclass-pull recorded for the digest, and afterclass-pull later loads the tarball only
+# when it yields that ID. An existing tarball is never trusted. The image is saved from Docker every time, under a
+# temporary name, and renamed over the old file, so a crash or a full disk leaves the old file whole. The data volume also
+# holds the database, so a save that would leave less than the reserve free is refused.
 set -euo pipefail
 
 dir=/data/afterclass/images
 reserve_bytes=$((2 * 1024 * 1024 * 1024))
 
-tag="${1:-}"
+digest="${1:-}"
 other="${2:-}"
-for candidate in "$tag" "$other"; do
-  if [ -n "$candidate" ] && [[ ! "$candidate" =~ ^[0-9a-f]{40}$ ]]; then
-    echo "afterclass-save-image: '${candidate}' is not a full commit hash" >&2
+for candidate in "$digest" "$other"; do
+  if [ -n "$candidate" ] && [[ ! "$candidate" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "afterclass-save-image: '${candidate}' is not an image digest" >&2
     exit 2
   fi
 done
-if [ -z "$tag" ]; then
-  echo "usage: afterclass-save-image <commit hash> [<commit hash>]" >&2
+if [ -z "$digest" ]; then
+  echo "usage: afterclass-save-image <image digest> [<image digest>]" >&2
   exit 2
 fi
 
-image="ghcr.io/derekhertz/after-class:${tag}"
+keep="${digest#sha256:}"
+keep_other="${other#sha256:}"
+id=$(cat "${dir}/${keep}.id")
 # Without the image there is nothing to save, and the tarball on disk may be the only copy left, so nothing is touched.
-size=$(docker image inspect --format '{{.Size}}' "$image")
+size=$(docker image inspect --format '{{.Size}}' "$id")
 
-mkdir -p "$dir"
-tmp="${dir}/${tag}.tar.new"
+tmp="${dir}/${keep}.tar.new"
 trap 'rm -f "$tmp"' EXIT
 
-rm -f "$dir"/*.tar.new
-for file in "$dir"/*.tar; do
+rm -f "$dir"/*.tar.new "$dir"/*.id.new
+for file in "$dir"/*.tar "$dir"/*.id; do
   [ -e "$file" ] || continue
-  name=$(basename "$file" .tar)
-  if [ "$name" != "$tag" ] && [ "$name" != "$other" ]; then
+  name=$(basename "${file%.*}")
+  if [ "$name" != "$keep" ] && [ "$name" != "$keep_other" ]; then
     rm -f "$file"
   fi
 done
@@ -45,8 +47,8 @@ if [ "$avail" -lt $((size + reserve_bytes)) ]; then
   exit 1
 fi
 
-docker save --output "$tmp" "$image"
+docker save --output "$tmp" "$id"
 sync "$tmp"
-mv "$tmp" "${dir}/${tag}.tar"
+mv "$tmp" "${dir}/${keep}.tar"
 sync "$dir"
-echo "afterclass-save-image: saved ${tag}"
+echo "afterclass-save-image: saved ${digest}"

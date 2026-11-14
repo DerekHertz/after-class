@@ -1,12 +1,12 @@
 #!/bin/bash
-# Started by afterclass-app.service. Runs the image named in /data/afterclass/current-tag, in the foreground.
+# Started by afterclass-app.service. Runs the image whose digest is in /data/afterclass/current-image, in the foreground, by
+# the local image ID afterclass-pull resolved for that digest, never by a tag.
 set -euo pipefail
 
 . /etc/afterclass/settings.env
 
-tag=$(cat /data/afterclass/current-tag)
-/usr/local/sbin/afterclass-pull "$tag"
-image="ghcr.io/derekhertz/after-class:${tag}"
+digest=$(cat /data/afterclass/current-image)
+image=$(/usr/local/sbin/afterclass-pull "$digest")
 
 # The container runs as the image's own user, so the database folder and the keys file must belong to it.
 uid=$(docker run --rm --entrypoint id "$image" -u)
