@@ -366,6 +366,29 @@ describe("scheduler: a delta covering another delta, and how often demand is rea
     expect(d.doubleRuns).toEqual([]);
   });
 
+  test("an abort listener covers the material of a snapshot item: the stale item does not start", () => {
+    let wantOld = true;
+    let covered = false;
+    const ran: string[] = [];
+    const old: WorkItem = {
+      key: k("old"), purpose: "interpretation", provider: "jev",
+      run(signal) {
+        ran.push("old");
+        signal.addEventListener("abort", () => {
+          covered = true;
+        });
+        return new Promise<void>(() => {});
+      },
+    };
+    const delta: WorkItem = { key: k("delta"), purpose: "interpretation", provider: "jev", run: () => (ran.push("delta"), new Promise<void>(() => {})) };
+    const scheduler = createScheduler([() => (wantOld ? [old] : covered ? [] : [delta])], LIMITS);
+    scheduler.pump();
+    wantOld = false;
+    scheduler.pump();
+    expect(covered).toBe(true);
+    expect(ran).toEqual(["old"]);
+  });
+
   test("a pass reads demand once per item it starts, plus one to find nothing more", () => {
     const w = world();
     for (const key of ["a", "b", "c"]) w.want(key, "claim_check");

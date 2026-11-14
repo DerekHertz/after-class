@@ -43,7 +43,9 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 
 - A capture is live while it can have demand. Every capture is live at boot. A pump that finds no demand in a capture drops it from its user's live set, and ingest, retry, stop early and a deletion by the user bring it back. A pump derives only live captures, so what one uploaded fact costs does not grow with the number of stored lectures.
 - An upload's pump runs at most `INGEST_PUMP_MS` (100 ms) after the first fact of a burst, after the reply. A job that stops being demanded is aborted that much later than before. Stop early and retry still pump at once (R8). Results still apply only through `appliesBefore`.
+- A capture that leaves the live set remembers the memo keys its last derivation read. Memo state is shared by a user's captures, so a hit, a terminal failure or a cleared failure on one of those keys brings that capture back, whichever capture's job or retry wrote it. `createMemo`'s `onChange` reports those writes.
 - A capture's running jobs are demanded while they run, so a capture with no demand has none to abort. The pass that finds no demand aborts what no longer is demanded.
+- A scheduler pass reads demand again after it aborts anything, because an abort listener runs synchronously and can change what is demanded.
 - Evidence drops only the written capture's cached projection on an upload.
 
 ## Users in the providers module

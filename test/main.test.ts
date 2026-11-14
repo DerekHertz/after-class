@@ -19,6 +19,7 @@ import type { ApiClient } from "../src/backend/providers/claude-api";
 import { ProviderError, unbudgeted } from "../src/backend/providers/memo";
 import { reviewState } from "../src/backend/review/tutor";
 import type { TutorInput } from "../src/backend/review/tutor";
+import { claimSupportTask } from "../src/backend/providers/jev-tasks";
 import type { ClaimSupportInput, BoundaryInput, FrameChangeInput } from "../src/backend/providers/jev-tasks";
 import { canonicalInterpretation, canonicalResourceSearch, canonicalRevision } from "../src/backend/preparation/tasks";
 import type { InterpretationInput, InterpretationOutput } from "../src/backend/preparation/tasks";
@@ -301,6 +302,42 @@ describe("main, the pump an upload triggers", () => {
     expect(retry.status).toBe(204);
     await until(() => prepared(b, CAP));
     expect(interpret.calls).toHaveLength(2);
+  }, 30_000);
+
+  test("retrying one capture wakes another capture of the user whose demand the cleared memo key creates", async () => {
+    const fakes = fakeTasks();
+    let interpretations = 0;
+    const interpret = scripted<InterpretationInput, InterpretationOutput>("interpretation", "claude", canonicalInterpretation, (i) => {
+      const label = ++interpretations === 1 ? "Topic A" : "Topic B";
+      return ok({ concepts: [{ label, summary: "Summary", claims: [{ text: "Shared statement", evidence: [i.newMaterial.passages[0]!.id], visualDependent: false, assumptions: [] }], confusions: [] }], links: [], supersedes: [] });
+    });
+    let checks = 0;
+    const checkClaim = scripted<ClaimSupportInput, { verdict: "yes"; p: number }>("claim_check", "jev", claimSupportTask({} as never).canonicalInput as never, () => (++checks === 1 ? fail("temporary failure") : ok({ verdict: "yes" as const, p: 0.9 })));
+    const revise = scripted("claim_revision", "claude", canonicalRevision, () => fail("revision failed"));
+    const searched: string[] = [];
+    const searchResources = scripted("resource_search", "claude", canonicalResourceSearch, (i) => {
+      searched.push((i as { concept: { label: string } }).concept.label);
+      return ok([]);
+    });
+    const tasks = { ...fakes.tasks, preparation: { interpret, checkClaim, revise, searchResources } } as unknown as TaskSet;
+    const b = await boot({ tasks, ingestPumpMs: 10 }, { AFTERCLASS_MODE: "replay" });
+    const { segmentation, preparation, scheduler } = b.r.modules;
+    const capA = stableId("cap", "main-test-shared-A") as CaptureId;
+    const capB = stableId("cap", "main-test-shared-B") as CaptureId;
+    for (const id of [capA, capB]) {
+      await ingestInto(b, id, fixture({ frames: false }));
+      await until(() => prepared(b, id));
+      await Bun.sleep(150);
+    }
+    scheduler.pump();
+    expect(searched).toEqual([]);
+
+    const retry = await fetch(`${b.base}/captures/${capB}/retry-preparation`, { method: "POST", headers: authed(b.r.token) });
+    expect(retry.status).toBe(204);
+    await until(() => searched.length >= 2);
+    expect(searched.sort()).toEqual(["Topic A", "Topic B"]);
+    expect(preparation.demand(capA)).toEqual([]);
+    expect(segmentation.current(capA)).toHaveLength(1);
   }, 30_000);
 
   test('R8: "Stop early" aborts the running job, and does not wait for the upload timer', async () => {

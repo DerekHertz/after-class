@@ -206,8 +206,15 @@ export function createScheduler(
     });
   }
 
-  function abortUndemanded(demand: ReadonlyMap<MemoKey, WorkItem>): void {
-    for (const r of running.values()) if (!demand.has(r.key) && !r.controller.signal.aborted) r.controller.abort();
+  /** How many it aborted. An abort listener runs synchronously and may write what demand reads. */
+  function abortUndemanded(demand: ReadonlyMap<MemoKey, WorkItem>): number {
+    let aborted = 0;
+    for (const r of running.values()) {
+      if (demand.has(r.key) || r.controller.signal.aborted) continue;
+      r.controller.abort();
+      aborted++;
+    }
+    return aborted;
   }
 
   function pump(): void {
@@ -222,8 +229,9 @@ export function createScheduler(
       do {
         again = false;
         for (;;) {
-          const demand = collect();
-          abortUndemanded(demand);
+          // An abort listener runs synchronously and can cover another item's material, so demand is read again after aborts.
+          let demand = collect();
+          while (abortUndemanded(demand) > 0) demand = collect();
           const pick = next(demand);
           if (pick === null) break;
           // Starting one item can cover another's material (a delta over the same span), so the next pass reads demand again.

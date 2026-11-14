@@ -51,7 +51,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { buildApp } from "../../scripts/build-app";
 import { stableId } from "../shared/ids";
-import type { CaptureId, EvidenceId, UserId } from "../shared/ids";
+import type { CaptureId, EvidenceId, MemoKey, UserId } from "../shared/ids";
 import type { AssessableClaim, BoundaryJudgment, BoundaryWindow, Evidence, Frame, Passage, Verdict } from "../shared/domain";
 import { heldMessage } from "../shared/allowance";
 import { LOCAL_USER, ensureLocalUser, openDb, scopeDb, signedInUsers, userForIdentity } from "./db";
@@ -61,7 +61,7 @@ import { createDevices, isDeviceToken } from "./devices";
 import type { Devices } from "./devices";
 import type { ClerkConfig, Rejection, Verifier } from "./clerk";
 import { createMemo, ProviderError } from "./providers/memo";
-import type { Memo, MemoMode, Task } from "./providers/memo";
+import type { LookupFn, Memo, MemoMode, Task } from "./providers/memo";
 import { createBudget } from "./providers/budget";
 import type { BudgetLimits } from "./providers/budget";
 import { createLedger } from "./providers/ledger";
@@ -395,9 +395,14 @@ type UserGraph = Omit<Modules, "scheduler"> & {
   readonly voice: Voice;
   /**
    * The captures that can have demand. All of them at boot. A capture leaves when a pump finds no demand in it, and comes
-   * back when ingest, retry, stop early or a deletion touches it, so a pump derives only what can have work.
+   * back when ingest, retry, stop early or a deletion touches it, or when a memo key it read changes (`asleep`), so a pump
+   * derives only what can have work.
    */
   readonly live: Set<CaptureId>;
+  /** The captures that left `live`, each with the memo keys its last derivation read. A change to one of those keys wakes it. */
+  readonly asleep: Map<CaptureId, ReadonlySet<MemoKey>>;
+  /** Runs `fn` and returns the memo keys it looked up. */
+  readonly reading: <T>(fn: () => T) => { readonly value: T; readonly keys: ReadonlySet<MemoKey> };
 };
 
 type Composed = {
@@ -512,21 +517,58 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     // evidence is created after the tasks that need its bytes; the tasks only read it when a call runs
     const frameBytes: FrameBytes = (id) => evidence.frameBytes(id);
     const tasks: TaskSet = options.tasks ?? buildTasks(providers.jev, providers.claude, frameBytes, tutorCache(db), tutorModel);
-    const memo = createMemo(db, memoMode, budget === null ? {} : { budget });
-    const ledger = createLedger(db, budget);
-
     const live = new Set<CaptureId>();
+    const asleep = new Map<CaptureId, ReadonlySet<MemoKey>>();
+    const wake = (captureId: CaptureId) => {
+      asleep.delete(captureId);
+      live.add(captureId);
+    };
+    /**
+     * Memo state is shared: captures of one user can interpret the same text and so share a key. A key that gets a hit, a
+     * terminal failure or a cleared failure changes what every capture that read it demands, not only the one whose job
+     * or retry wrote it. Those captures wake. Waking every capture of the user would derive them all on each job's result.
+     */
+    const memo = createMemo(db, memoMode, {
+      ...(budget === null ? {} : { budget }),
+      onChange(keys) {
+        let woke = false;
+        for (const [captureId, read] of asleep) {
+          if (keys.some((k) => read.has(k))) {
+            wake(captureId);
+            woke = true;
+          }
+        }
+        if (woke) pumpSoon();
+      },
+    });
+    const ledger = createLedger(db, budget);
+    let readKeys: Set<MemoKey> | null = null;
+    const lookup: LookupFn = (task, input) => {
+      const looked = memo.lookup(task, input);
+      readKeys?.add(looked.key);
+      return looked;
+    };
+    const reading = <T>(fn: () => T) => {
+      const outer = readKeys;
+      const keys = new Set<MemoKey>();
+      readKeys = keys;
+      try {
+        return { value: fn(), keys };
+      } finally {
+        readKeys = outer;
+      }
+    };
     const evidence: EvidenceStoreWithProbe = createEvidence(db, dataDir, {
-      lookupFrameChange: (input) => memo.lookup(tasks.frameChange, input),
+      lookupFrameChange: (input) => lookup(tasks.frameChange, input),
       // The first frame of a source has nothing to compare with: evidence keeps it without a call, and so does this.
       runFrameChange: (input, signal) => (input.before === null ? Promise.resolve(null) : memo.run(tasks.frameChange, input, { signal })),
       frameChangeKey: (input) => memo.key(tasks.frameChange, input),
       onChange(captureId) {
         if (captureId === null) {
-          for (const id of evidence.captures()) live.add(id);
+          for (const id of evidence.captures()) wake(id);
           pump();
         } else {
-          live.add(captureId);
+          wake(captureId);
           pumpSoon();
         }
       },
@@ -558,7 +600,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       db,
       {
         watchOrder: evidence.watchOrder,
-        lookupBoundary: (input) => memo.lookup(tasks.boundary, input),
+        lookupBoundary: (input) => lookup(tasks.boundary, input),
         boundaryInput,
         nextSeq: () => db.nextSeq(),
       },
@@ -570,7 +612,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       chunk: segmentation.revision,
       currentChunks: segmentation.current,
       bundle: evidence.bundle,
-      lookup: memo.lookup,
+      lookup,
       run: (task, input, signal) => memo.run(task, input, { signal }),
       clearFailures: memo.clearFailures,
       tasks: tasks.preparation,
@@ -579,12 +621,12 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     // Stop early is a fact that cancels work by derivation; the pump is what aborts what is already running.
     const preparation: Preparation = { ...preparationBase, stopEarly: (captureId, ids) => {
       const seq = preparationBase.stopEarly(captureId, ids);
-      live.add(captureId);
+      wake(captureId);
       pump();
       return seq;
     }, retry: (captureId, ids) => {
       const seq = preparationBase.retry(captureId, ids);
-      live.add(captureId);
+      wake(captureId);
       pump();
       return seq;
     } };
@@ -658,7 +700,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
         ? unavailableVoice
         : createVoice({ apiKey: voiceKey, voiceId, model: voiceModel, db, ...(options.fetch ? { fetch: options.fetch } : {}) });
 
-    return { tasks, evidence, segmentation, preparation, reviews, record, ledger, memo, diagrams, voice, live, db };
+    return { tasks, evidence, segmentation, preparation, reviews, record, ledger, memo, diagrams, voice, live, asleep, reading, db };
   }
 
   const graphs = new Map<UserId, UserGraph>();
@@ -697,16 +739,21 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     [...graphs.values()].flatMap((graph) =>
       [...graph.live].flatMap((captureId) => {
         let failed = false;
-        const items = DEMAND.flatMap(([where, derive]) => {
-          try {
-            return derive(graph, captureId).map((item) => ({ ...item, key: stableId("key", graph.db.userId, item.key) }));
-          } catch (e) {
-            failed = true;
-            reportOnce(`${where} ${captureId}`, e);
-            return [];
-          }
-        });
-        if (items.length === 0 && !failed) graph.live.delete(captureId);
+        const { value: items, keys } = graph.reading(() =>
+          DEMAND.flatMap(([where, derive]) => {
+            try {
+              return derive(graph, captureId).map((item) => ({ ...item, key: stableId("key", graph.db.userId, item.key) }));
+            } catch (e) {
+              failed = true;
+              reportOnce(`${where} ${captureId}`, e);
+              return [];
+            }
+          }),
+        );
+        if (items.length === 0 && !failed) {
+          graph.live.delete(captureId);
+          graph.asleep.set(captureId, keys);
+        }
         return items;
       }),
     );

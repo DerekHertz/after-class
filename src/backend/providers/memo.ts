@@ -187,6 +187,11 @@ export type MemoOptions = {
   readonly retryDelayMs?: (failures: number) => number;
   /** main.ts passes one in live mode. Without one, attempts are not budgeted (replay mode and tests). */
   readonly budget?: Budget;
+  /**
+   * After a write that changes what `lookup` answers for these keys: a hit stored, a failure recorded, a failure cleared.
+   * Not called for an aborted attempt or a budget hold, which leave the key missing. Never called inside a transaction.
+   */
+  readonly onChange?: (keys: readonly MemoKey[]) => void;
 };
 
 type InputRow = { provider: Provider; purpose: Purpose; version: string; model: string; input_json: string };
@@ -362,13 +367,15 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
 
       if (outcome.ok) {
         const { usage, encoded, value } = outcome;
-        return db.tx(() => {
+        const hit = db.tx(() => {
           const atSeq = db.nextSeq();
           q.insertHit.run(userId, key, encoded, atSeq, Math.round(now()));
           q.deleteFailure.run(userId, key);
           recordUsage(task, key, captureId, "ok", usage, startedMs, "ok", tickets);
           return { kind: "hit", key, value, atSeq } as const;
         });
+        opts.onChange?.([key]);
+        return hit;
       }
       const { usage, message, retryable, notBilled, held } = outcome;
       if (held !== null) {
@@ -385,7 +392,10 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
         recordUsage(task, key, captureId, "error", usage, startedMs, message, tickets, notBilled);
         failures = q.upsertFailure.get(userId, key, message, db.nextSeq(), terminal ? 1 : 0)!.attempts;
       });
-      if (terminal) return settled(task as Task<unknown, O>, key);
+      if (terminal) {
+        opts.onChange?.([key]);
+        return settled(task as Task<unknown, O>, key);
+      }
       onRetry?.();
       await sleep(retryDelayMs(failures), signal);
     }
@@ -407,6 +417,7 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
     db.tx(() => {
       for (const k of keys) q.deleteFailure.run(userId, k);
     });
+    if (keys.length > 0) opts.onChange?.(keys);
   }
 
   function inspect(key: MemoKey): MemoInspection | null {
