@@ -31,6 +31,8 @@ interface Workflow {
 const workflow = (name: string): Workflow => Bun.YAML.parse(readFileSync(join(WORKFLOWS, name), "utf8")) as Workflow;
 
 const PUSHED = `sha256:${"1".repeat(64)}`;
+/** What a release tag resolves to when imagetools create wraps the single manifest in a new index, its default. */
+const WRAPPED = `sha256:${"9".repeat(64)}`;
 const ATTACKER = `sha256:${"2".repeat(64)}`;
 
 interface StepRun {
@@ -102,10 +104,14 @@ case "$1 $2" in
     echo "5f70bf18a086: Pushed"
     printf '%s\\n' "${registry.pushed ?? `${COMMIT}: digest: ${PUSHED} size: 1234`}";;
   "buildx imagetools")
+    if [ "$3" = create ]; then
+      case " $* " in *" --prefer-index=false "*) ;; *) touch ${host.root}/wrapped;; esac
+    fi
     if [ "$3" = inspect ]; then
       ${registry.inspectFails ? "echo 'unexpected status: 502 Bad Gateway' >&2; exit 1" : ""}
       case "$last" in
 ${now}
+        *:v0.1.0) if [ -e ${host.root}/wrapped ]; then echo -n ${WRAPPED}; else echo -n ${PUSHED}; fi;;
         *) echo -n ${PUSHED};;
       esac
     fi;;
@@ -149,7 +155,7 @@ describe("release workflow", () => {
     expect(build).toContain("--platform linux/arm64");
     expect(build).toContain(`--tag ${REPOSITORY}:${COMMIT}`);
     expect(run.log).toContain(`docker push ${REPOSITORY}:${COMMIT}`);
-    expect(createdFrom(run)).toEqual([`docker buildx imagetools create --tag ${REPOSITORY}:v0.1.0 ${REPOSITORY}@${PUSHED}`]);
+    expect(createdFrom(run)).toEqual([`docker buildx imagetools create --prefer-index=false --tag ${REPOSITORY}:v0.1.0 ${REPOSITORY}@${PUSHED}`]);
     expect(run.output).toBe(`digest=${PUSHED}\n`);
     expect(release.jobs.image!.outputs?.digest).toBe("${{ steps.push.outputs.digest }}");
   });
