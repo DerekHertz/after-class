@@ -35,8 +35,8 @@ This AWS account is a member account that AWS manages through its account and pr
 - A `t4g.small` Amazon Linux 2023 ARM instance. The AMI comes from the SSM public parameter, IMDSv2 is required and the root volume is encrypted gp3. There is no key pair. Session Manager is the way in.
 - A separate encrypted gp3 data volume of 20 GB with `prevent_destroy`, attached at `/dev/sdf` and mounted at `/data` by its volume id. Nothing formats it at boot. A Data Lifecycle Manager policy snapshots it daily and keeps 7.
 - An instance role with `AmazonSSMManagedInstanceCore`, CloudWatch Logs write to its own log group (14 days), `ssm:GetParameter` on `/afterclass/beta/*` only, and `kms:Decrypt` on the `aws/ssm` key only through Systems Manager in `us-east-2`. The managed policy allows reading every parameter, and the `aws/ssm` key policy lets any principal in the account decrypt through Systems Manager, so the role also denies every `ssm:GetParameter*` outside `/afterclass/beta/*`.
-- Cloud-init (`user_data`) installs Docker, mounts `/data` once it is formatted, and sets up two systemd units. `afterclass-app` runs the app image from GHCR, pulled without a sign-in, and `afterclass-caddy` runs the pinned Caddy image as the reverse proxy on ports 80 and 443. Both containers join one Docker bridge network, `afterclass`, and Caddy proxies to `afterclass-app:8080`. Neither uses host networking, so the instance metadata hop limit of 1 keeps both away from the instance role's credentials. Both drop every capability, Caddy keeps only `NET_BIND_SERVICE`, both set `no-new-privileges`, and Caddy's root file system is read-only. Caddy's certificates live on `/data/caddy`. The app keeps its database in `/data/db`. Its config folder is `/run/afterclass-app`, mounted read-only at `/data/config` and described in "Keys" below.
-- A Systems Manager document that runs the deploy script with a commit hash, and an SSM parameter that holds the current instance id. `scripts/deploy-beta.sh` uses both.
+- Cloud-init (`user_data`) installs Docker, mounts `/data` once it is formatted, and sets up two systemd units. `afterclass-app` runs the app image from GHCR, pulled by digest without a sign-in, and `afterclass-caddy` runs the pinned Caddy image as the reverse proxy on ports 80 and 443. Both containers join one Docker bridge network, `afterclass`, and Caddy proxies to `afterclass-app:8080`. Neither uses host networking, so the instance metadata hop limit of 1 keeps both away from the instance role's credentials. Both drop every capability, Caddy keeps only `NET_BIND_SERVICE`, both set `no-new-privileges`, and Caddy's root file system is read-only. Caddy's certificates live on `/data/caddy`. The app keeps its database in `/data/db`. Its config folder is `/run/afterclass-app`, mounted read-only at `/data/config` and described in "Keys" below.
+- A Systems Manager document that runs the deploy script with a commit hash and an image digest, and an SSM parameter that holds the current instance id. `scripts/deploy-beta.sh` uses both.
 - With `domain` set, an A record for the apex in the existing Route 53 hosted zone.
 
 `main/`
@@ -106,7 +106,7 @@ Derek's first beta setup.
 
    The status must be `Success` and the output must end with `afterclass-bootstrap: done`. Caddy then runs and answers 502, because no image has been deployed. A second run of the command refuses, because the volume is no longer blank. Never run it on a replacement instance or a restored volume, which already hold a filesystem.
 
-4. Cut the first release, as in "Releases" below. The `release` workflow pushes `ghcr.io/derekhertz/after-class:<commit>` and `:v0.1.0`. GHCR creates the package as private, and the server pulls without a sign-in, so make it public once.
+4. Cut the first release, as in "Releases" below, starting with its first step, the publishing restrictions. The `release` workflow pushes `ghcr.io/derekhertz/after-class:<commit>` and `:v0.1.0` and records the image's digest in the GitHub Release. GHCR creates the package as private, and the server pulls without a sign-in, so make it public once.
 
    On GitHub, open the profile's **Packages** tab, then `after-class`, then **Package settings**. Under **Danger Zone**, choose **Change visibility**, then **Public**, and type the package name to confirm. The image holds no keys. They reach the server from Parameter Store at each start.
 
@@ -117,7 +117,7 @@ Derek's first beta setup.
    scripts/deploy-beta.sh v0.1.0
    ```
 
-   The script needs `git`, `bun`, `curl` and the AWS CLI. It refuses a tag that is not on `master` or does not match `package.json`, and a commit whose image GHCR does not serve anonymously. It then sends the deploy document and waits up to 15 minutes for the result. The server pulls the image, restarts the app, checks `/health` itself and rolls back to the previous image if the new one does not turn healthy. A healthy image is also saved on the server's data volume, and the server's output, which the script prints, has a `WARNING` line if that save failed. From the allowed address, `curl <public_url>/health` returns `{"ok":true}`.
+   The script needs `git`, `bun`, `gh`, `curl` and the AWS CLI. It refuses a tag that is not on `master` or does not match `package.json`, a release without a well-formed `image-digest.txt` for the tag's commit, and a digest GHCR does not serve anonymously. It then sends the deploy document and waits up to 15 minutes for the result. The server pulls the image by that digest, restarts the app, checks `/health` itself and rolls back to the previous image if the new one does not turn healthy. A healthy image is also saved on the server's data volume, and the server's output, which the script prints, has a `WARNING` line if that save failed. From the allowed address, `curl <public_url>/health` returns `{"ok":true}`.
 
 6. To open a shell, run `aws ssm start-session --target <instance_id output>`. This needs the Session Manager plugin for the AWS CLI on Derek's machine. The container logs are in the CloudWatch log group `/afterclass-beta`, in the streams `app` and `caddy`.
 
@@ -133,10 +133,23 @@ To rotate a key, put the new value with the step 3 command and restart the app, 
 
 ## Releases
 
-A release is a `v<major>.<minor>.<patch>` tag on a commit on `master` whose `package.json` has the same version. The first is `v0.1.0`.
+A release is a `v<major>.<minor>.<patch>` tag on a commit on `master` whose `package.json` has the same version. The first is `v0.1.0`. The deployed image is named by the digest that the release workflow records in the tag's GitHub Release, never by a GHCR tag. GHCR tags are mutable: anyone who can write the package can point `:<commit>` at other bytes.
 
-1. In a pull request, set `version` in `package.json` to the new version, and merge it.
-2. Tag the merge commit and push the tag. The `release` workflow checks that the tag is on `master` and equals the package version, and creates a GitHub Release with generated notes. Its `image` job then builds that commit for `linux/arm64` and pushes `ghcr.io/derekhertz/after-class:<commit>` and `:<tag>`. It signs in to GHCR with `GITHUB_TOKEN` and holds only `contents: read` and `packages: write`. A rerun keeps an image that already exists.
+1. Before the first release, restrict who can publish. Do all three once, in this order.
+
+   - Apply the tag ruleset, so only Derek can create, move or delete a `v*` tag. The ruleset is `infra/github/tag-ruleset.json`. It applies to every account except the repository admin role, which on this personal repository is Derek alone. A tag push runs `release.yml` as the tag has it, so without the ruleset a repository writer could push a `v*` tag on a branch with a changed workflow.
+
+     ```
+     gh api --method POST repos/DerekHertz/after-class/rulesets --input infra/github/tag-ruleset.json
+     ```
+
+   - On GitHub, open the profile's **Packages** tab, then `after-class`, then **Package settings**. Under **Manage Actions access**, keep `DerekHertz/after-class` as the only repository, with the **Write** role, and remove any other. Under **Manage access**, give no other account or repository write access. The package exists only after the first image push, so check this again right after the first release and before its deploy.
+   - Only `release.yml` may request `packages: write`, and only in its `image` job. `test/release-workflow.test.ts` fails when any other workflow or job asks for it, or when a workflow leaves its token's permissions to the repository default.
+
+   What this leaves open. Derek's own GitHub account can do everything above, so a compromise of that account, or of a token with its rights, can publish a release and its digest. A repository writer can still push an image to the package from a branch workflow that asks for `packages: write`. That moves tags, but no deploy reads a tag, and the test above only catches such a workflow in a pull request that runs the tests. GitHub Actions itself, and the actions the workflows pin, are trusted.
+
+2. In a pull request, set `version` in `package.json` to the new version, and merge it.
+3. Tag the merge commit and push the tag. The `release` workflow runs three jobs in order. `check` refuses a tag that is not on `master` or does not equal the package version. `image` builds that commit for `linux/arm64`, pushes it as `ghcr.io/derekhertz/after-class:<commit>`, takes the digest from that push's own output, tags `:<tag>` from that digest, and fails unless both tags now resolve to it. It signs in to GHCR with `GITHUB_TOKEN` and holds only `contents: read` and `packages: write`. It never reuses an image that is already there, and any registry error fails the run. `release` then writes the GitHub Release, with generated notes, and attaches `image-digest.txt`, which reads `commit <commit>` and `digest sha256:<64 hex>`. The release is written last, so it never names an image that was not pushed and checked. A rerun builds again, pushes a new digest and replaces `image-digest.txt`.
 
    ```
    git switch master && git pull
@@ -144,20 +157,16 @@ A release is a `v<major>.<minor>.<patch>` tag on a commit on `master` whose `pac
    git push origin v0.1.0
    ```
 
-3. When the `release` run is green, deploy the tag from the root of a clone of the repository.
+4. When the `release` run is green, deploy the tag from the root of a clone of the repository.
 
    ```
    aws login
    scripts/deploy-beta.sh v0.1.0
    ```
 
-   The script runs `scripts/check-release-tag.ts`, which fetches `master` and the tag afresh and refuses a tag whose commit is not on `master` or whose `package.json` there has another version. It checks that GHCR serves the commit's image without a sign-in, finds the instance through `/afterclass-beta/instance_id`, and starts the `afterclass-beta-deploy` document with the commit hash. The image tag on the server is that commit's hash. Redeploying an older tag is a rollback.
+   The script runs `scripts/check-release-tag.ts`, which fetches `master` and the tag afresh and refuses a tag whose commit is not on `master` or whose `package.json` there has another version. It reads `image-digest.txt` from the tag's release with `gh`, and refuses a release without one, a malformed digest, or a commit other than the tag's. It checks that GHCR serves that digest without a sign-in, finds the instance through `/afterclass-beta/instance_id`, and starts the `afterclass-beta-deploy` document with the commit and the digest. The document accepts only a 40-hex commit and a `sha256:` digest. The server pulls by digest, runs the image by the ID Docker reports for it, and records the digest as the running image. Redeploying an older tag is a rollback.
 
-Only Derek may create, move or delete a `v*` tag. The ruleset is `infra/github/tag-ruleset.json`. It applies to every account except the repository admin role, which on this personal repository is Derek alone. Because Derek bypasses it, the rule against force pushes does not stop Derek himself, so never move a pushed release tag. Apply it once:
-
-```
-gh api --method POST repos/DerekHertz/after-class/rulesets --input infra/github/tag-ruleset.json
-```
+Because Derek bypasses the ruleset, the rule against force pushes does not stop Derek himself, so never move a pushed release tag.
 
 ## Turning on HTTPS
 
@@ -192,8 +201,8 @@ Caddy passes the client's `Host` header to the app unchanged and adds `X-Forward
 - Bootstrap never formats. It mounts the data volume by its `/dev/disk/by-id` name, which holds the volume id, and writes the same name to `/etc/fstab`. When the mount fails, bootstrap exits with an error that names `afterclass-format-data`, before it creates the Docker network or enables, starts or restarts either unit. Boot cannot tell a blank disk from a used one it fails to read. `blkid` and `wipefs` have reported a read error as "nothing found", and `wipefs` can print nothing and exit 0 when a read fails inside it.
 - `afterclass-format-data <volume id>` is the only thing that formats, and only when Derek runs it. It refuses unless the argument equals this server's data volume id, no other format holds its `flock`, `/data` is not mounted, the first MiB reads back as zeros, `wipefs` exits 0 and lists no signature, and a read-only `mount` fails. A new EBS volume reads as zeros. A read error fails the zero check, which `wipefs` alone could miss. It runs `mkfs.xfs` without `-f`, so `mkfs.xfs` also refuses a disk that holds a filesystem. Bootstrap takes the same lock around its mount, so it never mounts a half-written filesystem.
 - A change to the settings, the units, the scripts or the Caddyfile changes `user_data` and replaces the instance, with a few minutes of downtime. A new Amazon Linux release does not, because the AMI is ignored. Replace it on purpose with `terraform apply -replace=aws_instance.beta`.
-- On replacement Terraform stops the old instance, detaches the data volume, creates the new instance, and attaches the volume again. The new instance's bootstrap waits up to 5 minutes for the device. The current image tag is stored on `/data`, so the app comes back by itself. So is the image: after every healthy deploy, and after every rollback, the server saves the running image with `docker save` to `/data/afterclass/images/<tag>.tar`. It writes under a temporary name and renames, so a crash leaves no half file. It keeps the running image and the one it replaced, and deletes every other tarball. The save never trusts a tarball that is already there. It saves the running image from Docker every time and renames the new file over the old one, so a damaged tarball is replaced by the next healthy deploy, and a failed save leaves the old file whole. When the image is not on the host, the save fails and deletes nothing. The app unit's pull step uses the tarball only when Docker no longer has the image, so a replacement instance starts the right image even when GHCR no longer holds it. `docker load` is the only check of the tarball. A load that fails, or loads another image, prints an `ERROR` line and the image comes from GHCR.
-- A deploy that does not turn healthy within 90 seconds, or whose restart fails, is rolled back to the previous tag, and `scripts/deploy-beta.sh` fails. A failed cleanup of old images after a healthy deploy is ignored.
+- On replacement Terraform stops the old instance, detaches the data volume, creates the new instance, and attaches the volume again. The new instance's bootstrap waits up to 5 minutes for the device. The running image's digest is stored on `/data/afterclass/current-image`, so the app comes back by itself. So is the image: after every healthy deploy, and after every rollback, the server saves the running image with `docker save` to `/data/afterclass/images/<digest hex>.tar`. It writes under a temporary name and renames, so a crash leaves no half file. It keeps the running image and the one it replaced, and deletes every other tarball. The save never trusts a tarball that is already there. It saves the running image from Docker every time and renames the new file over the old one, so a damaged tarball is replaced by the next healthy deploy, and a failed save leaves the old file whole. When the image is not on the host, the save fails and deletes nothing. The app unit's pull step uses the tarball only when Docker no longer has the image, so a replacement instance starts the right image even when GHCR no longer holds it. `docker save` and `docker load` keep an image's ID but drop its registry digest, on both the classic and the containerd image store (checked with Docker 25 and 29). So after each pull by digest, the server writes the ID Docker reports to `/data/afterclass/images/<digest hex>.id`, saves the image by that ID, and uses a tarball only when its load yields that ID. A load that fails, or loads another image, prints an `ERROR` line and the image comes from GHCR by digest. A tarball without an ID record is not used.
+- A deploy that does not turn healthy within 90 seconds, or whose restart fails, is rolled back to the previous digest, and `scripts/deploy-beta.sh` fails. A failed cleanup of old images after a healthy deploy is ignored.
 - The image save never fails a healthy deploy. It refuses to run when less than the image size plus 2 GiB would stay free on `/data`, so the images cannot starve the database of space, and it removes its temporary file when a save fails. The server prints a `WARNING` line, which `scripts/deploy-beta.sh` shows. Until the next deploy saves the image, a replaced instance needs GHCR to still hold it. Nothing deletes GHCR versions automatically.
 - Room on the data volume. A local amd64 build of this image is 381 MB unpacked, and `docker save` writes about that much per image on the server's overlay2 store. Two kept images plus one being written is about 1.1 GB of the 20 GB. The ARM image was not measured.
 - To restore a snapshot, create the volume from it by hand, then replace the resource in the state and apply. The apply replaces the instance, because the volume id is in `user_data`. The new instance mounts the restored volume. This procedure is written down and was not tested.
@@ -226,7 +235,19 @@ terraform plan -var='alb_ingress_cidrs=["<your public IP>/32"]' -var='github_oid
 terraform apply main.tfplan
 ```
 
-Add the `AWS_ROLE_ARN`, `ECS_CLUSTER` and `ECS_SERVICE` environment variables from its outputs, then run the `deploy` workflow. Terraform does not own the running task definition revision. The deploy workflow registers each revision, and the service ignores `task_definition` changes, so a later `terraform apply` does not roll a deploy back.
+### Parked main stack, GitHub setup
+
+`deploy.yml` deploys `main/` and runs in the `production` environment, which the deploy role's trust policy names (`infra/main/github.tf`). Before its first run:
+
+1. In GitHub, create the `production` environment with Derek as the required reviewer and **Deployment branches** set to `master` only. The role trust cannot see the branch, so this setting is what keeps other branches out.
+2. Add these environment variables to it. They are not secrets.
+
+   - `AWS_ROLE_ARN` from the `deploy_role_arn` output of `main/`
+   - `ECR_REPOSITORY` from the `ecr_repository_name` output of `shared/`
+   - `ECS_CLUSTER` from the `ecs_cluster_name` output of `main/`
+   - `ECS_SERVICE` from the `ecs_service_name` output of `main/`
+
+Then run the `deploy` workflow. Terraform does not own the running task definition revision. The deploy workflow registers each revision, and the service ignores `task_definition` changes, so a later `terraform apply` does not roll a deploy back.
 
 ## Monthly cost estimate
 
