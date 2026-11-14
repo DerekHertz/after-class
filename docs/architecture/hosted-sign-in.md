@@ -21,9 +21,10 @@ Leave `AFTERCLASS_HOST` unset so the backend listens on 127.0.0.1 and only Caddy
 
 These steps come from memory of Clerk's dashboard and were not checked against it.
 
-1. Create an application and turn on Google as the only sign-in method.
-2. Limit who can sign up. Either set the sign-up mode to Restricted and invite each friend, or turn on the allowlist and add each friend's email. After Class has no invitation list of its own.
-3. For a production instance, add the DNS records Clerk lists for the domain, then copy the keys and URLs above.
+1. Create an application and turn on Google and email as sign-in methods.
+2. Limit who can sign up. The beta sets Access mode to Invite-only and invites each friend under Users, Invitations. Clerk then refuses an uninvited sign-up with `sign_up_mode_restricted`, checked live on 2026-11-14. The allowlist needs a paid plan in production. After Class has no invitation list of its own.
+3. Production instances created on or after 2026-11-12 require a minimum ClerkJS version, 6.42.3 by default. `CLERK_JS_VERSION` must stay at or above it.
+4. For a production instance, add the DNS records Clerk lists for the domain, then copy the keys and URLs above.
 
 ## Caddy
 

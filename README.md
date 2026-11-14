@@ -23,7 +23,7 @@ After Class is a work-in-progress study companion for YouTube lectures. You can 
 
 ## Hosted beta
 
-A small invite-only beta runs at [useafterclass.com](https://useafterclass.com). It runs the same app on one server, with Clerk sign-in through Google or email. Sign-up is by invitation only. The server holds the model keys, so testers need no terminal or accounts beyond sign-in. Spending is capped at $5 per user and $50 in total each month, and the hosted beta uses the browser's voice instead of ElevenLabs. The Chrome extension is not in the Chrome Web Store yet.
+A small invite-only beta runs at [useafterclass.com](https://useafterclass.com). It runs the same app on one server, with Clerk sign-in through Google or email. Sign-up is by invitation only. The server holds the model keys, so testers bring no keys of their own. Spending is capped at $5 per user and $50 in total each month. A review that reaches a cap may still finish its wrap-up. The hosted beta uses the browser's voice instead of ElevenLabs. The Chrome extension is not in the Chrome Web Store yet, so testers install a build Derek provides.
 
 Releases are `v0.x` tags on master. The release workflow builds an image and records its digest, and the maintainer deploys a tag with `scripts/deploy-beta.sh`. The [infrastructure guide](infra/README.md) covers the server, keys, releases and costs.
 
