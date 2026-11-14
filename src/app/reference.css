@@ -1,5 +1,5 @@
 @font-face { font-family: 'After Class Serif'; src: url('./assets/fonts-v2/young-serif.ttf') format('truetype'); font-weight: 400; font-display: swap; }
-@font-face { font-family: 'After Class Sans'; src: url('./assets/fonts-v2/dm-sans-400.ttf') format('truetype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'After Class Sans'; src: url('./assets/fonts-v2/dm-sans-400.ttf') format('truetype'); font-weight: 400; font-display: block; }
 @font-face { font-family: 'After Class Sans'; src: url('./assets/fonts-v2/dm-sans-500.ttf') format('truetype'); font-weight: 500; font-display: swap; }
 @font-face { font-family: 'After Class Sans'; src: url('./assets/fonts-v2/dm-sans-600.ttf') format('truetype'); font-weight: 600; font-display: swap; }
 @font-face { font-family: 'After Class Sans'; src: url('./assets/fonts-v2/dm-sans-700.ttf') format('truetype'); font-weight: 700; font-display: swap; }
