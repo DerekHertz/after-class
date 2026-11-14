@@ -204,6 +204,23 @@ describe("the review app under /app", () => {
     expect((await fetch(`${base}/app/nested/`)).status).toBe(200);
   });
 
+  test("caches only what a content hash names: hashed files for a year, everything else revalidated, the page and its fallback never stored", async () => {
+    const dir = fixtureApp();
+    writeFileSync(join(dir, "chunk-25arry65.css"), "body{}");
+    writeFileSync(join(dir, "pixelify-sans-9ba86cd0.ttf"), "font");
+    writeFileSync(join(dir, "asset-notices.txt"), "notices");
+    const { base } = start(dir);
+    const cacheControl = async (path: string) => (await fetch(`${base}${path}`)).headers.get("cache-control");
+    const forever = "public, max-age=31536000, immutable";
+    expect(await cacheControl("/app/chunk-25arry65.css")).toBe(forever);
+    expect(await cacheControl("/app/pixelify-sans-9ba86cd0.ttf")).toBe(forever);
+    expect(await cacheControl("/app/main.js")).toBe("no-cache");
+    expect(await cacheControl("/app/asset-notices.txt")).toBe("no-cache");
+    expect(await cacheControl("/app/nested/a.css")).toBe("no-cache");
+    expect(await cacheControl("/app/")).toBe("no-store");
+    expect(await cacheControl(`/app/capture/${CAP}`)).toBe("no-store");
+  });
+
   test("path traversal cannot leave the app directory (literal, encoded and double-encoded)", async () => {
     const { port } = start();
     const paths = [
