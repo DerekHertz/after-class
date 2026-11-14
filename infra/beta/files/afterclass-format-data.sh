@@ -1,8 +1,9 @@
 #!/bin/bash
 # Usage: afterclass-format-data <data volume id>. Run by hand, once, on a new data volume (infra/README.md). Boot never
 # formats. The argument must be this server's data volume id, as a confirmation. The script refuses unless /data is not
-# mounted, the first MiB reads back as zeros, wipefs finds no signature and mount finds no filesystem. Each check has
-# its own way to fail on a used disk, and mkfs.xfs without -f refuses a disk that holds a filesystem too.
+# mounted, blkid finds no signature, wipefs finds none and mount finds no filesystem. These probes cannot prove a disk
+# holds no data. They only catch a disk that already carries a signature. mkfs.xfs without -f refuses a disk that holds
+# a filesystem too.
 set -euo pipefail
 
 . /etc/afterclass/settings.env
@@ -24,9 +25,10 @@ flock -n 9 || refuse "another format or a bootstrap mount holds the lock"
 if mountpoint -q /data; then
   refuse "/data is mounted"
 fi
-# A read error fails head, and pipefail fails the assignment. wipefs alone can report a read error as an empty disk.
-nonzero=$(head -c 1048576 "$device" | tr -d '\000' | wc -c) || refuse "cannot read ${device}"
-[ "$nonzero" -eq 0 ] || refuse "the first MiB of ${device} is not blank"
+# blkid -p exits 2 when it finds nothing. Any other status, a read error included, is not an answer, so it fails closed.
+blkid_status=0
+blkid -p "$device" >/dev/null 2>&1 || blkid_status=$?
+[ "$blkid_status" -eq 2 ] || refuse "blkid probed ${device} and exited ${blkid_status}, not 2 (nothing found)"
 found=$(wipefs --no-act --noheadings --output TYPE "$device") || refuse "wipefs cannot probe ${device}"
 [ -z "$found" ] || refuse "${device} holds ${found}"
 probe=$(mktemp -d)
@@ -37,5 +39,5 @@ if mount -o ro "$device" "$probe" 2>/dev/null; then
 fi
 rmdir "$probe"
 
-mkfs.xfs -L afterclass-data "$device"
+mkfs.xfs -L afterclass "$device"
 echo "afterclass-format-data: formatted ${device}. Run afterclass-bootstrap to mount it and start the app."
