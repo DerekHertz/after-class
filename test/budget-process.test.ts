@@ -15,6 +15,14 @@ const CHILD = join(import.meta.dir, "budget-child.ts");
 
 const child = (...args: string[]) => Bun.spawn([process.execPath, CHILD, ...args], { stdout: "pipe", stderr: "pipe" });
 
+/** Over the 15 s a race child waits for the other to reach its reserve, so a stuck child fails with its own stderr first. */
+const PROCESS_TEST_MS = 30_000;
+
+async function finished(p: ReturnType<typeof child>) {
+  const [code, out, err] = await Promise.all([p.exited, new Response(p.stdout).text(), new Response(p.stderr).text()]);
+  return { code, signal: p.signalCode, out: out.trim(), err };
+}
+
 function freshDb(dir: string): string {
   const path = join(dir, "afterclass.sqlite");
   const db = openDb(path);
@@ -44,9 +52,8 @@ describe("a process killed while its paid call is in flight", () => {
   test("R17: the next boot records the call as a usage event of unknown cost, and its hold counts at its reservation, once", async () => {
     const dataDir = tmpDir("budget-crash-data-");
     const path = freshDb(dataDir);
-    const killed = child("crash", path);
-    expect(await killed.exited).not.toBe(0);
-    expect(killed.signalCode).toBe("SIGKILL");
+    const killed = await finished(child("crash", path));
+    expect(killed.signal, `crash child exited ${killed.code}: ${killed.err}`).toBe("SIGKILL");
     expect(read(path)).toEqual({ holds: [{ reserved_micros: 750_000, settled_micros: null }], events: [] });
 
     const configDir = tmpDir("budget-crash-config-");
@@ -73,7 +80,7 @@ describe("a process killed while its paid call is in flight", () => {
 
     await boot();
     expect(read(path).events).toHaveLength(1);
-  });
+  }, PROCESS_TEST_MS);
 });
 
 describe("two processes reserving the last of a cap at once", () => {
@@ -81,10 +88,9 @@ describe("two processes reserving the last of a cap at once", () => {
     const dir = tmpDir("budget-race-");
     const path = freshDb(dir);
     const [a, b] = [join(dir, "a.ready"), join(dir, "b.ready")];
-    const procs = [child("race", path, a, b), child("race", path, b, a)];
-    const results = await Promise.all(procs.map(async (p) => ({ code: await p.exited, out: (await new Response(p.stdout).text()).trim(), err: await new Response(p.stderr).text() })));
-    for (const r of results) expect({ code: r.code, err: r.err }).toEqual({ code: 0, err: "" });
+    const results = await Promise.all([finished(child("race", path, a, b)), finished(child("race", path, b, a))]);
+    for (const r of results) expect({ code: r.code, err: r.err }, `race child exited ${r.code}: ${r.err}`).toEqual({ code: 0, err: "" });
     expect(results.map((r) => r.out).sort()).toEqual(["held", "reserved"]);
     expect(read(path).holds).toHaveLength(1);
-  });
+  }, PROCESS_TEST_MS);
 });
