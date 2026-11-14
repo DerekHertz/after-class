@@ -5,8 +5,11 @@ import { createEvidence } from "../src/backend/evidence";
 import { FRAME_STALL_S, clipToWatched, sourceIdOf, spanPlausible } from "../src/backend/evidence/core";
 import { FRAME_DEFAULTS } from "../src/extension/content/frames";
 import type { CaptureFact } from "../src/shared/domain";
+import type { CaptureId, EvidenceId } from "../src/shared/ids";
 import { randomId, stableId } from "../src/shared/ids";
 import { Material, interval, media } from "../src/shared/time";
+import { REMOVALS, captureDep, sourceDep } from "../src/backend/deps";
+import type { Dep } from "../src/backend/deps";
 import { JPEG, OTHER, SRC, VIDEO, exceptStalls, harness, keyOf, stream, textsOf } from "./evidence-fixtures";
 
 describe("R1: evidence only from intervals watched while capture was on", () => {
@@ -364,6 +367,119 @@ describe("ingest is idempotent on (captureId, clientSeq)", () => {
   });
 });
 
+describe("an upload invalidates only its own capture", () => {
+  test("ingesting into one capture keeps another capture's cached projection, and the written one reads its new facts", () => {
+    const h = harness();
+    const a = stream();
+    a.control("start");
+    a.source();
+    a.span(0, 10);
+    const b = stream();
+    b.control("start");
+    b.source();
+    b.span(0, 20);
+    h.evidence.ingest({ captureId: a.captureId, facts: a.facts });
+    h.evidence.ingest({ captureId: b.captureId, facts: b.facts });
+    const untouched = h.evidence.watchedMaterial(b.captureId);
+    const before = h.evidence.watchedMaterial(a.captureId);
+
+    const more = a.span(10, 25);
+    h.evidence.ingest({ captureId: a.captureId, facts: [more] });
+
+    expect(h.evidence.watchedMaterial(b.captureId)).toBe(untouched);
+    expect(h.evidence.watchedMaterial(a.captureId)).not.toBe(before);
+    expect(Material.duration(h.evidence.watchedMaterial(a.captureId))).toBe(25);
+    expect(h.changes.n).toBe(3);
+  });
+
+  test("a capture first written after the store listed its captures is still found by a bundle", () => {
+    const h = harness();
+    const a = stream();
+    a.control("start");
+    a.source();
+    a.span(0, 10);
+    h.evidence.ingest({ captureId: a.captureId, facts: a.facts });
+    h.evidence.bundle(h.evidence.watchedMaterial(a.captureId));
+
+    const b = stream();
+    b.control("start");
+    b.source();
+    b.transcript([[2, 4, "a new lecture"]]);
+    b.span(0, 10);
+    h.evidence.ingest({ captureId: b.captureId, facts: b.facts });
+    expect(textsOf(h.evidence.bundle(h.evidence.watchedMaterial(b.captureId)).passages)).toEqual(["a new lecture"]);
+  });
+});
+
+describe("what a write changes and what a read depends on", () => {
+  function listened() {
+    const h = harness();
+    const changed: { captureId: unknown; keys: readonly Dep[] }[] = [];
+    const reads = new Set<Dep>();
+    const evidence = createEvidence(h.db, h.dir, {
+      lookupFrameChange: () => ({ kind: "missing", key: stableId("key", "x") }),
+      runFrameChange: async () => undefined,
+      frameChangeKey: keyOf,
+      onChange: (captureId, keys) => void changed.push({ captureId, keys }),
+      read: (dep) => void reads.add(dep),
+      now: () => h.clock.t,
+    });
+    return { ...h, evidence, changed, reads };
+  }
+
+  test("an upload reports its capture and every source the capture has facts about, including one an earlier batch introduced", () => {
+    const h = listened();
+    const s = stream();
+    s.control("start");
+    s.source({ video: OTHER });
+    s.span(0, 10, { video: OTHER });
+    s.source();
+    s.span(0, 10);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts.slice(0, 3) });
+    h.evidence.ingest({ captureId: s.captureId, facts: [s.control("stop")] });
+    expect(h.changed.map((c) => c.captureId)).toEqual([s.captureId, s.captureId]);
+    expect(new Set(h.changed[1]!.keys)).toEqual(new Set([captureDep(s.captureId), sourceDep(sourceIdOf(OTHER))]));
+  });
+
+  test("a bundle depends on the sources of its material and on removals, a capture's own demand on that capture", () => {
+    const h = listened();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.span(0, 10);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    h.reads.clear();
+    h.evidence.bundle(Material.of([[SRC, [interval(0, 10)]]]));
+    expect(h.reads).toEqual(new Set([sourceDep(SRC), REMOVALS]));
+    h.reads.clear();
+    h.evidence.watchOrder(s.captureId);
+    expect(h.reads).toEqual(new Set([captureDep(s.captureId), REMOVALS]));
+    h.reads.clear();
+    h.evidence.frameDemand(s.captureId);
+    expect(h.reads.has(captureDep(s.captureId))).toBe(true);
+  });
+
+  test("a deletion by the user and a sweep that removed something report removals, and a sweep that removed nothing does not", () => {
+    const h = listened();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.transcript([[0, 4, "hello"]]);
+    s.span(0, 10);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    h.changed.length = 0;
+
+    h.evidence.sweepExpired(h.clock.t, 30);
+    expect(h.changed).toEqual([]);
+    h.evidence.deleteByUser(h.evidence.captureBundle(s.captureId).passages.map((p) => p.id as never), "r");
+    expect(h.changed).toEqual([{ captureId: null, keys: [REMOVALS] }]);
+    h.changed.length = 0;
+    h.clock.t += 31 * 86_400_000;
+    h.evidence.sweepExpired(h.clock.t, 30);
+    expect(h.changed).toEqual([{ captureId: null, keys: [REMOVALS] }]);
+  });
+});
+
 describe("capture view", () => {
   test("status follows control facts; activeCaptures lists only captures not stopped", () => {
     const h = harness();
@@ -535,5 +651,62 @@ describe("R1: a span counts only once the control facts before it have all arriv
     expect(Material.isEmpty(h.evidence.watchedMaterial(s.captureId))).toBe(true);
     h.evidence.ingest({ captureId: s.captureId, facts: [s.facts[2]!] });
     expect(Material.canonical(h.evidence.watchedMaterial(s.captureId))).toEqual([[SRC, [[0, 5]]]]);
+  });
+});
+
+describe("an upload re-indexes only its own capture", () => {
+  test("the evidence lookup after an upload visits the same number of projections whatever the number of stored captures", () => {
+    const h = harness();
+    const visits = (n: number, from: number): { count: number; target: CaptureId; id: EvidenceId } => {
+      let target = null as unknown as CaptureId;
+      for (let i = from; i < n; i++) {
+        const s = stream();
+        s.control("start");
+        s.source();
+        s.transcript([[0, 4, `lecture ${i}`]]);
+        s.span(0, 10);
+        h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+        target = s.captureId;
+      }
+      h.evidence.bundle(h.evidence.watchedMaterial(target));
+      const id = h.evidence.watchOrder(target).passages[0]!.passage.id;
+      h.evidence.get([id]);
+      h.evidence.ingest({ captureId: target, facts: [{ captureId: target, clientSeq: 1000 + n, wallMs: 9_000_000, kind: "control", action: "stop", reason: "user" }] });
+      const get = Map.prototype.get;
+      let count = 0;
+      Map.prototype.get = function (this: Map<unknown, unknown>, k: unknown) {
+        if (typeof k === "string" && k.startsWith("cap_")) count++;
+        return get.call(this, k);
+      };
+      try {
+        h.evidence.get([id]);
+      } finally {
+        Map.prototype.get = get;
+      }
+      return { count, target, id };
+    };
+    const small = visits(5, 0).count;
+    const large = visits(50, 5).count;
+    expect(large).toBe(small);
+  });
+
+  test("a passage two captures share stays found after one of them uploads again", () => {
+    const h = harness();
+    const a = stream();
+    a.control("start");
+    a.source();
+    a.transcript([[0, 4, "shared words"]]);
+    a.span(0, 10);
+    h.evidence.ingest({ captureId: a.captureId, facts: a.facts });
+    const id = h.evidence.watchOrder(a.captureId).passages[0]!.passage.id;
+    expect(h.evidence.get([id]).get(id)?.kind).toBe("passage");
+    const b = stream();
+    b.control("start");
+    b.source();
+    b.transcript([[0, 4, "shared words"]]);
+    b.span(0, 10);
+    h.evidence.ingest({ captureId: b.captureId, facts: b.facts });
+    h.evidence.ingest({ captureId: a.captureId, facts: [{ captureId: a.captureId, clientSeq: 900, wallMs: 9_000_000, kind: "control", action: "stop", reason: "user" }] });
+    expect(h.evidence.get([id]).get(id)?.kind).toBe("passage");
   });
 });

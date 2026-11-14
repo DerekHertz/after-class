@@ -3,7 +3,7 @@ import type { MemoKey } from "../src/shared/ids";
 import type { Provider, Purpose } from "../src/shared/domain";
 import { createScheduler } from "../src/backend/scheduler";
 import type { SchedulerLimits, SchedulerOptions, Timers, WorkItem } from "../src/backend/scheduler";
-import { createInterleave, raceAt } from "./interleave";
+import { createInterleave } from "./interleave";
 
 const k = (s: string) => s as MemoKey;
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -333,7 +333,7 @@ describe("scheduler: crash and repump", () => {
   });
 });
 
-describe("scheduler: a delta racing a stale demand snapshot", () => {
+describe("scheduler: a delta covering another delta, and how often demand is read", () => {
   /** Two chunk revisions each demand a delta over the same uncovered material; running one covers it. */
   function deltas() {
     let covered = false;
@@ -366,22 +366,40 @@ describe("scheduler: a delta racing a stale demand snapshot", () => {
     expect(d.doubleRuns).toEqual([]);
   });
 
-  test("another actor covers the material between the snapshot and the start: the stale delta does not run", async () => {
-    const d = deltas();
-    const result = await raceAt(
-      "after-snapshot",
-      (il) => {
-        const s = createScheduler([d.source(il)], LIMITS);
-        s.pump();
-        return s.inflight().map((i) => i.key);
+  test("an abort listener covers the material of a snapshot item: the stale item does not start", () => {
+    let wantOld = true;
+    let covered = false;
+    const ran: string[] = [];
+    const old: WorkItem = {
+      key: k("old"), purpose: "interpretation", provider: "jev",
+      run(signal) {
+        ran.push("old");
+        signal.addEventListener("abort", () => {
+          covered = true;
+        });
+        return new Promise<void>(() => {});
       },
-      () => {
-        void d.delta("r2").run(new AbortController().signal);
-      },
-    );
-    expect(d.ran).toEqual(["r2"]);
-    expect(d.doubleRuns).toEqual([]);
-    expect(result.first).toEqual([]);
+    };
+    const delta: WorkItem = { key: k("delta"), purpose: "interpretation", provider: "jev", run: () => (ran.push("delta"), new Promise<void>(() => {})) };
+    const scheduler = createScheduler([() => (wantOld ? [old] : covered ? [] : [delta])], LIMITS);
+    scheduler.pump();
+    wantOld = false;
+    scheduler.pump();
+    expect(covered).toBe(true);
+    expect(ran).toEqual(["old"]);
+  });
+
+  test("a pass reads demand once per item it starts, plus one to find nothing more", () => {
+    const w = world();
+    for (const key of ["a", "b", "c"]) w.want(key, "claim_check");
+    let reads = 0;
+    const scheduler = createScheduler([() => {
+      reads++;
+      return w.source();
+    }], LIMITS);
+    scheduler.pump();
+    expect(w.started).toHaveLength(3);
+    expect(reads).toBe(4);
   });
 });
 

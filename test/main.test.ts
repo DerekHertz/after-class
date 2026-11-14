@@ -8,7 +8,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ClaimDraft, Purpose, Provider } from "../src/shared/domain";
-import type { CaptureId, IdPart, WindowId } from "../src/shared/ids";
+import type { CaptureId, EvidenceId, IdPart, WindowId } from "../src/shared/ids";
 import { stableId } from "../src/shared/ids";
 import { captureResponse, ingestAckResponse } from "../src/shared/wire";
 import { PRODUCT_JEV_SETUP } from "../src/backend/jev-setup";
@@ -19,6 +19,7 @@ import type { ApiClient } from "../src/backend/providers/claude-api";
 import { ProviderError, unbudgeted } from "../src/backend/providers/memo";
 import { reviewState } from "../src/backend/review/tutor";
 import type { TutorInput } from "../src/backend/review/tutor";
+import { claimSupportTask } from "../src/backend/providers/jev-tasks";
 import type { ClaimSupportInput, BoundaryInput, FrameChangeInput } from "../src/backend/providers/jev-tasks";
 import { canonicalInterpretation, canonicalResourceSearch, canonicalRevision } from "../src/backend/preparation/tasks";
 import type { InterpretationInput, InterpretationOutput } from "../src/backend/preparation/tasks";
@@ -217,6 +218,269 @@ describe("main, replay mode with fake tasks", () => {
     const second = await boot({ tasks: fakes.tasks, configDir }, env);
     expect(second.r.modules.segmentation.current(CAP)).toHaveLength(1);
     expect(second.r.modules.preparation.assessableIn(CAP, second.r.modules.segmentation.current(CAP)[0]!.material)).toHaveLength(1);
+  }, 30_000);
+});
+
+// ───────────────────────────── the pump: what an upload costs, and who it wakes ─────────────────────────────
+
+async function ingestInto(b: Boot, captureId: CaptureId, facts: Record<string, unknown>[]): Promise<void> {
+  const res = await fetch(`${b.base}/ingest`, { method: "POST", headers: authed(b.r.token), body: JSON.stringify({ captureId, facts }) });
+  expect(res.status).toBe(200);
+}
+
+/** Counts every pump the scheduler is asked to run. */
+function countPumps(b: Boot) {
+  const { scheduler } = b.r.modules;
+  const real = scheduler.pump.bind(scheduler);
+  const seen = { n: 0 };
+  scheduler.pump = () => {
+    seen.n++;
+    real();
+  };
+  return seen;
+}
+
+const prepared = (b: Boot, captureId: CaptureId) => b.r.modules.segmentation.current(captureId).some((c) => b.r.modules.preparation.prep(c.id).finished);
+
+describe("main, the pump an upload triggers", () => {
+  test("an upload is answered before the pump runs, and a burst of uploads shares one pump", async () => {
+    const b = await boot({ tasks: fakeTasks().tasks, ingestPumpMs: 600 }, { AFTERCLASS_MODE: "replay" });
+    await Bun.sleep(50);
+    const pumps = countPumps(b);
+    const facts = fixture({ frames: false });
+    for (const f of facts.slice(0, 5)) await ingestInto(b, CAP, [f]);
+    expect(pumps.n).toBe(0);
+    await until(() => pumps.n > 0);
+    await Bun.sleep(100);
+    expect(pumps.n).toBe(1);
+  });
+
+  test("a capture with no demand is not derived by later pumps, and is derived again after a new upload", async () => {
+    const b = await boot({ tasks: fakeTasks().tasks, ingestPumpMs: 20 }, { AFTERCLASS_MODE: "replay" });
+    const { evidence, scheduler } = b.r.modules;
+    const derived: CaptureId[] = [];
+    const real = evidence.frameDemand;
+    evidence.frameDemand = (captureId) => {
+      derived.push(captureId);
+      return real(captureId);
+    };
+    await ingest(b, fixture({ frames: false }));
+    await until(() => prepared(b, CAP));
+    await Bun.sleep(300);
+    derived.length = 0;
+
+    for (let i = 0; i < 3; i++) scheduler.pump();
+    await Bun.sleep(100);
+    expect(derived).toEqual([]);
+
+    const other = stableId("cap", "main-test-other") as CaptureId;
+    await ingestInto(b, other, [{ kind: "control", action: "start", reason: "user", clientSeq: 0, wallMs: 1000 }]);
+    await until(() => derived.includes(other));
+    expect(derived.filter((id) => id === CAP)).toEqual([]);
+
+    await ingestInto(b, CAP, [{ kind: "control", action: "resume", reason: "user", clientSeq: 100, wallMs: 5000 }]);
+    await until(() => derived.includes(CAP));
+  });
+
+  test("an upload probes no sleeping capture's keys, however many lectures sleep", async () => {
+    const b = await boot({ tasks: fakeTasks().tasks, ingestPumpMs: 60_000 }, { AFTERCLASS_MODE: "replay" });
+    const { scheduler } = b.r.modules;
+    const target = stableId("cap", "scaling-target") as CaptureId;
+    const start = (id: CaptureId, clientSeq: number) => ingestInto(b, id, [{ kind: "control", action: "start", reason: "user", clientSeq, wallMs: 1000 + clientSeq }]);
+    const probesDuringUpload = async (seq: number): Promise<number> => {
+      const has = Set.prototype.has;
+      let probes = 0;
+      Set.prototype.has = function (this: Set<unknown>, v: unknown) {
+        if (typeof v === "string" && (v.startsWith("capture:") || v.startsWith("source:"))) probes++;
+        return has.call(this, v);
+      };
+      try {
+        await start(target, seq);
+      } finally {
+        Set.prototype.has = has;
+      }
+      return probes;
+    };
+    let seeded = 0;
+    let seq = 0;
+    const counts: number[] = [];
+    for (const size of [5, 50]) {
+      while (seeded < size) await start(stableId("cap", `scaling-${seeded++}`) as CaptureId, 0);
+      scheduler.pump();
+      await start(target, seq++);
+      scheduler.pump();
+      counts.push(await probesDuringUpload(seq++));
+    }
+    expect(counts[1]).toBe(counts[0]!);
+  });
+
+  test("retry wakes a capture whose failed job had left the working set", async () => {
+    const fakes = fakeTasks();
+    let attempts = 0;
+    const interpret = scripted<InterpretationInput, InterpretationOutput>("interpretation", "claude", canonicalInterpretation, (i) => {
+      attempts++;
+      if (attempts === 1) return fail("model unavailable");
+      return ok({ concepts: [{ label: "Topic", summary: "What the lecture is about", claims: [{ text: "The lecture states its topic first.", evidence: [i.newMaterial.passages[0]!.id], visualDependent: false, assumptions: [] }], confusions: [] }], links: [], supersedes: [] });
+    });
+    const tasks = { ...fakes.tasks, preparation: { ...fakes.tasks.preparation, interpret } } as unknown as TaskSet;
+    const b = await boot({ tasks, ingestPumpMs: 20 }, { AFTERCLASS_MODE: "replay" });
+    await ingest(b, fixture({ frames: false }));
+    await until(() => interpret.calls.length === 1);
+    await Bun.sleep(300);
+    expect(b.r.modules.scheduler.inflight()).toEqual([]);
+    expect(interpret.calls).toHaveLength(1);
+
+    const retry = await fetch(`${b.base}/captures/${CAP}/retry-preparation`, { method: "POST", headers: authed(b.r.token) });
+    expect(retry.status).toBe(204);
+    await until(() => prepared(b, CAP));
+    expect(interpret.calls).toHaveLength(2);
+  }, 30_000);
+
+  test("retrying one capture wakes another capture of the user whose demand the cleared memo key creates", async () => {
+    const fakes = fakeTasks();
+    let interpretations = 0;
+    const interpret = scripted<InterpretationInput, InterpretationOutput>("interpretation", "claude", canonicalInterpretation, (i) => {
+      const label = ++interpretations === 1 ? "Topic A" : "Topic B";
+      return ok({ concepts: [{ label, summary: "Summary", claims: [{ text: "Shared statement", evidence: [i.newMaterial.passages[0]!.id], visualDependent: false, assumptions: [] }], confusions: [] }], links: [], supersedes: [] });
+    });
+    let checks = 0;
+    const checkClaim = scripted<ClaimSupportInput, { verdict: "yes"; p: number }>("claim_check", "jev", claimSupportTask({} as never).canonicalInput as never, () => (++checks === 1 ? fail("temporary failure") : ok({ verdict: "yes" as const, p: 0.9 })));
+    const revise = scripted("claim_revision", "claude", canonicalRevision, () => fail("revision failed"));
+    const searched: string[] = [];
+    const searchResources = scripted("resource_search", "claude", canonicalResourceSearch, (i) => {
+      searched.push((i as { concept: { label: string } }).concept.label);
+      return ok([]);
+    });
+    const tasks = { ...fakes.tasks, preparation: { interpret, checkClaim, revise, searchResources } } as unknown as TaskSet;
+    const b = await boot({ tasks, ingestPumpMs: 10 }, { AFTERCLASS_MODE: "replay" });
+    const { segmentation, preparation, scheduler } = b.r.modules;
+    const capA = stableId("cap", "main-test-shared-A") as CaptureId;
+    const capB = stableId("cap", "main-test-shared-B") as CaptureId;
+    for (const id of [capA, capB]) {
+      await ingestInto(b, id, fixture({ frames: false }));
+      await until(() => prepared(b, id));
+      await Bun.sleep(150);
+    }
+    scheduler.pump();
+    expect(searched).toEqual([]);
+
+    const retry = await fetch(`${b.base}/captures/${capB}/retry-preparation`, { method: "POST", headers: authed(b.r.token) });
+    expect(retry.status).toBe(204);
+    await until(() => searched.length >= 2);
+    expect(searched.sort()).toEqual(["Topic A", "Topic B"]);
+    expect(preparation.demand(capA)).toEqual([]);
+    expect(segmentation.current(capA)).toHaveLength(1);
+  }, 30_000);
+
+  /** Ten 10 s segments of `text`, one 100 s span, then stop: a capture of `video` whose transcript is its own. */
+  const lectureFacts = (video: string, text: string): Record<string, unknown>[] =>
+    [
+      { kind: "control", action: "start", reason: "user" },
+      { kind: "source", videoId: video, title: "Lecture", channelName: "Prof", url: `https://www.youtube.com/watch?v=${video}`, durationS: 600 },
+      { kind: "transcript", videoId: video, origin: "panel", language: "en", autoGenerated: false, segments: Array.from({ length: 10 }, (_, i) => ({ start: i * 10, end: i * 10 + 10, text: `${text} ${i}` })) },
+      { kind: "span", videoId: video, start: 0, end: 100, rate: 1, tabVisible: true, wallDurationMs: 100_000 },
+      { kind: "control", action: "stop", reason: "user" },
+    ].map((f, clientSeq) => ({ ...f, clientSeq, wallMs: 1000 + clientSeq }));
+
+  const noClaims: InterpretationOutput = { concepts: [], links: [], supersedes: [] };
+
+  /** Both Claude slots held by two lectures' interpretations until `gate` opens, so a woken capture shows as not started. */
+  function crowded() {
+    const gate = deferred<FakeStep<InterpretationOutput>>();
+    let held = 0;
+    const fakes = fakeTasks();
+    const interpret = scripted<InterpretationInput, InterpretationOutput>("interpretation", "claude", canonicalInterpretation, () => (++held <= 2 ? gate.promise : ok(noClaims)));
+    const tasks = { ...fakes.tasks, preparation: { ...fakes.tasks.preparation, interpret } } as unknown as TaskSet;
+    return { gate, interpret, tasks };
+  }
+
+  const interpreted = (b: Boot, interpret: FakeTask<InterpretationInput, InterpretationOutput>) =>
+    interpret.calls.map((i) => b.r.modules.segmentation.revision(i.chunkRevisionId)?.captureId);
+
+  test("an upload to another capture of the same video wakes a sleeping capture whose bundle it changes", async () => {
+    const { gate, interpret, tasks } = crowded();
+    const b = await boot({ tasks, ingestPumpMs: 10 }, { AFTERCLASS_MODE: "replay" });
+    const { evidence, segmentation, preparation, scheduler } = b.r.modules;
+    const [block1, block2, a, other] = ["block1", "block2", "deleted-A", "fresh-B"].map((n) => stableId("cap", `main-test-${n}`) as CaptureId);
+    await ingestInto(b, block1!, lectureFacts("bbbbbbbbbbb", "first blocker"));
+    await until(() => interpret.calls.length === 1);
+    await ingestInto(b, block2!, lectureFacts("ccccccccccc", "second blocker"));
+    await until(() => interpret.calls.length === 2);
+    await ingestInto(b, a!, lectureFacts("aaaaaaaaaaa", "old transcript"));
+    await until(() => segmentation.current(a!).length > 0);
+    evidence.deleteByUser(evidence.captureBundle(a!).passages.map((p) => p.id as EvidenceId), "test-delete");
+    await Bun.sleep(100);
+    expect(preparation.demand(a!)).toEqual([]);
+
+    const derived: CaptureId[] = [];
+    const real = evidence.frameDemand;
+    evidence.frameDemand = (id) => (derived.push(id), real(id));
+    scheduler.pump();
+    expect(derived).not.toContain(a!);
+
+    await ingestInto(b, other!, lectureFacts("aaaaaaaaaaa", "new transcript"));
+    await until(() => derived.includes(a!));
+    gate.resolve(ok(noClaims));
+    await until(() => interpreted(b, interpret).includes(a!));
+  }, 30_000);
+
+  test("no sleeping capture has demand after any upload or deletion among captures that share a video", async () => {
+    const { gate, interpret, tasks } = crowded();
+    const b = await boot({ tasks, ingestPumpMs: 10 }, { AFTERCLASS_MODE: "replay" });
+    const { evidence, segmentation, preparation, scheduler } = b.r.modules;
+    const id = (n: string) => stableId("cap", `main-test-sweep-${n}`) as CaptureId;
+    const known: CaptureId[] = [];
+    const upload = async (n: string, video: string, text: string) => {
+      known.push(id(n));
+      await ingestInto(b, id(n), lectureFacts(video, text));
+    };
+    const real = evidence.frameDemand;
+    const derived: CaptureId[] = [];
+    evidence.frameDemand = (captureId) => (derived.push(captureId), real(captureId));
+    const hasDemand = (captureId: CaptureId) =>
+      segmentation.sync(captureId).demand.length + real(captureId).length + preparation.demand(captureId).length > 0;
+    const quiet = async () => {
+      await Bun.sleep(80);
+      derived.length = 0;
+      scheduler.pump();
+      for (const captureId of known) if (hasDemand(captureId)) expect(derived).toContain(captureId);
+    };
+
+    await upload("block1", "bbbbbbbbbbb", "first blocker");
+    await until(() => interpret.calls.length === 1);
+    await upload("block2", "ccccccccccc", "second blocker");
+    await until(() => interpret.calls.length === 2);
+    await quiet();
+    await upload("a", "aaaaaaaaaaa", "alpha");
+    await until(() => segmentation.current(id("a")).length > 0);
+    await quiet();
+    evidence.deleteByUser(evidence.captureBundle(id("a")).passages.map((p) => p.id as EvidenceId), "sweep-delete");
+    await quiet();
+    await upload("b", "aaaaaaaaaaa", "beta");
+    await quiet();
+    await upload("c", "aaaaaaaaaaa", "gamma");
+    await quiet();
+    await ingestInto(b, id("a"), [{ kind: "control", action: "resume", reason: "user", clientSeq: 100, wallMs: 9000 }]);
+    await quiet();
+    gate.resolve(ok(noClaims));
+    await until(() => interpret.calls.length >= 4);
+    await quiet();
+  }, 30_000);
+
+  test('R8: "Stop early" aborts the running job, and does not wait for the upload timer', async () => {
+    const fakes = fakeTasks();
+    const gate = deferred<FakeStep<never>>();
+    const interpret = scripted<InterpretationInput, InterpretationOutput>("interpretation", "claude", canonicalInterpretation, () => gate.promise);
+    const tasks = { ...fakes.tasks, preparation: { ...fakes.tasks.preparation, interpret } } as unknown as TaskSet;
+    const b = await boot({ tasks, ingestPumpMs: 60_000 }, { AFTERCLASS_MODE: "replay" });
+    const { scheduler } = b.r.modules;
+    await ingest(b, fixture({ frames: false }));
+    scheduler.pump();
+    await until(() => interpret.calls.length === 1);
+
+    const started = await fetch(`${b.base}/captures/${CAP}/reviews`, { method: "POST", headers: authed(b.r.token), body: JSON.stringify({ reviewId: stableId("rvw", "main-test-stop-early"), choice: "stop_early" }) });
+    expect(started.status).toBe(200);
+    await until(() => !scheduler.inflight().some((i) => i.purpose === "interpretation"), 2_000);
   }, 30_000);
 });
 

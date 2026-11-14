@@ -30,10 +30,12 @@ import { Material } from "../../shared/time";
 import type { MediaSeconds } from "../../shared/time";
 import { asSeq } from "../db";
 import type { UserDb } from "../db";
+import { REMOVALS, captureDep, sourceDep } from "../deps";
+import type { Dep, ReadDep } from "../deps";
 import type { WorkItem } from "../scheduler";
 import type { Lookup } from "../providers/memo";
 import type { FrameChangeInput } from "../providers/jev-tasks";
-import { adInside, bundleToJson, clipGap, dedupeGaps, foldCapture, frameInside, selectScope } from "./core";
+import { adInside, bundleToJson, clipGap, dedupeGaps, foldCapture, frameInside, selectScope, sourceIdOf } from "./core";
 import type { EvidenceBundleJson, FrameEntry, Projection, StoredFact } from "./core";
 
 /** Newly watched material in WATCH order (not media order): what segmentation windows over. */
@@ -137,21 +139,39 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   lookupFrameChange(input: FrameChangeInput): Lookup<Verdict>;
   runFrameChange(input: FrameChangeInput, signal: AbortSignal): Promise<unknown>;
   frameChangeKey(input: FrameChangeInput): MemoKey;
-  onChange(): void;
+  /**
+   * After a write commits: the capture whose facts changed, or null when evidence anywhere may have (a deletion by the user,
+   * the retention sweep), and the keys of what the write changed. A derivation that read one of them is stale.
+   */
+  onChange(captureId: CaptureId | null, changed: readonly Dep[]): void;
+  /** Called for each key a read depends on that a write to another capture can change. Absent where nothing listens. */
+  read?: ReadDep;
   /** Clock for received and created timestamps. Defaults to Date.now. */
   now?: () => number;
 }): EvidenceStoreWithProbe {
   const now = deps.now ?? Date.now;
   const userId = db.userId;
   const abs = (rel: string) => join(dataDir, rel);
+  const read: ReadDep = deps.read ?? (() => {});
 
   let projections = new Map<CaptureId, Projection>();
-  let captureIds: CaptureId[] | null = null;
-  let rawIndex: Map<EvidenceId, Raw> | null = null;
+  let captureIds: Set<CaptureId> | null = null;
+  /** Every evidence id with the captures that hold it, built once and then kept current one capture at a time. */
+  let rawIndex: Map<EvidenceId, Map<CaptureId, Raw>> | null = null;
+  const rawIds = new Map<CaptureId, EvidenceId[]>();
+  const rawDirty = new Set<CaptureId>();
+  /** One capture's facts changed: only its projection is stale. The ids of the others stay cached. */
+  const invalidateCapture = (captureId: CaptureId) => {
+    projections.delete(captureId);
+    captureIds?.add(captureId);
+    if (rawIndex) rawDirty.add(captureId);
+  };
   const invalidate = () => {
     projections = new Map();
     captureIds = null;
     rawIndex = null;
+    rawIds.clear();
+    rawDirty.clear();
   };
 
   const loadFacts = db.sql.query<
@@ -161,6 +181,15 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     `SELECT c.seq, c.client_seq, c.wall_ms, c.body_json,
             CASE WHEN EXISTS (SELECT 1 FROM frames f WHERE f.user_id = c.user_id AND f.seq = c.seq) THEN 1 ELSE 0 END AS has_bytes
      FROM capture_facts c WHERE c.user_id = ? AND c.capture_id = ? ORDER BY c.client_seq`,
+  );
+
+  /**
+   * Every source a capture has a fact about. A bundle gathers a source's facts from every capture that watched it, so a
+   * write to this capture can change the bundle of any capture that shares one of these. Facts only add to the set, and a
+   * removal reports REMOVALS instead. It reads the capture's own rows, so its cost does not grow with the lectures stored.
+   */
+  const sourcesOf = db.sql.query<{ video_id: string }, [string, string]>(
+    "SELECT DISTINCT json_extract(body_json, '$.videoId') AS video_id FROM capture_facts WHERE user_id = ? AND capture_id = ? AND json_extract(body_json, '$.videoId') IS NOT NULL",
   );
 
   function project(captureId: CaptureId): Projection {
@@ -176,14 +205,21 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     return p;
   }
 
-  function allCaptureIds(): CaptureId[] {
-    captureIds ??= db.sql.query<{ capture_id: string }, [string]>("SELECT DISTINCT capture_id FROM capture_facts WHERE user_id = ?").all(userId).map((r) => r.capture_id as CaptureId);
+  function allCaptureIds(): ReadonlySet<CaptureId> {
+    captureIds ??= new Set(db.sql.query<{ capture_id: string }, [string]>("SELECT DISTINCT capture_id FROM capture_facts WHERE user_id = ?").all(userId).map((r) => r.capture_id as CaptureId));
     return captureIds;
   }
 
-  const allProjections = () => allCaptureIds().map(project);
+  /** A capture's own facts, read for its own demand. Bundles read other captures through `allProjections` and key by source. */
+  const projectOwn = (captureId: CaptureId): Projection => {
+    read(captureDep(captureId));
+    return project(captureId);
+  };
+
+  const allProjections = () => [...allCaptureIds()].map(project);
 
   function deleted(): ReadonlyMap<string, number> {
+    read(REMOVALS);
     return new Map(
       db.sql
         .query<{ evidence_id: string; deleted_ms: number }, [string]>("SELECT evidence_id, deleted_ms FROM evidence_deletions WHERE user_id = ?")
@@ -192,15 +228,40 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     );
   }
 
-  function raw(): Map<EvidenceId, Raw> {
-    if (rawIndex) return rawIndex;
-    const index = new Map<EvidenceId, Raw>();
-    for (const p of allProjections()) {
-      for (const w of p.passages) if (!index.has(w.passage.id)) index.set(w.passage.id, { kind: "passage", passage: w.passage });
-      for (const entry of p.frames) if (!index.has(entry.frame.id)) index.set(entry.frame.id, { kind: "frame", entry });
+  function indexCapture(index: Map<EvidenceId, Map<CaptureId, Raw>>, captureId: CaptureId): void {
+    const ids: EvidenceId[] = [];
+    const put = (id: EvidenceId, entry: Raw) => {
+      let owners = index.get(id);
+      if (!owners) index.set(id, (owners = new Map()));
+      owners.set(captureId, entry);
+      ids.push(id);
+    };
+    const p = project(captureId);
+    for (const w of p.passages) put(w.passage.id, { kind: "passage", passage: w.passage });
+    for (const entry of p.frames) put(entry.frame.id, { kind: "frame", entry });
+    rawIds.set(captureId, ids);
+  }
+
+  /** A capture's own upload re-indexes that capture only. A passage id shared by captures names the same transcript text in each. */
+  function raw(): { get(id: EvidenceId): Raw | undefined; has(id: EvidenceId): boolean } {
+    if (!rawIndex) {
+      rawIndex = new Map();
+      for (const id of allCaptureIds()) indexCapture(rawIndex, id);
+      rawDirty.clear();
+    } else if (rawDirty.size > 0) {
+      for (const captureId of rawDirty) {
+        for (const id of rawIds.get(captureId) ?? []) {
+          const owners = rawIndex.get(id);
+          owners?.delete(captureId);
+          if (owners?.size === 0) rawIndex.delete(id);
+        }
+        rawIds.delete(captureId);
+        indexCapture(rawIndex, captureId);
+      }
+      rawDirty.clear();
     }
-    rawIndex = index;
-    return index;
+    const index = rawIndex;
+    return { get: (id) => index.get(id)?.values().next().value, has: (id) => index.has(id) };
   }
 
   const withBytes = (e: FrameEntry) => ({ frame: e.frame, bytes: (): Uint8Array => bytes(e.frame.id) ?? new Uint8Array() });
@@ -343,8 +404,8 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
         }
       });
       if (fresh.length > 0) {
-        invalidate();
-        deps.onChange();
+        invalidateCapture(captureId);
+        db.afterCommit(() => deps.onChange(captureId, [captureDep(captureId), ...sourcesOf.all(userId, captureId).map((r) => sourceDep(sourceIdOf(r.video_id)))]));
       }
       return { ackedThroughSeq: ackedThrough(captureId) };
     },
@@ -391,7 +452,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     },
 
     watchOrder(captureId) {
-      const p = project(captureId);
+      const p = projectOwn(captureId);
       const dead = deleted();
       return {
         passages: p.passages.filter((w) => !dead.has(w.passage.id)),
@@ -403,6 +464,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     },
 
     bundle(material) {
+      for (const sourceId of Material.sources(material)) read(sourceDep(sourceId));
       const dead = deleted();
       const scope = selectScope(allProjections(), material);
       const passages = new Map<EvidenceId, Passage>();
@@ -456,7 +518,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     frameDemand(captureId) {
       const dead = deleted();
       const items: WorkItem[] = [];
-      for (const e of project(captureId).frames) {
+      for (const e of projectOwn(captureId).frames) {
         if (dead.has(e.frame.id)) continue;
         const { teaching, input } = judge(e);
         if (teaching !== "unjudged" || input === null) continue;
@@ -521,7 +583,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
       });
       unlinkUnreferenced(files);
       invalidate();
-      deps.onChange();
+      db.afterCommit(() => deps.onChange(null, [REMOVALS]));
     },
 
     sweepExpired(nowMs, retentionDays) {
@@ -580,6 +642,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
         }
       }
       invalidate();
+      if (framesDeleted + factsDeleted + snapshotsDeleted > 0) db.afterCommit(() => deps.onChange(null, [REMOVALS]));
       return { framesDeleted, factsDeleted, snapshotsDeleted };
     },
 

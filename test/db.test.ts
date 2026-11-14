@@ -50,6 +50,71 @@ describe("migrations", () => {
   });
 });
 
+describe("afterCommit", () => {
+  const seen = (db: Db) => {
+    const log: string[] = [];
+    const note = (name: string) => db.afterCommit(() => log.push(`${name}${db.sql.inTransaction ? " in tx" : ""}`));
+    return { log, note };
+  };
+
+  test("runs at once outside a transaction", () => {
+    const db = testDb();
+    const { log, note } = seen(db);
+    note("a");
+    expect(log).toEqual(["a"]);
+  });
+
+  test("waits for the outermost commit, then runs in order outside the transaction", () => {
+    const db = testDb();
+    const { log, note } = seen(db);
+    db.tx(() => {
+      note("outer");
+      db.tx(() => note("inner"));
+      expect(log).toEqual([]);
+    });
+    expect(log).toEqual(["outer", "inner"]);
+  });
+
+  test("a rollback drops what its transaction registered, an outer one drops what committed inside it", () => {
+    const db = testDb();
+    const { log, note } = seen(db);
+    const abort = (message: string): never => {
+      throw new Error(message);
+    };
+    expect(() =>
+      db.tx(() => {
+        note("lost");
+        db.tx(() => note("lost too"));
+        abort("abort");
+      }),
+    ).toThrow("abort");
+    db.tx(() => {
+      note("kept");
+      expect(() =>
+        db.tx(() => {
+          note("inner lost");
+          abort("inner");
+        }),
+      ).toThrow("inner");
+    });
+    expect(log).toEqual(["kept"]);
+  });
+
+  test("a notification that throws does not stop the others, and its error reaches the caller after the commit", () => {
+    const db = testDb();
+    const { log, note } = seen(db);
+    expect(() =>
+      db.tx(() => {
+        db.afterCommit(() => {
+          throw new Error("listener");
+        });
+        note("after");
+      }),
+    ).toThrow("listener");
+    expect(log).toEqual(["after"]);
+  });
+});
+
 describe("nextSeq", () => {
   test("is strictly increasing and rolls back with its transaction", () => {
     const db = testDb();

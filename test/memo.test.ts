@@ -159,6 +159,54 @@ describe("failures", () => {
   });
 });
 
+describe("onChange", () => {
+  function listened() {
+    const db = testUserDb();
+    const events: { keys: readonly string[]; inTransaction: boolean; failures: number }[] = [];
+    const memo = createMemo(db, "live", {
+      retryDelayMs: () => 0,
+      onChange: (keys) =>
+        events.push({ keys, inTransaction: db.sql.inTransaction, failures: db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM memo_failures").get()!.n }),
+    });
+    return { db, memo, events };
+  }
+  const broken = () => fakeTask<In, string>({ answer: () => fail("bad request") });
+
+  test("reports a cleared failure once its transaction has committed", async () => {
+    const { memo, events } = listened();
+    const failed = await memo.run(broken(), { window: "w" });
+    events.length = 0;
+    memo.clearFailures([failed.key]);
+    expect(events).toEqual([{ keys: [failed.key], inTransaction: false, failures: 0 }]);
+  });
+
+  test("inside an outer transaction it waits for the outermost commit", async () => {
+    const { db, memo, events } = listened();
+    const failed = await memo.run(broken(), { window: "w" });
+    events.length = 0;
+    db.tx(() => {
+      memo.clearFailures([failed.key]);
+      expect(events).toEqual([]);
+    });
+    expect(events).toEqual([{ keys: [failed.key], inTransaction: false, failures: 0 }]);
+  });
+
+  test("a rolled back outer transaction reports nothing, and the failure is still recorded", async () => {
+    const { db, memo, events } = listened();
+    const t = broken();
+    const failed = await memo.run(t, { window: "w" });
+    events.length = 0;
+    expect(() =>
+      db.tx(() => {
+        memo.clearFailures([failed.key]);
+        throw new Error("outer rollback");
+      }),
+    ).toThrow("outer rollback");
+    expect(events).toEqual([]);
+    expect(memo.lookup(t, { window: "w" }).kind).toBe("failed");
+  });
+});
+
 describe("streaming", () => {
   test("streamTo receives the provider's deltas and the final output is stored", async () => {
     const { memo } = setup();

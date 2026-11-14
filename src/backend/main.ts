@@ -41,7 +41,9 @@
  * only way work runs in replay mode, and they are refused in live mode.
  *
  * Wiring order: db → memo → ledger → evidence → segmentation → preparation → reviews → record → scheduler → serve.
- * Every fact write schedules scheduler.pump(); a 24 h timer runs evidence.sweepExpired.
+ * An upload schedules scheduler.pump() on a short timer, so its reply goes out first and a burst of uploads shares one pump;
+ * stop early and retry pump at once. A pump derives only the captures that can have demand (`UserGraph.live`).
+ * A 24 h timer runs evidence.sweepExpired.
  */
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -50,6 +52,8 @@ import { join, resolve } from "node:path";
 import { buildApp } from "../../scripts/build-app";
 import { stableId } from "../shared/ids";
 import type { CaptureId, EvidenceId, UserId } from "../shared/ids";
+import { memoDep } from "./deps";
+import type { Dep, ReadDep } from "./deps";
 import type { AssessableClaim, BoundaryJudgment, BoundaryWindow, Evidence, Frame, Passage, Verdict } from "../shared/domain";
 import { heldMessage } from "../shared/allowance";
 import { LOCAL_USER, ensureLocalUser, openDb, scopeDb, signedInUsers, userForIdentity } from "./db";
@@ -59,7 +63,7 @@ import { createDevices, isDeviceToken } from "./devices";
 import type { Devices } from "./devices";
 import type { ClerkConfig, Rejection, Verifier } from "./clerk";
 import { createMemo, ProviderError } from "./providers/memo";
-import type { Memo, MemoMode, Task } from "./providers/memo";
+import type { LookupFn, Memo, MemoMode, Task } from "./providers/memo";
 import { createBudget } from "./providers/budget";
 import type { BudgetLimits } from "./providers/budget";
 import { createLedger } from "./providers/ledger";
@@ -99,6 +103,8 @@ import type { Voice } from "./providers/elevenlabs";
 
 const ROOT = resolve(import.meta.dir, "../..");
 const RETENTION_DAYS = 30;
+/** How long an upload may wait for the pump it triggers. Uploads arrive every 3 to 5 s per watcher, so a burst of them shares one pump. */
+const INGEST_PUMP_MS = 100;
 
 export type Mode = "live" | "replay";
 
@@ -133,6 +139,8 @@ export type MainOptions = {
   readonly claudeBin?: string;
   /** AFTERCLASS_CLAUDE_BACKEND=api only: a fake Messages API client, so a test makes no network call. */
   readonly anthropic?: ApiClient;
+  /** How long an upload may wait for the pump it triggers. Default INGEST_PUMP_MS; a test widens it to see the order. */
+  readonly ingestPumpMs?: number;
   readonly log?:(text: string) => void;
   readonly error?: (text: string) => void;
 };
@@ -385,11 +393,20 @@ export function hostedCallers(sessionUser: (token: string) => Promise<UserId | n
 /** Everything one user's requests and background work run on. Built once per user and kept for the process's life. */
 type UserGraph = Omit<Modules, "scheduler"> & {
   readonly tasks: TaskSet;
-  readonly served: EvidenceStoreWithProbe;
   readonly diagrams: Diagrams;
   readonly voice: Voice;
-  /** Every capture of this user that may still have work: those on disk at boot, plus any ingested since. */
-  readonly captures: Set<CaptureId>;
+  /**
+   * The captures that can have demand. All of them at boot. A capture leaves when a pump finds no demand in it, and comes
+   * back when ingest, retry or stop early touches it, or when anything its derivation read changes (`asleep`), so a pump
+   * derives only what can have work.
+   */
+  readonly live: Set<CaptureId>;
+  /** The captures that left `live`, each with the keys its last derivation read (`Dep`). A change to one of those keys wakes it. */
+  readonly asleep: Map<CaptureId, ReadonlySet<Dep>>;
+  /** Takes a capture out of `live` and files it under each key it read, so a change finds its sleepers without scanning them all. */
+  readonly sleep: (captureId: CaptureId, keys: ReadonlySet<Dep>) => void;
+  /** Runs `fn` and returns the keys its stores reported reading. */
+  readonly reading: <T>(fn: () => T) => { readonly value: T; readonly keys: ReadonlySet<Dep> };
 };
 
 type Composed = {
@@ -466,16 +483,30 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
 
   let alive = true;
   let scheduler: Scheduler | null = null;
+  const runPump = () => {
+    if (!alive) return;
+    try {
+      scheduler?.pump();
+    } catch (e) {
+      reportOnce("pump", e);
+    }
+  };
   /** After the current synchronous work, so a pump never runs inside the transaction that wrote the fact. */
-  const pump = () =>
-    queueMicrotask(() => {
-      if (!alive) return;
-      try {
-        scheduler?.pump();
-      } catch (e) {
-        reportOnce("pump", e);
-      }
-    });
+  const pump = () => queueMicrotask(runPump);
+  /**
+   * What an upload triggers: a burst of facts shares one pump, run after the replies went out. A job that an upload stops
+   * demanding is aborted up to INGEST_PUMP_MS later than a microtask pump would, and its result still applies only through
+   * `appliesBefore`. Stop early and retry pump at once.
+   */
+  let ingestPump: ReturnType<typeof setTimeout> | null = null;
+  const pumpSoon = () => {
+    if (ingestPump !== null || !alive) return;
+    ingestPump = setTimeout(() => {
+      ingestPump = null;
+      runPump();
+    }, options.ingestPumpMs ?? INGEST_PUMP_MS);
+    ingestPump.unref?.();
+  };
   const reported = new Set<string>();
   function reportOnce(where: string, error: unknown): void {
     const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
@@ -490,16 +521,86 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     // evidence is created after the tasks that need its bytes; the tasks only read it when a call runs
     const frameBytes: FrameBytes = (id) => evidence.frameBytes(id);
     const tasks: TaskSet = options.tasks ?? buildTasks(providers.jev, providers.claude, frameBytes, tutorCache(db), tutorModel);
-    const memo = createMemo(db, memoMode, budget === null ? {} : { budget });
+    const live = new Set<CaptureId>();
+    const asleep = new Map<CaptureId, ReadonlySet<Dep>>();
+    const sleepersOf = new Map<Dep, Set<CaptureId>>();
+    const unfile = (captureId: CaptureId) => {
+      const keys = asleep.get(captureId);
+      if (keys === undefined) return;
+      asleep.delete(captureId);
+      for (const k of keys) {
+        const sleepers = sleepersOf.get(k);
+        sleepers?.delete(captureId);
+        if (sleepers?.size === 0) sleepersOf.delete(k);
+      }
+    };
+    const wake = (captureId: CaptureId) => {
+      unfile(captureId);
+      live.add(captureId);
+    };
+    const sleep = (captureId: CaptureId, keys: ReadonlySet<Dep>) => {
+      unfile(captureId);
+      live.delete(captureId);
+      asleep.set(captureId, keys);
+      for (const k of keys) {
+        let sleepers = sleepersOf.get(k);
+        if (!sleepers) sleepersOf.set(k, (sleepers = new Set()));
+        sleepers.add(captureId);
+      }
+    };
+    /**
+     * A capture that sleeps keeps the keys its last derivation read, and every store reports a read where it makes one and
+     * a write by the keys it changed. A write wakes the sleepers that read one of its keys, so a capture wakes whenever
+     * any input its demand reads changes, whichever capture or job changed it, and no list of such inputs sits here.
+     * Waking every capture of the user instead would derive every lecture on each job result and each upload.
+     */
+    const changed = (keys: readonly Dep[]): boolean => {
+      const hit = new Set<CaptureId>();
+      for (const k of keys) for (const captureId of sleepersOf.get(k) ?? []) hit.add(captureId);
+      for (const captureId of hit) wake(captureId);
+      return hit.size > 0;
+    };
+    let readDeps: Set<Dep> | null = null;
+    const read: ReadDep = (dep) => {
+      readDeps?.add(dep);
+    };
+    const reading = <T>(fn: () => T) => {
+      const outer = readDeps;
+      const keys = new Set<Dep>();
+      readDeps = keys;
+      try {
+        return { value: fn(), keys };
+      } finally {
+        readDeps = outer;
+      }
+    };
+    const memo = createMemo(db, memoMode, {
+      ...(budget === null ? {} : { budget }),
+      onChange(keys) {
+        if (changed(keys.map(memoDep))) pumpSoon();
+      },
+    });
     const ledger = createLedger(db, budget);
-
+    const lookup: LookupFn = (task, input) => {
+      const looked = memo.lookup(task, input);
+      read(memoDep(looked.key));
+      return looked;
+    };
     const evidence: EvidenceStoreWithProbe = createEvidence(db, dataDir, {
-      lookupFrameChange: (input) => memo.lookup(tasks.frameChange, input),
+      lookupFrameChange: (input) => lookup(tasks.frameChange, input),
       // The first frame of a source has nothing to compare with: evidence keeps it without a call, and so does this.
       runFrameChange: (input, signal) => (input.before === null ? Promise.resolve(null) : memo.run(tasks.frameChange, input, { signal })),
       frameChangeKey: (input) => memo.key(tasks.frameChange, input),
-      onChange: pump,
+      read,
+      onChange(captureId, keys) {
+        // A capture's first upload is the only way a capture enters the working set after boot.
+        if (captureId !== null) wake(captureId);
+        changed(keys);
+        if (captureId === null) pump();
+        else pumpSoon();
+      },
     });
+    for (const id of evidence.captures()) live.add(id);
 
     const passageOf = (e: Evidence | { readonly kind: "deleted" } | undefined): e is Passage => e?.kind === "passage";
     const frameOf = (e: Evidence | { readonly kind: "deleted" } | undefined): e is Frame => e?.kind === "frame";
@@ -526,7 +627,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       db,
       {
         watchOrder: evidence.watchOrder,
-        lookupBoundary: (input) => memo.lookup(tasks.boundary, input),
+        lookupBoundary: (input) => lookup(tasks.boundary, input),
         boundaryInput,
         nextSeq: () => db.nextSeq(),
       },
@@ -538,19 +639,25 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       chunk: segmentation.revision,
       currentChunks: segmentation.current,
       bundle: evidence.bundle,
-      lookup: memo.lookup,
+      lookup,
       run: (task, input, signal) => memo.run(task, input, { signal }),
       clearFailures: memo.clearFailures,
       tasks: tasks.preparation,
       frameBytes: evidence.frameBytes,
+      read,
+      changed: (keys) => {
+        if (changed(keys)) pumpSoon();
+      },
     });
     // Stop early is a fact that cancels work by derivation; the pump is what aborts what is already running.
     const preparation: Preparation = { ...preparationBase, stopEarly: (captureId, ids) => {
       const seq = preparationBase.stopEarly(captureId, ids);
+      wake(captureId);
       pump();
       return seq;
     }, retry: (captureId, ids) => {
       const seq = preparationBase.retry(captureId, ids);
+      wake(captureId);
       pump();
       return seq;
     } };
@@ -619,22 +726,12 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       memo,
     });
 
-    const captures = new Set<CaptureId>(evidence.captures());
-    // The scheduler is the only holder of these; http gets the same store with ingest registering the capture first.
-    const served: EvidenceStoreWithProbe = {
-      ...evidence,
-      ingest(batch) {
-        captures.add(batch.captureId);
-        return evidence.ingest(batch);
-      },
-    };
-
     const voice: Voice =
       voiceKey === undefined
         ? unavailableVoice
         : createVoice({ apiKey: voiceKey, voiceId, model: voiceModel, db, ...(options.fetch ? { fetch: options.fetch } : {}) });
 
-    return { tasks, evidence, served, segmentation, preparation, reviews, record, ledger, memo, diagrams, voice, captures, db };
+    return { tasks, evidence, segmentation, preparation, reviews, record, ledger, memo, diagrams, voice, live, asleep, sleep, reading, db };
   }
 
   const graphs = new Map<UserId, UserGraph>();
@@ -651,35 +748,48 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   if (auth.kind === "local") graphFor(ensureLocalUser(rawDb));
   else for (const userId of signedInUsers(rawDb)) graphFor(userId);
 
+  /** Per capture, the three derivations that can ask for work. A failing one is reported and leaves the others running. */
+  const DEMAND: readonly (readonly [string, (graph: UserGraph, captureId: CaptureId) => readonly WorkItem[]])[] = [
+    ["segmentation", ({ segmentation, memo, tasks }, captureId) =>
+      segmentation.sync(captureId).demand.map((input): WorkItem => ({
+        key: memo.key(tasks.boundary, input),
+        purpose: "boundary",
+        provider: "jev",
+        run: (signal) => memo.run(tasks.boundary, input, { signal, captureId }),
+      }))],
+    ["frame demand", ({ evidence }, captureId) => evidence.frameDemand(captureId)],
+    ["preparation", ({ preparation }, captureId) => preparation.demand(captureId)],
+  ];
+
   /**
-   * Every user's demand, each item keyed by its user as well: memo keys hash the call alone, so two users' identical
-   * calls share a key, and the scheduler would otherwise treat one user's run as the other's.
+   * Every user's demand over the captures that can have any, each item keyed by its user as well: memo keys hash the call
+   * alone, so two users' identical calls share a key, and the scheduler would otherwise treat one user's run as the other's.
+   * A capture with no demand leaves its user's live set. Its running jobs are not demanded either, so this same pump aborts them (R8).
    */
-  const everyCapture = (where: string, items: (graph: UserGraph, captureId: CaptureId) => readonly WorkItem[]) => (): readonly WorkItem[] =>
+  const demand = (): readonly WorkItem[] =>
     [...graphs.values()].flatMap((graph) =>
-      [...graph.captures].flatMap((captureId) => {
-        try {
-          return items(graph, captureId).map((item) => ({ ...item, key: stableId("key", graph.db.userId, item.key) }));
-        } catch (e) {
-          reportOnce(`${where} ${captureId}`, e);
-          return [];
+      [...graph.live].flatMap((captureId) => {
+        let failed = false;
+        const { value: items, keys } = graph.reading(() =>
+          DEMAND.flatMap(([where, derive]) => {
+            try {
+              return derive(graph, captureId).map((item) => ({ ...item, key: stableId("key", graph.db.userId, item.key) }));
+            } catch (e) {
+              failed = true;
+              reportOnce(`${where} ${captureId}`, e);
+              return [];
+            }
+          }),
+        );
+        if (items.length === 0 && !failed) {
+          graph.sleep(captureId, keys);
         }
+        return items;
       }),
     );
 
   scheduler = createScheduler(
-    [
-      everyCapture("segmentation", ({ segmentation, memo, tasks }, captureId) =>
-        segmentation.sync(captureId).demand.map((input): WorkItem => ({
-          key: memo.key(tasks.boundary, input),
-          purpose: "boundary",
-          provider: "jev",
-          run: (signal) => memo.run(tasks.boundary, input, { signal, captureId }),
-        })),
-      ),
-      everyCapture("frame demand", ({ evidence }, captureId) => evidence.frameDemand(captureId)),
-      everyCapture("preparation", ({ preparation }, captureId) => preparation.demand(captureId)),
-    ],
+    [demand],
     DEFAULT_LIMITS,
     {
       sweep: {
@@ -707,7 +817,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   }
 
   const served = (g: UserGraph): ServedModules => ({
-    ledger: g.ledger, evidence: g.served, reviews: g.reviews, record: g.record, preparation: g.preparation, segmentation: g.segmentation, voice: g.voice, diagrams: g.diagrams,
+    ledger: g.ledger, evidence: g.evidence, reviews: g.reviews, record: g.record, preparation: g.preparation, segmentation: g.segmentation, voice: g.voice, diagrams: g.diagrams,
   });
   const hostname = env.AFTERCLASS_HOST || "127.0.0.1";
   const devices = createDevices(rawDb);
@@ -767,6 +877,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     scheduler,
     async stop() {
       alive = false;
+      if (ingestPump !== null) clearTimeout(ingestPump);
       await scheduler?.stop();
       await server.stop(true);
       rawDb.close();
