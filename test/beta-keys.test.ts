@@ -132,7 +132,7 @@ describe("afterclass-fetch-keys", () => {
 describe("afterclass-app-start", () => {
   function start(fetchFails: boolean): { status: number; log: string[] } {
     const host = makeHost("afterclass-start-test-");
-    writeFileSync(join(host.root, "settings.env"), "APP_PORT=8080\nAWS_REGION=us-east-2\nECR_REGISTRY=registry.test\nECR_REPOSITORY=afterclass-api\nLOG_GROUP=/afterclass-beta\n");
+    writeFileSync(join(host.root, "settings.env"), "APP_PORT=8080\nAWS_REGION=us-east-2\nLOG_GROUP=/afterclass-beta\n");
     writeFileSync(join(host.root, "data/afterclass/current-tag"), `${"b".repeat(40)}\n`);
     stub(host.bin, "docker", `echo "docker $*" >> ${host.log}\n[ "$3" = --entrypoint ] && echo 1000\nexit 0`);
     stub(host.bin, "chown", "exit 0");
@@ -151,6 +151,7 @@ describe("afterclass-app-start", () => {
     expect(run.log.indexOf("fetch-keys 1000 1000")).toBeLessThan(run.log.indexOf(appRun(run.log)!));
     expect(appRun(run.log)).toContain("-v /run/afterclass-app:/data/config:ro");
     expect(appRun(run.log)).not.toContain("-v /data/config");
+    expect(appRun(run.log)).toEndWith(` ghcr.io/derekhertz/after-class:${"b".repeat(40)}`);
   });
 
   test("a failed key fetch never starts the container", () => {

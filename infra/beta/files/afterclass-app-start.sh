@@ -6,7 +6,7 @@ set -euo pipefail
 
 tag=$(cat /data/afterclass/current-tag)
 /usr/local/sbin/afterclass-pull "$tag"
-image="${ECR_REGISTRY}/${ECR_REPOSITORY}:${tag}"
+image="ghcr.io/derekhertz/after-class:${tag}"
 
 # The container runs as the image's own user, so the database folder and the keys file must belong to it.
 uid=$(docker run --rm --entrypoint id "$image" -u)

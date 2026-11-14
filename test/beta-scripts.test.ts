@@ -29,6 +29,7 @@ function runDeploy(opts: {
   pruneFails?: boolean;
   saveFails?: boolean;
   unmounted?: boolean;
+  pullFails?: string[];
 }): DeployRun {
   const host = makeHost("afterclass-deploy-test-");
   const state = join(host.root, "data/afterclass/current-tag");
@@ -51,7 +52,7 @@ esac
 exit 0`,
   );
   stub(host.bin, "docker", `echo "docker $*" >> ${host.log}\n${opts.pruneFails ? 'if [ "$2" = prune ]; then exit 1; fi' : ""}\nexit 0`);
-  stub(host.root, "afterclass-pull", `echo "pull $1" >> ${host.log}`);
+  stub(host.root, "afterclass-pull", `echo "pull $1" >> ${host.log}\ncase " ${(opts.pullFails ?? []).join(" ")} " in *" $1 "*) exit 1;; esac`);
   stub(host.root, "afterclass-save-image", `echo "save $*" >> ${host.log}\n${opts.saveFails ? "echo 'no space left' >&2; exit 1" : "exit 0"}`);
 
   const run = runScript(host, "afterclass-deploy", [opts.next]);
@@ -126,6 +127,22 @@ describe("afterclass-deploy", () => {
     expect(run.log).toEqual([]);
   });
 
+  test("a pull that fails leaves the running tag selected and restarts nothing", () => {
+    const run = runDeploy({ previous: OLD, next: NEW, pullFails: [NEW] });
+    expect(run.status).not.toBe(0);
+    expect(run.tag).toBe(OLD);
+    expect(run.log).toEqual([`pull ${NEW}`]);
+  });
+
+  test("anything but a full lowercase commit hash is refused before the pull", () => {
+    for (const next of [`ghcr.io/derekhertz/after-class:${NEW}`, `evil.example/x:${NEW}`, NEW.toUpperCase(), "v0.1.0"]) {
+      const run = runDeploy({ previous: OLD, next });
+      expect(run.status).toBe(2);
+      expect(run.tag).toBe(OLD);
+      expect(run.log).toEqual([]);
+    }
+  });
+
   test("a failed save after a rollback is still reported, and the run still fails", () => {
     const run = runDeploy({ previous: OLD, next: NEW, unhealthy: [NEW], saveFails: true });
     expect(run.status).toBe(1);
@@ -133,7 +150,8 @@ describe("afterclass-deploy", () => {
     expect(run.stdout).toContain(`WARNING ${OLD} is not saved on /data`);
   });
 });
-const imageName = (tag: string): string => `registry.test/afterclass-api:${tag}`;
+const REPOSITORY = "ghcr.io/derekhertz/after-class";
+const imageName = (tag: string): string => `${REPOSITORY}:${tag}`;
 const storeKey = (tag: string): string => imageName(tag).replace(/[/:]/g, "_");
 
 /**
@@ -151,7 +169,7 @@ rm -rf "$d"; exit $status`;
 
 /**
  * A stand-in for the docker CLI. Its image store is a folder of marker files, so a save on one host followed by a load on
- * another behaves like the real round trip. `pullFails` stands for an image ECR no longer holds. `saveFails` writes part
+ * another behaves like the real round trip. `pullFails` stands for an image GHCR no longer holds. `saveFails` writes part
  * of an archive and exits 1, as docker save does when the disk fills. `size` is what `image inspect --format` reports.
  */
 function fakeDocker(host: Host, opts: { store: string; pullFails?: boolean | undefined; saveFails?: boolean | undefined; size?: number }): void {
@@ -185,11 +203,10 @@ case "$1 $2" in
   "pull "*)
     [ "$pull_fails" = 1 ] && { echo "manifest unknown" >&2; exit 1; }
     touch "$store/$(key "$2")"; exit 0;;
-  "login "*) cat >/dev/null; exit 0;;
 esac
 exit 0`,
   );
-  stub(host.bin, "aws", "echo token");
+  stub(host.bin, "aws", `echo "aws $*" >> ${host.log}`);
 }
 
 function addLocalImage(store: string, tag: string): void {
@@ -331,21 +348,21 @@ describe("afterclass-pull", () => {
     expect(run.log.some((line) => line.startsWith("docker load") || line.startsWith("docker pull"))).toBe(false);
   });
 
-  test("an image ECR has expired starts from the tarball on the data volume", () => {
+  test("an image GHCR no longer holds starts from the tarball on the data volume", () => {
     const run = runPull({ tag: NEW, tarball: "good", pullFails: true });
     expect(run.status).toBe(0);
     expect(run.hasImage).toBe(true);
     expect(run.log.some((line) => line.startsWith("docker pull"))).toBe(false);
   });
 
-  test("an expired image with no tarball fails, rather than starting something else", () => {
+  test("an image GHCR no longer holds, with no tarball, fails rather than starting something else", () => {
     const run = runPull({ tag: NEW, pullFails: true });
     expect(run.status).not.toBe(0);
     expect(run.hasImage).toBe(false);
   });
 
   for (const kind of ["not-a-tar", "truncated", "wrong-image"] as const) {
-    test(`a ${kind} tarball is reported as an error and the image comes from ECR`, () => {
+    test(`a ${kind} tarball is reported as an error and the image comes from GHCR`, () => {
       const run = runPull({ tag: NEW, tarball: kind });
       expect(run.status).toBe(0);
       expect(run.hasImage).toBe(true);
@@ -353,22 +370,44 @@ describe("afterclass-pull", () => {
       expect(run.log.some((line) => line.startsWith("docker pull"))).toBe(true);
     });
 
-    test(`a ${kind} tarball with ECR expired fails the pull`, () => {
+    test(`a ${kind} tarball with the image gone from GHCR fails the pull`, () => {
       const run = runPull({ tag: NEW, tarball: kind, pullFails: true });
       expect(run.status).not.toBe(0);
       expect(run.hasImage).toBe(false);
     });
   }
 
-  test("an image with no tarball is pulled from ECR", () => {
+  test("an image with no tarball is pulled anonymously from the pinned GHCR repository by its commit hash", () => {
     const run = runPull({ tag: NEW });
     expect(run.status).toBe(0);
-    expect(run.log.some((line) => line.startsWith("docker pull"))).toBe(true);
+    expect(run.log).toEqual([`docker image inspect ${REPOSITORY}:${NEW}`, `docker pull ${REPOSITORY}:${NEW}`]);
+  });
+
+  test("the settings and the environment cannot point the pull at another registry", () => {
+    const host = makeHost("afterclass-pull-pinned-");
+    fakeDocker(host, { store: join(host.root, "store") });
+    writeFileSync(join(host.root, "settings.env"), "AWS_REGION=us-east-2\nECR_REGISTRY=evil.example\nECR_REPOSITORY=x\nIMAGE=evil.example/x\n");
+    const run = Bun.spawnSync(["bash", installScript(host, "afterclass-pull"), NEW], {
+      env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}`, ECR_REGISTRY: "evil.example", IMAGE: "evil.example/x", REGISTRY: "evil.example" },
+    });
+    expect(run.exitCode).toBe(0);
+    expect(readLog(host)).toContain(`docker pull ${REPOSITORY}:${NEW}`);
+    expect(readLog(host).some((line) => line.includes("evil.example"))).toBe(false);
+  });
+
+  test("only a full lowercase commit hash is accepted, never a reference that names a registry", () => {
+    for (const arg of [`${REPOSITORY}:${NEW}`, `evil.example/after-class:${NEW}`, `${NEW}@sha256:${"0".repeat(64)}`, NEW.toUpperCase(), `${NEW}0`, "abc1234", "v0.1.0", ""]) {
+      const host = makeHost("afterclass-pull-refuse-");
+      fakeDocker(host, { store: join(host.root, "store") });
+      const run = runScript(host, "afterclass-pull", [arg]);
+      expect(run.status).toBe(2);
+      expect(readLog(host)).toEqual([]);
+    }
   });
 });
 
 describe("a replaced instance", () => {
-  /** Moves the data volume of one host to a new host whose ECR no longer holds the image. */
+  /** Moves the data volume of one host to a new host whose registry no longer holds the image. */
   function replaceHost(old: Host): Host {
     const fresh = makeHost("afterclass-replace-new-");
     rmSync(join(fresh.root, "data"), { recursive: true });
@@ -377,7 +416,7 @@ describe("a replaced instance", () => {
     return fresh;
   }
 
-  test("starts the image the old instance saved to /data, after ECR expired it", () => {
+  test("starts the image the old instance saved to /data, after GHCR lost it", () => {
     const old = makeHost("afterclass-replace-old-");
     fakeDocker(old, { store: join(old.root, "store") });
     addLocalImage(join(old.root, "store"), NEW);
@@ -389,7 +428,7 @@ describe("a replaced instance", () => {
     expect(existsSync(join(fresh.root, "store", storeKey(NEW)))).toBe(true);
   });
 
-  test("a corrupt tarball does not stop a healthy deploy, the next save overwrites it, and a replacement survives ECR expiry", () => {
+  test("a corrupt tarball does not stop a healthy deploy, the next save overwrites it, and a replacement survives the image leaving GHCR", () => {
     const host = makeHost("afterclass-repair-");
     const store = join(host.root, "store");
     const dir = join(host.root, "data/afterclass/images");

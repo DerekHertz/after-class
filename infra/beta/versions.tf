@@ -44,7 +44,5 @@ data "terraform_remote_state" "shared" {
 
 locals {
   ecr_repository_arn       = data.terraform_remote_state.shared.outputs.ecr_repository_arn
-  ecr_repository_name      = data.terraform_remote_state.shared.outputs.ecr_repository_name
   github_oidc_provider_arn = data.terraform_remote_state.shared.outputs.github_oidc_provider_arn
-  ecr_registry             = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.region}.amazonaws.com"
 }

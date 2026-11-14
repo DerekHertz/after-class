@@ -1,12 +1,10 @@
 #!/bin/bash
 # Usage: afterclass-save-image <running commit hash> [<other commit hash to keep>]. Saves the running image to the data
-# volume, so a replacement instance can start it even after ECR has expired the tag, and deletes every other saved image.
+# volume, so a replacement instance can start it even when GHCR no longer holds it, and deletes every other saved image.
 # An existing tarball is never trusted. The image is saved from Docker every time, under a temporary name, and renamed
 # over the old file, so a crash or a full disk leaves the old file whole. The data volume also holds the database, so a
 # save that would leave less than the reserve free is refused.
 set -euo pipefail
-
-. /etc/afterclass/settings.env
 
 dir=/data/afterclass/images
 reserve_bytes=$((2 * 1024 * 1024 * 1024))
@@ -24,7 +22,7 @@ if [ -z "$tag" ]; then
   exit 2
 fi
 
-image="${ECR_REGISTRY}/${ECR_REPOSITORY}:${tag}"
+image="ghcr.io/derekhertz/after-class:${tag}"
 # Without the image there is nothing to save, and the tarball on disk may be the only copy left, so nothing is touched.
 size=$(docker image inspect --format '{{.Size}}' "$image")
 

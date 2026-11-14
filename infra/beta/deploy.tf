@@ -7,7 +7,7 @@ resource "aws_ssm_document" "deploy" {
 
   content = jsonencode({
     schemaVersion = "2.2"
-    description   = "Pull the image tagged with the given commit hash and restart the app container."
+    description   = "Pull the GHCR image tagged with the given commit hash and restart the app container."
     parameters = {
       tag = {
         type           = "String"

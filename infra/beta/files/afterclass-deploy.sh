@@ -2,7 +2,7 @@
 # Usage: afterclass-deploy <commit hash>. Run by the Systems Manager deploy document as root.
 # Pulls the image first, so the running container keeps serving during the download. Then it records the tag, restarts the
 # app and waits for /health. A tag that never turns healthy is rolled back to the previous one, and the run still fails.
-# A healthy image is saved to the data volume, so a replacement instance never depends on ECR still holding the tag.
+# A healthy image is saved to the data volume, so a replacement instance never depends on GHCR still holding the image.
 set -euo pipefail
 
 . /etc/afterclass/settings.env
@@ -47,7 +47,7 @@ healthy() {
 # The save is a safety copy. A failure leaves the running app alone and shows up as a WARNING in the command output.
 save_running_image() {
   if ! /usr/local/sbin/afterclass-save-image "$@"; then
-    echo "afterclass-deploy: WARNING ${1} is not saved on /data, so a replacement instance needs ECR to still hold it. Free space on /data and deploy again."
+    echo "afterclass-deploy: WARNING ${1} is not saved on /data, so a replacement instance needs GHCR to still hold it. Free space on /data and deploy again."
   fi
 }
 

@@ -23,7 +23,7 @@ export function makeHost(prefix: string): Host {
   const bin = join(root, "bin");
   mkdirSync(bin);
   mkdirSync(join(root, "data/afterclass/images"), { recursive: true });
-  writeFileSync(join(root, "settings.env"), "APP_PORT=8080\nAWS_REGION=us-east-2\nECR_REGISTRY=registry.test\nECR_REPOSITORY=afterclass-api\n");
+  writeFileSync(join(root, "settings.env"), "APP_PORT=8080\nAWS_REGION=us-east-2\n");
   const log = join(root, "calls.log");
   writeFileSync(log, "");
   return { root, bin, log };
