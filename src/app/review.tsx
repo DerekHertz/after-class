@@ -52,15 +52,6 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   useEffect(() => {
     void controller.load();
   }, [controller]);
-  // The backend keeps an open review's cached tutor prompt warm between turns; leaving the page tells it to stop.
-  useEffect(() => {
-    const leave = () => void api.leaveReview(reviewId).catch(() => {});
-    window.addEventListener("pagehide", leave);
-    return () => {
-      window.removeEventListener("pagehide", leave);
-      leave();
-    };
-  }, [api, reviewId]);
   // Flow D: the learner starts the review from the topic checklist; nothing begins by itself.
   const resume = useMemo(() => resumeOnce(controller), [controller]);
   useEffect(() => { resume(state); }, [resume, state]);

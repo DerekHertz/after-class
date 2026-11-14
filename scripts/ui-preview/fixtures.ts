@@ -192,7 +192,6 @@ export function createFixture(scenario: Scenario): Fixture {
     async startReview(_capture, _choice, reviewId) { log("review.start"); return { kind: "started", reviewId, scope: view.scope }; },
     async answerInvite(_id, answer) { log(`invite.${answer}`); },
     async retryPreparation() { log("preparation.retry"); },
-    async leaveReview() { log("review.leave"); },
     async diagrams() {
       log("diagrams.read");
       if (scenario === "home-topic-error" && topicReads++ === 0) throw new ApiError("Fixture topic list could not load. Retry is available.", 503);

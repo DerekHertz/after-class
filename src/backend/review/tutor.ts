@@ -617,18 +617,37 @@ export type TutorModel = "opus" | "sonnet";
 
 const TUTOR_REQUEST = { effort: "medium", images: [], webTools: false, timeoutMs: 120_000 } as const;
 
+/**
+ * A 5 minute cache entry lives 5 minutes from the start of the request that last wrote or read it. A tutor request that starts
+ * more than this after the previous one has likely found its entry gone. The 30 seconds short of 5 minutes cover the time a request
+ * spends between this choice and reaching the API (building the prompt, waiting in the concurrency queue).
+ */
+export const LONG_PAUSE_MS = 4.5 * 60_000;
+
+/**
+ * Derek, 2026-11-13: "1 hour should only be for long pauses. maybe there is some "timeout" detection that moves to 1 hour?"
+ * A review's tutor prompt starts on the 5 minute cache. Once a tutor request starts more than LONG_PAUSE_MS after the previous one,
+ * that request and every later one in the review ask for 1 hour, because the caching docs do not say whether a 5 minute marker
+ * reads an entry written for 1 hour. A past request started when the turn just before its tutor turn was stored, so the answer is
+ * folded from the review's stored turns and the time now, and a restarted process gives the same one.
+ */
+export function cacheTtl(turns: readonly Turn[], nowMs: number): "5m" | "1h" {
+  const ordered = bySeq(turns);
+  const starts = ordered.flatMap((t, i) => (t.actor === "tutor" ? [(ordered[i - 1] ?? t).atMs] : []));
+  return [...starts, nowMs].some((start, i, all) => i > 0 && start - all[i - 1]! > LONG_PAUSE_MS) ? "1h" : "5m";
+}
+
 /** The system prompt is TUTOR_SYSTEM plus the review's stable material, the prompt only what changes per turn. */
-export function tutorRequest(input: TutorInput, model: TutorModel = "opus"): ClaudeRequest {
-  return { ...TUTOR_REQUEST, model, system: `${TUTOR_SYSTEM}\n\n${tutorContext(input)}`, prompt: tutorPrompt(input) };
+export function tutorRequest(input: TutorInput, model: TutorModel = "opus", nowMs = Date.now()): ClaudeRequest {
+  return { ...TUTOR_REQUEST, model, cacheTtl: cacheTtl(input.turns, nowMs), system: `${TUTOR_SYSTEM}\n\n${tutorContext(input)}`, prompt: tutorPrompt(input) };
 }
 
 /**
  * Claude streaming task. The key includes the whole turn log, so a resent turn hits the memo instead of paying twice.
  * A reply whose header is invalid or not allowed fails without a stored hit, so
  * the memo never replays a move that validation would reject.
- * `onSent` runs as each request is admitted, right before it leaves: keepalive.ts restarts the review's cache timer from it.
  */
-export function tutorTask(claude: ClaudeCli, model: TutorModel = "opus", onSent?: (input: TutorInput, request: ClaudeRequest) => void): Task<TutorInput, TutorOutput> {
+export function tutorTask(claude: ClaudeCli, model: TutorModel = "opus", now: () => number = Date.now): Task<TutorInput, TutorOutput> {
   return {
     provider: "claude",
     purpose: "tutor_turn",
@@ -640,13 +659,7 @@ export function tutorTask(claude: ClaudeCli, model: TutorModel = "opus", onSent?
       return { system, prompt, effort: TUTOR_REQUEST.effort };
     },
     async attempt(input, ctx) {
-      const request = tutorRequest(input, model);
-      const send = onSent === undefined ? ctx : { ...ctx, admit: () => {
-        const admitted = ctx.admit();
-        onSent(input, request);
-        return admitted;
-      } };
-      const { text, usage } = await claude.streamText(request, ctx.streamTo ?? (() => {}), send);
+      const { text, usage } = await claude.streamText(tutorRequest(input, model, now()), ctx.streamTo ?? (() => {}), ctx);
       const header = parseMoveHeader(text.includes("\n") ? text : `${text}\n`);
       if (header.kind !== "header") throw new ProviderError(`invalid move header: ${header.kind === "invalid" ? header.why : "empty reply"}`, usage, false);
       const verdict = validateMove(header.move, input);

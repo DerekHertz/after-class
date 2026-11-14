@@ -451,7 +451,6 @@ describe("keys.env", () => {
     const b = await boot();
     expect(b.r.mode).toBe("replay");
     expect(b.logs.join("\n")).toContain("no keys file: Jev unavailable");
-    expect(b.logs.join("\n")).not.toContain("kept warm");
     expect((await fetch(`${b.base}/health`)).status).toBe(200);
   });
 
@@ -708,7 +707,6 @@ describe("AFTERCLASS_CLAUDE_BACKEND", () => {
     expect(b.r.mode).toBe("live");
     expect(b.logs.join("\n")).not.toContain("claude backend");
     expect(b.logs.join("\n")).toContain("tutor and wrap-up model: opus");
-    expect(b.logs.join("\n")).not.toContain("kept warm");
     await ingest(b, fixture({ frames: false }));
     await until(() => spawned.length > 0, 15_000);
     expect(spawned[0]!.argv[0]).toBe("claude");
@@ -726,7 +724,6 @@ describe("AFTERCLASS_CLAUDE_BACKEND", () => {
     );
     expect(b.r.mode).toBe("live");
     expect(b.logs.join("\n")).toContain("claude backend: api for every Claude task");
-    expect(b.logs.join("\n")).toContain("keep-alive: an idle review's cached prompt is kept warm");
     await ingest(b, fixture({ frames: false }));
     await until(() => api.calls.length > 0, 15_000);
     // Interpretation reached the API client, and nothing was spawned.

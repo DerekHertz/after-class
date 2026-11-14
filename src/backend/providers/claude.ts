@@ -52,6 +52,8 @@ export type ClaudeRequest = {
   readonly images: readonly ClaudeImage[];
   readonly webTools: boolean; // true only for resource search
   readonly timeoutMs: number;
+  /** How long the Messages API keeps the system block cached; 5 minutes when absent. `claude -p` has no such control. */
+  readonly cacheTtl?: "5m" | "1h";
 };
 
 /** Every request is sent through `send.admit()`, called after the concurrency queue and right before the request leaves, so a budget is asked at that moment. */
@@ -64,11 +66,6 @@ export type ClaudeCli = {
    * of those turns while `text` is only the last one, so streaming callers should not attach images.
    */
   streamText(req: ClaudeRequest, onText: (delta: string) => void, send: SendContext): Promise<{ readonly text: string; readonly usage: UsageReport }>;
-  /**
-   * Re-sends the request's cached prefix with max_tokens 0, so the cache entry's timer restarts at the cache read price and nothing
-   * is generated. Only the Messages API adapter has it: `claude -p` gives no control over the cache, and replay makes no call.
-   */
-  keepWarm?(req: ClaudeRequest, send: SendContext): Promise<UsageReport>;
 };
 
 /** Pure, unit-tested: the exact argv for a request. The one place auth policy lives. */

@@ -11,8 +11,7 @@
  * Sources for every SDK call (the claude-api skill's reference files, read 2026-11-12):
  *   client.messages.stream(...), stream.on("text"), stream.finalMessage()   typescript/claude-api/streaming.md
  *   client.messages.create(...) with output_config.format = zodOutputFormat  typescript/claude-api/tool-use.md
- *   system block with cache_control { type: "ephemeral", ttl: "5m" }          typescript/claude-api/README.md
- *   keep-alive: create(...) with max_tokens 0, stream off, same prefix         shared/prompt-caching.md, Pre-warming and Choosing the TTL
+ *   system block with cache_control { type: "ephemeral", ttl: "5m" | "1h" }   typescript/claude-api/README.md, shared/prompt-caching.md
  *   typed error classes (Anthropic.RateLimitError and the rest)               typescript/claude-api/README.md, shared/error-codes.md
  *   Opus 5.5 request rules                                                     shared/model-migration.md, Migrating to Claude Opus 5.5
  *
@@ -33,11 +32,6 @@
  * from its redacted text and a status it read defensively. It never rethrows the caught value, never copies its billing, usage or
  * retryable flag, and a getter that throws reads as absent. The adapter's own errors (a refusal, a bad stop, a schema mismatch,
  * an unsupported model) are raised outside the `try` that wraps the client call, so no client can throw an error that looks like one.
- *
- * The system block is cached for 5 minutes, and each read restarts that timer. `keepWarm` sends the same model, system, tools and effort
- * with max_tokens 0 and streaming off, so an idle review's prefix stays cached at the read price. max_tokens 0 is refused with streaming,
- * `thinking.type: "enabled"`, output_config.format, a forced tool_choice and batches, and that request carries none of them. Thinking is
- * never sent here, so the keep-alive renders the same thinking configuration as the turn it keeps warm.
  *
  * Structured calls use `create` plus `zodOutputFormat`, not `messages.parse`: parse throws on text that is not
  * valid JSON before the caller can look at stop_reason, so a truncated or refused answer would hide its cause.
@@ -462,12 +456,6 @@ function textOfError(err: unknown): string {
  */
 type Untrusted = { readonly value: unknown; readonly admitted: Admitted };
 
-/**
- * The user turn of a keep-alive. The API reads it during prefill and never answers it, and the cache breakpoint sits on the system
- * block before it, so it is not part of the cached prefix.
- */
-const KEEP_WARM_PLACEHOLDER = "keep-alive";
-
 /** What a request turned away before any model ran costs. */
 const NOT_BILLED_REQUEST = { kind: "estimated", usd: 0, basis: "rejected before any model ran" } as const;
 
@@ -503,12 +491,10 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
    * The slot, the budget, the timeout and the abort wrapped around one request. An abort rejects the way the CLI adapter's does.
    * Every request this adapter sends goes through here, and `send.admit()` runs after the slot is granted and before the request
    * is sent, so a request that waited in the queue meets the stop switch as it is when it leaves. A refusal is thrown as it is.
-   * A keep-alive skips the queue: it generates nothing and returns at once, and one that waited behind long calls past the cache's
-   * expiry would pay for a fresh cache write instead of a read.
    */
-  async function call(req: ClaudeRequest, send: SendContext, work: (callSignal: AbortSignal, began: () => void) => Promise<unknown>, queued = true): Promise<Untrusted> {
+  async function call(req: ClaudeRequest, send: SendContext, work: (callSignal: AbortSignal, began: () => void) => Promise<unknown>): Promise<Untrusted> {
     const signal = send.signal;
-    const release = queued ? await limiter.acquire(signal) : () => {};
+    const release = await limiter.acquire(signal);
     let admitted: Admitted;
     try {
       signal.throwIfAborted();
@@ -541,13 +527,13 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
     }
   }
 
-  /** The request pieces every path shares. Throws before any call for a model or feature this trial does not cover. */
+  /** The request pieces both paths share. Throws before any call for a model or feature this trial does not cover. */
   function prepare(req: ClaudeRequest, promptSuffix = "") {
     const model = (API_MODELS as Readonly<Record<string, string>>)[req.model];
     // Nothing has been sent when these throw, so none of them can be billed.
     if (model === undefined) throw new ApiCallError(`claude api backend serves only "opus" and "sonnet", got "${safe(req.model, 80)}"`, null, false, "not_billed", null);
-    // One stable block on the 5 minute cache: each read restarts its timer, and `keepWarm` covers the gaps longer than that.
-    const system: TextBlockParam[] = [{ type: "text", text: req.system, cache_control: { type: "ephemeral", ttl: "5m" } }];
+    // One stable block, so a review's lecture context is read from cache on its later turns.
+    const system: TextBlockParam[] = [{ type: "text", text: req.system, cache_control: { type: "ephemeral", ttl: req.cacheTtl ?? "5m" } }];
     return { model, system, messages: [{ role: "user", content: userContent(req, req.prompt + promptSuffix) }] as const, tools: req.webTools ? WEB_TOOLS : null };
   }
 
@@ -714,18 +700,6 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
       const { parsed: reply, usage } = settle(response);
       sink.flush();
       return { text: reply.text, usage };
-    },
-
-    async keepWarm(req, send) {
-      const { model, system, tools } = prepare(req);
-      const response = await call(req, send, async (callSignal) =>
-        client.messages.create(
-          { model, max_tokens: 0, system, messages: [{ role: "user", content: KEEP_WARM_PLACEHOLDER }], ...(tools ? { tools } : {}), output_config: { effort: req.effort } },
-          { signal: callSignal },
-        ),
-        false,
-      );
-      return usageOf(read1(response));
     },
   };
 }

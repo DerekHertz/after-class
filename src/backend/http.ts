@@ -52,7 +52,6 @@ import type { Devices } from "./devices";
 import type { EvidenceStore, EvidenceStoreWithProbe } from "./evidence";
 import type { Preparation } from "./preparation";
 import type { Reviews } from "./review";
-import type { KeepAlive } from "./review/keepalive";
 import type { LearningRecord } from "./record";
 import type { Segmentation } from "./segmentation";
 import type { Ledger } from "./providers/ledger";
@@ -126,8 +125,7 @@ export function authorize(headers: Headers, expected: AuthConfig, opts: { readon
  * serve a subset: a route that needs a missing one answers 501, and a review's `saved` reads "unsaved".
  */
 export type ServedModules = Pick<Modules, "ledger" | "reviews"> & { readonly evidence: EvidenceStore & Pick<EvidenceStoreWithProbe, "watchedMaterial"> }
-  & Partial<Pick<Modules, "record" | "preparation" | "segmentation" | "voice" | "diagrams">>
-  & { readonly keepAlive?: Pick<KeepAlive, "leave"> };
+  & Partial<Pick<Modules, "record" | "preparation" | "segmentation" | "voice" | "diagrams">>;
 
 /** Local mode serves one user's `modules` behind the pairing token. Hosted mode serves each signed-in user their own. */
 export type ServeOptions = ServeCommon & (
@@ -442,7 +440,7 @@ function ndjson(events: AsyncIterable<TurnEvent>, cors: Record<string, string>, 
 }
 
 async function mounted(name: string, matched: { readonly params: Record<string, string> }, req: Request, modules: ServedModules, appOrigin: string, cors: Record<string, string>, guard: TurnGuard): Promise<Response | null> {
-  const { evidence, reviews, record, preparation, segmentation, voice, diagrams, keepAlive } = modules;
+  const { evidence, reviews, record, preparation, segmentation, voice, diagrams } = modules;
   const captureId = matched.params.captureId as CaptureId | undefined;
   const reviewId = matched.params.reviewId as ReviewId | undefined;
   const noteId = matched.params.noteId as NoteId | undefined;
@@ -528,12 +526,6 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
         if (!toSave) return failure(404, "unknown review", cors);
         if (toSave.state.phase !== "ended") return failure(409, "the review has not ended, so it cannot be saved", cors);
         return reply("save", await record.save(reviewId!), cors);
-      }
-      case "leaveReview": {
-        // Nothing is kept warm without a keep-alive (the CLI backend, replay), so leaving is then a no-op 204.
-        if (!reviewOf(reviews, reviewId!)) return failure(404, "unknown review", cors);
-        keepAlive?.leave(reviewId!);
-        return noContent(cors);
       }
       case "diagrams": {
         if (!diagrams) return null;

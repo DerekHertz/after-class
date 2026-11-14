@@ -422,7 +422,7 @@ describe("the diagram module", () => {
 describe("migration 003-diagram-purpose", () => {
   test("keeps every memo and usage row, still enforces its checks and triggers, and now accepts diagram_summary", () => {
     const path = `${process.env.TMPDIR ?? "/tmp"}/afterclass-migration-${crypto.randomUUID()}.sqlite`;
-    const old = { ...MIGRATIONS, providers: MIGRATIONS.providers.filter((m) => !m.id.startsWith("003") && !m.id.startsWith("004") && !m.id.startsWith("006")) };
+    const old = { ...MIGRATIONS, providers: MIGRATIONS.providers.filter((m) => !m.id.startsWith("003") && !m.id.startsWith("004")) };
     let db = openDb(path, old);
     db.sql.run("INSERT INTO memo_inputs VALUES ('k1','claude','tutor_turn','v','m','{}',1)");
     db.sql.run("INSERT INTO memo VALUES ('k1','{}',1,1)");

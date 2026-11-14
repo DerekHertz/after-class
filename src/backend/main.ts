@@ -10,8 +10,7 @@
  *            api: EVERY Claude task calls the Messages API (paid, priced from usage), so no `claude` binary is needed. api with no key
  *            refuses to start. Replay mode builds no Claude adapter, so the setting does nothing there.
  *   tutor    AFTERCLASS_TUTOR_MODEL=opus | sonnet, the model of the tutor turn and the wrap-up. Unset: sonnet when hosted, opus
- *            locally. Sonnet is a cost choice (experiment 8), not a judgment on its tutoring. With api, an idle review's cached
- *            tutor prompt is kept warm (review/keepalive.ts); each keep-alive is a paid call with its own usage event.
+ *            locally. Sonnet is a cost choice (experiment 8), not a judgment on its tutoring.
  *   voice    Tutor speech from ElevenLabs through POST /voice/speech, local live mode with a key only; otherwise GET /voice says
  *            unavailable and the app speaks with Chrome's voice. Hosted mode ignores the key: voice is not budgeted. AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL.
  *   token    ~/.config/afterclass/pairing-token (0600), created on first boot, printed with "listening on 127.0.0.1:<port>".
@@ -86,8 +85,6 @@ import { createReviews } from "./review";
 import type { Reviews } from "./review";
 import { tutorTask, wrapUpTask } from "./review/tutor";
 import type { TutorInput, TutorModel, TutorOutput, WrapUpInput, WrapUpOutput } from "./review/tutor";
-import { keepAliveFor } from "./review/keepalive";
-import type { KeepAlive } from "./review/keepalive";
 import { createDiagrams } from "./diagram";
 import type { Diagrams, DiagramSummaryInput, DiagramSummaryOutput } from "./diagram";
 import { diagramSummaryTask } from "./diagram/tasks";
@@ -233,7 +230,7 @@ export function resolveClaudeBackend(requested: string | undefined): ClaudeBacke
   throw new Error(`AFTERCLASS_CLAUDE_BACKEND must be "cli" or "api", got "${requested}"`);
 }
 
-export function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameBytes, tutorModel: TutorModel = "opus", keepAlive: KeepAlive | null = null): TaskSet {
+export function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameBytes, tutorModel: TutorModel = "opus"): TaskSet {
   return {
     boundary: productBoundaryTask(jev),
     frameChange: productFrameChangeTask(jev),
@@ -243,7 +240,7 @@ export function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameB
       checkClaim: claimSupportTask(jev),
       searchResources: resourceSearchTask(claude),
     },
-    tutor: tutorTask(claude, tutorModel, keepAlive?.sent),
+    tutor: tutorTask(claude, tutorModel),
     wrapUp: wrapUpTask(claude, tutorModel),
     diagramSummary: diagramSummaryTask(claude, frameBytes),
   };
@@ -378,8 +375,6 @@ type UserGraph = Omit<Modules, "scheduler"> & {
   readonly voice: Voice;
   /** Every capture of this user that may still have work: those on disk at boot, plus any ingested since. */
   readonly captures: Set<CaptureId>;
-  /** Null unless the Claude adapter can keep a cache warm. */
-  readonly keepAlive: KeepAlive | null;
 };
 
 type Composed = {
@@ -449,8 +444,6 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
 
   // Injected tasks make no live call, so the memo may run them. Without them, replay never runs a task at all.
   const memoMode: MemoMode = mode === "replay" && !options.tasks ? "replay" : "live";
-  // Only the Messages API can keep a cache warm; replay's refusing adapter and `claude -p` cannot, and injected tasks make no live call.
-  const keepsWarm = !options.tasks && providers.claude.keepWarm !== undefined;
   // One budget for every user, on the raw db: the total cap sums all of them. Each user's memo reserves as its own user.
   const budget = mode === "live" ? createBudget(rawDb, { limits: budgetLimits, stopped: paidCallsStopped }) : null;
   // Before any request: what a previous process left unsettled gets its usage event (R17) and counts at its price, or its reservation when unpriced.
@@ -481,17 +474,9 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   function wire(db: UserDb): UserGraph {
     // evidence is created after the tasks that need its bytes; the tasks only read it when a call runs
     const frameBytes: FrameBytes = (id) => evidence.frameBytes(id);
+    const tasks: TaskSet = options.tasks ?? buildTasks(providers.jev, providers.claude, frameBytes, tutorModel);
     const memo = createMemo(db, memoMode, budget === null ? {} : { budget });
     const ledger = createLedger(db, budget);
-    const keepAlive: KeepAlive | null = !keepsWarm
-      ? null
-      : keepAliveFor(providers.claude, tutorModel, {
-        memo,
-        // reviews is built below; a keep-alive only asks once a tutor request has been sent.
-        ended: (reviewId) => reviews.view(reviewId).state.phase === "ended",
-        onError: (reviewId, e) => reportOnce(`keep-alive ${reviewId}`, e),
-      });
-    const tasks: TaskSet = options.tasks ?? buildTasks(providers.jev, providers.claude, frameBytes, tutorModel, keepAlive);
 
     const evidence: EvidenceStoreWithProbe = createEvidence(db, dataDir, {
       lookupFrameChange: (input) => memo.lookup(tasks.frameChange, input),
@@ -634,7 +619,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
         ? unavailableVoice
         : createVoice({ apiKey: voiceKey, voiceId, model: voiceModel, db, ...(options.fetch ? { fetch: options.fetch } : {}) });
 
-    return { tasks, evidence, served, segmentation, preparation, reviews, record, ledger, memo, diagrams, voice, captures, db, keepAlive };
+    return { tasks, evidence, served, segmentation, preparation, reviews, record, ledger, memo, diagrams, voice, captures, db };
   }
 
   const graphs = new Map<UserId, UserGraph>();
@@ -708,7 +693,6 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
 
   const served = (g: UserGraph): ServedModules => ({
     ledger: g.ledger, evidence: g.served, reviews: g.reviews, record: g.record, preparation: g.preparation, segmentation: g.segmentation, voice: g.voice, diagrams: g.diagrams,
-    ...(g.keepAlive === null ? {} : { keepAlive: g.keepAlive }),
   });
   const hostname = env.AFTERCLASS_HOST || "127.0.0.1";
   const devices = createDevices(rawDb);
@@ -744,7 +728,6 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   );
   const cap = (usd: number | null) => (usd === null ? "no cap" : `$${usd}`);
   if (mode === "live") log(`tutor and wrap-up model: ${tutorModel}`);
-  if (keepsWarm) log("keep-alive: an idle review's cached prompt is kept warm for up to an hour");
   if (budget !== null) log(`budget per month (UTC): ${cap(budgetLimits.userUsd)} per user, ${cap(budgetLimits.totalUsd)} in total; stop switch: ${join(configDir, STOP_FILE)}${paidCallsStopped() ? " (on)" : ""}`);
   if (interrupted > 0) log(`budget: ${interrupted} call(s) a previous process left unfinished are recorded at unknown cost and count at their reservation`);
   log(
@@ -769,7 +752,6 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     scheduler,
     async stop() {
       alive = false;
-      for (const graph of graphs.values()) graph.keepAlive?.stop();
       await scheduler?.stop();
       await server.stop(true);
       rawDb.close();

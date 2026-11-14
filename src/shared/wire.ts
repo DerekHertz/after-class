@@ -547,7 +547,7 @@ export const saveResponse = z.discriminatedUnion("kind", [
 ]) satisfies z.ZodType<SaveResult>;
 
 const COST_KINDS = ["measured", "notional", "estimated", "unknown"] as const;
-const PURPOSES = ["boundary", "frame_change", "claim_check", "interpretation", "claim_revision", "resource_search", "tutor_turn", "wrap_up", "diagram_summary", "cache_keepalive"] as const;
+const PURPOSES = ["boundary", "frame_change", "claim_check", "interpretation", "claim_revision", "resource_search", "tutor_turn", "wrap_up", "diagram_summary"] as const;
 
 const allowancez = z.object({
   usedUsd: z.number(),
@@ -706,8 +706,6 @@ export const ROUTES = {
   sendTurn: route("POST", "/reviews/:reviewId/turns", { request: turnRequest, bearer: APP, reply: { kind: "ndjson", event: tutorStreamEvent } }),
   review: route("GET", "/reviews/:reviewId", { bearer: APP, reply: json(reviewViewResponse) }),
   save: route("POST", "/reviews/:reviewId/save", { bearer: APP, reply: json(saveResponse) }),
-  /** The learner left the review page, so the backend stops keeping the review's cached tutor prompt warm. No body. */
-  leaveReview: route("POST", "/reviews/:reviewId/leave", { bearer: APP, reply: EMPTY }),
   /** Frame and summary state of every topic in the review's frozen scope. Read-only: makes no model call. */
   diagrams: route("GET", "/reviews/:reviewId/diagrams", { bearer: APP, reply: json(diagramsResponse) }),
   /** Starts the topic's state-change summary (one Claude call per topic and evidence set, memoized) and answers with where it stands. Asking again after a failure retries. */
