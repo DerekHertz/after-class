@@ -106,16 +106,6 @@ variable "github_environment" {
   default     = "production"
 }
 
-variable "clerk_publishable_key" {
-  description = "The Clerk application's publishable key, pk_live_... or pk_test_..., from Clerk's API keys page. It is public, not a secret. The issuer and the JWKS URL are derived from it."
-  type        = string
-
-  validation {
-    condition     = can(regex("^pk_(live|test)_[A-Za-z0-9+/]+={0,2}$", var.clerk_publishable_key))
-    error_message = "clerk_publishable_key must be pk_live_ or pk_test_ followed by base64."
-  }
-}
-
 variable "extension_id" {
   description = "Chrome Web Store id of the hosted extension. Null lets no extension connect."
   type        = string

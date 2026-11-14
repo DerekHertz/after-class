@@ -166,8 +166,6 @@ locals {
   ])
 
   public_origin = local.site_name == "" ? "http://${aws_eip.beta.public_ip}" : "https://${local.site_name}"
-  # A Clerk publishable key is pk_live_ or pk_test_ and the base64 of the Frontend API host followed by "$".
-  clerk_frontend_api = "https://${trimsuffix(base64decode(regex("^pk_(?:live|test)_(.+)$", var.clerk_publishable_key)[0]), "$")}"
 
   # The Dockerfile sets the replay skeleton's defaults. The beta runs live, with the keys from Parameter Store, Claude
   # through the Messages API only, and Clerk sign-in (docs/architecture/hosted-sign-in.md).
