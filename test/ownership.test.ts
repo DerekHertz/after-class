@@ -61,6 +61,7 @@ const CASES: { readonly [N in RouteName]: "none" | ((ids: Ids) => readonly Call[
   sendTurn: () => [{ request: (base, ids, h) => send(base, "POST", url("sendTurn", { reviewId: ids.reviewId }), { turnId: randomId("turn"), act: said("hi") }, h), bStatus: 404 }],
   review: () => [{ request: (base, ids, h) => get(url("review", { reviewId: ids.reviewId }))(base, h), bStatus: 404 }],
   save: () => [{ request: (base, ids, h) => send(base, "POST", url("save", { reviewId: ids.reviewId }), {}, h), bStatus: 404 }],
+  leaveReview: () => [{ request: (base, ids, h) => send(base, "POST", url("leaveReview", { reviewId: ids.reviewId }), {}, h), bStatus: 404 }],
   diagrams: () => [{ request: (base, ids, h) => get(url("diagrams", { reviewId: ids.reviewId }))(base, h), bStatus: 404 }],
   requestDiagram: () => [
     {

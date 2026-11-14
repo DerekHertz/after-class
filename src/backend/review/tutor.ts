@@ -609,31 +609,44 @@ export function tutorPrompt(input: TutorInput): string {
   return sections.join("\n\n");
 }
 
-const TUTOR_REQUEST = { model: "opus", effort: "medium", images: [], webTools: false, timeoutMs: 120_000 } as const;
+/**
+ * The model the tutor turn and the wrap-up run on. Opus by default. Hosted mode defaults to Sonnet because it costs about half
+ * as much per review (experiment 8). That is a cost choice: no experiment has compared the two models' tutoring.
+ */
+export type TutorModel = "opus" | "sonnet";
+
+const TUTOR_REQUEST = { effort: "medium", images: [], webTools: false, timeoutMs: 120_000 } as const;
 
 /** The system prompt is TUTOR_SYSTEM plus the review's stable material, the prompt only what changes per turn. */
-export function tutorRequest(input: TutorInput): ClaudeRequest {
-  return { ...TUTOR_REQUEST, system: `${TUTOR_SYSTEM}\n\n${tutorContext(input)}`, prompt: tutorPrompt(input) };
+export function tutorRequest(input: TutorInput, model: TutorModel = "opus"): ClaudeRequest {
+  return { ...TUTOR_REQUEST, model, system: `${TUTOR_SYSTEM}\n\n${tutorContext(input)}`, prompt: tutorPrompt(input) };
 }
 
 /**
  * Claude streaming task. The key includes the whole turn log, so a resent turn hits the memo instead of paying twice.
  * A reply whose header is invalid or not allowed fails without a stored hit, so
  * the memo never replays a move that validation would reject.
+ * `onSent` runs as each request is admitted, right before it leaves: keepalive.ts restarts the review's cache timer from it.
  */
-export function tutorTask(claude: ClaudeCli): Task<TutorInput, TutorOutput> {
+export function tutorTask(claude: ClaudeCli, model: TutorModel = "opus", onSent?: (input: TutorInput, request: ClaudeRequest) => void): Task<TutorInput, TutorOutput> {
   return {
     provider: "claude",
     purpose: "tutor_turn",
-    model: TUTOR_REQUEST.model,
+    model,
     version: "tutor-3",
     maxAttempts: 2,
     canonicalInput: (input) => {
-      const { system, prompt } = tutorRequest(input);
+      const { system, prompt } = tutorRequest(input, model);
       return { system, prompt, effort: TUTOR_REQUEST.effort };
     },
     async attempt(input, ctx) {
-      const { text, usage } = await claude.streamText(tutorRequest(input), ctx.streamTo ?? (() => {}), ctx);
+      const request = tutorRequest(input, model);
+      const send = onSent === undefined ? ctx : { ...ctx, admit: () => {
+        const admitted = ctx.admit();
+        onSent(input, request);
+        return admitted;
+      } };
+      const { text, usage } = await claude.streamText(request, ctx.streamTo ?? (() => {}), send);
       const header = parseMoveHeader(text.includes("\n") ? text : `${text}\n`);
       if (header.kind !== "header") throw new ProviderError(`invalid move header: ${header.kind === "invalid" ? header.why : "empty reply"}`, usage, false);
       const verdict = validateMove(header.move, input);
@@ -680,19 +693,19 @@ export function wrapUpPrompt(input: WrapUpInput): string {
   ].join("\n\n");
 }
 
-const WRAP_UP_REQUEST = { model: "opus", effort: "medium", images: [], webTools: false, timeoutMs: 180_000 } as const;
+const WRAP_UP_REQUEST = { effort: "medium", images: [], webTools: false, timeoutMs: 180_000 } as const;
 
 /** Claude structured task. Proposes statuses from the actual turns; code clamps them. */
-export function wrapUpTask(claude: ClaudeCli): Task<WrapUpInput, WrapUpOutput> {
+export function wrapUpTask(claude: ClaudeCli, model: TutorModel = "opus"): Task<WrapUpInput, WrapUpOutput> {
   return {
     provider: "claude",
     purpose: "wrap_up",
-    model: WRAP_UP_REQUEST.model,
+    model,
     version: "wrap-up-1",
     maxAttempts: 3,
     canonicalInput: (input) => ({ system: WRAP_UP_SYSTEM, prompt: wrapUpPrompt(input), effort: WRAP_UP_REQUEST.effort }),
     async attempt(input, ctx) {
-      return claude.structured({ ...WRAP_UP_REQUEST, system: WRAP_UP_SYSTEM, prompt: wrapUpPrompt(input) }, wrapUpSchema, ctx);
+      return claude.structured({ ...WRAP_UP_REQUEST, model, system: WRAP_UP_SYSTEM, prompt: wrapUpPrompt(input) }, wrapUpSchema, ctx);
     },
     decode: (stored) => wrapUpSchema.parse(stored),
   };

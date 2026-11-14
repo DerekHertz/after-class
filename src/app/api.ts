@@ -64,6 +64,8 @@ export type AppApi = Api & {
   diagrams(reviewId: ReviewId): Promise<readonly TopicDiagram[]>;
   /** Starts the topic summary (or retries a failed one); answers with where it stands. Poll `diagrams` for the result. */
   requestDiagram(reviewId: ReviewId, topicId: ConceptId): Promise<TopicDiagram>;
+  /** The learner left the review page. Sent with `keepalive`, so it still goes out while the page unloads. */
+  leaveReview(reviewId: ReviewId): Promise<void>;
   /** Re-queues the capture's unfinished chunks and those with no supported claim. */
   retryPreparation(captureId: CaptureId): Promise<void>;
   /** Whether the backend can speak tutor sentences with ElevenLabs (false in replay mode or without a key). */
@@ -109,7 +111,7 @@ export function createApi(credential: Credential, options: ApiOptions = {}): App
   const enc = encodeURIComponent;
   const life = options.signal;
 
-  async function send(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
+  async function send(method: string, path: string, body?: unknown, signal?: AbortSignal, keepalive = false): Promise<Response> {
     let res: Response;
     try {
       const bearer = await token();
@@ -118,7 +120,7 @@ export function createApi(credential: Credential, options: ApiOptions = {}): App
       if (body !== undefined) headers["content-type"] = "application/json";
       const both = life !== undefined && signal !== undefined ? AbortSignal.any([life, signal]) : (life ?? signal);
       res = await doFetch(`${base}${path}`, {
-        method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...(both === undefined ? {} : { signal: both }),
+        method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...(both === undefined ? {} : { signal: both }), ...(keepalive ? { keepalive } : {}),
       });
     } catch (e) {
       throw new ApiError(e instanceof Error ? e.message : "network error", 0);
@@ -162,6 +164,9 @@ export function createApi(credential: Credential, options: ApiOptions = {}): App
     sendTurn,
     review: (reviewId) => call(reviewViewz, "GET", `/reviews/${enc(reviewId)}`),
     save: (reviewId) => call(saveResultz, "POST", `/reviews/${enc(reviewId)}/save`),
+    leaveReview: async (reviewId) => {
+      await send(ROUTES.leaveReview.method, routeUrl(ROUTES.leaveReview, { reviewId }), undefined, undefined, true);
+    },
     record: (filter) => call(recordViewz, "GET", filter.reviewId === undefined ? "/record" : `/record?reviewId=${enc(filter.reviewId)}`),
     usage: () => call(usageSummaryz, "GET", "/usage"),
     lectures: () => call(lecturesResponse, ROUTES.lectures.method, ROUTES.lectures.path),
