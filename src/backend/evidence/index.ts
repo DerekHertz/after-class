@@ -155,7 +155,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   const read: ReadDep = deps.read ?? (() => {});
 
   let projections = new Map<CaptureId, Projection>();
-  let captureIds: CaptureId[] | null = null;
+  let captureIds: Set<CaptureId> | null = null;
   /** Every evidence id with the captures that hold it, built once and then kept current one capture at a time. */
   let rawIndex: Map<EvidenceId, Map<CaptureId, Raw>> | null = null;
   const rawIds = new Map<CaptureId, EvidenceId[]>();
@@ -163,7 +163,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   /** One capture's facts changed: only its projection is stale. The ids of the others stay cached. */
   const invalidateCapture = (captureId: CaptureId) => {
     projections.delete(captureId);
-    if (captureIds && !captureIds.includes(captureId)) captureIds.push(captureId);
+    captureIds?.add(captureId);
     if (rawIndex) rawDirty.add(captureId);
   };
   const invalidate = () => {
@@ -205,8 +205,8 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     return p;
   }
 
-  function allCaptureIds(): CaptureId[] {
-    captureIds ??= db.sql.query<{ capture_id: string }, [string]>("SELECT DISTINCT capture_id FROM capture_facts WHERE user_id = ?").all(userId).map((r) => r.capture_id as CaptureId);
+  function allCaptureIds(): ReadonlySet<CaptureId> {
+    captureIds ??= new Set(db.sql.query<{ capture_id: string }, [string]>("SELECT DISTINCT capture_id FROM capture_facts WHERE user_id = ?").all(userId).map((r) => r.capture_id as CaptureId));
     return captureIds;
   }
 
@@ -216,7 +216,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     return project(captureId);
   };
 
-  const allProjections = () => allCaptureIds().map(project);
+  const allProjections = () => [...allCaptureIds()].map(project);
 
   function deleted(): ReadonlyMap<string, number> {
     read(REMOVALS);
