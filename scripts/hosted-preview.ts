@@ -10,18 +10,16 @@
  * the UI constructor that the stub UI script sets. The stub ClerkJS is labelled as a test stub on screen, and its
  * "sign in" mints a real RS256 session token that the backend verifies exactly as it would Clerk's.
  *
- * It also builds the hosted extension for this origin into dist/hosted-preview-extension and pins the id Chrome gives
- * that folder when it is loaded unpacked, so e2e/connect-extension.spec.ts can connect a real extension. The seeded
+ * It also builds the hosted extension for this origin into dist/hosted-preview-extension, whose manifest key gives it
+ * HOSTED_EXTENSION_ID wherever it is loaded unpacked, so e2e/connect-extension.spec.ts can connect a real extension. The seeded
  * lecture goes up the way the extension sends one: through a connect code and a device token.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { CLERK_JS_VERSION, CLERK_UI_VERSION } from "../src/backend/clerk";
 import { mainHosted } from "../src/backend/main";
-import { buildExtension } from "./build-extension";
+import { buildExtension, HOSTED_EXTENSION_ID } from "./build-extension";
 
 const port = Number(process.env.AFTERCLASS_HOSTED_PREVIEW_PORT ?? 8774);
 const clerkPort = Number(process.env.AFTERCLASS_FAKE_CLERK_PORT ?? 8775);
@@ -80,12 +78,9 @@ const fakeClerk = Bun.serve({
   },
 });
 
-/** Chrome names an unpacked extension by the SHA-256 of its folder's path: the first 32 hex digits, each 0-f written as a-p. */
-const unpackedId = (dir: string) => createHash("sha256").update(realpathSync(dir)).digest("hex").slice(0, 32).split("").map((h) => String.fromCharCode(97 + parseInt(h, 16))).join("");
-
 const extensionDir = resolve(import.meta.dir, "../dist/hosted-preview-extension");
 await buildExtension(extensionDir, { hostedOrigin: origin });
-const extensionId = unpackedId(extensionDir);
+const extensionId = HOSTED_EXTENSION_ID;
 
 const dataDir = mkdtempSync(join(tmpdir(), "afterclass-hosted-preview-"));
 const running = await mainHosted({
