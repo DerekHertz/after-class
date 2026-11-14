@@ -9,6 +9,8 @@
  *   claude   AFTERCLASS_CLAUDE_BACKEND=cli | api. Default cli: every Claude task runs through `claude -p` on the subscription.
  *            api: EVERY Claude task calls the Messages API (paid, priced from usage), so no `claude` binary is needed. api with no key
  *            refuses to start. Replay mode builds no Claude adapter, so the setting does nothing there.
+ *   tutor    AFTERCLASS_TUTOR_MODEL=opus | sonnet, the model of the tutor turn and the wrap-up. Unset: sonnet when hosted, opus
+ *            locally. Sonnet is a cost choice (experiment 8), not a judgment on its tutoring.
  *   voice    Tutor speech from ElevenLabs through POST /voice/speech, local live mode with a key only; otherwise GET /voice says
  *            unavailable and the app speaks with Chrome's voice. Hosted mode ignores the key: voice is not budgeted. AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL.
  *   token    ~/.config/afterclass/pairing-token (0600), created on first boot, printed with "listening on 127.0.0.1:<port>".
@@ -81,8 +83,8 @@ import { interpretTask, resourceSearchTask, reviseTask } from "./preparation/tas
 import type { FrameBytes, PreparationTasks } from "./preparation/tasks";
 import { createReviews } from "./review";
 import type { Reviews } from "./review";
-import { tutorTask, wrapUpTask } from "./review/tutor";
-import type { TutorInput, TutorOutput, WrapUpInput, WrapUpOutput } from "./review/tutor";
+import { tutorCache, tutorTask, wrapUpTask } from "./review/tutor";
+import type { TutorCache, TutorInput, TutorModel, TutorOutput, WrapUpInput, WrapUpOutput } from "./review/tutor";
 import { createDiagrams } from "./diagram";
 import type { Diagrams, DiagramSummaryInput, DiagramSummaryOutput } from "./diagram";
 import { diagramSummaryTask } from "./diagram/tasks";
@@ -113,7 +115,7 @@ export type TaskSet = {
 export type Env = Readonly<Record<string, string | undefined>>;
 
 export type MainOptions = {
-  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_CLAUDE_BACKEND, AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_HOST, AFTERCLASS_HEALTH_ANY_HOST, AFTERCLASS_BUILD_APP, AFTERCLASS_CONFIG_DIR, AFTERCLASS_EXTENSION_ID, AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL, the budget settings AFTERCLASS_BUDGET_USER_USD, AFTERCLASS_BUDGET_TOTAL_USD, AFTERCLASS_STOP_PAID_CALLS, and the sign-in settings AFTERCLASS_AUTH (also hosted or not, for the budget), AFTERCLASS_CLERK_ISSUER, AFTERCLASS_CLERK_JWKS_URL, AFTERCLASS_CLERK_PUBLISHABLE_KEY, AFTERCLASS_PUBLIC_ORIGIN. */
+  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_CLAUDE_BACKEND, AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_HOST, AFTERCLASS_HEALTH_ANY_HOST, AFTERCLASS_BUILD_APP, AFTERCLASS_CONFIG_DIR, AFTERCLASS_EXTENSION_ID, AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL, AFTERCLASS_TUTOR_MODEL, the budget settings AFTERCLASS_BUDGET_USER_USD, AFTERCLASS_BUDGET_TOTAL_USD, AFTERCLASS_STOP_PAID_CALLS, and the sign-in settings AFTERCLASS_AUTH (also hosted or not, for the budget), AFTERCLASS_CLERK_ISSUER, AFTERCLASS_CLERK_JWKS_URL, AFTERCLASS_CLERK_PUBLISHABLE_KEY, AFTERCLASS_PUBLIC_ORIGIN. */
   readonly env?: Env;
   /** Holds keys.env and pairing-token. Defaults to AFTERCLASS_CONFIG_DIR, then ~/.config/afterclass. */
   readonly configDir?: string;
@@ -228,7 +230,7 @@ export function resolveClaudeBackend(requested: string | undefined): ClaudeBacke
   throw new Error(`AFTERCLASS_CLAUDE_BACKEND must be "cli" or "api", got "${requested}"`);
 }
 
-export function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameBytes): TaskSet {
+export function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameBytes, tutorCache: TutorCache, tutorModel: TutorModel = "opus"): TaskSet {
   return {
     boundary: productBoundaryTask(jev),
     frameChange: productFrameChangeTask(jev),
@@ -238,8 +240,8 @@ export function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameB
       checkClaim: claimSupportTask(jev),
       searchResources: resourceSearchTask(claude),
     },
-    tutor: tutorTask(claude),
-    wrapUp: wrapUpTask(claude),
+    tutor: tutorTask(claude, tutorCache, tutorModel),
+    wrapUp: wrapUpTask(claude, tutorModel),
     diagramSummary: diagramSummaryTask(claude, frameBytes),
   };
 }
@@ -270,6 +272,14 @@ export function resolveBudgetLimits(env: Env): BudgetLimits {
   const userUsd = usdSetting("AFTERCLASS_BUDGET_USER_USD", env.AFTERCLASS_BUDGET_USER_USD);
   const totalUsd = usdSetting("AFTERCLASS_BUDGET_TOTAL_USD", env.AFTERCLASS_BUDGET_TOTAL_USD);
   return hosted ? { userUsd: userUsd ?? HOSTED_LIMITS.userUsd, totalUsd: totalUsd ?? HOSTED_LIMITS.totalUsd } : { userUsd, totalUsd };
+}
+
+/** Derek, 2026-11-13: "We could definitely use Sonnet for the tutor." Hosted defaults to it; local keeps Opus. */
+export function resolveTutorModel(env: Env): TutorModel {
+  const requested = env.AFTERCLASS_TUTOR_MODEL ?? "";
+  if (requested === "") return isHosted(env) ? "sonnet" : "opus";
+  if (requested === "opus" || requested === "sonnet") return requested;
+  throw new Error(`AFTERCLASS_TUTOR_MODEL must be "opus" or "sonnet", got "${requested}"`);
 }
 
 /** The stop switch: the environment at boot, or the file, which is looked for before every request. */
@@ -404,6 +414,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     throw new Error(`AFTERCLASS_CLAUDE_BACKEND=api needs AFTERCLASS_ANTHROPIC_API_KEY in ${keysPath}; refusing to start`);
   }
   const budgetLimits = resolveBudgetLimits(env);
+  const tutorModel = resolveTutorModel(env);
   const paidCallsStopped = stopSwitch(env, configDir);
   // Hosted mode has no pairing token: sign-in replaces it.
   const token = auth.kind === "local" ? loadPairingToken(join(configDir, "pairing-token")) : "";
@@ -463,7 +474,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   function wire(db: UserDb): UserGraph {
     // evidence is created after the tasks that need its bytes; the tasks only read it when a call runs
     const frameBytes: FrameBytes = (id) => evidence.frameBytes(id);
-    const tasks: TaskSet = options.tasks ?? buildTasks(providers.jev, providers.claude, frameBytes);
+    const tasks: TaskSet = options.tasks ?? buildTasks(providers.jev, providers.claude, frameBytes, tutorCache(db), tutorModel);
     const memo = createMemo(db, memoMode, budget === null ? {} : { budget });
     const ledger = createLedger(db, budget);
 
@@ -716,6 +727,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       : `mode: replay (${keysFile ? "AFTERCLASS_MODE=replay" : "no keys file"}: Jev unavailable, Claude unavailable, every live call is refused)`,
   );
   const cap = (usd: number | null) => (usd === null ? "no cap" : `$${usd}`);
+  if (mode === "live") log(`tutor and wrap-up model: ${tutorModel}`);
   if (budget !== null) log(`budget per month (UTC): ${cap(budgetLimits.userUsd)} per user, ${cap(budgetLimits.totalUsd)} in total; stop switch: ${join(configDir, STOP_FILE)}${paidCallsStopped() ? " (on)" : ""}`);
   if (interrupted > 0) log(`budget: ${interrupted} call(s) a previous process left unfinished are recorded at unknown cost and count at their reservation`);
   log(

@@ -106,18 +106,20 @@ describe("request shape", () => {
     expect(API_MODELS).toEqual({ opus: "claude-opus-5-5", sonnet: "claude-sonnet-5-5" });
   });
 
-  test("streamText sends the model, one cached system block, the prompt as the one user message and the effort", async () => {
+  test("streamText sends the model, one system block cached for 5 minutes unless the request asks for 1 hour, the prompt as the one user message and the effort", async () => {
     const { claude, seen } = api({ deltas: ["hi"] });
     await claude.streamText(req({ effort: "high" }), () => {}, OPEN);
     expect(seen).toHaveLength(1);
     expect(seen[0]!.via).toBe("stream");
     const p = seen[0]!.params;
     expect(p.model).toBe("claude-opus-5-5");
-    expect(p.system).toEqual([{ type: "text", text: "You are the tutor.", cache_control: { type: "ephemeral", ttl: "1h" } }]);
+    expect(p.system).toEqual([{ type: "text", text: "You are the tutor.", cache_control: { type: "ephemeral", ttl: "5m" } }]);
     expect(p.messages).toEqual([{ role: "user", content: "Ask a question." }]);
     expect(p.output_config).toEqual({ effort: "high" });
     expect(p.max_tokens).toBe(STREAM_MAX_TOKENS);
     expect(STREAM_MAX_TOKENS).toBeGreaterThanOrEqual(16_000);
+    await claude.streamText(req({ cacheTtl: () => "1h" }), () => {}, OPEN);
+    expect(seen[1]!.params.system).toEqual([{ type: "text", text: "You are the tutor.", cache_control: { type: "ephemeral", ttl: "1h" } }]);
   });
 
   test("sonnet maps to claude-sonnet-5-5", async () => {
@@ -188,7 +190,7 @@ describe("structured", () => {
     expect(seen[0]!.via).toBe("create");
     expect(p.max_tokens).toBe(STRUCTURED_MAX_TOKENS);
     expect(STRUCTURED_MAX_TOKENS).toBe(16_000);
-    expect(p.system).toEqual([{ type: "text", text: "You are the tutor.", cache_control: { type: "ephemeral", ttl: "1h" } }]);
+    expect(p.system).toEqual([{ type: "text", text: "You are the tutor.", cache_control: { type: "ephemeral", ttl: "5m" } }]);
     const format = p.output_config?.format as { type: string; schema: { type: string; properties: Record<string, unknown> } };
     expect(p.output_config?.effort).toBe("low");
     expect(format.type).toBe("json_schema");
@@ -247,7 +249,7 @@ describe("usage and cost", () => {
     expect(priceUsage("claude-opus-5-5", { fresh: 0, creation5m: 0, creation1h: 0, read: 1_000_000, output: 1_000_000 })).toBeCloseTo(20.2, 9);
   });
 
-  test("a cache write with no TTL breakdown is priced as the 1 hour write the request asked for", async () => {
+  test("a cache write with no TTL breakdown is priced at the dearer 1 hour rate", async () => {
     const { claude } = api({ deltas: ["x"], final: message({ usage: { input: 0, creation: 1_000_000, read: 0, output: 0, breakdown: null } }) });
     const { usage } = await claude.streamText(req(), () => {}, OPEN);
     expect(usage.cost).toEqual({ kind: "estimated", usd: 8, basis: "anthropic_api_list_price" });

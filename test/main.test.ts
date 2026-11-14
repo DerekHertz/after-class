@@ -12,7 +12,7 @@ import type { CaptureId, IdPart, WindowId } from "../src/shared/ids";
 import { stableId } from "../src/shared/ids";
 import { captureResponse, ingestAckResponse } from "../src/shared/wire";
 import { PRODUCT_JEV_SETUP } from "../src/backend/jev-setup";
-import { buildTasks, loadPairingToken, main, readKeys, resolveClaudeBackend, resolveMode, STOP_FILE } from "../src/backend/main";
+import { buildTasks, loadPairingToken, main, readKeys, resolveClaudeBackend, resolveMode, resolveTutorModel, STOP_FILE } from "../src/backend/main";
 import type { MainOptions, Running, TaskSet } from "../src/backend/main";
 import type { ClaudeCli, SpawnFn } from "../src/backend/providers/claude";
 import type { ApiClient } from "../src/backend/providers/claude-api";
@@ -22,7 +22,7 @@ import type { TutorInput } from "../src/backend/review/tutor";
 import type { ClaimSupportInput, BoundaryInput, FrameChangeInput } from "../src/backend/providers/jev-tasks";
 import { canonicalInterpretation, canonicalResourceSearch, canonicalRevision } from "../src/backend/preparation/tasks";
 import type { InterpretationInput, InterpretationOutput } from "../src/backend/preparation/tasks";
-import { deferred, fail, fakeTask, ok } from "./fakes";
+import { UNASKED_CACHE, deferred, fail, fakeTask, ok } from "./fakes";
 import type { FakeStep, FakeTask } from "./fakes";
 
 const CAP = stableId("cap", "main-test") as CaptureId;
@@ -638,6 +638,40 @@ describe("AFTERCLASS_CLAUDE_BACKEND", () => {
     await expect(boot({ configDir }, { AFTERCLASS_CLAUDE_BACKEND: "paid" })).rejects.toThrow("AFTERCLASS_CLAUDE_BACKEND");
   });
 
+  test("AFTERCLASS_TUTOR_MODEL: hosted defaults to Sonnet, local keeps Opus, and the setting chooses either", () => {
+    expect(resolveTutorModel({})).toBe("opus");
+    expect(resolveTutorModel({ AFTERCLASS_AUTH: "clerk" })).toBe("sonnet");
+    expect(resolveTutorModel({ AFTERCLASS_HOST: "0.0.0.0" })).toBe("sonnet");
+    expect(resolveTutorModel({ AFTERCLASS_AUTH: "clerk", AFTERCLASS_TUTOR_MODEL: "opus" })).toBe("opus");
+    expect(resolveTutorModel({ AFTERCLASS_TUTOR_MODEL: "sonnet" })).toBe("sonnet");
+    expect(() => resolveTutorModel({ AFTERCLASS_AUTH: "clerk", AFTERCLASS_TUTOR_MODEL: "haiku" })).toThrow('AFTERCLASS_TUTOR_MODEL must be "opus" or "sonnet"');
+  });
+
+  test("the tutor model reaches the tutor turn and the wrap-up, and no other task", async () => {
+    const models: Record<string, string> = {};
+    const adapter: ClaudeCli = {
+      structured: (req) => {
+        models[req.system.startsWith("You close a lecture review") ? "wrapUp" : "other"] = req.model;
+        return Promise.reject(new ProviderError("stub", null, false));
+      },
+      streamText: (req) => {
+        models.tutor = req.model;
+        return Promise.reject(new ProviderError("stub", null, false));
+      },
+    };
+    const jev = { ask: () => Promise.reject(new Error("no Jev call in this test")) };
+    const ctx = { ...unbudgeted(new AbortController().signal), streamTo: null };
+    const empty = { passages: [], frames: [], gaps: [] };
+    const tasks = buildTasks(jev, adapter, () => null, UNASKED_CACHE, "sonnet");
+    expect([tasks.tutor.model, tasks.wrapUp.model]).toEqual(["sonnet", "sonnet"]);
+    await Promise.allSettled([
+      tasks.tutor.attempt({ state: reviewState("rev_aaaaaaaaaaaaaaaaaaaaaaaaaa" as never, [], [], 0, 0), allowed: ["wrap_up"], claims: [], evidence: empty, turns: [], priorObservations: [], repairNote: null, scope: {} } as unknown as TutorInput, ctx),
+      tasks.wrapUp.attempt({ turns: [], claims: [], threads: [] }, ctx),
+      tasks.preparation.interpret.attempt({ chunkRevisionId: "chr_x", newMaterial: empty, existingClaims: [], gaps: [] } as never, ctx),
+    ]);
+    expect(models).toEqual({ tutor: "sonnet", wrapUp: "sonnet", other: "opus" });
+  });
+
   test("buildTasks gives every task the one adapter it is passed", async () => {
     const seen: string[] = [];
     const adapter: ClaudeCli = {
@@ -653,7 +687,7 @@ describe("AFTERCLASS_CLAUDE_BACKEND", () => {
     const jev = { ask: () => Promise.reject(new Error("no Jev call in this test")) };
     const ctx = { ...unbudgeted(new AbortController().signal), streamTo: null };
     const empty = { passages: [], frames: [], gaps: [] };
-    const tasks = buildTasks(jev, adapter, () => null);
+    const tasks = buildTasks(jev, adapter, () => null, UNASKED_CACHE);
     await Promise.allSettled([
       tasks.tutor.attempt({ state: reviewState("rev_aaaaaaaaaaaaaaaaaaaaaaaaaa" as never, [], [], 0, 0), allowed: ["wrap_up"], claims: [], evidence: empty, turns: [], priorObservations: [], repairNote: null, scope: {} } as unknown as TutorInput, ctx),
       tasks.wrapUp.attempt({ turns: [], claims: [], threads: [] }, ctx),
@@ -672,6 +706,7 @@ describe("AFTERCLASS_CLAUDE_BACKEND", () => {
     const b = await boot({ configDir, fetch: jevFake(), spawn: closedSpawn(spawned), anthropic: api.client }, { PATH: "/usr/bin" });
     expect(b.r.mode).toBe("live");
     expect(b.logs.join("\n")).not.toContain("claude backend");
+    expect(b.logs.join("\n")).toContain("tutor and wrap-up model: opus");
     await ingest(b, fixture({ frames: false }));
     await until(() => spawned.length > 0, 15_000);
     expect(spawned[0]!.argv[0]).toBe("claude");

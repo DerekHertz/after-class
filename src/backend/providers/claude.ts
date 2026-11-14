@@ -52,7 +52,14 @@ export type ClaudeRequest = {
   readonly images: readonly ClaudeImage[];
   readonly webTools: boolean; // true only for resource search
   readonly timeoutMs: number;
+  /**
+   * How long the Messages API keeps the system block cached; 5 minutes when absent. Asked once for each request, after the budget
+   * admits it and right before it is sent, so a held request never asks. `claude -p` has no such control and never asks.
+   */
+  readonly cacheTtl?: () => CacheTtl;
 };
+
+export type CacheTtl = "5m" | "1h";
 
 /** Every request is sent through `send.admit()`, called after the concurrency queue and right before the request leaves, so a budget is asked at that moment. */
 export type ClaudeCli = {

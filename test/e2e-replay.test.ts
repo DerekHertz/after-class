@@ -32,6 +32,7 @@ import { diagramSummaryTask } from "../src/backend/diagram/tasks";
 import { nextThreadId, tutorTask, wrapUpTask } from "../src/backend/review/tutor";
 import type { TutorInput } from "../src/backend/review/tutor";
 import { isLearningGap } from "../src/backend/review/clamp";
+import { UNASKED_CACHE } from "./fakes";
 
 const CAP = stableId("cap", "e2e-replay") as CaptureId;
 const REVIEW = stableId("rvw", "e2e-replay") as ReviewId;
@@ -155,7 +156,7 @@ function fakeTasks() {
   const searchResources = faked(resourceSearchTask(noClaude), () => ({ output: [], usage: FAKE_UNKNOWN }));
 
   // The tutor. Code has already decided which moves are allowed; this picks one, as a scripted Claude would.
-  const tutor = faked(tutorTask(noClaude), (input, ctx) => {
+  const tutor = faked(tutorTask(noClaude, UNASKED_CACHE), (input, ctx) => {
     const { move, say } = tutorReply(input);
     const header = JSON.stringify(move);
     ctx.streamTo?.(`${header.slice(0, 20)}`);

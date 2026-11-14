@@ -36,9 +36,12 @@ import type { Db } from "../db";
  * What one request reserves, in USD. A settlement replaces it with the recorded cost, so for a priced call it only decides
  * whether the attempt may start. For a call of unknown cost it is the amount counted.
  *
- *   Claude (every task runs on claude-opus-5-5 through the Messages API in hosted mode). Experiment 8 measured a first tutor turn
- *   at $0.5575, later turns at $0.02 to $0.04 and a wrap-up at $0.1688 (docs/experiments/08-api-tutor.md, estimates at list
- *   price). $0.75 covers the largest of those. Interpretation, revision and the diagram summary are not measured on the API.
+ *   Claude (the Messages API in hosted mode; the tutor and wrap-up on claude-sonnet-5-5 unless AFTERCLASS_TUTOR_MODEL=opus, every
+ *   other task on claude-opus-5-5). Experiment 8 measured, on Opus with the 1 hour cache, a first tutor turn at $0.5575, later turns
+ *   at $0.02 to $0.04 and a wrap-up at $0.1688 (docs/experiments/08-api-tutor.md, estimates at list price). Of that first turn,
+ *   $0.5540 was writing 69,251 tokens at 2 times the input price. A review's first turn now writes them at 1.25 times, but the turn
+ *   after a long pause writes them at 2 times again (`tutorCache` in review/tutor.ts), so $0.75 still covers that turn on Opus, and
+ *   on Sonnet ($0.2770 for the write) with room. Interpretation, revision and the diagram summary are not measured on the API.
  *   Priced as `worstCaseUsd` prices a call (all of max_tokens spent, every input token a 1 hour cache write), a structured call
  *   with 50,000 input tokens comes to $0.75. Resource search adds up to 5 web searches at $0.01 per call and up to 3
  *   continuations, each a request that reserves $1 again. These are estimates, not upper bounds: the same worst case is $1.23 for a tutor turn with

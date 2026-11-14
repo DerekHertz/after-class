@@ -1,20 +1,19 @@
 /**
- * Every module's schema, as append-only migrations per owner. Table ownership: each table belongs to exactly one
- * module, which is its only writer. Ownership is read from the CREATE TABLE statements under each owner below
- * (`tableOwners` in db.ts), and test/boundaries.test.ts fails when a module's SQL writes a table it does not own. To
- * change your module's schema, append a new migration to your own array. Never edit an applied one: the runner
- * refuses a migration whose text changed after it ran. db.ts runs them and re-exports this module's names.
+ * Every module's schema, as append-only migrations per owner. Table ownership: each table belongs to exactly one module, which is its
+ * only writer. Ownership is read from the CREATE TABLE statements under each owner below (`tableOwners` in db.ts), and test/boundaries.test.ts
+ * fails when a module's SQL writes a table it does not own. To change your module's schema, append a new migration to your own array.
+ * Never edit an applied one: the runner refuses a migration whose text changed after it ran. db.ts runs them and re-exports this module's names.
  */
 import { stableId } from "../shared/ids";
 import { BUDGET_HOLDS } from "./migrations-budget";
 import { DEVICES_MIGRATION } from "./devices";
 import { OBSERVATION_STATUSES, RECORD_USER_ID } from "./migrations-record";
+import { TUTOR_CACHE } from "./migrations-review";
 
 export const OWNERS = ["kernel", "providers", "evidence", "segmentation", "preparation", "review", "record"] as const;
 export type Owner = (typeof OWNERS)[number];
 
 export type Migration = { readonly id: string; readonly sql: string };
-
 
 const PURPOSES = `'boundary','frame_change','claim_check','interpretation','claim_revision','resource_search','tutor_turn','wrap_up'`;
 /** 003-diagram-purpose adds "diagram_summary"; 001 keeps the list it was applied with (its text is hashed). */
@@ -897,6 +896,7 @@ WHEN EXISTS (
   AND NOT EXISTS (SELECT 1 FROM evidence_deletions d WHERE d.user_id = OLD.user_id AND d.evidence_id = OLD.evidence_id)
 BEGIN SELECT RAISE(ABORT, 'R16: frames of an unsaved review are held'); END;`,
     },
+    TUTOR_CACHE,
   ],
 
   record: [
