@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 
-const ROOT = resolve(import.meta.dir, "..");
+const REPO = resolve(import.meta.dir, "..");
 
 /**
  * Bun inlines every CSS `url()` target of 128 KiB or less as a base64 `data:` URI and has no option to stop it. A
@@ -52,11 +52,17 @@ function externalizeDataUrls(css: string, out: string, names: Map<string, string
   });
 }
 
-export async function buildApp(outDir: string): Promise<void> {
-  const out = resolve(ROOT, outDir);
+/**
+ * A cached file must never be paired with a newer release, so each immutable name is a function of the file's final bytes.
+ * Bun names the stylesheet by a hash of what it read, and `externalizeDataUrls` then rewrites it (the extracted names depend
+ * on source basenames Bun's hash does not see). `buildApp` therefore renames each stylesheet by the hash of its rewritten
+ * bytes. Nothing else is written after Bun hashes it: index.html and the notices keep a fixed name and are served no-cache.
+ */
+export async function buildApp(outDir: string, root = REPO): Promise<void> {
+  const out = resolve(root, outDir);
   rmSync(out, { recursive: true, force: true });
   const result = await Bun.build({
-    entrypoints: [join(ROOT, "src/app/index.html")],
+    entrypoints: [join(root, "src/app/index.html")],
     outdir: out,
     target: "browser",
     publicPath: "/app/",
@@ -64,25 +70,37 @@ export async function buildApp(outDir: string): Promise<void> {
     throw: false,
   });
   if (!result.success) throw new Error(`build of the review app failed:\n${result.logs.map(String).join("\n")}`);
-  const names = sourceNames(join(ROOT, "src/app/assets"));
+  const names = sourceNames(join(root, "src/app/assets"));
   const emitted: string[] = [];
+  const stylesheets = new Map<string, string>();
   for (const output of result.outputs.filter((o) => o.path.endsWith(".css"))) {
-    writeFileSync(output.path, externalizeDataUrls(readFileSync(output.path, "utf8"), out, names, emitted));
+    const css = Buffer.from(externalizeDataUrls(readFileSync(output.path, "utf8"), out, names, emitted));
+    const file = basename(output.path).replace(/-[a-z0-9]{8}\.css$/, `-${sha256(css).slice(0, 8)}.css`);
+    rmSync(output.path);
+    writeFileSync(join(out, file), css);
+    stylesheets.set(basename(output.path), file);
+  }
+  const page = join(out, "index.html");
+  let html = readFileSync(page, "utf8");
+  for (const [bunName, file] of stylesheets) {
+    for (const script of result.outputs.filter((o) => o.path.endsWith(".js"))) {
+      if (readFileSync(script.path, "utf8").includes(bunName)) throw new Error(`${basename(script.path)} names the stylesheet ${bunName}, and build-app.ts would have to rehash the script after renaming it`);
+    }
+    html = html.replaceAll(bunName, file);
   }
   const preloads = FIRST_SCREEN_FONTS.map((stem) => {
     const file = emitted.find((f) => f.startsWith(`${stem}-`) && f.endsWith(".ttf"));
     if (file === undefined) throw new Error(`the first-screen font ${stem} is not in the review app's CSS`);
     return `<link rel="preload" href="/app/${file}" as="font" type="font/ttf" crossorigin>`;
   });
-  const page = join(out, "index.html");
-  writeFileSync(page, readFileSync(page, "utf8").replace("</head>", () => `${preloads.join("")}</head>`));
+  writeFileSync(page, html.replace("</head>", () => `${preloads.join("")}</head>`));
   const licenses: [string, string][] = [
     ["Feather icons", "src/app/assets/icons-v2/LICENSE"],
     ["Young Serif", "src/app/assets/fonts-v2/young-serif-OFL.txt"],
     ["DM Sans", "src/app/assets/fonts-v2/dm-sans-OFL.txt"],
     ["Pixelify Sans", "src/app/assets/fonts-v2/OFL-PixelifySans.txt"],
   ];
-  const notices = licenses.map(([name, path]) => `${name}\n\n${readFileSync(join(ROOT, path), "utf8")}`).join("\n\n");
+  const notices = licenses.map(([name, path]) => `${name}\n\n${readFileSync(join(root, path), "utf8")}`).join("\n\n");
   writeFileSync(join(out, "asset-notices.txt"), notices);
   console.log(`built the review app into ${out}`);
 }

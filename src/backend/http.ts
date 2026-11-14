@@ -234,7 +234,7 @@ function resolveApp(root: string, rest: string): AppTarget {
  * (index.html, also the answer for a deep link) and the notices keep a name across releases, so each visit asks again.
  * The headers are set here, not in the proxy, so the app that knows which files are hashed is the one that says so.
  */
-const HASHED_APP_FILE = /-[a-z0-9]{8}\.[a-z0-9]+$/;
+export const HASHED_APP_FILE = /-[a-z0-9]{8}\.[a-z0-9]+$/;
 const appFileCacheControl = (path: string) => (HASHED_APP_FILE.test(path) ? "public, max-age=31536000, immutable" : "no-cache");
 
 function serveApp(req: Request, rest: string, opts: ServeOptions, page: (html: string) => string): Response {
