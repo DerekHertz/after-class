@@ -17,6 +17,19 @@ ${domain} {
 	# reverse_proxy passes the client's Host header through unchanged and adds X-Forwarded-For, X-Forwarded-Proto and
 	# X-Forwarded-Host. With no trusted_proxies set, Caddy replaces any of those the client sent, so the app can read
 	# the public origin and the client address from them.
+	# Compress the text the app serves (page, script, stylesheet, fonts, JSON). The list names the types, so the tutor
+	# turn (application/x-ndjson, streamed line by line) and the already compressed images and audio pass through
+	# untouched. Compression buffers a response, and a buffered turn would arrive all at once at the end.
+	encode zstd gzip {
+		match {
+			header Content-Type text/*
+			header Content-Type application/javascript*
+			header Content-Type application/json*
+			header Content-Type image/svg+xml*
+			header Content-Type font/*
+		}
+	}
+
 	# The tutor turn streams NDJSON, so the proxy flushes every write instead of buffering.
 	reverse_proxy afterclass-app:${app_port} {
 		flush_interval -1

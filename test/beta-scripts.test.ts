@@ -825,4 +825,12 @@ describe("beta container wiring", () => {
     expect(appStart).toContain("--network afterclass");
     expect(caddyfile).toContain("reverse_proxy afterclass-app:${app_port}");
   });
+
+  test("Caddy compresses the app's text types with zstd and gzip, and lists them so the NDJSON tutor stream and the images stay untouched", () => {
+    const block = /encode zstd gzip \{\s*match \{([^}]*)\}\s*\}/.exec(caddyfile)?.[1];
+    expect(block).toBeDefined();
+    const types = [...block!.matchAll(/header Content-Type (\S+)/g)].map((m) => m[1]);
+    expect(types).toEqual(["text/*", "application/javascript*", "application/json*", "image/svg+xml*", "font/*"]);
+    expect(caddyfile).toMatch(/reverse_proxy afterclass-app:\$\{app_port\} \{\s*flush_interval -1/);
+  });
 });
