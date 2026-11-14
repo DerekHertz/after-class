@@ -217,10 +217,11 @@ const refused = (what: string) => new ProviderError(`replay mode: a live ${what}
 
 /** Replay mode's providers. They exist so a task can still be built; any call to them is a bug and says so. */
 const refusingJev: JevClient = { ask: () => Promise.reject(refused("Jev")) };
-const refusingClaude: ClaudeCli = {
+const refusingAdapter: ClaudeCli = {
   structured: () => Promise.reject(refused("Claude")),
   streamText: () => Promise.reject(refused("Claude")),
 };
+const refusingClaude: ClaudeLanes = { preparation: refusingAdapter, interactive: refusingAdapter };
 
 export type ClaudeBackend = "cli" | "api";
 
@@ -230,19 +231,33 @@ export function resolveClaudeBackend(requested: string | undefined): ClaudeBacke
   throw new Error(`AFTERCLASS_CLAUDE_BACKEND must be "cli" or "api", got "${requested}"`);
 }
 
-export function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameBytes, tutorCache: TutorCache, tutorModel: TutorModel = "opus"): TaskSet {
+/**
+ * Two Claude adapters, so each has its own concurrency limit. Preparation fills its lane for minutes at a time; a tutor turn, the wrap-up
+ * or a diagram summary has a learner waiting and must never queue behind it. Both lanes still reserve every request in `admit()` (R17).
+ */
+export type ClaudeLanes = { readonly preparation: ClaudeCli; readonly interactive: ClaudeCli };
+
+/** Requests the interactive lane runs at once. Hosted, one process serves every friend's tutor turns. */
+export const INTERACTIVE_CLAUDE_LIMIT = 4;
+
+export const claudeLanes = (adapter: (maxConcurrent: number) => ClaudeCli): ClaudeLanes => ({
+  preparation: adapter(DEFAULT_LIMITS.claude),
+  interactive: adapter(INTERACTIVE_CLAUDE_LIMIT),
+});
+
+export function buildTasks(jev: JevClient, claude: ClaudeLanes, frameBytes: FrameBytes, tutorCache: TutorCache, tutorModel: TutorModel = "opus"): TaskSet {
   return {
     boundary: productBoundaryTask(jev),
     frameChange: productFrameChangeTask(jev),
     preparation: {
-      interpret: interpretTask(claude, frameBytes),
-      revise: reviseTask(claude, frameBytes),
+      interpret: interpretTask(claude.preparation, frameBytes),
+      revise: reviseTask(claude.preparation, frameBytes),
       checkClaim: claimSupportTask(jev),
-      searchResources: resourceSearchTask(claude),
+      searchResources: resourceSearchTask(claude.preparation),
     },
-    tutor: tutorTask(claude, tutorCache, tutorModel),
-    wrapUp: wrapUpTask(claude, tutorModel),
-    diagramSummary: diagramSummaryTask(claude, frameBytes),
+    tutor: tutorTask(claude.interactive, tutorCache, tutorModel),
+    wrapUp: wrapUpTask(claude.interactive, tutorModel),
+    diagramSummary: diagramSummaryTask(claude.interactive, frameBytes),
   };
 }
 
@@ -425,19 +440,19 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   mkdirSync(dataDir, { recursive: true });
   const rawDb = openDb(join(dataDir, "afterclass.sqlite"));
 
-  const liveClaude = (): ClaudeCli => {
+  const liveClaude = (): ClaudeLanes => {
     if (claudeBackend === "api") {
       log("claude backend: api for every Claude task (paid, priced from usage); no claude binary is used");
-      return createClaudeApi({ apiKey: anthropicKey!, maxConcurrent: DEFAULT_LIMITS.claude, ...(options.anthropic ? { client: options.anthropic } : {}) });
+      return claudeLanes((maxConcurrent) => createClaudeApi({ apiKey: anthropicKey!, maxConcurrent, ...(options.anthropic ? { client: options.anthropic } : {}) }));
     }
     const claudeCwd = join(dataDir, "claude-cwd");
     mkdirSync(claudeCwd, { recursive: true });
     // No provider key may reach the child: claude -p bills the subscription login, and the Jev, voice and Messages API keys are not its business.
     const { TYPESAFE_API_KEY: _jevKey, ELEVENLABS_API_KEY: _voiceKey, AFTERCLASS_ANTHROPIC_API_KEY: _messagesKey, ...childEnv } = env;
-    return createClaudeCli({ bin: options.claudeBin ?? "claude", cwd: claudeCwd, maxConcurrent: DEFAULT_LIMITS.claude, env: childEnv, ...(options.spawn ? { spawn: options.spawn } : {}) });
+    return claudeLanes((maxConcurrent) => createClaudeCli({ bin: options.claudeBin ?? "claude", cwd: claudeCwd, maxConcurrent, env: childEnv, ...(options.spawn ? { spawn: options.spawn } : {}) }));
   };
   // One client per provider for the whole process, so their concurrency limits hold across users.
-  const providers: { readonly jev: JevClient; readonly claude: ClaudeCli } =
+  const providers: { readonly jev: JevClient; readonly claude: ClaudeLanes } =
     mode === "live" && !options.tasks
       ? { jev: createJevClient({ apiKey: apiKey!, ...(options.fetch ? { fetch: options.fetch } : {}) }), claude: liveClaude() }
       : { jev: refusingJev, claude: refusingClaude };
