@@ -2,22 +2,22 @@
    roomStyle(); this file owns only layout rules, so all three rooms share one set of rules and one React tree. */
 @font-face { font-family: 'After Class Pixel'; src: url('./assets/fonts-v2/pixelify-sans.ttf') format('truetype'); font-weight: 400 700; font-display: block; }
 
-:is(.scene-shell[data-scene="last-desk"], .front-row-scene[data-room="last-desk"]) { --fr-plate: url('./assets/front-row/last-desk.png'); }
-:is(.scene-shell[data-scene="study-bench"], .front-row-scene[data-room="study-bench"]) { --fr-plate: url('./assets/front-row/study-bench.png'); }
-:is(.scene-shell[data-scene="projection-booth"], .front-row-scene[data-room="projection-booth"]) { --fr-plate: url('./assets/front-row/projection-booth.png'); }
+:is(.scene-shell[data-scene="last-desk"], .front-row-scene[data-room="last-desk"]) { --fr-plate: url('./assets/front-row/last-desk.webp'); }
+:is(.scene-shell[data-scene="study-bench"], .front-row-scene[data-room="study-bench"]) { --fr-plate: url('./assets/front-row/study-bench.webp'); }
+:is(.scene-shell[data-scene="projection-booth"], .front-row-scene[data-room="projection-booth"]) { --fr-plate: url('./assets/front-row/projection-booth.webp'); }
 
 /* The review's layers, one set per room: the background, then the board, desk and mat as nine-slices, then the extras. The
    plates above stay for the room picker and for every page that has no review scene. */
-.scene-shell[data-scene="last-desk"] { --fr-bg: url('./assets/front-row-v2/rail-background.png'); --fr-board-art: url('./assets/front-row-v2/rail-board.png'); --fr-desk-art: url('./assets/front-row-v2/rail-desk.png'); --fr-mat-art: url('./assets/front-row-v2/rail-mat.png'); }
-.scene-shell[data-scene="study-bench"] { --fr-bg: url('./assets/front-row-v2/harbor-background.png'); --fr-board-art: url('./assets/front-row-v2/harbor-board.png'); --fr-desk-art: url('./assets/front-row-v2/harbor-desk.png'); --fr-mat-art: url('./assets/front-row-v2/harbor-mat.png'); }
-.scene-shell[data-scene="projection-booth"] { --fr-bg: url('./assets/front-row-v2/canal-background.png'); --fr-board-art: url('./assets/front-row-v2/canal-board.png'); --fr-desk-art: url('./assets/front-row-v2/canal-desk.png'); --fr-mat-art: url('./assets/front-row-v2/canal-mat.png'); }
-.front-row-art [data-extra="ledge-items"] { background-image: url('./assets/front-row-v2/rail-ledge-items.png'); }
-.front-row-art [data-extra="vine"] { background-image: url('./assets/front-row-v2/rail-vine.png'); }
-.front-row-art [data-extra="lamp"] { background-image: url('./assets/front-row-v2/harbor-lamp.png'); }
-.front-row-art [data-extra="awning"] { background-image: url('./assets/front-row-v2/harbor-awning.png'); }
-.front-row-art [data-extra="cushion"] { background-image: url('./assets/front-row-v2/harbor-cushion.png'); }
-.front-row-art [data-extra="pull-tab"] { background-image: url('./assets/front-row-v2/canal-pull-tab.png'); }
-.front-row-art [data-extra="projector"] { background-image: url('./assets/front-row-v2/canal-projector.png'); }
+.scene-shell[data-scene="last-desk"] { --fr-bg: url('./assets/front-row-v2/rail-background.webp'); --fr-board-art: url('./assets/front-row-v2/rail-board.webp'); --fr-desk-art: url('./assets/front-row-v2/rail-desk.webp'); --fr-mat-art: url('./assets/front-row-v2/rail-mat.webp'); }
+.scene-shell[data-scene="study-bench"] { --fr-bg: url('./assets/front-row-v2/harbor-background.webp'); --fr-board-art: url('./assets/front-row-v2/harbor-board.webp'); --fr-desk-art: url('./assets/front-row-v2/harbor-desk.webp'); --fr-mat-art: url('./assets/front-row-v2/harbor-mat.webp'); }
+.scene-shell[data-scene="projection-booth"] { --fr-bg: url('./assets/front-row-v2/canal-background.webp'); --fr-board-art: url('./assets/front-row-v2/canal-board.webp'); --fr-desk-art: url('./assets/front-row-v2/canal-desk.webp'); --fr-mat-art: url('./assets/front-row-v2/canal-mat.webp'); }
+.front-row-art [data-extra="ledge-items"] { background-image: url('./assets/front-row-v2/rail-ledge-items.webp'); }
+.front-row-art [data-extra="vine"] { background-image: url('./assets/front-row-v2/rail-vine.webp'); }
+.front-row-art [data-extra="lamp"] { background-image: url('./assets/front-row-v2/harbor-lamp.webp'); }
+.front-row-art [data-extra="awning"] { background-image: url('./assets/front-row-v2/harbor-awning.webp'); }
+.front-row-art [data-extra="cushion"] { background-image: url('./assets/front-row-v2/harbor-cushion.webp'); }
+.front-row-art [data-extra="pull-tab"] { background-image: url('./assets/front-row-v2/canal-pull-tab.webp'); }
+.front-row-art [data-extra="projector"] { background-image: url('./assets/front-row-v2/canal-projector.webp'); }
 
 /* On every page the selected room is the backdrop and the navigation sits over the art as small chips, each with its own
    backing for legibility. There is no bar behind them. */
@@ -175,8 +175,8 @@
 /* The folio and the notebook on the desk. The whole object is the button; it lifts when pointed at or focused. */
 .scene-shell .front-row-scene .front-row-object { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 44px; min-height: 44px; margin: 0; padding: 0 0 4px; border: 0; border-radius: 0; background: transparent; box-shadow: none; cursor: pointer; }
 .front-row-object .front-row-object-art { position: absolute; inset: 0; background: var(--fr-object-art) 50% 100% / contain no-repeat; filter: drop-shadow(0 4px 0 #00000052); transition: translate 120ms ease-out, filter 120ms ease-out; }
-.front-row-object[data-object="source"] { --fr-object-art: url('./assets/front-row-v2/closed-folio.png'); }
-.front-row-object[data-object="history"] { --fr-object-art: url('./assets/front-row-v2/closed-notebook.png'); }
+.front-row-object[data-object="source"] { --fr-object-art: url('./assets/front-row-v2/closed-folio.webp'); }
+.front-row-object[data-object="history"] { --fr-object-art: url('./assets/front-row-v2/closed-notebook.webp'); }
 .front-row-object .front-row-object-tag { position: relative; padding: 3px 8px; background: var(--fr-bar); color: var(--fr-bar-ink); border: 2px solid var(--fr-bar-ink); font: 500 .95rem/1.2 'After Class Pixel', var(--font); white-space: nowrap; }
 .front-row-object:is(:hover, :focus-visible) .front-row-object-art { translate: 0 -4px; filter: drop-shadow(0 8px 0 #00000052) brightness(1.08); }
 .front-row-object:is(:hover, :focus-visible) .front-row-object-tag { background: var(--fr-bar-ink); color: var(--fr-bar); }
@@ -205,8 +205,8 @@
   color: var(--obj-ink); font: 400 1.05rem/1.5 var(--pixel);
 }
 .scene-shell .review .room-object:not([open]) { display: none; }
-:is(.room-object, .room-paper)[data-object="source"] { --obj-art: url('./assets/room-objects/source-folio.png'); }
-:is(.room-object[data-object="history"], .room-paper[data-object="history"], .review-complete) { --obj-art: url('./assets/room-objects/review-notebook.png'); }
+:is(.room-object, .room-paper)[data-object="source"] { --obj-art: url('./assets/room-objects/source-folio.webp'); }
+:is(.room-object[data-object="history"], .room-paper[data-object="history"], .review-complete) { --obj-art: url('./assets/room-objects/review-notebook.webp'); }
 .room-object::backdrop { background: color-mix(in srgb, var(--fr-bar, #1a2b3b) 38%, transparent); }
 .scene-shell .review .room-object :focus-visible { outline: 3px solid var(--obj-ink); outline-offset: 2px; }
 

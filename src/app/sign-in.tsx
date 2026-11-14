@@ -7,6 +7,7 @@
  */
 import { Component, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
+import { usePrefetchReviewArt } from "./art-prefetch";
 import { objectFrame } from "./room-object";
 
 export type ClerkClient = {
@@ -99,6 +100,7 @@ export function SignInScreen({ clerk }: { readonly clerk: ClerkClient }) {
 }
 
 function SignInCard({ clerk }: { readonly clerk: ClerkClient }) {
+  usePrefetchReviewArt();
   const mount = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const node = mount.current!;

@@ -3,10 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { COMPANIONS } from "../src/app/appearance";
 import type { CompanionId } from "../src/app/appearance";
 import { COMPANION_SPRITES, CompanionDrawing, POSES, companionPose } from "../src/app/companion";
-import { pixel, readPng } from "./png";
+import { pixel, readImage } from "./png";
 
 const ids = Object.keys(COMPANIONS) as CompanionId[];
-const sheet = (id: CompanionId) => readPng(new URL(`../src/app/assets/companions-v3/${id}.png`, import.meta.url));
+const sheet = (id: CompanionId, size: "" | "-small" = "") => readImage(new URL(`../src/app/assets/companions-v3/${id}${size}.webp`, import.meta.url));
 
 describe("companion poses", () => {
   test("a reaction picks its own pose, and no reaction is the idle pose", () => {
@@ -27,8 +27,8 @@ describe("companion poses", () => {
 
 describe("every companion sheet is three whole, transparent, registered poses", () => {
   for (const id of ids) {
-    test(id, () => {
-      const png = sheet(id);
+    test(id, async () => {
+      const png = await sheet(id);
       const { cell } = COMPANION_SPRITES[id];
       expect({ width: png.width, height: png.height, alpha: png.alpha }).toEqual({ width: cell.width * 3, height: cell.height, alpha: true });
       const bottoms: number[] = [];

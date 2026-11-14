@@ -4,6 +4,7 @@ import { randomId } from "../shared/ids";
 import type { CaptureId, ReviewId } from "../shared/ids";
 import type { ReviewOptions, StartChoice, UsageSummary } from "../shared/domain";
 import type { AppApi } from "./api";
+import { usePrefetchReviewArt } from "./art-prefetch";
 import { formatClock, inspectBundle, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
 import type { OptionsScreen, ScopeSummary, SourceTitles, StartOffer } from "./core";
 import { usePolled } from "./poll";
@@ -156,6 +157,7 @@ export async function checkAgain(
 }
 
 export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readonly captureId: CaptureId }) {
+  usePrefetchReviewArt();
   const capture = useAsync(useCallback(() => api.captureView(captureId), [api, captureId]));
   const options = usePolled(useCallback(() => api.reviewOptions(captureId), [api, captureId]), isProcessing, POLL_MS);
   // A budget that holds back new model calls holds back preparation too. Read again while it does, so the note goes when it lifts.
