@@ -130,13 +130,16 @@ describe("afterclass-fetch-keys", () => {
 });
 
 describe("afterclass-app-start", () => {
+  const DIGEST = `sha256:${"b".repeat(64)}`;
+  const IMAGE_ID = `sha256:${"9".repeat(64)}`;
+
   function start(fetchFails: boolean): { status: number; log: string[] } {
     const host = makeHost("afterclass-start-test-");
-    writeFileSync(join(host.root, "settings.env"), "APP_PORT=8080\nAWS_REGION=us-east-2\nECR_REGISTRY=registry.test\nECR_REPOSITORY=afterclass-api\nLOG_GROUP=/afterclass-beta\n");
-    writeFileSync(join(host.root, "data/afterclass/current-tag"), `${"b".repeat(40)}\n`);
+    writeFileSync(join(host.root, "settings.env"), "APP_PORT=8080\nAWS_REGION=us-east-2\nLOG_GROUP=/afterclass-beta\n");
+    writeFileSync(join(host.root, "data/afterclass/current-image"), `${DIGEST}\n`);
     stub(host.bin, "docker", `echo "docker $*" >> ${host.log}\n[ "$3" = --entrypoint ] && echo 1000\nexit 0`);
     stub(host.bin, "chown", "exit 0");
-    stub(host.root, "afterclass-pull", "exit 0");
+    stub(host.root, "afterclass-pull", `echo "pull $*" >> ${host.log}\n[ "$1" = ${DIGEST} ] && echo ${IMAGE_ID}`);
     stub(host.root, "afterclass-fetch-keys", `echo "fetch-keys $*" >> ${host.log}\nexit ${fetchFails ? 1 : 0}`);
     const result = Bun.spawnSync(["bash", installScript(host, "afterclass-app-start")], { env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` } });
     return { status: result.exitCode, log: readLog(host) };
@@ -151,6 +154,13 @@ describe("afterclass-app-start", () => {
     expect(run.log.indexOf("fetch-keys 1000 1000")).toBeLessThan(run.log.indexOf(appRun(run.log)!));
     expect(appRun(run.log)).toContain("-v /run/afterclass-app:/data/config:ro");
     expect(appRun(run.log)).not.toContain("-v /data/config");
+  });
+
+  test("runs the image ID that afterclass-pull resolved for the recorded digest, never a tag", () => {
+    const run = start(false);
+    expect(run.log).toContain(`pull ${DIGEST}`);
+    expect(appRun(run.log)).toEndWith(` ${IMAGE_ID}`);
+    for (const line of run.log.filter((l) => l.startsWith("docker run"))) expect(line).not.toContain("ghcr.io/derekhertz/after-class:");
   });
 
   test("a failed key fetch never starts the container", () => {

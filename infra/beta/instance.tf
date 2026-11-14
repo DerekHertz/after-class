@@ -38,19 +38,8 @@ resource "aws_iam_role_policy_attachment" "ssm_core" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# The app image comes from the public GHCR package without a sign-in, so the role has no registry permission.
 data "aws_iam_policy_document" "instance" {
-  statement {
-    sid       = "EcrLogin"
-    actions   = ["ecr:GetAuthorizationToken"]
-    resources = ["*"]
-  }
-
-  statement {
-    sid       = "EcrPull"
-    actions   = ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
-    resources = [local.ecr_repository_arn]
-  }
-
   statement {
     sid       = "Logs"
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
@@ -92,7 +81,7 @@ data "aws_kms_alias" "ssm" {
 }
 
 resource "aws_iam_role_policy" "instance" {
-  name   = "pull-image-and-write-logs"
+  name   = "write-logs-and-read-app-keys"
   role   = aws_iam_role.instance.id
   policy = data.aws_iam_policy_document.instance.json
 }
@@ -155,8 +144,6 @@ locals {
 
   settings = join("\n", [
     "AWS_REGION=${var.region}",
-    "ECR_REGISTRY=${local.ecr_registry}",
-    "ECR_REPOSITORY=${local.ecr_repository_name}",
     "CADDY_IMAGE=${var.caddy_image}",
     "LOG_GROUP=${aws_cloudwatch_log_group.beta.name}",
     "DATA_VOLUME_ID=${aws_ebs_volume.data.id}",
@@ -273,7 +260,7 @@ resource "aws_volume_attachment" "data" {
   stop_instance_before_detaching = true
 }
 
-# The deploy role reads this to find the current instance, so an instance replacement needs no change in GitHub.
+# scripts/deploy-beta.sh reads this to find the current instance, so an instance replacement needs no change to it.
 resource "aws_ssm_parameter" "instance_id" {
   name  = "/${var.name}/instance_id"
   type  = "String"

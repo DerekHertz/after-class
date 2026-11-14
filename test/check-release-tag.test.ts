@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { releaseTagProblem } from "../scripts/check-release-tag";
 import { tmpDir } from "./tmp";
@@ -35,7 +35,7 @@ function commitVersion(work: string, version: string, extra: Record<string, stri
 /**
  * An origin with master at v0.1.0, a tag v0.3.0 on master whose package.json says 0.2.9, and a tag v0.2.0 off master
  * whose own check-release-tag.ts would move the runner's origin/master onto itself and leave a marker. The runner is a
- * full clone checked out at master, as the deploy job's first checkout is.
+ * full clone checked out at master, as Derek's clone is when he runs scripts/deploy-beta.sh.
  */
 function releaseRepo(): { runner: string; marker: string; master: string; offMaster: string } {
   const root = tmpDir("afterclass-release-tag-test-");
@@ -114,19 +114,5 @@ describe("check-release-tag", () => {
     const run = check(releaseRepo().runner, "v0.1.0:refs/heads/master");
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("is not v<major>.<minor>.<patch>");
-  });
-});
-
-describe("deploy-beta", () => {
-  test("checks the tag with master's code before it checks out the tag's commit", () => {
-    const workflow = readFileSync(resolve(import.meta.dir, "../.github/workflows/deploy-beta.yml"), "utf8");
-    const checkouts = [...workflow.matchAll(/uses: actions\/checkout@\S+[^]*?(?=\n {6}- )/g)].map((m) => ({ at: m.index, text: m[0] }));
-    const gate = workflow.indexOf("bun scripts/check-release-tag.ts");
-    expect(checkouts).toHaveLength(2);
-    expect(checkouts[0]!.text).not.toContain("ref:");
-    expect(checkouts[0]!.at).toBeLessThan(gate);
-    expect(checkouts[1]!.at).toBeGreaterThan(gate);
-    expect(checkouts[1]!.text).toContain("ref: ${{ steps.release.outputs.commit }}");
-    expect(workflow.indexOf("configure-aws-credentials")).toBeGreaterThan(checkouts[1]!.at);
   });
 });

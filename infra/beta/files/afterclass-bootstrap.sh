@@ -61,7 +61,7 @@ mkdir -p /data/db /data/afterclass/images /data/caddy/data /data/caddy/config
 
 systemctl daemon-reload
 systemctl enable afterclass-caddy.service afterclass-app.service
-# Caddy starts now. The app unit starts after the first deploy writes /data/afterclass/current-tag, or at once on a
+# Caddy starts now. The app unit starts after the first deploy writes /data/afterclass/current-image, or at once on a
 # replacement instance whose data volume already holds one.
 systemctl restart afterclass-caddy.service
 systemctl start afterclass-app.service

@@ -5,7 +5,7 @@ Wants=network-online.target
 Requires=docker.service
 RequiresMountsFor=/data
 # The first deploy writes this file. Until then there is no image to run, and the unit is skipped, not failed.
-ConditionPathExists=/data/afterclass/current-tag
+ConditionPathExists=/data/afterclass/current-image
 StartLimitIntervalSec=0
 
 [Service]

@@ -5,7 +5,7 @@ variable "region" {
 }
 
 variable "name" {
-  description = "Prefix for resource names. The beta and main stacks use the same default, so the repository name matches in both."
+  description = "Prefix for resource names. The main stack uses the same default, so the repository name matches."
   type        = string
   default     = "afterclass"
 }

@@ -62,6 +62,11 @@ variable "db_instance_class" {
   default     = "db.t4g.micro"
 }
 
+variable "github_oidc_provider_arn" {
+  description = "ARN of the account's GitHub OIDC provider, the federated principal of the deploy role. Required, no default. This account's service control policy denies iam:CreateOpenIDConnectProvider, so the stack cannot be applied here until a provider exists or the deploy takes another route."
+  type        = string
+}
+
 variable "github_repository" {
   description = "owner/name of the repository whose deploy workflow may assume the deploy role."
   type        = string

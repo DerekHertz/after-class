@@ -69,11 +69,11 @@ resource "aws_vpc_security_group_ingress_rule" "https" {
   cidr_ipv4         = each.value
 }
 
-# Package installs, ECR pulls, the Caddy image pull, Systems Manager, CloudWatch Logs and the Let's Encrypt calls all use
+# Package installs, the app image pull from GHCR, the Caddy image pull, Systems Manager, CloudWatch Logs and the Let's Encrypt calls all use
 # HTTPS. DNS to the VPC resolver and the instance metadata and time services are not filtered by security groups.
 resource "aws_vpc_security_group_egress_rule" "https" {
   security_group_id = aws_security_group.beta.id
-  description       = "HTTPS out for packages, ECR, Systems Manager, CloudWatch Logs and certificate issuance"
+  description       = "HTTPS out for packages, images, Systems Manager, CloudWatch Logs and certificate issuance"
   ip_protocol       = "tcp"
   from_port         = 443
   to_port           = 443

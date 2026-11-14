@@ -1,19 +1,25 @@
 #!/bin/bash
-# Usage: afterclass-deploy <commit hash>. Run by the Systems Manager deploy document as root.
-# Pulls the image first, so the running container keeps serving during the download. Then it records the tag, restarts the
-# app and waits for /health. A tag that never turns healthy is rolled back to the previous one, and the run still fails.
-# A healthy image is saved to the data volume, so a replacement instance never depends on ECR still holding the tag.
+# Usage: afterclass-deploy <commit hash> <image digest>. Run by the Systems Manager deploy document as root.
+# The digest names the image, and the commit only labels the output. Pulls the image first, so the running container keeps
+# serving during the download. Then it records the digest, restarts the app and waits for /health. A digest that never
+# turns healthy is rolled back to the previous one, and the run still fails. A healthy image is saved to the data volume,
+# so a replacement instance never depends on GHCR still holding the image.
 set -euo pipefail
 
 . /etc/afterclass/settings.env
 
-tag="${1:-}"
-if [[ ! "$tag" =~ ^[0-9a-f]{40}$ ]]; then
-  echo "afterclass-deploy: '${tag}' is not a full commit hash" >&2
+commit="${1:-}"
+digest="${2:-}"
+if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "afterclass-deploy: '${commit}' is not a full commit hash" >&2
+  exit 2
+fi
+if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+  echo "afterclass-deploy: '${digest}' is not an image digest" >&2
   exit 2
 fi
 
-# Two deploys at once would race on the tag file and the restart.
+# Two deploys at once would race on the state file and the restart.
 exec 9>/run/afterclass-deploy.lock
 flock -w 600 9
 
@@ -22,11 +28,11 @@ if ! mountpoint -q /data; then
   exit 1
 fi
 
-state=/data/afterclass/current-tag
+state=/data/afterclass/current-image
 mkdir -p /data/afterclass
 previous=$(cat "$state" 2>/dev/null || true)
 
-write_tag() {
+write_image() {
   printf '%s\n' "$1" > "${state}.new"
   mv "${state}.new" "$state"
 }
@@ -47,14 +53,14 @@ healthy() {
 # The save is a safety copy. A failure leaves the running app alone and shows up as a WARNING in the command output.
 save_running_image() {
   if ! /usr/local/sbin/afterclass-save-image "$@"; then
-    echo "afterclass-deploy: WARNING ${1} is not saved on /data, so a replacement instance needs ECR to still hold it. Free space on /data and deploy again."
+    echo "afterclass-deploy: WARNING ${1} is not saved on /data, so a replacement instance needs GHCR to still hold it. Free space on /data and deploy again."
   fi
 }
 
-# The previous tag goes back first, so a failed pull, restart or health check of the previous image still leaves it selected.
+# The previous digest goes back first, so a failed pull, restart or health check of the previous image still leaves it selected.
 rollback() {
-  write_tag "$previous"
-  /usr/local/sbin/afterclass-pull "$previous" || echo "afterclass-deploy: could not pull ${previous}, the app unit retries" >&2
+  write_image "$previous"
+  /usr/local/sbin/afterclass-pull "$previous" >/dev/null || echo "afterclass-deploy: could not pull ${previous}, the app unit retries" >&2
   systemctl restart afterclass-app.service || true
   if healthy; then
     echo "afterclass-deploy: rolled back to ${previous}" >&2
@@ -64,21 +70,21 @@ rollback() {
   fi
 }
 
-/usr/local/sbin/afterclass-pull "$tag"
+/usr/local/sbin/afterclass-pull "$digest" >/dev/null
 
-write_tag "$tag"
+write_image "$digest"
 # A restart that fails is the same as one that never turns healthy. The condition keeps set -e from skipping the rollback.
 if systemctl restart afterclass-app.service && healthy; then
-  echo "afterclass-deploy: ${tag} is healthy"
-  save_running_image "$tag" ${previous:+"$previous"}
+  echo "afterclass-deploy: ${commit} (${digest}) is healthy"
+  save_running_image "$digest" ${previous:+"$previous"}
   # The deploy already worked, so a failed cleanup must not fail it.
   docker image prune --all --force --filter until=72h >/dev/null || echo "afterclass-deploy: image prune failed, ignored" >&2
   exit 0
 fi
 
-echo "afterclass-deploy: ${tag} did not become healthy" >&2
+echo "afterclass-deploy: ${commit} (${digest}) did not become healthy" >&2
 journalctl -u afterclass-app.service -n 30 --no-pager >&2 || true
-if [ -n "$previous" ] && [ "$previous" != "$tag" ]; then
+if [ -n "$previous" ] && [ "$previous" != "$digest" ]; then
   rollback
 fi
 exit 1

@@ -94,18 +94,6 @@ variable "log_retention_days" {
   default     = 14
 }
 
-variable "github_repository" {
-  description = "owner/name of the repository whose deploy-beta workflow may assume the deploy role."
-  type        = string
-  default     = "DerekHertz/after-class"
-}
-
-variable "github_environment" {
-  description = "GitHub environment the deploy job runs in. The role trust policy accepts only this environment, so the environment's required reviewers gate every deploy."
-  type        = string
-  default     = "production"
-}
-
 variable "extension_id" {
   description = "Chrome Web Store id of the hosted extension. Null lets no extension connect."
   type        = string
