@@ -30,23 +30,29 @@ export function clerkScripts(doc: Document): ClerkScripts | null {
   return clerk && { clerk, ui: doc.querySelector<HTMLScriptElement>("script[data-clerk-ui]") };
 }
 
-/** Resolves once `script` has run or failed, or at once when what it sets is already there or there is no script. */
-const settled = (script: HTMLScriptElement | null, arrived: boolean) =>
-  arrived || script === null
+/**
+ * Resolves once `script` has run or failed, or at once when what it sets is already there or there is no script. A
+ * deferred script that failed before this was called fires no further event, so it also resolves once the document has
+ * parsed: by DOMContentLoaded every deferred script has run or failed.
+ */
+const settled = (script: HTMLScriptElement | null, arrived: boolean, doc: Document) =>
+  arrived || script === null || doc.readyState === "complete"
     ? Promise.resolve()
     : new Promise<void>((resolve) => {
       script.addEventListener("load", () => resolve(), { once: true });
       script.addEventListener("error", () => resolve(), { once: true });
+      doc.addEventListener("DOMContentLoaded", () => resolve(), { once: true });
+      doc.addEventListener("readystatechange", () => doc.readyState === "complete" && resolve());
     });
 
 /**
  * Resolves once ClerkJS has loaded with its UI and restored any session. A script that errors or never arrives, or a
  * UI that is missing once both have run, rejects.
  */
-export function loadClerk(scripts: ClerkScripts, host: ClerkHost = globalThis as ClerkHost): Promise<ClerkClient> {
+export function loadClerk(scripts: ClerkScripts, host: ClerkHost = globalThis as ClerkHost, doc: Document = scripts.clerk.ownerDocument): Promise<ClerkClient> {
   const arrived = new Promise<{ clerk: ClerkClient; ClerkUI: unknown }>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("sign-in did not load")), LOAD_TIMEOUT_MS);
-    void Promise.all([settled(scripts.ui, host.__internal_ClerkUICtor !== undefined), settled(scripts.clerk, host.Clerk !== undefined)]).then(() => {
+    void Promise.all([settled(scripts.ui, host.__internal_ClerkUICtor !== undefined, doc), settled(scripts.clerk, host.Clerk !== undefined, doc)]).then(() => {
       clearTimeout(timer);
       const { Clerk: clerk, __internal_ClerkUICtor: ClerkUI } = host;
       if (clerk && ClerkUI !== undefined) resolve({ clerk, ClerkUI });

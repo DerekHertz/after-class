@@ -67,8 +67,20 @@ describe("createApi with a session", () => {
 });
 
 describe("loadClerk", () => {
-  const script = () => new EventTarget() as unknown as HTMLScriptElement;
+  const parsing = () => Object.assign(new EventTarget(), { readyState: "loading" }) as unknown as Document;
+  const script = (doc: Document = parsing()) => Object.assign(new EventTarget(), { ownerDocument: doc }) as unknown as HTMLScriptElement;
   class ClerkUI {}
+
+  test("a script that failed before the app started is seen once the document has parsed, not after the timeout", async () => {
+    const doc = parsing();
+    const clerk = fakeClerk();
+    const failing = loadClerk({ clerk: script(doc), ui: script(doc) }, { Clerk: clerk });
+    doc.dispatchEvent(new Event("DOMContentLoaded"));
+    await expect(failing).rejects.toThrow("sign-in did not load");
+    const done = Object.assign(new EventTarget(), { readyState: "complete" }) as unknown as Document;
+    await expect(loadClerk({ clerk: script(done), ui: script(done) }, { Clerk: clerk })).rejects.toThrow("sign-in did not load");
+    expect(clerk.loads).toEqual([]);
+  });
 
   test("waits for both scripts, then loads ClerkJS once, handing it the UI", async () => {
     const scripts = { clerk: script(), ui: script() };
