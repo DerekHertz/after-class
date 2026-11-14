@@ -4,15 +4,15 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ApiError, createApi } from "../src/app/api";
 import { SignInScreen, SignOutButton, accountToken, loadClerk } from "../src/app/sign-in";
-import type { ClerkClient } from "../src/app/sign-in";
+import type { ClerkClient, ClerkHost } from "../src/app/sign-in";
 
 const lectures = () => new Response(JSON.stringify({ lectures: [] }), { headers: { "content-type": "application/json" } });
 
-function fakeClerk(over: Partial<ClerkClient> = {}): ClerkClient & { loads: number } {
+function fakeClerk(over: Partial<ClerkClient> = {}): ClerkClient & { loads: unknown[] } {
   const clerk = {
-    loads: 0,
-    async load() {
-      clerk.loads += 1;
+    loads: [] as unknown[],
+    async load(options: unknown) {
+      clerk.loads.push(options);
     },
     user: null,
     session: null,
@@ -67,24 +67,57 @@ describe("createApi with a session", () => {
 });
 
 describe("loadClerk", () => {
-  test("waits for the script, then loads ClerkJS once", async () => {
-    const script = new EventTarget() as unknown as HTMLScriptElement;
-    const host: { Clerk?: ClerkClient } = {};
-    const loading = loadClerk(script, host);
+  const parsing = () => Object.assign(new EventTarget(), { readyState: "loading" }) as unknown as Document;
+  const script = (doc: Document = parsing()) => Object.assign(new EventTarget(), { ownerDocument: doc }) as unknown as HTMLScriptElement;
+  class ClerkUI {}
+
+  test("a script that failed before the app started is seen once the document has parsed, not after the timeout", async () => {
+    const doc = parsing();
     const clerk = fakeClerk();
-    host.Clerk = clerk;
-    script.dispatchEvent(new Event("load"));
-    expect(await loading).toBe(clerk);
-    expect(clerk.loads).toBe(1);
+    const failing = loadClerk({ clerk: script(doc), ui: script(doc) }, { Clerk: clerk });
+    doc.dispatchEvent(new Event("DOMContentLoaded"));
+    await expect(failing).rejects.toThrow("sign-in did not load");
+    const done = Object.assign(new EventTarget(), { readyState: "complete" }) as unknown as Document;
+    await expect(loadClerk({ clerk: script(done), ui: script(done) }, { Clerk: clerk })).rejects.toThrow("sign-in did not load");
+    expect(clerk.loads).toEqual([]);
   });
 
-  test("uses ClerkJS that arrived before the app, and refuses when the script failed", async () => {
+  test("waits for both scripts, then loads ClerkJS once, handing it the UI", async () => {
+    const scripts = { clerk: script(), ui: script() };
+    const host: ClerkHost = {};
+    const loading = loadClerk(scripts, host);
+    const clerk = fakeClerk();
+    host.Clerk = clerk;
+    scripts.clerk.dispatchEvent(new Event("load"));
+    await Bun.sleep(0);
+    expect(clerk.loads).toEqual([]);
+    host.__internal_ClerkUICtor = ClerkUI;
+    scripts.ui.dispatchEvent(new Event("load"));
+    expect(await loading).toBe(clerk);
+    expect(clerk.loads).toEqual([{ ui: { ClerkUI } }]);
+  });
+
+  test("uses ClerkJS and its UI that arrived before the app", async () => {
     const early = fakeClerk();
-    expect(await loadClerk(new EventTarget() as unknown as HTMLScriptElement, { Clerk: early })).toBe(early);
-    const script = new EventTarget() as unknown as HTMLScriptElement;
-    const failing = loadClerk(script, {});
-    script.dispatchEvent(new Event("error"));
+    expect(await loadClerk({ clerk: script(), ui: script() }, { Clerk: early, __internal_ClerkUICtor: ClerkUI })).toBe(early);
+    expect(early.loads).toEqual([{ ui: { ClerkUI } }]);
+  });
+
+  test("refuses when the ClerkJS script failed", async () => {
+    const scripts = { clerk: script(), ui: script() };
+    const failing = loadClerk(scripts, { __internal_ClerkUICtor: ClerkUI });
+    scripts.clerk.dispatchEvent(new Event("error"));
     await expect(failing).rejects.toThrow("sign-in did not load");
+  });
+
+  test("refuses without loading ClerkJS when the UI is missing, whether its script failed or the page has none", async () => {
+    const scripts = { clerk: script(), ui: script() };
+    const clerk = fakeClerk();
+    const failing = loadClerk(scripts, { Clerk: clerk });
+    scripts.ui.dispatchEvent(new Event("error"));
+    await expect(failing).rejects.toThrow("sign-in did not load");
+    await expect(loadClerk({ clerk: script(), ui: null }, { Clerk: clerk })).rejects.toThrow("sign-in did not load");
+    expect(clerk.loads).toEqual([]);
   });
 });
 

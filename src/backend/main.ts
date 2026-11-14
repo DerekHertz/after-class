@@ -54,7 +54,7 @@ import type { AssessableClaim, BoundaryJudgment, BoundaryWindow, Evidence, Frame
 import { heldMessage } from "../shared/allowance";
 import { LOCAL_USER, ensureLocalUser, openDb, scopeDb, signedInUsers, userForIdentity } from "./db";
 import type { Db, UserDb } from "./db";
-import { clerkScriptUrl, createClerkVerifier, frontendApiOf } from "./clerk";
+import { clerkScriptUrl, clerkUiScriptUrl, createClerkVerifier, frontendApiOf } from "./clerk";
 import { createDevices, isDeviceToken } from "./devices";
 import type { Devices } from "./devices";
 import type { ClerkConfig, Rejection, Verifier } from "./clerk";
@@ -709,7 +709,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
         hosted: {
           publicOrigin: auth.publicOrigin,
           extensionId,
-          clerk: { scriptUrl: clerkScriptUrl(auth.frontendApi), publishableKey: auth.publishableKey },
+          clerk: { scriptUrl: clerkScriptUrl(auth.frontendApi), uiScriptUrl: clerkUiScriptUrl(auth.frontendApi), publishableKey: auth.publishableKey },
           userFor: hostedCallers(clerkUsers(createClerkVerifier(auth.clerk), rawDb, (reason) => reportOnce("sign-in", new Error(`a session token was refused (${reason})`))), devices),
           devices,
         },

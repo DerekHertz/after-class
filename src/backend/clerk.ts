@@ -12,7 +12,7 @@
  * request, so a flood of unknown kids cannot turn into a flood of fetches. With no fresh keys, every token is refused.
  *
  * Also here: what the review app needs to load ClerkJS. The publishable key encodes the Frontend API host, which serves
- * the pinned ClerkJS build.
+ * the pinned ClerkJS build and the pinned build of its UI.
  */
 
 export type ClerkConfig = {
@@ -44,6 +44,8 @@ const SUBJECT_MAX = 256;
 
 /** The ClerkJS build the review app loads. Pinned to an exact version at least 7 days old. */
 export const CLERK_JS_VERSION = "6.42.2";
+/** ClerkJS 6 ships its prebuilt UI as this separate package, released together with ClerkJS: keep the two from one release. */
+export const CLERK_UI_VERSION = "1.42.3";
 
 const SEGMENT = /^[A-Za-z0-9_-]+$/;
 const RSA = { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" } as const;
@@ -165,3 +167,4 @@ export function frontendApiOf(publishableKey: string): string | null {
 }
 
 export const clerkScriptUrl = (frontendApi: string) => `https://${frontendApi}/npm/@clerk/clerk-js@${CLERK_JS_VERSION}/dist/clerk.browser.js`;
+export const clerkUiScriptUrl = (frontendApi: string) => `https://${frontendApi}/npm/@clerk/ui@${CLERK_UI_VERSION}/dist/ui.browser.js`;
