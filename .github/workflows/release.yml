@@ -72,7 +72,7 @@ jobs:
           pushed=$(docker push "${image}:${COMMIT}")
           printf '%s\n' "$pushed"
           digest=$(printf '%s\n' "$pushed" | sed -n -E "s/^${COMMIT}: digest: (sha256:[0-9a-f]{64}) size: [0-9]+$/\1/p")
-          docker buildx imagetools create --tag "${image}:${TAG}" "${image}@${digest}"
+          docker buildx imagetools create --prefer-index=false --tag "${image}:${TAG}" "${image}@${digest}"
           for ref in "${image}:${COMMIT}" "${image}:${TAG}"; do
             now=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$ref")
             if [ "$now" != "$digest" ]; then
