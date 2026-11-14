@@ -16,6 +16,10 @@
  * name that origin instead of 127.0.0.1:4317, and the extension connects through the
  * web app instead of taking a pasted pairing token (src/extension/worker/backend.ts).
  * Unset, the build is the local one, unchanged.
+ *
+ * A hosted build also carries the public key in src/extension/hosted-key.txt as the manifest's `key`, so Chrome gives
+ * it the same id, HOSTED_EXTENSION_ID, on every machine that loads it. The server allows only that id, through the
+ * beta's `extension_id` Terraform variable. The private key is kept outside the repo and is needed only to pack a .crx.
  */
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -86,12 +90,24 @@ export function hostedOriginFrom(value: string | undefined): string | null {
 
 type Manifest = Record<string, unknown> & { name: string; host_permissions: string[] };
 
+/** The hosted build's public key, base64 DER, as Chrome reads a manifest `key`. */
+export const HOSTED_KEY = readFileSync(join(SRC, "hosted-key.txt"), "utf8").trim();
+
+/** Chrome's extension id for a manifest key: the first 128 bits of its SHA-256, each hex digit written as a to p. */
+export function extensionIdFromKey(key: string): string {
+  const hex = new Bun.CryptoHasher("sha256").update(Buffer.from(key, "base64")).digest("hex").slice(0, 32);
+  return [...hex].map((h) => String.fromCharCode(97 + parseInt(h, 16))).join("");
+}
+
+export const HOSTED_EXTENSION_ID = extensionIdFromKey(HOSTED_KEY);
+
 /** A hosted build reaches its backend instead of the local one, and only that backend's pages may hand it a connect code. */
 export function hostedManifest(manifest: Manifest, origin: string): Manifest {
   return {
     ...manifest,
     host_permissions: manifest.host_permissions.map((p) => (p === LOCAL_HOST_PERMISSION ? `${origin}/*` : p)),
     externally_connectable: { matches: [`${origin}/*`] },
+    key: HOSTED_KEY,
   };
 }
 
@@ -130,6 +146,7 @@ export async function buildExtension(outDir: string, options: BuildOptions = {})
   if (missing.length > 0) throw new Error(`manifest references files that were not built: ${missing.join(", ")}`);
 
   console.log(`built ${readdirSync(out).filter((f) => !f.endsWith(".map")).join(", ")} into ${out}`);
+  if (hostedOrigin !== null) console.log(`hosted build for ${hostedOrigin}, extension id ${HOSTED_EXTENSION_ID}`);
 
   const copyTo = process.env.AFTERCLASS_EXT_OUT;
   if (copyTo) copyBuild(out, resolve(copyTo));

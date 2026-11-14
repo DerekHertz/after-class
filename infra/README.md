@@ -57,7 +57,7 @@ This AWS account is a member account that AWS manages through its account and pr
 - `availability_zone` defaults to `us-east-2a` and is pinned, so a change in the zone offerings never replaces the data volume. A precondition checks that the instance type is offered there.
 - `caddy_image` is pinned by version and digest. To update it, read the new index digest from the registry and change both.
 - `clerk_publishable_key` is required. It is the `pk_live_...` or `pk_test_...` key from Clerk's API keys page, and it is public. Terraform derives the issuer and the JWKS URL from it and sets the app's public origin from `public_url`. Keep it in `infra/beta/terraform.tfvars`.
-- `extension_id` defaults to `null`, which lets no extension connect. Set it to the Chrome Web Store id once the listing exists.
+- `extension_id` defaults to `null`, which lets no extension connect. For the beta, set it to `jambcaokhnaonnemlbpnppijaojlohgl`, the id of the hosted build (`AFTERCLASS_EXT_BACKEND=https://useafterclass.com bun run build:ext`), which a pinned manifest key keeps the same on every machine. Change it to the Chrome Web Store id once the listing exists. Changing it replaces the instance on apply.
 
 ## Commands, in order
 
