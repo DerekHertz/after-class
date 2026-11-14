@@ -547,10 +547,25 @@ const DEVICE = "/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${DATA_VOLUME_ID
 const XFS_MAGIC = "XFSB";
 
 /**
- * One server and its data volume. The volume is a 4 MiB file of zeros, as a new EBS volume reads. The stubbed mkfs.xfs
- * writes the xfs magic at its start, and the stubbed mount succeeds only on a file that starts with it. mountpoint reports
- * /data mounted after a mount of /data. head, tr, wc and flock are the real tools.
+ * One server and its data volume. The volume is a 4 MiB file, zeros unless the test gives contents. The stubbed mkfs.xfs
+ * refuses a label over 12 characters as the real one does, and writes the xfs magic at the start of the disk. The stubbed
+ * mount succeeds only on a file that starts with that magic, and mountpoint reports /data mounted after a mount of /data.
+ * The stubbed blkid exits 2 on a readable disk and 4 on a missing one, as blkid -p does for a disk with no signature.
+ * flock is the real tool.
  */
+const XFS_LABEL_MAX = 12;
+
+/** Deterministic bytes that read as random: no zero run, no signature. */
+function noise(length: number): Buffer {
+  const out = Buffer.alloc(length);
+  let state = 0x9e3779b9;
+  for (let i = 0; i < length; i++) {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    out[i] = (state >>> 24) | 1;
+  }
+  return out;
+}
+
 class DataVolume {
   readonly host = makeHost("afterclass-volume-test-");
   readonly disk = join(this.host.root, "disk.img");
@@ -563,10 +578,12 @@ class DataVolume {
     writeFileSync(join(host.root, "fstab"), "UUID=root / xfs defaults 0 1\n");
     stub(host.bin, "sleep", "exit 0");
     stub(host.bin, "wipefs", "exit 0");
+    stub(host.bin, "blkid", `[ -e ${disk} ] || exit 4\nexit 2`);
     stub(
       host.bin,
       "mkfs.xfs",
-      `echo "mkfs.xfs $*" >> ${host.log}\n/bin/sleep ${opts.mkfsSeconds ?? 0}\nprintf ${XFS_MAGIC} | dd of=${disk} conv=notrunc status=none`,
+      `echo "mkfs.xfs $*" >> ${host.log}
+while getopts L: opt; do [ "$opt" = L ] && [ "\${#OPTARG}" -gt ${XFS_LABEL_MAX} ] && { echo "Invalid value $OPTARG for -L option" >&2; exit 1; }; done\n/bin/sleep ${opts.mkfsSeconds ?? 0}\nprintf ${XFS_MAGIC} | dd of=${disk} conv=notrunc status=none`,
     );
     stub(
       host.bin,
@@ -689,9 +706,21 @@ describe("afterclass-format-data", () => {
     const volume = new DataVolume();
     const run = volume.format();
     expect(run.status).toBe(0);
-    expect(volume.log).toContain(`mkfs.xfs -L afterclass-data ${volume.disk}`);
+    expect(volume.log).toContain(`mkfs.xfs -L afterclass ${volume.disk}`);
     expect(volume.run("afterclass-bootstrap").status).toBe(0);
     expect(volume.log).toContain("systemctl start afterclass-app.service");
+  });
+
+  test("a new volume whose first MiB is random data with no signature is formatted, once, with a label XFS accepts and without -f", () => {
+    const volume = new DataVolume({ contents: Buffer.concat([Buffer.alloc(4096), noise(1_044_480), Buffer.alloc(3 * 1024 * 1024)]) });
+    const run = volume.format();
+    expect(run.output).not.toContain("nothing was formatted");
+    expect(run.status).toBe(0);
+    const calls = volume.log.filter((line) => line.startsWith("mkfs.xfs"));
+    expect(calls).toEqual([`mkfs.xfs -L afterclass ${volume.disk}`]);
+    const label = calls[0]!.split(" ")[2]!;
+    expect(label.length).toBeLessThanOrEqual(XFS_LABEL_MAX);
+    expect(calls[0]).not.toMatch(/ -\w*f/);
   });
 
   test("without the matching volume id it formats nothing", () => {
@@ -721,7 +750,9 @@ describe("afterclass-format-data", () => {
   const refusals: [string, (volume: DataVolume) => void][] = [
     ["/data is mounted", (volume) => volume.markMounted()],
     ["the device cannot be read", (volume) => rmSync(volume.disk)],
-    ["one nonzero byte sits in the first MiB, with every probe silent", (volume) => writeFileSync(volume.disk, Buffer.concat([Buffer.alloc(700_000), Buffer.from([1]), Buffer.alloc(3_000_000)]))],
+    ["blkid finds a signature", (volume) => stub(volume.host.bin, "blkid", "echo 'TYPE=\"ext4\"'; exit 0")],
+    ["blkid fails with a read error", (volume) => stub(volume.host.bin, "blkid", "echo 'blkid: error reading' >&2; exit 4")],
+    ["blkid fails without a status of its own", (volume) => stub(volume.host.bin, "blkid", "exit 1")],
     ["wipefs finds a signature past the first MiB", (volume) => stub(volume.host.bin, "wipefs", "echo gpt")],
     ["wipefs fails", (volume) => stub(volume.host.bin, "wipefs", "echo 'wipefs: Input/output error' >&2; exit 1")],
     ["mount finds a filesystem the other checks missed", (volume) => stub(volume.host.bin, "mount", "exit 0")],
@@ -737,17 +768,24 @@ describe("afterclass-format-data", () => {
     });
   }
 
-  const haveTools = Bun.which("wipefs") !== null && Bun.which("mkfs.ext4") !== null;
-  test.skipIf(!haveTools)("the real wipefs and head refuse an ext4 image and pass a blank one", () => {
+  const haveTools = Bun.which("wipefs") !== null && Bun.which("blkid") !== null && Bun.which("mkfs.ext4") !== null;
+  test.skipIf(!haveTools)("the real blkid and wipefs refuse an ext4 image and pass a blank one and one of random data", () => {
     const used = new DataVolume();
     expect(Bun.spawnSync(["mkfs.ext4", "-q", "-F", used.disk]).exitCode).toBe(0);
     rmSync(join(used.host.bin, "wipefs"));
+    rmSync(join(used.host.bin, "blkid"));
     expect(used.format().status).not.toBe(0);
     expect(used.count("mkfs.xfs")).toBe(0);
 
     const blank = new DataVolume();
     rmSync(join(blank.host.bin, "wipefs"));
+    rmSync(join(blank.host.bin, "blkid"));
     expect(blank.format().status).toBe(0);
+
+    const random = new DataVolume({ contents: Buffer.concat([Buffer.alloc(4096), noise(1_044_480), Buffer.alloc(3 * 1024 * 1024)]) });
+    rmSync(join(random.host.bin, "wipefs"));
+    rmSync(join(random.host.bin, "blkid"));
+    expect(random.format().status).toBe(0);
   });
 });
 
