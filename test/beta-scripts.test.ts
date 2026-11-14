@@ -1,71 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { tmpDir } from "./tmp";
-
-const FILES = resolve(import.meta.dir, "../infra/beta/files");
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { FILES, type Host, installScript, makeHost, readLog, runScript, stub } from "./beta-host";
 
 const OLD = "a".repeat(40);
 const NEW = "b".repeat(40);
 const OLDER = "c".repeat(40);
 const OLDEST = "d".repeat(40);
-
-function stub(dir: string, name: string, body: string): void {
-  const path = join(dir, name);
-  writeFileSync(path, `#!/bin/bash\n${body}\n`);
-  chmodSync(path, 0o755);
-}
-
-interface Host {
-  readonly root: string;
-  readonly bin: string;
-  readonly log: string;
-}
-
-/** A temp tree that stands in for one server's root: /data, /etc/afterclass and /usr/local/sbin. */
-function makeHost(prefix: string): Host {
-  const root = tmpDir(prefix);
-  const bin = join(root, "bin");
-  mkdirSync(bin);
-  mkdirSync(join(root, "data/afterclass/images"), { recursive: true });
-  writeFileSync(join(root, "settings.env"), "APP_PORT=8080\nAWS_REGION=us-east-2\nECR_REGISTRY=registry.test\nECR_REPOSITORY=afterclass-api\n");
-  const log = join(root, "calls.log");
-  writeFileSync(log, "");
-  return { root, bin, log };
-}
-
-function readLog(host: Host): string[] {
-  return readFileSync(host.log, "utf8").split("\n").filter(Boolean);
-}
-
-/**
- * Copies a real script into the host with every absolute path of the real server pointed into the temp tree. One pass
- * replaces every key, longest first, so a replacement is never rewritten by a later key.
- */
-function installScript(host: Host, name: string, extra: Record<string, string> = {}): string {
-  const paths: Record<string, string> = {
-    "/etc/afterclass/settings.env": join(host.root, "settings.env"),
-    "/run/afterclass-deploy.lock": join(host.root, "lock"),
-    "/data/afterclass": join(host.root, "data/afterclass"),
-    ...extra,
-  };
-  const keys = Object.keys(paths).sort((a, b) => b.length - a.length);
-  const pattern = new RegExp(keys.map((key) => key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g");
-  const text = readFileSync(join(FILES, `${name}.sh`), "utf8")
-    .replace(/\/usr\/local\/sbin\/(afterclass-[a-z-]+)/g, join(host.root, "$1"))
-    .replace(pattern, (key) => paths[key]!);
-  expect(text).not.toContain("/usr/local/sbin");
-  const path = join(host.root, name);
-  writeFileSync(path, text);
-  return path;
-}
-
-function runScript(host: Host, name: string, args: string[]): { status: number; stdout: string; stderr: string } {
-  const result = Bun.spawnSync(["bash", installScript(host, name), ...args], {
-    env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` },
-  });
-  return { status: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString() };
-}
 
 interface DeployRun {
   readonly status: number;
@@ -87,6 +28,7 @@ function runDeploy(opts: {
   unhealthy?: string[];
   pruneFails?: boolean;
   saveFails?: boolean;
+  unmounted?: boolean;
 }): DeployRun {
   const host = makeHost("afterclass-deploy-test-");
   const state = join(host.root, "data/afterclass/current-tag");
@@ -94,7 +36,7 @@ function runDeploy(opts: {
   const restartFails = (opts.restartFails ?? []).join(" ");
   const unhealthy = (opts.unhealthy ?? []).join(" ");
 
-  stub(host.bin, "mountpoint", "exit 0");
+  stub(host.bin, "mountpoint", opts.unmounted ? "exit 1" : "exit 0");
   stub(host.bin, "sleep", "exit 0");
   stub(host.bin, "journalctl", "exit 0");
   stub(host.bin, "curl", `tag=$(cat ${state}); case " ${unhealthy} " in *" $tag "*) exit 22;; esac; exit 0`);
@@ -174,6 +116,14 @@ describe("afterclass-deploy", () => {
     const run = runDeploy({ previous: OLD, next: NEW, unhealthy: [NEW] });
     expect(run.log).toContain(`save ${OLD}`);
     expect(run.log.some((line) => line.startsWith(`save ${NEW}`))).toBe(false);
+  });
+
+  test("an unmounted /data stops the deploy before it pulls, writes the tag or restarts anything", () => {
+    const run = runDeploy({ previous: OLD, next: NEW, unmounted: true });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("/data is not mounted");
+    expect(run.tag).toBe(OLD);
+    expect(run.log).toEqual([]);
   });
 
   test("a failed save after a rollback is still reported, and the run still fails", () => {
@@ -572,6 +522,23 @@ describe("afterclass-bootstrap", () => {
     expect(readFileSync(join(volume.host.root, "fstab"), "utf8").match(/ xfs defaults,nofail/g)).toHaveLength(1);
   });
 
+  test("waits while a format holds the lock, then mounts the filesystem the format wrote", async () => {
+    const volume = new DataVolume();
+    const holding = join(volume.host.root, "holding");
+    const format = Bun.spawn([
+      "flock",
+      join(volume.host.root, "format.lock"),
+      "bash",
+      "-c",
+      `touch ${holding}; /bin/sleep 1; printf ${XFS_MAGIC} | dd of=${volume.disk} conv=notrunc status=none`,
+    ]);
+    while (!existsSync(holding)) await Bun.sleep(10);
+    const run = volume.run("afterclass-bootstrap");
+    expect(await format.exited).toBe(0);
+    expect(run.status).toBe(0);
+    expect(volume.log).toContain("systemctl start afterclass-app.service");
+  });
+
   test("a device that never appears fails without touching fstab", () => {
     const volume = new DataVolume();
     rmSync(volume.disk);
@@ -647,6 +614,23 @@ describe("afterclass-format-data", () => {
     rmSync(join(blank.host.bin, "wipefs"));
     expect(blank.format().status).toBe(0);
   });
+});
+
+/** The values of `key` in the [Unit] section of a systemd unit file, split on spaces as systemd lists them. */
+function unitValues(unit: string, key: string): string[] {
+  const section = unit.split(/^\[/m).find((part) => part.startsWith("Unit]")) ?? "";
+  return section
+    .split("\n")
+    .filter((line) => line.startsWith(`${key}=`))
+    .flatMap((line) => line.slice(key.length + 1).trim().split(/\s+/));
+}
+
+describe("beta units", () => {
+  for (const name of ["afterclass-app.service", "afterclass-caddy.service"]) {
+    test(`${name} refuses to start without the /data mount`, () => {
+      expect(unitValues(readFileSync(join(FILES, name), "utf8"), "RequiresMountsFor")).toContain("/data");
+    });
+  }
 });
 
 describe("beta container wiring", () => {

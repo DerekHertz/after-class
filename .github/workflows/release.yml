@@ -1,0 +1,36 @@
+name: release
+
+# A pushed v<major>.<minor>.<patch> tag becomes a GitHub Release with generated notes. The tag must be on master and equal
+# the version in package.json at the tagged commit. A tag push runs this file and the check as the tag has them, so the
+# tag ruleset (infra/github/tag-ruleset.json) decides who can cut a release. Deploying it is a separate, approved run of
+# deploy-beta (infra/README.md, Releases).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - name: The tag is on master and equals the package version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: bun scripts/check-release-tag.ts "$TAG"
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "$TAG"

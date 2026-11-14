@@ -13,6 +13,9 @@ Restart=always
 RestartSec=5
 TimeoutStartSec=300
 TimeoutStopSec=130
+# Holds keys.env while the app runs. systemd creates it on tmpfs at each start and removes it at each stop.
+RuntimeDirectory=afterclass-app
+RuntimeDirectoryMode=0700
 ExecStartPre=-/usr/bin/docker rm -f afterclass-app
 ExecStart=/usr/local/sbin/afterclass-app-start
 ExecStop=/usr/bin/docker stop -t 120 afterclass-app

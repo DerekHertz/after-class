@@ -33,8 +33,8 @@ Nothing here has been planned or applied. Derek runs every command below, with `
 - An Elastic IP on a separate network interface, so the address is on the instance before its first boot command and survives a replacement.
 - A `t4g.small` Amazon Linux 2023 ARM instance. The AMI comes from the SSM public parameter, IMDSv2 is required and the root volume is encrypted gp3. There is no key pair. Session Manager is the way in.
 - A separate encrypted gp3 data volume of 20 GB with `prevent_destroy`, attached at `/dev/sdf` and mounted at `/data` by its volume id. Nothing formats it at boot. A Data Lifecycle Manager policy snapshots it daily and keeps 7.
-- An instance role with `AmazonSSMManagedInstanceCore`, ECR pull from the shared repository only and CloudWatch Logs write to its own log group (14 days).
-- Cloud-init (`user_data`) installs Docker, mounts `/data` once it is formatted, and sets up two systemd units. `afterclass-app` runs the image from ECR, and `afterclass-caddy` runs the pinned Caddy image as the reverse proxy on ports 80 and 443. Both containers join one Docker bridge network, `afterclass`, and Caddy proxies to `afterclass-app:8080`. Neither uses host networking, so the instance metadata hop limit of 1 keeps both away from the instance role's credentials. Both drop every capability, Caddy keeps only `NET_BIND_SERVICE`, both set `no-new-privileges`, and Caddy's root file system is read-only. Caddy's certificates live on `/data/caddy`. The app keeps its database in `/data/db` and its config folder in `/data/config`.
+- An instance role with `AmazonSSMManagedInstanceCore`, ECR pull from the shared repository only, CloudWatch Logs write to its own log group (14 days), `ssm:GetParameter` on `/afterclass/beta/*` only, and `kms:Decrypt` on the `aws/ssm` key only through Systems Manager in `us-east-2`. The managed policy allows reading every parameter, and the `aws/ssm` key policy lets any principal in the account decrypt through Systems Manager, so the role also denies every `ssm:GetParameter*` outside `/afterclass/beta/*`.
+- Cloud-init (`user_data`) installs Docker, mounts `/data` once it is formatted, and sets up two systemd units. `afterclass-app` runs the image from ECR, and `afterclass-caddy` runs the pinned Caddy image as the reverse proxy on ports 80 and 443. Both containers join one Docker bridge network, `afterclass`, and Caddy proxies to `afterclass-app:8080`. Neither uses host networking, so the instance metadata hop limit of 1 keeps both away from the instance role's credentials. Both drop every capability, Caddy keeps only `NET_BIND_SERVICE`, both set `no-new-privileges`, and Caddy's root file system is read-only. Caddy's certificates live on `/data/caddy`. The app keeps its database in `/data/db`. Its config folder is `/run/afterclass-app`, mounted read-only at `/data/config` and described in "Keys" below.
 - A deploy role for `deploy-beta.yml`, a Systems Manager document that runs the deploy script with a commit hash, and an SSM parameter that holds the current instance id.
 - With `domain` set, an A record for the apex in the existing Route 53 hosted zone.
 
@@ -55,6 +55,8 @@ Nothing here has been planned or applied. Derek runs every command below, with `
 - `domain` defaults to `null`: no DNS record, HTTP only on the Elastic IP. Set it to the apex domain, whose Route 53 hosted zone must exist, to turn on automatic HTTPS. Caddy gets its certificate from Let's Encrypt, which validates from the internet, so Terraform refuses a `domain` unless `ingress_cidrs` includes `0.0.0.0/0`. The exact apply is in "Turning on HTTPS" below.
 - `availability_zone` defaults to `us-east-2a` and is pinned, so a change in the zone offerings never replaces the data volume. A precondition checks that the instance type is offered there.
 - `caddy_image` is pinned by version and digest. To update it, read the new index digest from the registry and change both.
+- `clerk_publishable_key` is required. It is the `pk_live_...` or `pk_test_...` key from Clerk's API keys page, and it is public. Terraform derives the issuer and the JWKS URL from it and sets the app's public origin from `public_url`. Keep it in `infra/beta/terraform.tfvars`.
+- `extension_id` defaults to `null`, which lets no extension connect. Set it to the Chrome Web Store id once the listing exists.
 
 ## Commands, in order
 
@@ -80,12 +82,19 @@ Derek's first beta setup.
    terraform apply shared.tfplan
    ```
 
-3. Create the beta server.
+3. Store the app's keys in Parameter Store, then create the beta server. Derek's two parameters are already in place, so on his account this is only for a rotation. The keys must exist before the plan, because the `aws/ssm` key that Terraform looks up appears with the account's first SecureString parameter. Each command reads the value from the terminal without echo and hands it to the CLI on stdin, so it stays out of the shell history and out of the process list that `ps` shows. A value must be one line of printable characters without spaces or quotes, or the app refuses to start.
+
+   ```
+   read -rs JEV_KEY && printf '%s' "$JEV_KEY" | aws ssm put-parameter --region us-east-2 --type SecureString \
+     --overwrite --name /afterclass/beta/TYPESAFE_API_KEY --value file:///dev/stdin && unset JEV_KEY
+   read -rs ANTHROPIC_KEY && printf '%s' "$ANTHROPIC_KEY" | aws ssm put-parameter --region us-east-2 --type SecureString \
+     --overwrite --name /afterclass/beta/AFTERCLASS_ANTHROPIC_API_KEY --value file:///dev/stdin && unset ANTHROPIC_KEY
+   ```
 
    ```
    cd ../beta
    terraform init -backend-config="bucket=afterclass-tfstate-<account id>"
-   terraform plan -var='ingress_cidrs=["<your public IP>/32"]' -out=beta.tfplan
+   terraform plan -var='ingress_cidrs=["<your public IP>/32"]' -var='clerk_publishable_key=<pk_...>' -out=beta.tfplan
    terraform apply beta.tfplan
    ```
 
@@ -112,11 +121,46 @@ Derek's first beta setup.
    - `ECR_REPOSITORY` from the `ecr_repository_name` output of `shared/`
    - `BETA_PUBLIC_CHECK` set to `false`, until `ingress_cidrs` includes `0.0.0.0/0`. A GitHub runner cannot reach the server while only Derek's address is allowed. The server's own check of `/health` still gates the deploy.
 
-5. Run the `deploy-beta` workflow from `master` and approve it. It builds the arm64 image, pushes it to the shared repository by commit hash, and has the server pull it and restart the app. The server checks `/health` itself and rolls back to the previous image if the new one does not turn healthy. A healthy image is also saved on the server's data volume, and the workflow prints a warning if that save failed. From the allowed address, `curl <public_url>/health` returns `{"ok":true}`.
+5. Cut a release and deploy it, as in "Releases" below. The app runs live, so the flow document's conditions for the first hosted live call apply: the spending limits are merged, Derek has set the amounts, and Derek approves the deploy. The deploy builds the arm64 image, pushes it to the shared repository by commit hash, and has the server pull it and restart the app. The server checks `/health` itself and rolls back to the previous image if the new one does not turn healthy. A healthy image is also saved on the server's data volume, and the workflow prints a warning if that save failed. From the allowed address, `curl <public_url>/health` returns `{"ok":true}`.
 
 6. To open a shell, run `aws ssm start-session --target <instance_id output>`. This needs the Session Manager plugin for the AWS CLI on Derek's machine. The container logs are in the CloudWatch log group `/afterclass-beta`, in the streams `app` and `caddy`.
 
 When sign-in lands and the domain exists, run `terraform apply` in `beta/` again with `ingress_cidrs=["0.0.0.0/0"]` and `domain=<apex domain>`, then delete the `BETA_PUBLIC_CHECK` variable and set `BETA_URL` again from the new `public_url`. The change replaces the instance, because the Caddyfile is part of `user_data`. The Elastic IP, the data volume and the certificates stay, and the new instance starts the last deployed image by itself.
+
+## Keys
+
+The app runs live, with Claude through the Messages API and Clerk sign-in, so it needs `TYPESAFE_API_KEY` and `AFTERCLASS_ANTHROPIC_API_KEY`. ElevenLabs stays off in the beta, so there is no key for it. The keys are SecureString parameters under `/afterclass/beta/`, encrypted with the default `aws/ssm` key. No key is in Terraform, its state, `user_data`, the image or the data volume.
+
+At every start of the app unit, `afterclass-fetch-keys` reads both parameters and writes `keys.env`, mode 0600 and owned by the container's user, into `/run/afterclass-app`. systemd creates that folder on tmpfs at each start and removes it at each stop. The script refuses a folder that is not on tmpfs, prints no value even under `bash -x`, and fails the start when a parameter is missing, unreadable, or not one line of printable characters without spaces or quotes. The app container mounts the folder read-only at `/data/config`, where the image's `AFTERCLASS_CONFIG_DIR` points. The failure is a line that starts with `afterclass-fetch-keys:` in `journalctl -u afterclass-app`, and systemd tries again every 5 seconds.
+
+To rotate a key, put the new value with the step 3 command and restart the app, through Session Manager: `systemctl restart afterclass-app`. A deploy restarts it too.
+
+## Releases
+
+A release is a `v<major>.<minor>.<patch>` tag on a commit on `master` whose `package.json` has the same version. The first is `v0.1.0`.
+
+1. In a pull request, set `version` in `package.json` to the new version, and merge it.
+2. Tag the merge commit and push the tag. The `release` workflow checks that the tag is on `master` and equals the package version, and creates a GitHub Release with generated notes.
+
+   ```
+   git switch master && git pull
+   git tag -a v0.1.0 -m v0.1.0
+   git push origin v0.1.0
+   ```
+
+3. Deploy the tag, then approve the run in the `production` environment.
+
+   ```
+   gh workflow run deploy-beta --ref master -f tag=v0.1.0
+   ```
+
+   The workflow runs from `master`, because the environment allows no other branch. With `master`'s own `scripts/check-release-tag.ts`, it refuses a tag whose commit is not on a freshly fetched `master` or whose `package.json` there has another version. Only then does it check out the tag's commit, and it deploys the image built from the tag's commit. The image tag on ECR and on the server is still that commit's hash. Redeploying an older tag is a rollback.
+
+Only Derek may create, move or delete a `v*` tag. The ruleset is `infra/github/tag-ruleset.json`. It applies to every account except the repository admin role, which on this personal repository is Derek alone. Because Derek bypasses it, the rule against force pushes does not stop Derek himself, so never move a pushed release tag. Apply it once:
+
+```
+gh api --method POST repos/DerekHertz/after-class/rulesets --input infra/github/tag-ruleset.json
+```
 
 ## Turning on HTTPS
 

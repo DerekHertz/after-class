@@ -1,10 +1,17 @@
 name: deploy-beta
 
-# Manual only. The job runs in the protected `production` environment, so Derek approves each run, and the AWS role's
-# trust policy accepts only that environment's token. The environment must allow deployments from master only, because
-# the token's subject carries no branch. It never runs on pull requests.
+# Manual only, run from master with a release tag. It deploys the image built from the tag's commit, which must be on
+# master and carry the same version in package.json. Master's check-release-tag.ts checks both before the tag's commit
+# is checked out, so no code from the tag runs first. The job runs in the protected `production` environment, so Derek
+# approves each run, and the AWS role's trust policy accepts only that environment's token. The environment must allow
+# deployments from master only, because the token's subject carries no branch. It never runs on pull requests.
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to deploy, for example v0.1.0
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -29,6 +36,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+
+      - id: release
+        name: The tag is a release of a commit on master
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          commit=$(bun scripts/check-release-tag.ts "$TAG")
+          echo "commit=${commit}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ steps.release.outputs.commit }}
 
       - id: aws
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
@@ -40,7 +66,7 @@ jobs:
         env:
           ACCOUNT_ID: ${{ steps.aws.outputs.aws-account-id }}
           ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-          IMAGE_TAG: ${{ github.sha }}
+          IMAGE_TAG: ${{ steps.release.outputs.commit }}
         run: |
           set -euo pipefail
           registry="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
@@ -61,7 +87,8 @@ jobs:
         env:
           BETA_INSTANCE_PARAMETER: ${{ vars.BETA_INSTANCE_PARAMETER }}
           BETA_DEPLOY_DOCUMENT: ${{ vars.BETA_DEPLOY_DOCUMENT }}
-          IMAGE_TAG: ${{ github.sha }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          IMAGE_TAG: ${{ steps.release.outputs.commit }}
         run: |
           set -euo pipefail
           instance_id=$(aws ssm get-parameter --name "$BETA_INSTANCE_PARAMETER" --query Parameter.Value --output text)
@@ -69,7 +96,7 @@ jobs:
             --instance-ids "$instance_id" \
             --document-name "$BETA_DEPLOY_DOCUMENT" \
             --parameters "tag=${IMAGE_TAG}" \
-            --comment "deploy ${IMAGE_TAG}" \
+            --comment "deploy ${RELEASE_TAG} ${IMAGE_TAG}" \
             --query Command.CommandId --output text)
           echo "command ${command_id} on ${instance_id}"
           # The server pulls the image, restarts the app and waits for its own /health, then rolls back on failure. It

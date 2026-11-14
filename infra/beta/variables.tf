@@ -105,3 +105,14 @@ variable "github_environment" {
   type        = string
   default     = "production"
 }
+
+variable "extension_id" {
+  description = "Chrome Web Store id of the hosted extension. Null lets no extension connect."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.extension_id == null ? true : can(regex("^[a-p]{32}$", var.extension_id))
+    error_message = "extension_id must be 32 letters from a to p."
+  }
+}
