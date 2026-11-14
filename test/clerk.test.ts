@@ -3,7 +3,7 @@
  * test asserts the reason, so a token refused for some other reason cannot make a test pass.
  */
 import { beforeAll, describe, expect, test } from "bun:test";
-import { CLERK_JS_VERSION, CLOCK_SKEW_S, clerkScriptUrl, createClerkVerifier, frontendApiOf } from "../src/backend/clerk";
+import { CLERK_JS_VERSION, CLERK_UI_VERSION, CLOCK_SKEW_S, clerkScriptUrl, clerkUiScriptUrl, createClerkVerifier, frontendApiOf } from "../src/backend/clerk";
 import type { VerifierOptions } from "../src/backend/clerk";
 import type { SigningKey } from "./clerk-fixtures";
 import { ISSUER, PUBLIC_ORIGIN, PUBLISHABLE_KEY, claims, fakeJwks, hs256WithPublicKey, sign, signingKey, tamper, unsigned } from "./clerk-fixtures";
@@ -121,11 +121,13 @@ describe("the key cache", () => {
 });
 
 describe("the publishable key", () => {
-  test("names the Frontend API host that serves the pinned ClerkJS build", () => {
+  test("names the Frontend API host that serves the pinned ClerkJS build and its UI", () => {
     expect(frontendApiOf(PUBLISHABLE_KEY)).toBe("clerk.afterclass.test");
     expect(frontendApiOf(`pk_live_${Buffer.from("clerk.example.com$").toString("base64")}`)).toBe("clerk.example.com");
     expect(clerkScriptUrl("clerk.afterclass.test")).toBe(`https://clerk.afterclass.test/npm/@clerk/clerk-js@${CLERK_JS_VERSION}/dist/clerk.browser.js`);
+    expect(clerkUiScriptUrl("clerk.afterclass.test")).toBe(`https://clerk.afterclass.test/npm/@clerk/ui@${CLERK_UI_VERSION}/dist/ui.browser.js`);
     expect(CLERK_JS_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(CLERK_UI_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
   test("anything else is refused, including a host that could break out of the URL", () => {

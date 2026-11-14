@@ -1,16 +1,23 @@
 import { expect, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 /** scripts/hosted-preview.ts: the real backend in hosted mode, and a fake Clerk that this spec routes the Clerk host to. */
 const APP = "http://127.0.0.1:8774";
 const FAKE_CLERK = "http://127.0.0.1:8775";
 
+/** Routes the Clerk host to the fake Clerk, letting `alter` replace one script's response. */
+const routeClerk = (page: Page, alter: (path: string, body: string) => { status: number; body: string } | null = () => null) =>
+  page.route("https://clerk.afterclass.test/**", async (route) => {
+    const url = new URL(route.request().url());
+    const response = await page.request.fetch(`${FAKE_CLERK}${url.pathname}${url.search}`);
+    const altered = alter(url.pathname, await response.text());
+    await route.fulfill(altered ? { ...altered, contentType: "text/javascript" } : { response });
+  });
+
 test("hosted sign-in: signed out shows the sign-in screen, signing in shows the account's lectures and a sign-out control", async ({ page }, info) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.route("https://clerk.afterclass.test/**", async (route) => {
-    const url = new URL(route.request().url());
-    await route.fulfill({ response: await page.request.fetch(`${FAKE_CLERK}${url.pathname}${url.search}`) });
-  });
+  await routeClerk(page);
 
   const html = await (await page.request.get(`${APP}/app/`)).text();
   expect(html).not.toContain("afterclass-token");
@@ -44,6 +51,22 @@ test("hosted sign-in: signed out shows the sign-in screen, signing in shows the 
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByRole("heading", { name: "Sign in to After Class" })).toBeVisible();
   await expect.poll(accountDatabases).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("when Clerk's UI does not arrive, or Clerk refuses to mount its sign-in, the page says sign-in could not load", async ({ page }) => {
+  await routeClerk(page, (path) => (path.endsWith("/ui.browser.js") ? { status: 404, body: "" } : null));
+  await page.goto(`${APP}/app/`);
+  await expect(page.getByRole("heading", { name: "Sign-in could not load" })).toBeVisible();
+
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.unrouteAll();
+  await routeClerk(page, (path, body) =>
+    path.endsWith("/clerk.browser.js") ? { status: 200, body: `${body}\nwindow.Clerk.mountSignIn = () => { throw new Error("mount refused"); };` } : null,
+  );
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Sign-in could not load" })).toBeVisible();
   expect(errors).toEqual([]);
 });
 

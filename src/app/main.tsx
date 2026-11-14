@@ -15,7 +15,7 @@ import { LOCAL_UNSENT_DB, browserIdb } from "./unsent";
 import { Link, usePathname } from "./ui";
 import { HomeScreen } from "./home";
 import { objectFrame } from "./room-object";
-import { SignInScreen, SignInUnavailable, SignOutButton, clerkScript, loadClerk } from "./sign-in";
+import { SignInScreen, SignInUnavailable, SignOutButton, clerkScripts, loadClerk } from "./sign-in";
 import { ConnectExtensionScreen, extensionIdOf } from "./connect";
 import type { ClerkClient } from "./sign-in";
 
@@ -80,11 +80,11 @@ function Hosted({ clerk, accounts }: { readonly clerk: ClerkClient; readonly acc
 }
 
 const root = createRoot(document.getElementById("root")!);
-const script = clerkScript(document);
-if (script === null) {
+const scripts = clerkScripts(document);
+if (scripts === null) {
   root.render(<AppearanceProvider><SceneShell><App services={servicesFor(readToken(), LOCAL_UNSENT_DB, browser)} extensionId={null} /></SceneShell></AppearanceProvider>);
 } else {
-  loadClerk(script).then(
+  loadClerk(scripts).then(
     (clerk) => root.render(<AppearanceProvider><Hosted clerk={clerk} accounts={followAccount(clerk, browser)} /></AppearanceProvider>),
     () => root.render(<AppearanceProvider><SceneShell><SignInUnavailable /></SceneShell></AppearanceProvider>),
   );

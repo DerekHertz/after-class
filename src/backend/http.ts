@@ -79,8 +79,8 @@ export type HostedAuth = {
   readonly publicOrigin: string;
   /** "" refuses every extension origin. */
   readonly extensionId: string;
-  /** The ClerkJS script the app page loads, and the publishable key it is loaded with. */
-  readonly clerk: { readonly scriptUrl: string; readonly publishableKey: string };
+  /** The ClerkJS script and its UI script the app page loads, and the publishable key ClerkJS is loaded with. */
+  readonly clerk: { readonly scriptUrl: string; readonly uiScriptUrl: string; readonly publishableKey: string };
   /** The user a bearer token names and which kind of token it is, or null when the token does not verify. */
   readonly userFor: (token: string) => Promise<Caller | null>;
   /** Connect codes, device tokens and their revocation. */
@@ -187,14 +187,15 @@ function injectToken(html: string, token: string): string {
 }
 
 /**
- * The hosted page: no token tag at all, ClerkJS loaded the way Clerk documents it, keyed by the script's attribute, and
- * the pinned extension's id, which the connect page sends the connect code to.
+ * The hosted page: no token tag at all, ClerkJS and its UI loaded the way Clerk documents them (the UI first, ClerkJS
+ * keyed by the script's attribute), and the pinned extension's id, which the connect page sends the connect code to.
  */
 function injectClerk(html: string, hosted: Pick<HostedAuth, "clerk" | "extensionId">): string {
   const { clerk } = hosted;
   const extension = `<meta name="afterclass-extension-id" content="${escapeAttr(hosted.extensionId)}">`;
-  const tag = `<script async crossorigin="anonymous" data-clerk-publishable-key="${escapeAttr(clerk.publishableKey)}" src="${escapeAttr(clerk.scriptUrl)}"></script>`;
-  return html.replace(TOKEN_META, "").replace(/<\/head>/i, () => `${extension}${tag}</head>`);
+  const ui = `<script defer crossorigin="anonymous" data-clerk-ui src="${escapeAttr(clerk.uiScriptUrl)}"></script>`;
+  const tag = `<script defer crossorigin="anonymous" data-clerk-publishable-key="${escapeAttr(clerk.publishableKey)}" src="${escapeAttr(clerk.scriptUrl)}"></script>`;
+  return html.replace(TOKEN_META, "").replace(/<\/head>/i, () => `${extension}${ui}${tag}</head>`);
 }
 
 type AppTarget = { readonly kind: "file"; readonly path: string } | { readonly kind: "index" } | { readonly kind: "missing" };

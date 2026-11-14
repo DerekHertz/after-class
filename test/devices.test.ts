@@ -149,7 +149,7 @@ function hostedServer(options: Parameters<typeof createDevices>[1] = {}) {
   const devices = createDevices(w.db, options);
   const server = serve({
     hosted: {
-      publicOrigin: PUBLIC_ORIGIN, extensionId: EXT_ID, clerk: { scriptUrl: "https://clerk.afterclass.test/clerk.js", publishableKey: PUBLISHABLE_KEY },
+      publicOrigin: PUBLIC_ORIGIN, extensionId: EXT_ID, clerk: { scriptUrl: "https://clerk.afterclass.test/clerk.js", uiScriptUrl: "https://clerk.afterclass.test/ui.js", publishableKey: PUBLISHABLE_KEY },
       userFor: hostedCallers(clerkUsers(verifier, w.db), devices), devices,
     },
     port: 0,

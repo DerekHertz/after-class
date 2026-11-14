@@ -26,6 +26,7 @@ import { EXTENSION_ORIGIN, EXT_ID, TOKEN, connectDevice, fixtureApp, raw, regist
 registerCleanup();
 
 const SCRIPT = "https://clerk.afterclass.test/npm/@clerk/clerk-js@6.42.2/dist/clerk.browser.js";
+const UI_SCRIPT = "https://clerk.afterclass.test/npm/@clerk/ui@1.42.3/dist/ui.browser.js";
 const PARAM_KIND: Record<string, IdKind> = { captureId: "cap", reviewId: "rvw", topicId: "cpt", evidenceId: "ev", noteId: "note", linkId: "lnk", observationId: "obs", deviceId: "dev" };
 
 let key: SigningKey;
@@ -39,7 +40,7 @@ function hostedServer() {
   const verifier = createClerkVerifier({ issuer: ISSUER, jwksUrl: "https://clerk.afterclass.test/.well-known/jwks.json", authorizedParties: [PUBLIC_ORIGIN] }, { fetch: fakeJwks([key]).fetch });
   const devices = createDevices(w.db);
   const server = serve({
-    hosted: { publicOrigin: PUBLIC_ORIGIN, extensionId: EXT_ID, clerk: { scriptUrl: SCRIPT, publishableKey: PUBLISHABLE_KEY }, userFor: hostedCallers(clerkUsers(verifier, w.db), devices), devices },
+    hosted: { publicOrigin: PUBLIC_ORIGIN, extensionId: EXT_ID, clerk: { scriptUrl: SCRIPT, uiScriptUrl: UI_SCRIPT, publishableKey: PUBLISHABLE_KEY }, userFor: hostedCallers(clerkUsers(verifier, w.db), devices), devices },
     port: 0,
     modulesFor: () => ({ ledger: { summary: () => ({ total: { known: 0, unknown: 0 } }) } as never, evidence: w.evidence, reviews: w.reviews }),
     appDir: fixtureApp(),
@@ -121,7 +122,9 @@ describe("hosted requests", () => {
     const page = await raw(s.port, "/app/", { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate" });
     expect(page.status).toBe(200);
     expect(page.body).not.toContain("afterclass-token");
-    expect(page.body).toContain(`<script async crossorigin="anonymous" data-clerk-publishable-key="${PUBLISHABLE_KEY}" src="${SCRIPT}"></script></head>`);
+    expect(page.body).toContain(
+      `<script defer crossorigin="anonymous" data-clerk-ui src="${UI_SCRIPT}"></script><script defer crossorigin="anonymous" data-clerk-publishable-key="${PUBLISHABLE_KEY}" src="${SCRIPT}"></script></head>`,
+    );
     expect(page.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
     const asset = await raw(s.port, "/app/main.js", { "Sec-Fetch-Site": "cross-site" });
     expect(asset.status).toBe(200);

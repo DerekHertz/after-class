@@ -3,11 +3,12 @@
  * behind a fake Clerk. Nothing reaches Clerk or a model provider. e2e/hosted-sign-in.spec.ts drives it.
  *
  *   AFTERCLASS_HOSTED_PREVIEW_PORT (default 8774)  the backend: app and API on http://127.0.0.1:<port>
- *   AFTERCLASS_FAKE_CLERK_PORT (default 8775)      the fake Clerk: the JWKS, a stub ClerkJS and a token endpoint
+ *   AFTERCLASS_FAKE_CLERK_PORT (default 8775)      the fake Clerk: the JWKS, a stub ClerkJS and UI, and a token endpoint
  *
- * The browser asks for ClerkJS at https://clerk.afterclass.test, the host the publishable key names; the spec routes
- * that host to the fake Clerk. The stub ClerkJS is labelled as a test stub on screen, and its "sign in" mints a real
- * RS256 session token that the backend verifies exactly as it would Clerk's.
+ * The browser asks for ClerkJS and its UI at https://clerk.afterclass.test, the host the publishable key names; the spec
+ * routes that host to the fake Clerk. Like ClerkJS 6, the stub mounts its sign-in only when its first `load` was handed
+ * the UI constructor that the stub UI script sets. The stub ClerkJS is labelled as a test stub on screen, and its
+ * "sign in" mints a real RS256 session token that the backend verifies exactly as it would Clerk's.
  *
  * It also builds the hosted extension for this origin into dist/hosted-preview-extension and pins the id Chrome gives
  * that folder when it is loaded unpacked, so e2e/connect-extension.spec.ts can connect a real extension. The seeded
@@ -18,7 +19,7 @@ import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { CLERK_JS_VERSION } from "../src/backend/clerk";
+import { CLERK_JS_VERSION, CLERK_UI_VERSION } from "../src/backend/clerk";
 import { mainHosted } from "../src/backend/main";
 import { buildExtension } from "./build-extension";
 
@@ -38,14 +39,18 @@ async function sessionToken(sub: string): Promise<string> {
   return `${input}.${Buffer.from(await crypto.subtle.sign(RSA, pair.privateKey, new TextEncoder().encode(input))).toString("base64url")}`;
 }
 
+const STUB_UI = `window.__internal_ClerkUICtor = class StubClerkUI {};`;
+
 const STUB = `(() => {
   const listeners = new Set();
   const KEY = "afterclass-stub-clerk-user";
+  let ui;
   const clerk = {
     user: null,
     session: null,
-    async load() { sync(); },
+    async load(options) { if (ui === undefined) ui = options?.ui?.ClerkUI ?? null; sync(); },
     mountSignIn(node) {
+      if (!ui) throw new Error("Clerk was not loaded with Ui components");
       node.innerHTML = '<div class="stub-clerk"><p><strong>Test stub</strong>, not Clerk. Clerk\\'s sign-in card appears here.</p><button type="button">Continue with Google</button></div>';
       node.querySelector("button").addEventListener("click", () => { sessionStorage.setItem(KEY, "user_preview"); sync(); });
     },
@@ -69,6 +74,7 @@ const fakeClerk = Bun.serve({
     const url = new URL(req.url);
     if (url.pathname === "/.well-known/jwks.json") return Response.json({ keys: [{ kty: "RSA", n, e, kid: "preview", alg: "RS256", use: "sig" }] });
     if (url.pathname === `/npm/@clerk/clerk-js@${CLERK_JS_VERSION}/dist/clerk.browser.js`) return new Response(STUB, { headers: { "Content-Type": "text/javascript" } });
+    if (url.pathname === `/npm/@clerk/ui@${CLERK_UI_VERSION}/dist/ui.browser.js`) return new Response(STUB_UI, { headers: { "Content-Type": "text/javascript" } });
     if (url.pathname === "/token") return new Response(await sessionToken(url.searchParams.get("sub") ?? ""), { headers: { "Access-Control-Allow-Origin": origin } });
     return new Response("not found", { status: 404 });
   },
