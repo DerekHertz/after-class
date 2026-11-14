@@ -11,13 +11,16 @@
 .scene-shell[data-scene="last-desk"] { --fr-bg: url('./assets/front-row-v2/rail-background.webp'); --fr-board-art: url('./assets/front-row-v2/rail-board.webp'); --fr-desk-art: url('./assets/front-row-v2/rail-desk.webp'); --fr-mat-art: url('./assets/front-row-v2/rail-mat.webp'); }
 .scene-shell[data-scene="study-bench"] { --fr-bg: url('./assets/front-row-v2/harbor-background.webp'); --fr-board-art: url('./assets/front-row-v2/harbor-board.webp'); --fr-desk-art: url('./assets/front-row-v2/harbor-desk.webp'); --fr-mat-art: url('./assets/front-row-v2/harbor-mat.webp'); }
 .scene-shell[data-scene="projection-booth"] { --fr-bg: url('./assets/front-row-v2/canal-background.webp'); --fr-board-art: url('./assets/front-row-v2/canal-board.webp'); --fr-desk-art: url('./assets/front-row-v2/canal-desk.webp'); --fr-mat-art: url('./assets/front-row-v2/canal-mat.webp'); }
-.front-row-art [data-extra="ledge-items"] { background-image: url('./assets/front-row-v2/rail-ledge-items.webp'); }
-.front-row-art [data-extra="vine"] { background-image: url('./assets/front-row-v2/rail-vine.webp'); }
-.front-row-art [data-extra="lamp"] { background-image: url('./assets/front-row-v2/harbor-lamp.webp'); }
-.front-row-art [data-extra="awning"] { background-image: url('./assets/front-row-v2/harbor-awning.webp'); }
-.front-row-art [data-extra="cushion"] { background-image: url('./assets/front-row-v2/harbor-cushion.webp'); }
-.front-row-art [data-extra="pull-tab"] { background-image: url('./assets/front-row-v2/canal-pull-tab.webp'); }
-.front-row-art [data-extra="projector"] { background-image: url('./assets/front-row-v2/canal-projector.webp'); }
+/* The extras are drawn only by the full layout (below), so the compact one, which draws no layer but the background, does not fetch them. */
+@media (min-width: 900px) and (min-height: 560px) {
+  .front-row-art [data-extra="ledge-items"] { background-image: url('./assets/front-row-v2/rail-ledge-items.webp'); }
+  .front-row-art [data-extra="vine"] { background-image: url('./assets/front-row-v2/rail-vine.webp'); }
+  .front-row-art [data-extra="lamp"] { background-image: url('./assets/front-row-v2/harbor-lamp.webp'); }
+  .front-row-art [data-extra="awning"] { background-image: url('./assets/front-row-v2/harbor-awning.webp'); }
+  .front-row-art [data-extra="cushion"] { background-image: url('./assets/front-row-v2/harbor-cushion.webp'); }
+  .front-row-art [data-extra="pull-tab"] { background-image: url('./assets/front-row-v2/canal-pull-tab.webp'); }
+  .front-row-art [data-extra="projector"] { background-image: url('./assets/front-row-v2/canal-projector.webp'); }
+}
 
 /* On every page the selected room is the backdrop and the navigation sits over the art as small chips, each with its own
    backing for legibility. There is no bar behind them. */
@@ -26,6 +29,9 @@
    background while a review loads or shows, and the room's plate on every other page. It is crisp,
    ignores the pointer and sits under the shell's content (the shell isolates). */
 .scene-shell::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--fr-plate) 50% 100% / cover no-repeat; }
+/* smooth-ok: the backdrop is smooth on purpose. The file holds the room once per plate pixel, and this draws it at 0.86 to 3.2 times that size. In
+   headless Chrome, against the doubled file this replaced, smooth drawing differs in 0 to 7.1 percent of pixels by more than 8 levels (at most 0.4 percent
+   by more than 32) from 390x844 at 3x to 3840x2160 at 2x, and pixelated drawing in 2.3 to 17.6 percent. The room's stage, which draws the same file, is pixelated. */
 .scene-shell:has(:is(.front-row, .review-loading))::before { background: var(--fr-bg) var(--fr-phone-x) 0 / cover no-repeat; }
 .scene-shell .scene-masthead { height: auto; max-width: none; margin: 0; padding: 8px 12px; gap: 8px; background: none; border: 0; color: var(--fr-bar-ink); }
 .scene-shell :is(.scene-masthead > a, .appearance-picker > summary, .scene-masthead > .sign-out) { display: flex; align-items: center; min-height: 44px; padding: 0 12px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); color: var(--fr-bar-ink); box-shadow: 0 3px 0 #00000040; }
@@ -174,6 +180,9 @@
 .front-row-buddy .quiet-status { align-self: flex-end; padding: 4px 8px; background: var(--fr-bar); color: var(--fr-bar-ink); font: 500 .95rem/1.2 'After Class Pixel', var(--font); }
 /* The folio and the notebook on the desk. The whole object is the button; it lifts when pointed at or focused. */
 .scene-shell .front-row-scene .front-row-object { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 44px; min-height: 44px; margin: 0; padding: 0 0 4px; border: 0; border-radius: 0; background: transparent; box-shadow: none; cursor: pointer; }
+/* smooth-ok: the closed folio and notebook are drawn smaller than their files, 0.2 to 0.94 times at common window sizes (1.4 at 3840x2160 at 2x). In
+   headless Chrome, against the doubled file this replaced, smooth drawing differs in 0 to 3 percent of pixels by more than 8 levels, 0 on desktop windows at
+   1x and 2x, and pixelated drawing, which would skip source pixels, in 5 to 22 percent. */
 .front-row-object .front-row-object-art { position: absolute; inset: 0; background: var(--fr-object-art) 50% 100% / contain no-repeat; filter: drop-shadow(0 4px 0 #00000052); transition: translate 120ms ease-out, filter 120ms ease-out; }
 .front-row-object[data-object="source"] { --fr-object-art: url('./assets/front-row-v2/closed-folio.webp'); }
 .front-row-object[data-object="history"] { --fr-object-art: url('./assets/front-row-v2/closed-notebook.webp'); }

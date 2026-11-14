@@ -28,7 +28,7 @@ const MANIFEST = join(REPO, "art/manifest.json");
 export const MAX_DEVICE_PIXEL_RATIO = 3;
 
 /** One companion sheet is three equal cells. These cell heights are what each of its two sizes ships at. */
-const COMPANION_CELL = { large: 724, small: 362 } as const;
+export const COMPANION_CELL = { large: 724, small: 362 } as const;
 
 export type ArtOutput = {
   /** Path under src/app/assets. */

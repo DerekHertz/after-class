@@ -3,7 +3,8 @@ import { appendFileSync, cpSync, existsSync, readFileSync, readdirSync, renameSy
 import { join, resolve } from "node:path";
 import { INLINE_LIMIT, buildApp } from "../scripts/build-app";
 import { FRONT_ROW_ROOMS } from "../src/app/front-row";
-import { ROOM_ART_PREFIX } from "../src/shared/room-art";
+import { parseAppearance } from "../src/app/appearance";
+import { FULL_ROOM_QUERY, ROOM_ART_PREFIX } from "../src/shared/room-art";
 import type { RoomArtTable } from "../src/shared/room-art";
 import { HASHED_APP_FILE } from "../src/backend/http";
 import { tmpDir } from "./tmp";
@@ -59,14 +60,15 @@ describe("the review app bundle", () => {
 
   describe("the room art the page names", () => {
     /** The page's own script, run against a page that has the saved room and the address given. */
-    async function preloaded(saved: string | null, pathname: string): Promise<{ table: RoomArtTable; hrefs: string[] }> {
+    async function preloaded(saved: string | null, pathname: string, full = true): Promise<{ table: RoomArtTable; hrefs: string[] }> {
       const { out } = await built();
       const page = readFileSync(join(out, "index.html"), "utf8");
       const json = page.match(/<script type="application\/json" id="room-art">(.*?)<\/script>/)![1]!;
       const script = page.match(/<script>(.*?)<\/script>/)![1]!;
       const links: { rel?: string; as?: string; href?: string }[] = [];
       const document = { getElementById: () => ({ textContent: json }), createElement: () => ({}), head: { appendChild: (l: object) => links.push(l) } };
-      new Function("document", "localStorage", "location", script)(document, { getItem: () => saved }, { pathname });
+      const matchMedia = (query: string) => { expect(query).toBe(FULL_ROOM_QUERY); return { matches: full }; };
+      new Function("document", "localStorage", "location", "matchMedia", script)(document, { getItem: () => saved }, { pathname }, matchMedia);
       expect(links.every((l) => l.rel === "preload" && l.as === "image")).toBe(true);
       return { table: JSON.parse(json) as RoomArtTable, hrefs: links.map((l) => l.href!) };
     }
@@ -74,11 +76,12 @@ describe("the review app bundle", () => {
     test("every file in the table is in the bundle, each room's review starts with its background, and every extra a room draws is in it", async () => {
       const { out } = await built();
       const { table } = await preloaded(null, "/app/");
-      const urls = [...Object.values(table.rooms).flatMap((r) => [r.plate, ...r.layers]), ...table.shared];
+      const urls = [...Object.values(table.rooms).flatMap((r) => [r.plate, ...r.layers, ...r.compact]), ...table.shared];
       expect(urls.filter((u) => !existsSync(join(out, u.slice("/app/".length))))).toEqual([]);
       for (const [scene, prefix] of Object.entries(ROOM_ART_PREFIX)) {
         const room = table.rooms[scene]!;
         expect(room.layers[0]).toMatch(new RegExp(`^/app/${prefix}-background-[a-z0-9]{8}\\.webp$`));
+        expect(room.compact).toEqual([room.layers[0]!]);
         expect(room.plate).toMatch(new RegExp(`^/app/${scene}-[a-z0-9]{8}\\.webp$`));
         for (const extra of FRONT_ROW_ROOMS[scene as keyof typeof FRONT_ROW_ROOMS].extras) expect(room.layers.some((u) => u.startsWith(`/app/${prefix}-${extra.name}-`))).toBe(true);
       }
@@ -93,10 +96,24 @@ describe("the review app bundle", () => {
       expect((await preloaded(harbor, "/app/reviews")).hrefs).toEqual([home.table.rooms["study-bench"]!.plate]);
     });
 
+    test("a phone or a short window, whose layout draws only the background, preloads only that", async () => {
+      const harbor = JSON.stringify({ scene: "study-bench" });
+      const compact = await preloaded(harbor, "/app/review/rvw_abc", false);
+      expect(compact.hrefs).toEqual([...compact.table.rooms["study-bench"]!.compact]);
+      expect(compact.hrefs).toHaveLength(1);
+      expect((await preloaded(harbor, "/app/", false)).hrefs).toEqual([compact.table.rooms["study-bench"]!.plate]);
+    });
+
     test("with no saved room, or one the app would not accept, the default room's art is preloaded", async () => {
-      for (const saved of [null, "not json", JSON.stringify({ scene: "attic" })]) {
+      const garbage = [null, "not json", "null", "[]", "5", "{}", JSON.stringify({ scene: "attic" }), JSON.stringify({ scene: "constructor" }), JSON.stringify({ scene: "__proto__" }),
+        JSON.stringify({ scene: "toString" }), JSON.stringify({ scene: "hasOwnProperty" }), JSON.stringify({ scene: ["study-bench"] }), JSON.stringify({ scene: { toString: "study-bench" } }), JSON.stringify({ scene: 7 }), JSON.stringify({ scene: null }), '{"__proto__":{"scene":"study-bench"}}'];
+      for (const saved of garbage) {
         const { table, hrefs } = await preloaded(saved, "/app/");
-        expect(hrefs).toEqual([table.rooms["last-desk"]!.plate]);
+        expect({ saved, hrefs }).toEqual({ saved, hrefs: [table.rooms["last-desk"]!.plate] });
+        const review = await preloaded(saved, "/app/review/rvw_abc");
+        expect({ saved, hrefs: review.hrefs }).toEqual({ saved, hrefs: [...table.rooms["last-desk"]!.layers] });
+        expect(review.hrefs.every((h) => h.startsWith("/app/"))).toBe(true);
+        expect({ saved, scene: parseAppearance(saved).scene }).toEqual({ saved, scene: "last-desk" });
       }
     });
   });

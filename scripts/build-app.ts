@@ -6,7 +6,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
-import { APPEARANCE_STORAGE_KEY, DEFAULT_ROOM, ROOM_ART_PREFIX, ROOM_LAYER_ORDER, SHARED_ROOM_ART } from "../src/shared/room-art";
+import { APPEARANCE_STORAGE_KEY, COMPACT_ROOM_LAYERS, DEFAULT_ROOM, FULL_ROOM_QUERY, ROOM_ART_PREFIX, ROOM_LAYER_ORDER, SHARED_ROOM_ART, ownKey } from "../src/shared/room-art";
 import type { RoomArtTable } from "../src/shared/room-art";
 
 const REPO = resolve(import.meta.dir, "..");
@@ -39,24 +39,25 @@ export function roomArtTable(emitted: readonly string[], layerNames: readonly st
     if (file.length !== 1) throw new Error(`the review app's CSS must draw ${stem}.webp exactly once in the bundle; found ${file.length}`);
     return `/app/${file[0]}`;
   };
-  const rooms: Record<string, { plate: string; layers: string[] }> = {};
+  const rooms: Record<string, { plate: string; layers: string[]; compact: string[] }> = {};
   for (const [scene, prefix] of Object.entries(ROOM_ART_PREFIX)) {
     const own = layerNames.filter((n) => n.startsWith(`${prefix}-`));
     const first = ROOM_LAYER_ORDER.map((layer) => `${prefix}-${layer}`);
     for (const stem of first) if (!own.includes(stem)) throw new Error(`${scene} has no ${stem} in assets/front-row-v2`);
-    rooms[scene] = { plate: url(scene), layers: [...first, ...own.filter((n) => !first.includes(n)).sort()].map(url) };
+    const layers = [...first, ...own.filter((n) => !first.includes(n)).sort()];
+    rooms[scene] = { plate: url(scene), layers: layers.map(url), compact: COMPACT_ROOM_LAYERS.map((layer) => url(`${prefix}-${layer}`)) };
   }
   return { rooms, shared: SHARED_ROOM_ART.map(url) };
 }
 
 /**
  * Runs while the page is still being parsed, before the stylesheet and the script, and so before the app can say which room
- * the learner is in. It reads their saved room, the way parseAppearance does, and asks for the art that the first screen is
- * about to draw: the review's layers on a review page, the room's plate everywhere else. A page nothing has saved a room for
- * gets the default room's.
+ * the learner is in. It reads their saved room, validated as parseAppearance validates it, and asks for the art that the first
+ * screen is about to draw: on a review page the layers the window's layout draws (a phone's draws only the background), and
+ * the room's plate everywhere else. A page nothing has saved a room for gets the default room's.
  */
 function preloadScript(): string {
-  return `(function(){try{var t=JSON.parse(document.getElementById("room-art").textContent),s;try{s=JSON.parse(localStorage.getItem(${JSON.stringify(APPEARANCE_STORAGE_KEY)})).scene}catch(e){}var r=t.rooms[s]||t.rooms[${JSON.stringify(DEFAULT_ROOM)}];var u=/^\\/app\\/review(\\/|$)/.test(location.pathname)?r.layers:[r.plate];for(var i=0;i<u.length;i++){var l=document.createElement("link");l.rel="preload";l.as="image";l.href=u[i];document.head.appendChild(l)}}catch(e){}})()`;
+  return `(function(){${ownKey.toString().replace(/\s+/g, " ")}try{var t=JSON.parse(document.getElementById("room-art").textContent),s;try{s=JSON.parse(localStorage.getItem(${JSON.stringify(APPEARANCE_STORAGE_KEY)})).scene}catch(e){}var r=t.rooms[ownKey(t.rooms,s)?s:${JSON.stringify(DEFAULT_ROOM)}];var u=/^\\/app\\/review(\\/|$)/.test(location.pathname)?(matchMedia(${JSON.stringify(FULL_ROOM_QUERY)}).matches?r.layers:r.compact):[r.plate];for(var i=0;i<u.length;i++){var l=document.createElement("link");l.rel="preload";l.as="image";l.href=u[i];document.head.appendChild(l)}}catch(e){}})()`;
 }
 
 function sourceNames(dir: string, names = new Map<string, string>()): Map<string, string> {

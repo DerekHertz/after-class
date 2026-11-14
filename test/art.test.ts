@@ -31,6 +31,41 @@ export function isIntegerUpscale(png: Png, k: number): boolean {
   return true;
 }
 
+type Rule = { readonly selector: string; readonly body: string; readonly smoothOk: string | null };
+
+/** The rules of a stylesheet, flattened out of any @media block. A `/* smooth-ok: reason *\/` comment right before a rule becomes that rule's `smoothOk`. */
+export function parseRules(css: string): Rule[] {
+  const marked = css.replace(/\/\*\s*smooth-ok:([\s\S]*?)\*\//g, (_, why: string) => `§${why.trim().replace(/\s+/g, " ")}§`).replace(/\/\*[\s\S]*?\*\//g, "");
+  return [...marked.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ selector: m[1]!.replace(/§[^§]*§/g, "").trim(), body: m[2]!, smoothOk: m[1]!.match(/§([^§]*)§/)?.[1] ?? null }));
+}
+
+/**
+ * The rules that draw a halved image without `image-rendering: pixelated` and without a recorded reason. A file stored at half
+ * size is the same picture only while it is enlarged by repeating pixels, and a rule that drew the doubled file smooth drew it
+ * smooth from a file that held each pixel four times. Each such rule is either pixelated, directly or through a parent whose
+ * every child is (`.x > *`), or carries a `smooth-ok` comment that says why smooth drawing is the right one.
+ */
+export function unprotectedHalvedImages(stylesheets: readonly string[], halved: readonly string[]): string[] {
+  const rules = stylesheets.flatMap(parseRules);
+  const pixelated = (r: Rule) => /image-rendering:\s*pixelated/.test(r.body);
+  const parents = rules.filter(pixelated).map((r) => r.selector.match(/^(.+) > \*$/)?.[1]).filter((p): p is string => p !== undefined);
+  const problems: string[] = [];
+  for (const ship of halved) {
+    const named = rules.filter((r) => r.body.includes(`/${ship}'`) || r.body.includes(`/${ship}"`) || r.body.includes(`/${ship})`));
+    const consumers = named.flatMap((r) => {
+      const property = r.body.match(new RegExp(`(--[\\w-]+|background-image)\\s*:[^;]*/${ship.replace(/[.]/g, "\\.")}`))?.[1];
+      return property === undefined ? [] : property.startsWith("--") ? rules.filter((c) => c.body.includes(`var(${property})`)) : [r];
+    });
+    if (consumers.length === 0) problems.push(`${ship}: no rule draws it`);
+    for (const c of consumers) {
+      if (pixelated(c) || parents.some((p) => c.selector.startsWith(`${p} `))) continue;
+      if (c.smoothOk !== null && c.smoothOk.length >= 40) continue;
+      problems.push(`${ship}: ${c.selector} draws it smooth with no reason recorded`);
+    }
+  }
+  return problems;
+}
+
 describe("the art the app ships is built from art/masters by scripts/build-art.ts", () => {
   test("every raster the stylesheets draw is in the manifest, with the bytes the script wrote from the master it names", () => {
     const css = files(join(REPO, "src/app")).filter((f) => f.endsWith(".css")).map((f) => ({ f, text: readFileSync(f, "utf8") }));
@@ -91,4 +126,18 @@ describe("the art the app ships is built from art/masters by scripts/build-art.t
       expect({ ship: entry.ship, differing }).toEqual({ ship: entry.ship, differing: 0 });
     }
   }, 300_000);
+
+  test("every image stored at half size is drawn pixelated, or smooth with a reason the stylesheet records", () => {
+    const stylesheets = files(join(REPO, "src/app")).filter((f) => f.endsWith(".css")).map((f) => readFileSync(f, "utf8"));
+    const halved = manifest.filter((e) => e.undoUpscale !== undefined).map((e) => e.ship);
+    expect(halved.length).toBe(21);
+    expect(unprotectedHalvedImages(stylesheets, halved)).toEqual([]);
+    const sample = ".a { --art: url('./assets/x/y.webp'); }\n.b { background: var(--art); }\n";
+    expect(unprotectedHalvedImages([sample], ["x/y.webp"])).toEqual(["x/y.webp: .b draws it smooth with no reason recorded"]);
+    expect(unprotectedHalvedImages([sample.replace(".b {", ".b { image-rendering: pixelated;")], ["x/y.webp"])).toEqual([]);
+    expect(unprotectedHalvedImages([sample.replace(".b {", ".b { image-rendering: pixelated;"), ".b > * { image-rendering: pixelated; }"], ["x/y.webp"])).toEqual([]);
+    expect(unprotectedHalvedImages([sample.replace(".b {", "/* smooth-ok: the picture is drawn smaller than its file, where skipping pixels would alias */ .b {")], ["x/y.webp"])).toEqual([]);
+    expect(unprotectedHalvedImages([sample.replace(".b {", "/* smooth-ok: fine */ .b {")], ["x/y.webp"])).toHaveLength(1);
+    expect(unprotectedHalvedImages([sample.replace(".b {", ".c { background: var(--art); }\n.b {")], ["x/y.webp"])).toHaveLength(2);
+  });
 });
