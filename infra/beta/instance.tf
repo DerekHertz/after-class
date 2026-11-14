@@ -260,7 +260,7 @@ resource "aws_volume_attachment" "data" {
   stop_instance_before_detaching = true
 }
 
-# The deploy role reads this to find the current instance, so an instance replacement needs no change in GitHub.
+# scripts/deploy-beta.sh reads this to find the current instance, so an instance replacement needs no change to it.
 resource "aws_ssm_parameter" "instance_id" {
   name  = "/${var.name}/instance_id"
   type  = "String"

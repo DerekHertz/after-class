@@ -1,12 +1,12 @@
-# The deploy workflow signs in with a short-lived GitHub OIDC token. No AWS key is stored in GitHub.
-# The OIDC provider belongs to infra/shared.
+# The deploy workflow signs in with a short-lived GitHub OIDC token. No AWS key is stored in GitHub. The OIDC provider is
+# an input, because this account's service control policy denies creating one (infra/README.md).
 data "aws_iam_policy_document" "github_assume" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
 
     principals {
       type        = "Federated"
-      identifiers = [local.github_oidc_provider_arn]
+      identifiers = [var.github_oidc_provider_arn]
     }
 
     condition {

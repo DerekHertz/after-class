@@ -1,4 +1,4 @@
-# The one image repository for the beta and the future ECS stack, so the same image moves between them.
+# The image repository of the parked ECS stack in infra/main. The beta does not use it. Its images are on GHCR.
 resource "aws_ecr_repository" "api" {
   name = "${var.name}-api"
 
@@ -14,9 +14,7 @@ resource "aws_ecr_repository" "api" {
   }
 }
 
-# Retention is housekeeping only. The beta server saves the running image and its predecessor on its data volume
-# (afterclass-save-image), so an expired tag never stops a replaced instance from starting. The ECS stack pulls a tag
-# when a task starts, and 20 images cover any rollback it would make.
+# The ECS stack pulls a tag when a task starts, and 20 images cover any rollback it would make.
 resource "aws_ecr_lifecycle_policy" "api" {
   repository = aws_ecr_repository.api.name
 
