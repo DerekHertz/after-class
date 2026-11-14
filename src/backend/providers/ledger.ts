@@ -42,7 +42,7 @@ export type Ledger = {
 };
 
 const COST_KINDS = ["measured", "notional", "estimated", "unknown"] as const;
-const PURPOSES = ["boundary", "frame_change", "claim_check", "interpretation", "claim_revision", "resource_search", "tutor_turn", "wrap_up", "diagram_summary"] as const satisfies readonly Purpose[];
+const PURPOSES = ["boundary", "frame_change", "claim_check", "interpretation", "claim_revision", "resource_search", "tutor_turn", "wrap_up", "diagram_summary", "cache_keepalive"] as const satisfies readonly Purpose[];
 
 type Row = {
   id: string; memo_key: string; attempt_no: number; provider: Provider; model: string; purpose: Purpose; outcome: UsageEvent["outcome"];

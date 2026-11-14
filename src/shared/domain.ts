@@ -637,7 +637,7 @@ export type Provider = "jev" | "claude";
 
 export type Purpose =
   | "boundary" | "frame_change" | "claim_check" | "interpretation" | "claim_revision"
-  | "resource_search" | "tutor_turn" | "wrap_up" | "diagram_summary";
+  | "resource_search" | "tutor_turn" | "wrap_up" | "diagram_summary" | "cache_keepalive";
 
 export type UsageOutcome = "ok" | "error" | "aborted";
 

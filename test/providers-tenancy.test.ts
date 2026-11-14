@@ -161,7 +161,7 @@ describe("migration 004-user-id", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   };
-  const before = { ...MIGRATIONS, providers: MIGRATIONS.providers.filter((m) => m.id !== "004-user-id") };
+  const before = { ...MIGRATIONS, providers: MIGRATIONS.providers.filter((m) => m.id !== "004-user-id" && m.id !== "006-keepalive-purpose") };
 
   function seedOld(path: string) {
     const db = openDb(path, before);

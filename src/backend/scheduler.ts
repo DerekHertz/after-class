@@ -80,6 +80,7 @@ const PRIORITY: Readonly<Record<Purpose, number>> = {
   tutor_turn: 5,
   wrap_up: 5,
   diagram_summary: 5,
+  cache_keepalive: 5,
 };
 
 const realTimers: Timers = {

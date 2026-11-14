@@ -64,6 +64,11 @@ export type ClaudeCli = {
    * of those turns while `text` is only the last one, so streaming callers should not attach images.
    */
   streamText(req: ClaudeRequest, onText: (delta: string) => void, send: SendContext): Promise<{ readonly text: string; readonly usage: UsageReport }>;
+  /**
+   * Re-sends the request's cached prefix with max_tokens 0, so the cache entry's timer restarts at the cache read price and nothing
+   * is generated. Only the Messages API adapter has it: `claude -p` gives no control over the cache, and replay makes no call.
+   */
+  keepWarm?(req: ClaudeRequest, send: SendContext): Promise<UsageReport>;
 };
 
 /** Pure, unit-tested: the exact argv for a request. The one place auth policy lives. */

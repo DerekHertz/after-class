@@ -68,7 +68,7 @@ describe("reserve and settle", () => {
     expect(used(w.budget, w.db)).toBe(TUTOR);
     gate.resolve(ok("x", { usage: usage({ kind: "estimated", usd: 0.1234567, basis: "test" }) }));
     expect((await run).kind).toBe("hit");
-    expect(holds(w.db)).toEqual([{ reserved_micros: 750_000, settled_micros: 123_457 }]);
+    expect(holds(w.db)).toEqual([{ reserved_micros: Math.round(TUTOR * 1_000_000), settled_micros: 123_457 }]);
     expect(used(w.budget, w.db)).toBe(0.123457);
   });
 
@@ -179,7 +179,7 @@ describe("stop switch", () => {
     expect(w.budget.allowance(w.db.userId).held).toEqual({ reason: "stopped" });
     gate.resolve(ok("finished", { usage: usage({ kind: "measured", usd: 0.1 }) }));
     expect(await running).toMatchObject({ kind: "hit", value: "finished" });
-    expect(holds(w.db)).toEqual([{ reserved_micros: 750_000, settled_micros: 100_000 }]);
+    expect(holds(w.db)).toEqual([{ reserved_micros: Math.round(TUTOR * 1_000_000), settled_micros: 100_000 }]);
     w.stop(false);
     expect(await w.memo.run(t, { n: 2 })).toMatchObject({ kind: "hit", value: "later" });
   });
@@ -378,13 +378,13 @@ describe("what the learner sees", () => {
     const w = world({ userUsd: 5, totalUsd: 50 });
     const spend = (db: UserDb, usd: number) => w.memoFor(db).run(claudeTask("claim_revision", () => ok("x", { usage: usage({ kind: "measured", usd }) })), { n: usd });
     const [someLeft, spentAll, bystander] = [w.db, otherUserDb(w.db, "spent-all"), otherUserDb(w.db, "bystander")];
-    await spend(someLeft, 4.5);
+    await spend(someLeft, 5 - TUTOR / 2);
     await spend(spentAll, 5);
     expect(w.budget.allowance(someLeft.userId).held).toEqual({ reason: "user_budget", resetsAtMs: DEC_1, usedUp: false });
     expect(w.budget.allowance(spentAll.userId).held).toEqual({ reason: "user_budget", resetsAtMs: DEC_1, usedUp: true });
     for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) await spend(otherUserDb(w.db, `spender-${n}`), 5);
-    // A wrap-up passes the caps, so it can bring the month to $49.75 and then to exactly $50.
-    const wrapUp = (n: number) => w.memoFor(otherUserDb(w.db, "finisher")).run(claudeTask("wrap_up", () => ok("x", { usage: usage({ kind: "measured", usd: 0.25 }) })), { n });
+    // The month is at $49.80. A wrap-up passes the caps, so it can bring it to $49.90 and then to exactly $50.
+    const wrapUp = (n: number) => w.memoFor(otherUserDb(w.db, "finisher")).run(claudeTask("wrap_up", () => ok("x", { usage: usage({ kind: "measured", usd: 0.1 }) })), { n });
     await wrapUp(1);
     expect(w.budget.allowance(bystander.userId)).toMatchObject({ usedUsd: 0, held: { reason: "total_budget", resetsAtMs: DEC_1, usedUp: false } });
     await wrapUp(2);
@@ -394,7 +394,7 @@ describe("what the learner sees", () => {
   test("a tutor turn held with money left says so in the chat, not that the allowance is used up", async () => {
     const r = startedRig();
     const tutor = heldTutor(r.db, { userUsd: 5, totalUsd: 50 }, () => reply(askMain(r.claim), "What is the main idea?"));
-    const spent = claudeTask("claim_revision", () => ok("x", { usage: usage({ kind: "measured", usd: 4.5 }) }));
+    const spent = claudeTask("claim_revision", () => ok("x", { usage: usage({ kind: "measured", usd: 5 - TUTOR / 2 }) }));
     await createMemo(r.db, "live", { budget: tutor.budget }).run(spent, { n: 1 });
     const reviews = createReviews(r.db, { ...r.world.deps, runTutor: tutor.runTutor, clearFailures: tutor.clearFailures }, { tutor: kit, now: () => 1 });
     const turnId = randomId("turn");

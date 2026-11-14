@@ -547,7 +547,7 @@ export const saveResponse = z.discriminatedUnion("kind", [
 ]) satisfies z.ZodType<SaveResult>;
 
 const COST_KINDS = ["measured", "notional", "estimated", "unknown"] as const;
-const PURPOSES = ["boundary", "frame_change", "claim_check", "interpretation", "claim_revision", "resource_search", "tutor_turn", "wrap_up", "diagram_summary"] as const;
+const PURPOSES = ["boundary", "frame_change", "claim_check", "interpretation", "claim_revision", "resource_search", "tutor_turn", "wrap_up", "diagram_summary", "cache_keepalive"] as const;
 
 const allowancez = z.object({
   usedUsd: z.number(),
