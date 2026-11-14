@@ -228,6 +228,15 @@ function resolveApp(root: string, rest: string): AppTarget {
   return statSync(real).isFile() ? { kind: "file", path: real } : { kind: "index" };
 }
 
+/**
+ * scripts/build-app.ts names every file it emits except index.html and asset-notices.txt `<name>-<8 hash chars>.<ext>`, and
+ * test/build-app.test.ts keeps it that way. A name that changes with the bytes can be cached for good. The page
+ * (index.html, also the answer for a deep link) and the notices keep a name across releases, so each visit asks again.
+ * The headers are set here, not in the proxy, so the app that knows which files are hashed is the one that says so.
+ */
+export const HASHED_APP_FILE = /-[a-z0-9]{8}\.[a-z0-9]+$/;
+const appFileCacheControl = (path: string) => (HASHED_APP_FILE.test(path) ? "public, max-age=31536000, immutable" : "no-cache");
+
 function serveApp(req: Request, rest: string, opts: ServeOptions, page: (html: string) => string): Response {
   if (req.method !== "GET" && req.method !== "HEAD") return failure(405, "method not allowed", { Allow: "GET, HEAD" });
   let root: string;
@@ -243,7 +252,7 @@ function serveApp(req: Request, rest: string, opts: ServeOptions, page: (html: s
   const path = target.kind === "index" ? indexPath : target.path;
   if (path !== indexPath) {
     const file = Bun.file(path);
-    return new Response(file, { headers: { "Content-Type": file.type, ...SECURITY_HEADERS } });
+    return new Response(file, { headers: { "Content-Type": file.type, "Cache-Control": appFileCacheControl(path), ...SECURITY_HEADERS } });
   }
   let html: string;
   try {

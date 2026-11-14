@@ -1,6 +1,6 @@
 /* The review as a front-row seat. Geometry and colour come from FRONT_ROW_ROOMS through custom properties set by
    roomStyle(); this file owns only layout rules, so all three rooms share one set of rules and one React tree. */
-@font-face { font-family: 'After Class Pixel'; src: url('./assets/fonts-v2/pixelify-sans.ttf') format('truetype'); font-weight: 400 700; font-display: swap; }
+@font-face { font-family: 'After Class Pixel'; src: url('./assets/fonts-v2/pixelify-sans.ttf') format('truetype'); font-weight: 400 700; font-display: block; }
 
 :is(.scene-shell[data-scene="last-desk"], .front-row-scene[data-room="last-desk"]) { --fr-plate: url('./assets/front-row/last-desk.png'); }
 :is(.scene-shell[data-scene="study-bench"], .front-row-scene[data-room="study-bench"]) { --fr-plate: url('./assets/front-row/study-bench.png'); }
