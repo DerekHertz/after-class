@@ -140,7 +140,7 @@ for (const table of ["invite_answers", "reviews", "review_turns"]) REBUILT_BY_MI
 for (const table of ["notes", "note_edits", "note_deletions", "note_evidence", "observations", "observation_decisions", "link_suggestions", "link_decisions", "saved_reviews", "save_failures"]) REBUILT_BY_MIGRATION.add(table);
 
 /** The kernel files that hold schema text; migrations-record.ts holds the record's last migration because migrations.ts is at the line limit. */
-const MIGRATION_FILES = new Set(["src/backend/db.ts", "src/backend/migrations.ts", "src/backend/migrations-record.ts", "src/backend/migrations-budget.ts"]);
+const MIGRATION_FILES = new Set(["src/backend/db.ts", "src/backend/migrations.ts", "src/backend/migrations-record.ts", "src/backend/migrations-budget.ts", "src/backend/migrations-review.ts"]);
 
 /** devices.ts holds the kernel's devices and connect_codes tables, their migration, and their only writes. */
 const KERNEL_FILES = new Set([...MIGRATION_FILES, "src/backend/devices.ts"]);

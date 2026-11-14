@@ -118,7 +118,7 @@ describe("request shape", () => {
     expect(p.output_config).toEqual({ effort: "high" });
     expect(p.max_tokens).toBe(STREAM_MAX_TOKENS);
     expect(STREAM_MAX_TOKENS).toBeGreaterThanOrEqual(16_000);
-    await claude.streamText(req({ cacheTtl: "1h" }), () => {}, OPEN);
+    await claude.streamText(req({ cacheTtl: () => "1h" }), () => {}, OPEN);
     expect(seen[1]!.params.system).toEqual([{ type: "text", text: "You are the tutor.", cache_control: { type: "ephemeral", ttl: "1h" } }]);
   });
 

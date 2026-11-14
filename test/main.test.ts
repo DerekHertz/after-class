@@ -22,7 +22,7 @@ import type { TutorInput } from "../src/backend/review/tutor";
 import type { ClaimSupportInput, BoundaryInput, FrameChangeInput } from "../src/backend/providers/jev-tasks";
 import { canonicalInterpretation, canonicalResourceSearch, canonicalRevision } from "../src/backend/preparation/tasks";
 import type { InterpretationInput, InterpretationOutput } from "../src/backend/preparation/tasks";
-import { deferred, fail, fakeTask, ok } from "./fakes";
+import { UNASKED_CACHE, deferred, fail, fakeTask, ok } from "./fakes";
 import type { FakeStep, FakeTask } from "./fakes";
 
 const CAP = stableId("cap", "main-test") as CaptureId;
@@ -662,7 +662,7 @@ describe("AFTERCLASS_CLAUDE_BACKEND", () => {
     const jev = { ask: () => Promise.reject(new Error("no Jev call in this test")) };
     const ctx = { ...unbudgeted(new AbortController().signal), streamTo: null };
     const empty = { passages: [], frames: [], gaps: [] };
-    const tasks = buildTasks(jev, adapter, () => null, "sonnet");
+    const tasks = buildTasks(jev, adapter, () => null, UNASKED_CACHE, "sonnet");
     expect([tasks.tutor.model, tasks.wrapUp.model]).toEqual(["sonnet", "sonnet"]);
     await Promise.allSettled([
       tasks.tutor.attempt({ state: reviewState("rev_aaaaaaaaaaaaaaaaaaaaaaaaaa" as never, [], [], 0, 0), allowed: ["wrap_up"], claims: [], evidence: empty, turns: [], priorObservations: [], repairNote: null, scope: {} } as unknown as TutorInput, ctx),
@@ -687,7 +687,7 @@ describe("AFTERCLASS_CLAUDE_BACKEND", () => {
     const jev = { ask: () => Promise.reject(new Error("no Jev call in this test")) };
     const ctx = { ...unbudgeted(new AbortController().signal), streamTo: null };
     const empty = { passages: [], frames: [], gaps: [] };
-    const tasks = buildTasks(jev, adapter, () => null);
+    const tasks = buildTasks(jev, adapter, () => null, UNASKED_CACHE);
     await Promise.allSettled([
       tasks.tutor.attempt({ state: reviewState("rev_aaaaaaaaaaaaaaaaaaaaaaaaaa" as never, [], [], 0, 0), allowed: ["wrap_up"], claims: [], evidence: empty, turns: [], priorObservations: [], repairNote: null, scope: {} } as unknown as TutorInput, ctx),
       tasks.wrapUp.attempt({ turns: [], claims: [], threads: [] }, ctx),

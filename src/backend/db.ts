@@ -72,6 +72,7 @@ export const TABLE_SCOPES: { readonly [table: string]: TableScope } = {
   invite_answers: "user",
   reviews: "user",
   review_turns: "user",
+  tutor_cache: "user",
   notes: "user",
   note_edits: "user",
   note_deletions: "user",

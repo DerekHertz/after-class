@@ -10,7 +10,7 @@ import { allowedMoves, nextThreadId, parseMoveHeader, reviewState, tutorPrompt, 
 import type { TutorInput, WrapUpOutput } from "../src/backend/review/tutor";
 import type { ClaudeCli, ClaudeRequest } from "../src/backend/providers/claude";
 import { createMemo } from "../src/backend/providers/memo";
-import { testUserDb, testSeq, usage } from "./fakes";
+import { UNASKED_CACHE, testUserDb, testSeq, usage } from "./fakes";
 
 const REVIEW = stableId("rvw", "review-1") as ReviewId;
 const SRC = stableId("src", "youtube", "abcdefghijk") as SourceId;
@@ -383,7 +383,7 @@ describe("tutorTask", () => {
     const { cli, requests } = fakeClaude([opening]);
     const memo = createMemo(testUserDb(), "live", { retryDelayMs: () => 0 });
     let streamed = "";
-    const r = await memo.run(tutorTask(cli), inputFor([]), { streamTo: (d) => (streamed += d) });
+    const r = await memo.run(tutorTask(cli, UNASKED_CACHE), inputFor([]), { streamTo: (d) => (streamed += d) });
     expect(r.kind).toBe("hit");
     if (r.kind !== "hit") return;
     expect(r.value).toEqual({ move: askMain(1), say: "Without looking back, how would you describe the row picture?" });
@@ -398,8 +398,8 @@ describe("tutorTask", () => {
     const l = log().learner({ kind: "resume" });
     const first = { ...inputFor(l.turns), state: stateOf(l.turns, [], 5_000) };
     const resent = { ...inputFor(l.turns), state: stateOf(l.turns, [], 90_000) };
-    await memo.run(tutorTask(cli), first);
-    const again = await memo.run(tutorTask(cli), resent);
+    await memo.run(tutorTask(cli, UNASKED_CACHE), first);
+    const again = await memo.run(tutorTask(cli, UNASKED_CACHE), resent);
     expect(again.kind).toBe("hit");
     expect(requests).toHaveLength(1);
   });
@@ -412,7 +412,7 @@ describe("tutorTask", () => {
     const { cli } = fakeClaude([reply]);
     const db = testUserDb();
     const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
-    const r = await memo.run(tutorTask(cli), inputFor([]));
+    const r = await memo.run(tutorTask(cli, UNASKED_CACHE), inputFor([]));
     expect(r.kind).toBe("failed");
     expect(db.sql.query("SELECT COUNT(*) AS n FROM memo").get()).toEqual({ n: 0 });
     expect(db.sql.query("SELECT outcome, cost_kind FROM usage_events").all()).toEqual([{ outcome: "error", cost_kind: "notional" }]);

@@ -83,8 +83,8 @@ import { interpretTask, resourceSearchTask, reviseTask } from "./preparation/tas
 import type { FrameBytes, PreparationTasks } from "./preparation/tasks";
 import { createReviews } from "./review";
 import type { Reviews } from "./review";
-import { tutorTask, wrapUpTask } from "./review/tutor";
-import type { TutorInput, TutorModel, TutorOutput, WrapUpInput, WrapUpOutput } from "./review/tutor";
+import { tutorCache, tutorTask, wrapUpTask } from "./review/tutor";
+import type { TutorCache, TutorInput, TutorModel, TutorOutput, WrapUpInput, WrapUpOutput } from "./review/tutor";
 import { createDiagrams } from "./diagram";
 import type { Diagrams, DiagramSummaryInput, DiagramSummaryOutput } from "./diagram";
 import { diagramSummaryTask } from "./diagram/tasks";
@@ -230,7 +230,7 @@ export function resolveClaudeBackend(requested: string | undefined): ClaudeBacke
   throw new Error(`AFTERCLASS_CLAUDE_BACKEND must be "cli" or "api", got "${requested}"`);
 }
 
-export function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameBytes, tutorModel: TutorModel = "opus"): TaskSet {
+export function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameBytes, tutorCache: TutorCache, tutorModel: TutorModel = "opus"): TaskSet {
   return {
     boundary: productBoundaryTask(jev),
     frameChange: productFrameChangeTask(jev),
@@ -240,7 +240,7 @@ export function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameB
       checkClaim: claimSupportTask(jev),
       searchResources: resourceSearchTask(claude),
     },
-    tutor: tutorTask(claude, tutorModel),
+    tutor: tutorTask(claude, tutorCache, tutorModel),
     wrapUp: wrapUpTask(claude, tutorModel),
     diagramSummary: diagramSummaryTask(claude, frameBytes),
   };
@@ -474,7 +474,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   function wire(db: UserDb): UserGraph {
     // evidence is created after the tasks that need its bytes; the tasks only read it when a call runs
     const frameBytes: FrameBytes = (id) => evidence.frameBytes(id);
-    const tasks: TaskSet = options.tasks ?? buildTasks(providers.jev, providers.claude, frameBytes, tutorModel);
+    const tasks: TaskSet = options.tasks ?? buildTasks(providers.jev, providers.claude, frameBytes, tutorCache(db), tutorModel);
     const memo = createMemo(db, memoMode, budget === null ? {} : { budget });
     const ledger = createLedger(db, budget);
 

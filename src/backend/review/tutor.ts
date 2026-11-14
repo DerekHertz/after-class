@@ -18,7 +18,7 @@
  */
 import { z } from "zod";
 import { stableId } from "../../shared/ids";
-import type { ClaimId, ConceptId, EvidenceId, Id, IdKind, ThreadId } from "../../shared/ids";
+import type { ClaimId, ConceptId, EvidenceId, Id, IdKind, ReviewId, ThreadId } from "../../shared/ids";
 import type {
   AssessableClaim, Concept, Correction, EvidenceBundle, FrozenScope, LearnerActKind, Observation, ReviewPhase, ReviewState, Turn,
   TutorMove, TutorMoveKind,
@@ -26,7 +26,8 @@ import type {
 import { Material, contains } from "../../shared/time";
 import { ProviderError } from "../providers/memo";
 import type { Task } from "../providers/memo";
-import type { ClaudeCli, ClaudeRequest } from "../providers/claude";
+import type { CacheTtl, ClaudeCli, ClaudeRequest } from "../providers/claude";
+import type { UserDb } from "../db";
 import { attributeTurns, moveThreads, quickCheckThreads } from "./clamp";
 import { detourTracker } from "./detour";
 
@@ -619,27 +620,35 @@ const TUTOR_REQUEST = { effort: "medium", images: [], webTools: false, timeoutMs
 
 /**
  * A 5 minute cache entry lives 5 minutes from the start of the request that last wrote or read it. A tutor request that starts
- * more than this after the previous one has likely found its entry gone. The 30 seconds short of 5 minutes cover the time a request
- * spends between this choice and reaching the API (building the prompt, waiting in the concurrency queue).
+ * more than this after the previous one has likely found its entry gone. The 30 seconds short of 5 minutes cover the time between
+ * the admission that records a start and the request reaching the API.
  */
 export const LONG_PAUSE_MS = 4.5 * 60_000;
 
 /**
  * Derek, 2026-11-13: "1 hour should only be for long pauses. maybe there is some "timeout" detection that moves to 1 hour?"
- * A review's tutor prompt starts on the 5 minute cache. Once a tutor request starts more than LONG_PAUSE_MS after the previous one,
- * that request and every later one in the review ask for 1 hour, because the caching docs do not say whether a 5 minute marker
- * reads an entry written for 1 hour. A past request started when the turn just before its tutor turn was stored, so the answer is
- * folded from the review's stored turns and the time now, and a restarted process gives the same one.
+ * A review's tutor prompt starts on the 5 minute cache. Once a tutor request starts more than LONG_PAUSE_MS after the review's
+ * previous one, that request and every later one in the review ask for 1 hour, because the caching docs do not say whether a
+ * 5 minute marker reads an entry written for 1 hour. `start` is asked by the adapter once a request is admitted and right before
+ * it is sent, so a request the budget held is not a start, and one sent that then failed is. Each start is stored in tutor_cache
+ * with the review's lifetime, so a restarted process makes the same choice.
  */
-export function cacheTtl(turns: readonly Turn[], nowMs: number): "5m" | "1h" {
-  const ordered = bySeq(turns);
-  const starts = ordered.flatMap((t, i) => (t.actor === "tutor" ? [(ordered[i - 1] ?? t).atMs] : []));
-  return [...starts, nowMs].some((start, i, all) => i > 0 && start - all[i - 1]! > LONG_PAUSE_MS) ? "1h" : "5m";
+export type TutorCache = { start(reviewId: ReviewId): CacheTtl };
+
+export function tutorCache(db: UserDb, now: () => number = Date.now): TutorCache {
+  const start = db.sql.query<{ ttl: CacheTtl }, [string, string, number, number]>(
+    `INSERT INTO tutor_cache (user_id, review_id, last_start_ms, ttl) VALUES (?1, ?2, ?3, '5m')
+     ON CONFLICT (user_id, review_id) DO UPDATE SET
+       ttl = CASE WHEN ttl = '1h' OR ?3 - last_start_ms > ?4 THEN '1h' ELSE '5m' END,
+       last_start_ms = MAX(last_start_ms, ?3)
+     RETURNING ttl`,
+  );
+  return { start: (reviewId) => start.get(db.userId, reviewId, Math.round(now()), LONG_PAUSE_MS)!.ttl };
 }
 
 /** The system prompt is TUTOR_SYSTEM plus the review's stable material, the prompt only what changes per turn. */
-export function tutorRequest(input: TutorInput, model: TutorModel = "opus", nowMs = Date.now()): ClaudeRequest {
-  return { ...TUTOR_REQUEST, model, cacheTtl: cacheTtl(input.turns, nowMs), system: `${TUTOR_SYSTEM}\n\n${tutorContext(input)}`, prompt: tutorPrompt(input) };
+export function tutorRequest(input: TutorInput, model: TutorModel = "opus"): ClaudeRequest {
+  return { ...TUTOR_REQUEST, model, system: `${TUTOR_SYSTEM}\n\n${tutorContext(input)}`, prompt: tutorPrompt(input) };
 }
 
 /**
@@ -647,7 +656,7 @@ export function tutorRequest(input: TutorInput, model: TutorModel = "opus", nowM
  * A reply whose header is invalid or not allowed fails without a stored hit, so
  * the memo never replays a move that validation would reject.
  */
-export function tutorTask(claude: ClaudeCli, model: TutorModel = "opus", now: () => number = Date.now): Task<TutorInput, TutorOutput> {
+export function tutorTask(claude: ClaudeCli, cache: TutorCache, model: TutorModel = "opus"): Task<TutorInput, TutorOutput> {
   return {
     provider: "claude",
     purpose: "tutor_turn",
@@ -659,7 +668,11 @@ export function tutorTask(claude: ClaudeCli, model: TutorModel = "opus", now: ()
       return { system, prompt, effort: TUTOR_REQUEST.effort };
     },
     async attempt(input, ctx) {
-      const { text, usage } = await claude.streamText(tutorRequest(input, model, now()), ctx.streamTo ?? (() => {}), ctx);
+      const { text, usage } = await claude.streamText(
+        { ...tutorRequest(input, model), cacheTtl: () => cache.start(input.state.reviewId) },
+        ctx.streamTo ?? (() => {}),
+        ctx,
+      );
       const header = parseMoveHeader(text.includes("\n") ? text : `${text}\n`);
       if (header.kind !== "header") throw new ProviderError(`invalid move header: ${header.kind === "invalid" ? header.why : "empty reply"}`, usage, false);
       const verdict = validateMove(header.move, input);
