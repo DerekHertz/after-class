@@ -39,6 +39,13 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 - Quote Derek's rules as `Rn: "<exact text>"` wherever code enforces one. `test/rules.test.ts` fails on any wording that differs from `docs/flows/after-class.md`.
 - Every provider call is `memo.run(task, input)`. Derivations read `memo.lookup` and apply results only through `appliesBefore(lookup, cutoff)`.
 
+## The pump
+
+- A capture is live while it can have demand. Every capture is live at boot. A pump that finds no demand in a capture drops it from its user's live set, and ingest, retry, stop early and a deletion by the user bring it back. A pump derives only live captures, so what one uploaded fact costs does not grow with the number of stored lectures.
+- An upload's pump runs at most `INGEST_PUMP_MS` (100 ms) after the first fact of a burst, after the reply. A job that stops being demanded is aborted that much later than before. Stop early and retry still pump at once (R8). Results still apply only through `appliesBefore`.
+- A capture's running jobs are demanded while they run, so a capture with no demand has none to abort. The pass that finds no demand aborts what no longer is demanded.
+- Evidence drops only the written capture's cached projection on an upload.
+
 ## Users in the providers module
 
 - `createMemo`, `createLedger` and `createVoice` take a `UserDb` and read and write only its `userId`'s rows. A memo is per user: its rows are keyed by (`user_id`, `key`), and the key stays a hash of the call alone. A `MemoKey` is therefore unique only within one user, so a module that stores one beside its own rows reads it back through that user's memo.

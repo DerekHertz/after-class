@@ -226,10 +226,8 @@ export function createScheduler(
           abortUndemanded(demand);
           const pick = next(demand);
           if (pick === null) break;
-          // Starting one item can cover another's material (a delta over the same span),
-          // so confirm against a fresh read that the pick is still demanded.
-          const fresh = collect().get(pick.key);
-          if (fresh) start(fresh);
+          // Starting one item can cover another's material (a delta over the same span), so the next pass reads demand again.
+          start(pick);
         }
       } while (again && !stopped);
     } finally {

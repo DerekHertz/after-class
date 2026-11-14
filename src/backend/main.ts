@@ -41,7 +41,9 @@
  * only way work runs in replay mode, and they are refused in live mode.
  *
  * Wiring order: db → memo → ledger → evidence → segmentation → preparation → reviews → record → scheduler → serve.
- * Every fact write schedules scheduler.pump(); a 24 h timer runs evidence.sweepExpired.
+ * An upload schedules scheduler.pump() on a short timer, so its reply goes out first and a burst of uploads shares one pump;
+ * stop early and retry pump at once. A pump derives only the captures that can have demand (`UserGraph.live`).
+ * A 24 h timer runs evidence.sweepExpired.
  */
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -99,6 +101,8 @@ import type { Voice } from "./providers/elevenlabs";
 
 const ROOT = resolve(import.meta.dir, "../..");
 const RETENTION_DAYS = 30;
+/** How long an upload may wait for the pump it triggers. Uploads arrive every 3 to 5 s per watcher, so a burst of them shares one pump. */
+const INGEST_PUMP_MS = 100;
 
 export type Mode = "live" | "replay";
 
@@ -133,6 +137,8 @@ export type MainOptions = {
   readonly claudeBin?: string;
   /** AFTERCLASS_CLAUDE_BACKEND=api only: a fake Messages API client, so a test makes no network call. */
   readonly anthropic?: ApiClient;
+  /** How long an upload may wait for the pump it triggers. Default INGEST_PUMP_MS; a test widens it to see the order. */
+  readonly ingestPumpMs?: number;
   readonly log?:(text: string) => void;
   readonly error?: (text: string) => void;
 };
@@ -385,11 +391,13 @@ export function hostedCallers(sessionUser: (token: string) => Promise<UserId | n
 /** Everything one user's requests and background work run on. Built once per user and kept for the process's life. */
 type UserGraph = Omit<Modules, "scheduler"> & {
   readonly tasks: TaskSet;
-  readonly served: EvidenceStoreWithProbe;
   readonly diagrams: Diagrams;
   readonly voice: Voice;
-  /** Every capture of this user that may still have work: those on disk at boot, plus any ingested since. */
-  readonly captures: Set<CaptureId>;
+  /**
+   * The captures that can have demand. All of them at boot. A capture leaves when a pump finds no demand in it, and comes
+   * back when ingest, retry, stop early or a deletion touches it, so a pump derives only what can have work.
+   */
+  readonly live: Set<CaptureId>;
 };
 
 type Composed = {
@@ -466,16 +474,30 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
 
   let alive = true;
   let scheduler: Scheduler | null = null;
+  const runPump = () => {
+    if (!alive) return;
+    try {
+      scheduler?.pump();
+    } catch (e) {
+      reportOnce("pump", e);
+    }
+  };
   /** After the current synchronous work, so a pump never runs inside the transaction that wrote the fact. */
-  const pump = () =>
-    queueMicrotask(() => {
-      if (!alive) return;
-      try {
-        scheduler?.pump();
-      } catch (e) {
-        reportOnce("pump", e);
-      }
-    });
+  const pump = () => queueMicrotask(runPump);
+  /**
+   * What an upload triggers: a burst of facts shares one pump, run after the replies went out. A job that an upload stops
+   * demanding is aborted up to INGEST_PUMP_MS later than a microtask pump would, and its result still applies only through
+   * `appliesBefore`. Stop early and retry pump at once.
+   */
+  let ingestPump: ReturnType<typeof setTimeout> | null = null;
+  const pumpSoon = () => {
+    if (ingestPump !== null || !alive) return;
+    ingestPump = setTimeout(() => {
+      ingestPump = null;
+      runPump();
+    }, options.ingestPumpMs ?? INGEST_PUMP_MS);
+    ingestPump.unref?.();
+  };
   const reported = new Set<string>();
   function reportOnce(where: string, error: unknown): void {
     const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
@@ -493,13 +515,23 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     const memo = createMemo(db, memoMode, budget === null ? {} : { budget });
     const ledger = createLedger(db, budget);
 
+    const live = new Set<CaptureId>();
     const evidence: EvidenceStoreWithProbe = createEvidence(db, dataDir, {
       lookupFrameChange: (input) => memo.lookup(tasks.frameChange, input),
       // The first frame of a source has nothing to compare with: evidence keeps it without a call, and so does this.
       runFrameChange: (input, signal) => (input.before === null ? Promise.resolve(null) : memo.run(tasks.frameChange, input, { signal })),
       frameChangeKey: (input) => memo.key(tasks.frameChange, input),
-      onChange: pump,
+      onChange(captureId) {
+        if (captureId === null) {
+          for (const id of evidence.captures()) live.add(id);
+          pump();
+        } else {
+          live.add(captureId);
+          pumpSoon();
+        }
+      },
     });
+    for (const id of evidence.captures()) live.add(id);
 
     const passageOf = (e: Evidence | { readonly kind: "deleted" } | undefined): e is Passage => e?.kind === "passage";
     const frameOf = (e: Evidence | { readonly kind: "deleted" } | undefined): e is Frame => e?.kind === "frame";
@@ -547,10 +579,12 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     // Stop early is a fact that cancels work by derivation; the pump is what aborts what is already running.
     const preparation: Preparation = { ...preparationBase, stopEarly: (captureId, ids) => {
       const seq = preparationBase.stopEarly(captureId, ids);
+      live.add(captureId);
       pump();
       return seq;
     }, retry: (captureId, ids) => {
       const seq = preparationBase.retry(captureId, ids);
+      live.add(captureId);
       pump();
       return seq;
     } };
@@ -619,22 +653,12 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       memo,
     });
 
-    const captures = new Set<CaptureId>(evidence.captures());
-    // The scheduler is the only holder of these; http gets the same store with ingest registering the capture first.
-    const served: EvidenceStoreWithProbe = {
-      ...evidence,
-      ingest(batch) {
-        captures.add(batch.captureId);
-        return evidence.ingest(batch);
-      },
-    };
-
     const voice: Voice =
       voiceKey === undefined
         ? unavailableVoice
         : createVoice({ apiKey: voiceKey, voiceId, model: voiceModel, db, ...(options.fetch ? { fetch: options.fetch } : {}) });
 
-    return { tasks, evidence, served, segmentation, preparation, reviews, record, ledger, memo, diagrams, voice, captures, db };
+    return { tasks, evidence, segmentation, preparation, reviews, record, ledger, memo, diagrams, voice, live, db };
   }
 
   const graphs = new Map<UserId, UserGraph>();
@@ -651,35 +675,44 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   if (auth.kind === "local") graphFor(ensureLocalUser(rawDb));
   else for (const userId of signedInUsers(rawDb)) graphFor(userId);
 
+  /** Per capture, the three derivations that can ask for work. A failing one is reported and leaves the others running. */
+  const DEMAND: readonly (readonly [string, (graph: UserGraph, captureId: CaptureId) => readonly WorkItem[]])[] = [
+    ["segmentation", ({ segmentation, memo, tasks }, captureId) =>
+      segmentation.sync(captureId).demand.map((input): WorkItem => ({
+        key: memo.key(tasks.boundary, input),
+        purpose: "boundary",
+        provider: "jev",
+        run: (signal) => memo.run(tasks.boundary, input, { signal, captureId }),
+      }))],
+    ["frame demand", ({ evidence }, captureId) => evidence.frameDemand(captureId)],
+    ["preparation", ({ preparation }, captureId) => preparation.demand(captureId)],
+  ];
+
   /**
-   * Every user's demand, each item keyed by its user as well: memo keys hash the call alone, so two users' identical
-   * calls share a key, and the scheduler would otherwise treat one user's run as the other's.
+   * Every user's demand over the captures that can have any, each item keyed by its user as well: memo keys hash the call
+   * alone, so two users' identical calls share a key, and the scheduler would otherwise treat one user's run as the other's.
+   * A capture with no demand leaves its user's live set. Its running jobs are not demanded either, so this same pump aborts them (R8).
    */
-  const everyCapture = (where: string, items: (graph: UserGraph, captureId: CaptureId) => readonly WorkItem[]) => (): readonly WorkItem[] =>
+  const demand = (): readonly WorkItem[] =>
     [...graphs.values()].flatMap((graph) =>
-      [...graph.captures].flatMap((captureId) => {
-        try {
-          return items(graph, captureId).map((item) => ({ ...item, key: stableId("key", graph.db.userId, item.key) }));
-        } catch (e) {
-          reportOnce(`${where} ${captureId}`, e);
-          return [];
-        }
+      [...graph.live].flatMap((captureId) => {
+        let failed = false;
+        const items = DEMAND.flatMap(([where, derive]) => {
+          try {
+            return derive(graph, captureId).map((item) => ({ ...item, key: stableId("key", graph.db.userId, item.key) }));
+          } catch (e) {
+            failed = true;
+            reportOnce(`${where} ${captureId}`, e);
+            return [];
+          }
+        });
+        if (items.length === 0 && !failed) graph.live.delete(captureId);
+        return items;
       }),
     );
 
   scheduler = createScheduler(
-    [
-      everyCapture("segmentation", ({ segmentation, memo, tasks }, captureId) =>
-        segmentation.sync(captureId).demand.map((input): WorkItem => ({
-          key: memo.key(tasks.boundary, input),
-          purpose: "boundary",
-          provider: "jev",
-          run: (signal) => memo.run(tasks.boundary, input, { signal, captureId }),
-        })),
-      ),
-      everyCapture("frame demand", ({ evidence }, captureId) => evidence.frameDemand(captureId)),
-      everyCapture("preparation", ({ preparation }, captureId) => preparation.demand(captureId)),
-    ],
+    [demand],
     DEFAULT_LIMITS,
     {
       sweep: {
@@ -707,7 +740,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   }
 
   const served = (g: UserGraph): ServedModules => ({
-    ledger: g.ledger, evidence: g.served, reviews: g.reviews, record: g.record, preparation: g.preparation, segmentation: g.segmentation, voice: g.voice, diagrams: g.diagrams,
+    ledger: g.ledger, evidence: g.evidence, reviews: g.reviews, record: g.record, preparation: g.preparation, segmentation: g.segmentation, voice: g.voice, diagrams: g.diagrams,
   });
   const hostname = env.AFTERCLASS_HOST || "127.0.0.1";
   const devices = createDevices(rawDb);
@@ -767,6 +800,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     scheduler,
     async stop() {
       alive = false;
+      if (ingestPump !== null) clearTimeout(ingestPump);
       await scheduler?.stop();
       await server.stop(true);
       rawDb.close();

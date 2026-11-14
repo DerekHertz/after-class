@@ -220,6 +220,106 @@ describe("main, replay mode with fake tasks", () => {
   }, 30_000);
 });
 
+// ───────────────────────────── the pump: what an upload costs, and who it wakes ─────────────────────────────
+
+async function ingestInto(b: Boot, captureId: CaptureId, facts: Record<string, unknown>[]): Promise<void> {
+  const res = await fetch(`${b.base}/ingest`, { method: "POST", headers: authed(b.r.token), body: JSON.stringify({ captureId, facts }) });
+  expect(res.status).toBe(200);
+}
+
+/** Counts every pump the scheduler is asked to run. */
+function countPumps(b: Boot) {
+  const { scheduler } = b.r.modules;
+  const real = scheduler.pump.bind(scheduler);
+  const seen = { n: 0 };
+  scheduler.pump = () => {
+    seen.n++;
+    real();
+  };
+  return seen;
+}
+
+const prepared = (b: Boot, captureId: CaptureId) => b.r.modules.segmentation.current(captureId).some((c) => b.r.modules.preparation.prep(c.id).finished);
+
+describe("main, the pump an upload triggers", () => {
+  test("an upload is answered before the pump runs, and a burst of uploads shares one pump", async () => {
+    const b = await boot({ tasks: fakeTasks().tasks, ingestPumpMs: 600 }, { AFTERCLASS_MODE: "replay" });
+    await Bun.sleep(50);
+    const pumps = countPumps(b);
+    const facts = fixture({ frames: false });
+    for (const f of facts.slice(0, 5)) await ingestInto(b, CAP, [f]);
+    expect(pumps.n).toBe(0);
+    await until(() => pumps.n > 0);
+    await Bun.sleep(100);
+    expect(pumps.n).toBe(1);
+  });
+
+  test("a capture with no demand is not derived by later pumps, and is derived again after a new upload", async () => {
+    const b = await boot({ tasks: fakeTasks().tasks, ingestPumpMs: 20 }, { AFTERCLASS_MODE: "replay" });
+    const { evidence, scheduler } = b.r.modules;
+    const derived: CaptureId[] = [];
+    const real = evidence.frameDemand;
+    evidence.frameDemand = (captureId) => {
+      derived.push(captureId);
+      return real(captureId);
+    };
+    await ingest(b, fixture({ frames: false }));
+    await until(() => prepared(b, CAP));
+    await Bun.sleep(300);
+    derived.length = 0;
+
+    for (let i = 0; i < 3; i++) scheduler.pump();
+    await Bun.sleep(100);
+    expect(derived).toEqual([]);
+
+    const other = stableId("cap", "main-test-other") as CaptureId;
+    await ingestInto(b, other, [{ kind: "control", action: "start", reason: "user", clientSeq: 0, wallMs: 1000 }]);
+    await until(() => derived.includes(other));
+    expect(derived.filter((id) => id === CAP)).toEqual([]);
+
+    await ingestInto(b, CAP, [{ kind: "control", action: "resume", reason: "user", clientSeq: 100, wallMs: 5000 }]);
+    await until(() => derived.includes(CAP));
+  });
+
+  test("retry wakes a capture whose failed job had left the working set", async () => {
+    const fakes = fakeTasks();
+    let attempts = 0;
+    const interpret = scripted<InterpretationInput, InterpretationOutput>("interpretation", "claude", canonicalInterpretation, (i) => {
+      attempts++;
+      if (attempts === 1) return fail("model unavailable");
+      return ok({ concepts: [{ label: "Topic", summary: "What the lecture is about", claims: [{ text: "The lecture states its topic first.", evidence: [i.newMaterial.passages[0]!.id], visualDependent: false, assumptions: [] }], confusions: [] }], links: [], supersedes: [] });
+    });
+    const tasks = { ...fakes.tasks, preparation: { ...fakes.tasks.preparation, interpret } } as unknown as TaskSet;
+    const b = await boot({ tasks, ingestPumpMs: 20 }, { AFTERCLASS_MODE: "replay" });
+    await ingest(b, fixture({ frames: false }));
+    await until(() => interpret.calls.length === 1);
+    await Bun.sleep(300);
+    expect(b.r.modules.scheduler.inflight()).toEqual([]);
+    expect(interpret.calls).toHaveLength(1);
+
+    const retry = await fetch(`${b.base}/captures/${CAP}/retry-preparation`, { method: "POST", headers: authed(b.r.token) });
+    expect(retry.status).toBe(204);
+    await until(() => prepared(b, CAP));
+    expect(interpret.calls).toHaveLength(2);
+  }, 30_000);
+
+  test('R8: "Stop early" aborts the running job, and does not wait for the upload timer', async () => {
+    const fakes = fakeTasks();
+    const gate = deferred<FakeStep<never>>();
+    const interpret = scripted<InterpretationInput, InterpretationOutput>("interpretation", "claude", canonicalInterpretation, () => gate.promise);
+    const tasks = { ...fakes.tasks, preparation: { ...fakes.tasks.preparation, interpret } } as unknown as TaskSet;
+    const b = await boot({ tasks, ingestPumpMs: 60_000 }, { AFTERCLASS_MODE: "replay" });
+    const { scheduler } = b.r.modules;
+    await ingest(b, fixture({ frames: false }));
+    scheduler.pump();
+    await until(() => interpret.calls.length === 1);
+
+    const started = await fetch(`${b.base}/captures/${CAP}/reviews`, { method: "POST", headers: authed(b.r.token), body: JSON.stringify({ reviewId: stableId("rvw", "main-test-stop-early"), choice: "stop_early" }) });
+    expect(started.status).toBe(200);
+    await until(() => !scheduler.inflight().some((i) => i.purpose === "interpretation"), 2_000);
+  }, 30_000);
+});
+
 // ───────────────────────────── M7b: the record, preparation and segmentation reach the server ─────────────────────────────
 
 describe("main, the live backend serves save, retry-preparation, the record and evidence", () => {

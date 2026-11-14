@@ -137,7 +137,8 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   lookupFrameChange(input: FrameChangeInput): Lookup<Verdict>;
   runFrameChange(input: FrameChangeInput, signal: AbortSignal): Promise<unknown>;
   frameChangeKey(input: FrameChangeInput): MemoKey;
-  onChange(): void;
+  /** After a write: the capture whose facts changed, or null when evidence anywhere may have (a deletion by the user). */
+  onChange(captureId: CaptureId | null): void;
   /** Clock for received and created timestamps. Defaults to Date.now. */
   now?: () => number;
 }): EvidenceStoreWithProbe {
@@ -148,6 +149,12 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   let projections = new Map<CaptureId, Projection>();
   let captureIds: CaptureId[] | null = null;
   let rawIndex: Map<EvidenceId, Raw> | null = null;
+  /** One capture's facts changed: only its projection is stale. The ids of the others stay cached. */
+  const invalidateCapture = (captureId: CaptureId) => {
+    projections.delete(captureId);
+    if (captureIds && !captureIds.includes(captureId)) captureIds.push(captureId);
+    rawIndex = null;
+  };
   const invalidate = () => {
     projections = new Map();
     captureIds = null;
@@ -343,8 +350,8 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
         }
       });
       if (fresh.length > 0) {
-        invalidate();
-        deps.onChange();
+        invalidateCapture(captureId);
+        deps.onChange(captureId);
       }
       return { ackedThroughSeq: ackedThrough(captureId) };
     },
@@ -521,7 +528,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
       });
       unlinkUnreferenced(files);
       invalidate();
-      deps.onChange();
+      deps.onChange(null);
     },
 
     sweepExpired(nowMs, retentionDays) {

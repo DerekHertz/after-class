@@ -364,6 +364,50 @@ describe("ingest is idempotent on (captureId, clientSeq)", () => {
   });
 });
 
+describe("an upload invalidates only its own capture", () => {
+  test("ingesting into one capture keeps another capture's cached projection, and the written one reads its new facts", () => {
+    const h = harness();
+    const a = stream();
+    a.control("start");
+    a.source();
+    a.span(0, 10);
+    const b = stream();
+    b.control("start");
+    b.source();
+    b.span(0, 20);
+    h.evidence.ingest({ captureId: a.captureId, facts: a.facts });
+    h.evidence.ingest({ captureId: b.captureId, facts: b.facts });
+    const untouched = h.evidence.watchedMaterial(b.captureId);
+    const before = h.evidence.watchedMaterial(a.captureId);
+
+    const more = a.span(10, 25);
+    h.evidence.ingest({ captureId: a.captureId, facts: [more] });
+
+    expect(h.evidence.watchedMaterial(b.captureId)).toBe(untouched);
+    expect(h.evidence.watchedMaterial(a.captureId)).not.toBe(before);
+    expect(Material.duration(h.evidence.watchedMaterial(a.captureId))).toBe(25);
+    expect(h.changes.n).toBe(3);
+  });
+
+  test("a capture first written after the store listed its captures is still found by a bundle", () => {
+    const h = harness();
+    const a = stream();
+    a.control("start");
+    a.source();
+    a.span(0, 10);
+    h.evidence.ingest({ captureId: a.captureId, facts: a.facts });
+    h.evidence.bundle(h.evidence.watchedMaterial(a.captureId));
+
+    const b = stream();
+    b.control("start");
+    b.source();
+    b.transcript([[2, 4, "a new lecture"]]);
+    b.span(0, 10);
+    h.evidence.ingest({ captureId: b.captureId, facts: b.facts });
+    expect(textsOf(h.evidence.bundle(h.evidence.watchedMaterial(b.captureId)).passages)).toEqual(["a new lecture"]);
+  });
+});
+
 describe("capture view", () => {
   test("status follows control facts; activeCaptures lists only captures not stopped", () => {
     const h = harness();
