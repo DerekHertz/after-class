@@ -1,6 +1,6 @@
 # Hosted sign-in
 
-The beta runs the current backend on one server behind Caddy, with the app and the API on one origin. Friends sign in with Google through Clerk. Each Clerk account is one After Class user, and the backend serves each user only their own data.
+The beta runs the current backend on one server behind Caddy, with the app and the API on one origin. Friends sign in through Clerk with Google or email. Each Clerk account is one After Class user, and the backend serves each user only their own data.
 
 ## Settings
 
@@ -19,11 +19,11 @@ Leave `AFTERCLASS_HOST` unset so the backend listens on 127.0.0.1 and only Caddy
 
 ## Clerk dashboard
 
-These steps come from memory of Clerk's dashboard and were not checked against it.
+Steps 1 and 4 come from memory of Clerk's dashboard. Steps 2 and 3 were checked against the live instance and Clerk's docs on 2026-11-14.
 
 1. Create an application and turn on Google and email as sign-in methods.
-2. Limit who can sign up. The beta sets Access mode to Invite-only and invites each friend under Users, Invitations. Clerk then refuses an uninvited sign-up with `sign_up_mode_restricted`, checked live on 2026-11-14. The allowlist needs a paid plan in production. After Class has no invitation list of its own.
-3. Production instances created on or after 2026-11-12 require a minimum ClerkJS version, 6.42.3 by default. `CLERK_JS_VERSION` must stay at or above it.
+2. Limit who can sign up. The beta sets Access mode to Invite-only and invites each friend under Users, Invitations. Clerk then refuses an uninvited sign-up with `sign_up_mode_restricted`, checked live on 2026-11-14. Clerk's [restricting access guide](https://clerk.com/docs/guides/secure/restricting-access) says the allowlist needs a paid plan in production. After Class has no invitation list of its own.
+3. Clerk's [minimum ClerkJS version protection](https://clerk.com/docs/guides/protect/protections/require-minimum-clerkjs-version) is on for instances created on or after 2026-11-12, with a minimum of 6.42.3 unless changed in the dashboard. Clerk refuses sign-in from an older ClerkJS, so keep the `CLERK_JS_VERSION` constant in `src/backend/clerk.ts` at or above the instance's minimum.
 4. For a production instance, add the DNS records Clerk lists for the domain, then copy the keys and URLs above.
 
 ## Caddy
