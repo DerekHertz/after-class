@@ -116,7 +116,7 @@ describe("the stop switch at the moment of sending", () => {
     const w = world({ userUsd: 1.5, totalUsd: 50 });
     const run = w.memo.run(apiTask(w.claude, "resource_search", true), { n: 1 });
     await tick();
-    w.net.pending[0]!.resolve(message({ stop: "pause_turn", content: [{ type: "server_tool_use", id: "s", name: "web_search", input: {} }] }));
+    w.net.pending[0]!.resolve(PAUSED_1_12);
     expect(await run).toMatchObject({ kind: "held", hold: { reason: "user_budget", usedUp: false } });
     expect(w.net.pending).toHaveLength(1);
     expect(w.events()).toHaveLength(1);
@@ -157,6 +157,43 @@ describe("the other adapters ask at the moment of sending too", () => {
     w.stop();
     expect(await w.memo.run(productBoundaryTask(jev), boundaryInput())).toMatchObject({ kind: "held", hold: { reason: "stopped" } });
     expect(requests).toEqual([]);
+  });
+});
+
+/** A paused search turn that wrote 600,000 tokens to the 1 hour cache and spent 16,000 on output: $4.80 + $0.32, past a $5 cap alone. */
+const PAUSED_5_12 = message({
+  stop: "pause_turn",
+  content: [{ type: "server_tool_use", id: "srv_1", name: "web_search", input: { query: "q" } }, { type: "web_search_tool_result", tool_use_id: "srv_1", content: [] }],
+  usage: { input_tokens: 0, output_tokens: 16_000, cache_creation_input_tokens: 600_000, cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 600_000 }, cache_read_input_tokens: 0 },
+});
+
+describe("a response's known price counts from the moment it is read", () => {
+  test("a first response that alone costs $5.12 holds the continuation under a $5 cap, and the hold says used up", async () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    const run = w.memo.run(apiTask(w.claude, "resource_search", true), { n: 1 });
+    await tick();
+    w.net.pending[0]!.resolve(PAUSED_5_12);
+    await tick();
+    await tick();
+    expect(w.net.pending.length, "the continuation was sent after the first response had already cost $5.12").toBe(1);
+    expect(await run).toMatchObject({ kind: "held", hold: { reason: "user_budget", usedUp: true } });
+    expect(w.events()).toEqual([{ purpose: "resource_search", cost_kind: "estimated", cost_usd: expect.closeTo(5.12, 9) as unknown as number }]);
+    expect(w.holds()).toEqual([5_120_000]);
+  });
+
+  test("a process that ends during the continuation is reconciled at the $5.12 already known plus the continuation's reservation (R17)", async () => {
+    const w = world({ userUsd: null, totalUsd: null });
+    void w.memo.run(apiTask(w.claude, "resource_search", true), { n: 1 });
+    await tick();
+    w.net.pending[0]!.resolve(PAUSED_5_12);
+    await tick();
+    expect(w.net.pending).toHaveLength(2);
+
+    const next = createBudget(w.db, { limits: { userUsd: 5, totalUsd: 50 }, stopped: () => false });
+    expect(next.reconcileInterrupted()).toBe(1);
+    expect(w.holds()).toEqual([5_120_000, ESTIMATE_USD.resource_search * 1_000_000]);
+    expect(next.allowance(w.db.userId).usedUsd).toBeCloseTo(5.12 + ESTIMATE_USD.resource_search, 9);
+    expect(w.events()).toEqual([{ purpose: "resource_search", cost_kind: "unknown", cost_usd: null }]);
   });
 });
 

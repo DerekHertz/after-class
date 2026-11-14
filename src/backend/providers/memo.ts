@@ -17,7 +17,8 @@
  *    database is a labelled replay sample with no provider constructed.
  *  - Budgets: an adapter calls `ctx.admit()` immediately before each paid request leaves the process, after any queue,
  *    so the stop switch and the caps are asked at the moment of sending and a call that sends several requests reserves
- *    for each. The holds settle in the usage event's transaction. A refusal throws `BudgetHeld` and the run resolves
+ *    for each. Each hold is priced as its response is read, so the next request is admitted against what is already
+ *    known to be spent. The holds settle in the usage event's transaction. A refusal throws `BudgetHeld` and the run resolves
  *    `held`. If nothing was sent it records no usage event; if earlier requests were sent, it records their cost.
  *  - Per user: a memo is built on a `UserDb` and reads and writes only that user's rows, which are keyed by
  *    (user_id, key). The key itself stays a hash of the call alone, so it does not change when a user is added and
@@ -328,7 +329,12 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
         if (admission?.kind === "held") throw new BudgetHeld(admission.hold, null);
         const ticket: Ticket = { reservation: admission?.reservation ?? null, cost: null };
         tickets.push(ticket);
-        return { priced: (cost) => void (ticket.cost = cost) };
+        return {
+          priced: (cost) => {
+            ticket.cost = cost;
+            if (ticket.reservation !== null) budget!.price(ticket.reservation, cost);
+          },
+        };
       };
       const startedMs = now();
       let outcome:

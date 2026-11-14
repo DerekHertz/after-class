@@ -1,7 +1,7 @@
 /**
  * Budgets for paid calls (plan phase 7, step 1). Every outbound paid request reserves here at the moment it is sent (memo.ts
- * hands the adapter an `admit` it calls after any queue, right before the request leaves), and memo.ts settles the attempt's
- * holds after it. `reconcileInterrupted` settles what a previous process left. Nothing else writes budget_holds. One budget
+ * hands the adapter an `admit` it calls after any queue, right before the request leaves), memo.ts prices each hold as its
+ * response is read, and settles the attempt's holds after it. `reconcileInterrupted` settles what a previous process left. Nothing else writes budget_holds. One budget
  * serves every user, because the monthly total sums all of them.
  *
  * Derek, amendment of 2026-11-13: "Every hosted call runs inside a per-user budget and a monthly total budget, and a stop
@@ -13,9 +13,12 @@
  *             insert. The write lock is taken before the sums are read, so two requests (in this process or another on the same
  *             file) cannot both take the last of a budget. A call that sends several requests (a resource search that continues a
  *             paused turn) reserves for each one.
+ *   price     as soon as a response is read and its cost is known, before the attempt sends anything else, so the next
+ *             reservation counts what is already known to be spent, and a crash after it keeps that figure.
  *   settle    inside the transaction that records the attempt's usage event, so a hold is settled exactly when its event exists.
  *   crash     a hold a process never settled may have been billed. At boot, before any new request, `reconcileInterrupted` writes
- *             one usage event of unknown cost for each attempt such holds belong to, and settles each hold at its reservation.
+ *             one usage event of unknown cost for each attempt such holds belong to, and settles each hold at its price, or at
+ *             its reservation when it was never priced.
  *
  * A call can cost more than its estimate. Its settlement then takes the month past the cap by the difference, and every
  * request after it is refused. So the cap can be passed by at most the overrun of the requests already sent when it is reached.
@@ -81,6 +84,8 @@ export type Admission = { readonly kind: "reserved"; readonly reservation: Reser
 
 export type Budget = {
   reserve(userId: UserId, purpose: Purpose, key: MemoKey): Admission;
+  /** Record a request's known cost the moment it is read, so it counts before the attempt settles. An unknown cost changes nothing. */
+  price(reservation: Reservation, cost: Cost): void;
   /** Run it inside the transaction that records the attempt's usage event. */
   settle(reservation: Reservation, cost: Cost): void;
   allowance(userId: UserId): Allowance;
@@ -109,11 +114,12 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
   const now = opts.now ?? Date.now;
   const userCap = opts.limits.userUsd === null ? null : toMicros(opts.limits.userUsd);
   const totalCap = opts.limits.totalUsd === null ? null : toMicros(opts.limits.totalUsd);
-  const spent = "COALESCE(SUM(COALESCE(settled_micros, reserved_micros)), 0) AS used FROM budget_holds";
+  const spent = "COALESCE(SUM(COALESCE(settled_micros, priced_micros, reserved_micros)), 0) AS used FROM budget_holds";
   const q = {
     userUsed: db.sql.query<{ used: number }, [string, string]>(`SELECT ${spent} WHERE period = ? AND user_id = ?`),
     totalUsed: db.sql.query<{ used: number }, [string]>(`SELECT ${spent} WHERE period = ?`),
     insert: db.sql.query(`INSERT INTO budget_holds (id, user_id, period, purpose, memo_key, reserved_micros, reserved_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`),
+    price: db.sql.query(`UPDATE budget_holds SET priced_micros = ? WHERE id = ? AND settled_micros IS NULL`),
     settle: db.sql.query(`UPDATE budget_holds SET settled_micros = ?, settled_ms = ? WHERE id = ? AND settled_micros IS NULL`),
     interrupted: db.sql.query<{ user_id: string; memo_key: string; provider: string; model: string; purpose: string; started: number; next: number }, []>(
       `SELECT h.user_id, h.memo_key, i.provider, i.model, i.purpose, MIN(h.reserved_ms) AS started,
@@ -125,7 +131,7 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
       `INSERT INTO usage_events (id, user_id, memo_key, capture_id, attempt_no, provider, model, purpose, outcome, cost_kind, cost_reason, started_ms, duration_ms)
        VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 'aborted', 'unknown', ?, ?, 0)`,
     ),
-    settleInterrupted: db.sql.query(`UPDATE budget_holds SET settled_micros = reserved_micros, settled_ms = ? WHERE user_id = ? AND memo_key = ? AND settled_micros IS NULL`),
+    settleInterrupted: db.sql.query(`UPDATE budget_holds SET settled_micros = COALESCE(priced_micros, reserved_micros), settled_ms = ? WHERE user_id = ? AND memo_key = ? AND settled_micros IS NULL`),
   };
 
   /** Why an attempt for `purpose` that would add `micros` to this month is refused, or null when it may start. */
@@ -156,6 +162,10 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
         q.insert.run(id, userId, periodOf(at), purpose, key, micros, Math.round(at));
         return { kind: "reserved", reservation: { id, micros } };
       }).immediate();
+    },
+
+    price(reservation, cost) {
+      if (cost.kind !== "unknown") q.price.run(toMicros(cost.usd), reservation.id);
     },
 
     settle(reservation, cost) {

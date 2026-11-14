@@ -435,7 +435,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   const memoMode: MemoMode = mode === "replay" && !options.tasks ? "replay" : "live";
   // One budget for every user, on the raw db: the total cap sums all of them. Each user's memo reserves as its own user.
   const budget = mode === "live" ? createBudget(rawDb, { limits: budgetLimits, stopped: paidCallsStopped }) : null;
-  // Before any request: what a previous process left unsettled gets its usage event (R17) and counts at its reservation.
+  // Before any request: what a previous process left unsettled gets its usage event (R17) and counts at its price, or its reservation when unpriced.
   const interrupted = budget?.reconcileInterrupted() ?? 0;
 
   let alive = true;
