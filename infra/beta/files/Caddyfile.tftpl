@@ -19,7 +19,7 @@ ${domain} {
 	# the public origin and the client address from them.
 	# Compress the text the app serves (page, script, stylesheet, fonts, JSON). The list names the types, so the tutor
 	# turn (application/x-ndjson, streamed line by line) and the already compressed images and audio pass through
-	# untouched. Compression buffers a response, and a buffered turn would arrive all at once at the end.
+	# untouched. A measured run showed Caddy still flushes each compressed NDJSON line, so leaving the stream out is a precaution.
 	encode zstd gzip {
 		match {
 			header Content-Type text/*
