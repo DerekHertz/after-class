@@ -12,11 +12,11 @@ import type { CaptureId, IdPart, WindowId } from "../src/shared/ids";
 import { stableId } from "../src/shared/ids";
 import { captureResponse, ingestAckResponse } from "../src/shared/wire";
 import { PRODUCT_JEV_SETUP } from "../src/backend/jev-setup";
-import { buildTasks, loadPairingToken, main, readKeys, resolveClaudeBackend, resolveMode } from "../src/backend/main";
+import { buildTasks, loadPairingToken, main, readKeys, resolveClaudeBackend, resolveMode, STOP_FILE } from "../src/backend/main";
 import type { MainOptions, Running, TaskSet } from "../src/backend/main";
 import type { ClaudeCli, SpawnFn } from "../src/backend/providers/claude";
 import type { ApiClient } from "../src/backend/providers/claude-api";
-import { ProviderError } from "../src/backend/providers/memo";
+import { ProviderError, unbudgeted } from "../src/backend/providers/memo";
 import { reviewState } from "../src/backend/review/tutor";
 import type { TutorInput } from "../src/backend/review/tutor";
 import type { ClaimSupportInput, BoundaryInput, FrameChangeInput } from "../src/backend/providers/jev-tasks";
@@ -541,6 +541,32 @@ describe("main, live mode", () => {
     const usage = await (await fetch(`${b.base}/usage`, { headers: authed(b.r.token) })).text();
     for (const text of [usage, b.logs.join("\n"), b.errors.join("\n")]) expect(text).not.toContain(KEY);
   }, 30_000);
+
+  test("with the stop switch file in the config dir no paid call is made, and /usage says why", async () => {
+    const configDir = dir("afterclass-config-");
+    writeFileSync(join(configDir, "keys.env"), "TYPESAFE_API_KEY=sk-stop-switch\n", { mode: 0o600 });
+    writeFileSync(join(configDir, STOP_FILE), "");
+    let jevRequests = 0;
+    const fetchFake = (async () => {
+      jevRequests++;
+      return new Response("{}", { status: 500 });
+    }) as unknown as typeof fetch;
+    let spawned = 0;
+    const spawn: SpawnFn = () => {
+      spawned++;
+      throw new Error("no claude child may start while paid calls are stopped");
+    };
+    const b = await boot({ configDir, fetch: fetchFake, spawn }, { AFTERCLASS_BUDGET_USER_USD: "3", PATH: "/usr/bin" });
+    expect(b.logs.join("\n")).toContain(`budget per month (UTC): $3 per user, no cap in total; stop switch: ${join(configDir, STOP_FILE)} (on)`);
+    await ingest(b, fixture({ frames: false }));
+    const asked = () => b.r.modules.db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM memo_inputs").get()!.n;
+    await until(() => asked() > 0);
+    await Bun.sleep(200);
+    expect(jevRequests).toBe(0);
+    expect(spawned).toBe(0);
+    const usage = (await (await fetch(`${b.base}/usage`, { headers: authed(b.r.token) })).json()) as { allowance: unknown };
+    expect(usage.allowance).toMatchObject({ usedUsd: 0, limitUsd: 3, held: { reason: "stopped" } });
+  }, 30_000);
 });
 
 // ───────────────────────────── the Claude backend switch ─────────────────────────────
@@ -625,7 +651,7 @@ describe("AFTERCLASS_CLAUDE_BACKEND", () => {
       },
     };
     const jev = { ask: () => Promise.reject(new Error("no Jev call in this test")) };
-    const ctx = { signal: new AbortController().signal, streamTo: null };
+    const ctx = { ...unbudgeted(new AbortController().signal), streamTo: null };
     const empty = { passages: [], frames: [], gaps: [] };
     const tasks = buildTasks(jev, adapter, () => null);
     await Promise.allSettled([

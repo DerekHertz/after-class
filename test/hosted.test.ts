@@ -4,7 +4,7 @@
  */
 import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClerkVerifier } from "../src/backend/clerk";
@@ -12,8 +12,11 @@ import { createDevices } from "../src/backend/devices";
 import { serve } from "../src/backend/http";
 import { clerkUsers, hostedCallers, main, mainHosted, resolveAuth } from "../src/backend/main";
 import type { HostedRunning } from "../src/backend/main";
+import type { Memo } from "../src/backend/providers/memo";
+import type { Allowance, Cost } from "../src/shared/domain";
 import { stableId } from "../src/shared/ids";
-import type { IdKind } from "../src/shared/ids";
+import type { IdKind, UserId } from "../src/shared/ids";
+import { UNKNOWN_COST, fakeTask, ok, usage } from "./fakes";
 import { ROUTES, routeUrl } from "../src/shared/wire";
 import type { RouteName } from "../src/shared/wire";
 import type { SigningKey } from "./clerk-fixtures";
@@ -255,6 +258,96 @@ describe("mainHosted", () => {
     } finally {
       await b.r.stop();
     }
+  });
+
+  describe("budgets", () => {
+    /** Live mode with a keys file, so the one shared budget runs. Every provider call is refused and counted. */
+    async function bootLive(extraKeys = "") {
+      const configDir = dir("afterclass-hosted-config-");
+      const dataDir = dir("afterclass-hosted-data-");
+      writeFileSync(join(configDir, "keys.env"), `TYPESAFE_API_KEY=sk-hosted-budget\n${extraKeys}`, { mode: 0o600 });
+      const logs: string[] = [];
+      let providerCalls = 0;
+      const refuse = () => {
+        providerCalls++;
+        throw new Error("a hosted budget test reached a provider");
+      };
+      const r = await mainHosted({ port: 0, buildApp: false, configDir, appDir: fixtureApp(), env: hostedEnv(jwks.url, dataDir), fetch: refuse as unknown as typeof fetch, spawn: refuse, log: (t) => void logs.push(t), error: () => {} });
+      expect(r.mode).toBe("live");
+      const base = `http://127.0.0.1:${r.port}`;
+      const signIn = async (sub: string) => {
+        const headers = await as(sub);
+        expect((await fetch(`${base}/lectures`, { headers })).status).toBe(200);
+        const db = new Database(join(dataDir, "afterclass.sqlite"), { readonly: true });
+        try {
+          const userId = db.query<{ id: UserId }, [string]>("SELECT id FROM users WHERE auth_subject = ?").get(sub)!.id;
+          return {
+            headers,
+            memo: r.modulesFor(userId).memo,
+            allowance: async () => ((await (await fetch(`${base}/usage`, { headers })).json()) as { allowance: Allowance | null }).allowance,
+          };
+        } finally {
+          db.close();
+        }
+      };
+      return { r, base, logs, signIn, providerCalls: () => providerCalls };
+    }
+
+    test("ElevenLabs stays off even with its key in keys.env: voice is unavailable, nothing is sent, and the log says the key is ignored", async () => {
+      const b = await bootLive("ELEVENLABS_API_KEY=sk-eleven-hosted\n");
+      try {
+        const alice = await b.signIn("user_alice");
+        expect(await (await fetch(`${b.base}/voice`, { headers: alice.headers })).json()).toEqual({ available: false });
+        const speech = await fetch(`${b.base}/voice/speech`, { method: "POST", headers: { ...alice.headers, "content-type": "application/json" }, body: JSON.stringify({ text: "Hello." }) });
+        expect(speech.status).toBe(503);
+        expect(b.providerCalls()).toBe(0);
+        expect(b.logs.join("\n")).toContain("voice: ELEVENLABS_API_KEY is ignored in hosted mode");
+      } finally {
+        await b.r.stop();
+      }
+    });
+
+    const turns = (cost: Cost = UNKNOWN_COST) => fakeTask<{ n: number }, string>({ purpose: "tutor_turn", provider: "claude", answer: () => ok("turn", { usage: usage(cost) }) });
+    const run = (memo: Memo, task: ReturnType<typeof turns>, ns: readonly number[]) => Promise.all(ns.map((n) => memo.run(task, { n }).then((r) => r.kind)));
+
+    test("each signed-in user is held at their own $5 a month, and one user's spending never holds another", async () => {
+      const b = await bootLive();
+      try {
+        const alice = await b.signIn("user_alice");
+        const bob = await b.signIn("user_bob");
+        const aliceTurns = turns();
+        const bobTurns = turns();
+        expect(await run(alice.memo, aliceTurns, [1, 2, 3, 4, 5, 6])).toEqual(Array(6).fill("hit"));
+        expect(await alice.memo.run(aliceTurns, { n: 7 })).toMatchObject({ kind: "held", hold: { reason: "user_budget" } });
+        expect(await bob.allowance()).toMatchObject({ usedUsd: 0, limitUsd: 5, held: null });
+        expect(await run(bob.memo, bobTurns, [1, 2, 3, 4, 5, 6])).toEqual(Array(6).fill("hit"));
+        expect(await bob.memo.run(bobTurns, { n: 7 })).toMatchObject({ kind: "held", hold: { reason: "user_budget" } });
+        expect(aliceTurns.calls).toHaveLength(6);
+        expect(bobTurns.calls).toHaveLength(6);
+        for (const user of [alice, bob]) expect(await user.allowance()).toMatchObject({ usedUsd: 4.5, limitUsd: 5, held: { reason: "user_budget" } });
+        expect(b.providerCalls()).toBe(0);
+      } finally {
+        await b.r.stop();
+      }
+    });
+
+    test("once both users' calls together reach $50, the total holds a user who still has allowance left", async () => {
+      const b = await bootLive();
+      try {
+        const alice = await b.signIn("user_alice");
+        const bob = await b.signIn("user_bob");
+        expect(await run(alice.memo, turns({ kind: "measured", usd: 46 }), [1])).toEqual(["hit"]);
+        expect(await alice.memo.run(turns(), { n: 2 })).toMatchObject({ kind: "held", hold: { reason: "user_budget" } });
+        const bobTurns = turns();
+        expect(await run(bob.memo, bobTurns, [1, 2, 3, 4, 5])).toEqual(Array(5).fill("hit"));
+        expect(await bob.memo.run(bobTurns, { n: 6 })).toMatchObject({ kind: "held", hold: { reason: "total_budget" } });
+        expect(bobTurns.calls).toHaveLength(5);
+        expect(await bob.allowance()).toMatchObject({ usedUsd: 3.75, limitUsd: 5, held: { reason: "total_budget" } });
+        expect(b.providerCalls()).toBe(0);
+      } finally {
+        await b.r.stop();
+      }
+    });
   });
 
   test("a restart runs the expiry sweep for every signed-in user, as the local app does for its one user", async () => {

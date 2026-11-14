@@ -84,6 +84,7 @@ export function fakeTask<I extends IdPart, O>(opts: {
     canonicalInput: (input) => input,
     decode: opts.decode ?? ((stored) => stored as O),
     async attempt(input: I, ctx: AttemptContext) {
+      ctx.admit();
       calls.push(input);
       const aborted = new Promise<never>((_, reject) => {
         if (ctx.signal.aborted) reject(new DOMException("aborted", "AbortError"));

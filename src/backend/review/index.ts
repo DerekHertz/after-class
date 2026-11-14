@@ -19,13 +19,13 @@
 import { stableId } from "../../shared/ids";
 import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, ConceptId, EvidenceId, ReviewId, ThreadId, TurnId } from "../../shared/ids";
 import type {
-  AssessableClaim, ChunkPrep, ChunkRevision, Claim, CodeNotice, Concept, Correction, EvidenceBundle, FrozenScope, InviteAnswer, InviteState,
+  AssessableClaim, BudgetHold, ChunkPrep, ChunkRevision, Claim, CodeNotice, Concept, Correction, EvidenceBundle, FrozenScope, InviteAnswer, InviteState,
   LearnerAct, ReviewOptions, ReviewView, ScopePreview, Seq, StartChoice, StartResult, Turn, TurnEvent, TutorMove,
 } from "../../shared/domain";
 import { Material } from "../../shared/time";
 import { asSeq } from "../db";
 import type { UserDb } from "../db";
-import type { Lookup, Memo } from "../providers/memo";
+import type { Memo, RunResult } from "../providers/memo";
 import { MAX_MAIN_QUESTIONS, allowedMoves, askedClaims, parseMoveHeader, reviewState, settledCorrections, validateMove, tutorOwesMove, waitsForLearner } from "./tutor";
 import type { TutorInput, TutorOutput, WrapUpInput, WrapUpOutput } from "./tutor";
 import {
@@ -102,10 +102,10 @@ export type ReviewsDeps = {
   concepts?(ids: readonly ConceptId[]): readonly Concept[];
   bundle(material: Material): EvidenceBundle;
   watchedSeconds(captureId: CaptureId): number;
-  runTutor(input: TutorInput, streamTo: (delta: string) => void, signal: AbortSignal, onRetry: () => void): Promise<Lookup<TutorOutput>>;
+  runTutor(input: TutorInput, streamTo: (delta: string) => void, signal: AbortSignal, onRetry: () => void): Promise<RunResult<TutorOutput>>;
   /** The memo's: a resend clears the stored terminal failure of its tutor call so the model is asked again. */
   clearFailures: Memo["clearFailures"];
-  runWrapUp(input: WrapUpInput): Promise<Lookup<WrapUpOutput>>;
+  runWrapUp(input: WrapUpInput): Promise<RunResult<WrapUpOutput>>;
   nextSeq(): Seq;
   /** The record's markEndedInTx, run in the transaction that stores the wrap_up turn, so an ended review always has a save row (#138). */
   endedInTx?(reviewId: ReviewId): void;
@@ -119,9 +119,10 @@ type Attempt =
   | { readonly kind: "spoken"; readonly move: TutorMove; readonly say: string }
   /** `stored`: the memo holds this invalid output, so a resend replays it instead of asking the model again. */
   | { readonly kind: "invalid"; readonly why: string; readonly stored: boolean }
-  | { readonly kind: "failed"; readonly error: string };
+  | { readonly kind: "failed"; readonly error: string }
+  | { readonly kind: "held"; readonly hold: BudgetHold };
 
-type Settled = { readonly ok: true; readonly lookup: Lookup<TutorOutput> } | { readonly ok: false; readonly error: string };
+type Settled = { readonly ok: true; readonly lookup: RunResult<TutorOutput> } | { readonly ok: false; readonly error: string };
 
 const CLOSE_THREAD_LINE = "Let's leave that question there and move on.";
 const WRAP_UP_LINE = "Let's wrap up here.";
@@ -421,7 +422,7 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
    * A terminal failure stored before this request began answered an earlier send,
    * not this one, so a resend clears it and asks the model once more.
    */
-  async function runTutor(input: TutorInput, onDelta: (d: string) => void, onRetry: () => void, signal: AbortSignal, asOf: Seq): Promise<Lookup<TutorOutput>> {
+  async function runTutor(input: TutorInput, onDelta: (d: string) => void, onRetry: () => void, signal: AbortSignal, asOf: Seq): Promise<RunResult<TutorOutput>> {
     const lookup = await deps.runTutor(input, onDelta, signal, onRetry);
     if (lookup.kind !== "failed" || lookup.atSeq > asOf) return lookup;
     deps.clearFailures([lookup.key]);
@@ -500,6 +501,7 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     if (invalid !== null) return { kind: "invalid", why: invalid, stored: result.ok && result.lookup.kind === "hit" };
     if (!result.ok) return { kind: "failed", error: result.error };
     const lookup = result.lookup;
+    if (lookup.kind === "held") return { kind: "held", hold: lookup.hold };
     if (lookup.kind === "failed") return { kind: "failed", error: lookup.lastError };
     if (lookup.kind !== "hit") return { kind: "failed", error: `tutor call ${lookup.kind}` };
 
@@ -640,6 +642,14 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
         const outcome = yield* attempt(input, asOf);
         if (outcome.kind === "failed") {
           yield { type: "turn_failed", error: outcome.error, retryable: true };
+          return;
+        }
+        if (outcome.kind === "held") {
+          // Derek, 2026-11-13: "i think it should be allowed to finish". A cap never holds a turn that can only wrap up,
+          // so code says the wrap-up line without a call. The stop switch still holds it.
+          const onlyWrapUp = input.allowed.length === 1 && input.allowed[0] === "wrap_up";
+          if (onlyWrapUp && outcome.hold.reason !== "stopped") break;
+          yield { type: "turn_held", hold: outcome.hold };
           return;
         }
         let why: string;

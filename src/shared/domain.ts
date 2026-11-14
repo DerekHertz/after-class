@@ -490,7 +490,9 @@ export type TurnEvent =
   | { readonly type: "sentence"; readonly text: string }
   | { readonly type: "say_reset" }
   | { readonly type: "turn_complete"; readonly turnId: TurnId }
-  | { readonly type: "turn_failed"; readonly error: string; readonly retryable: boolean };
+  | { readonly type: "turn_failed"; readonly error: string; readonly retryable: boolean }
+  /** The tutor's next call was refused by a budget before it began. Nothing was cut: the learner's turn is stored and a resend continues it. */
+  | { readonly type: "turn_held"; readonly hold: BudgetHold };
 
 /** What the tutor may propose for an observation. */
 export type ObservationStatus = "independent" | "partial" | "after_help" | "unresolved" | "not_assessed";
@@ -658,4 +660,26 @@ export type UsageEvent = {
 export type UsageSummary = {
   readonly byKind: Readonly<Record<Cost["kind"], { readonly calls: number; readonly usd: number | null }>>;
   readonly byPurpose: Readonly<Record<Purpose, { readonly calls: number; readonly errors: number; readonly unknownCost: number }>>;
+  /** Null when no budget runs (replay mode). */
+  readonly allowance: Allowance | null;
+};
+
+/**
+ * Why a paid call was refused before it began: the stop switch is on, or the call would take this user's or everyone's
+ * spend for the calendar month (UTC) past its budget. `resetsAtMs` is the start of the next month. `usedUp`: spend has
+ * already reached that budget. When false, money is left but not enough for the call's estimate.
+ */
+export type BudgetHold =
+  | { readonly reason: "stopped" }
+  | { readonly reason: "user_budget" | "total_budget"; readonly resetsAtMs: number; readonly usedUp: boolean };
+
+/** One user's budget for the current calendar month (UTC). */
+export type Allowance = {
+  /** What this month's calls count against the budget: their recorded cost, or what was set aside for a call still running or of unknown cost. */
+  readonly usedUsd: number;
+  /** Null when there is no per-user cap. */
+  readonly limitUsd: number | null;
+  readonly resetsAtMs: number;
+  /** Set when a new model call would be refused now. */
+  readonly held: BudgetHold | null;
 };

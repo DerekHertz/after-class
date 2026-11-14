@@ -95,7 +95,7 @@ export function diagramSummaryTask(claude: ClaudeCli, frameBytes: FrameBytes): T
       const { output, usage } = await claude.structured(
         { model: "opus", effort: "high", system: DIAGRAM_SYSTEM, prompt: evidence.text, images: evidence.images, webTools: false, timeoutMs: 600_000 },
         outputSchema,
-        ctx.signal,
+        ctx,
       );
       const lines = enforceCitations(output.lines, evidenceIdsOf({ passages: input.passages, frames: input.frames }));
       if (lines.length === 0) throw new ProviderError("no summary line cites the topic's evidence", usage, true);

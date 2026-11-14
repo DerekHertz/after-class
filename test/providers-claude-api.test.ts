@@ -12,8 +12,8 @@ import {
   API_MODELS, MAX_TOKEN_COUNT, REQUEST_OVERHEAD_TOKENS, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, ApiCallError, billingOfStatus, clientOptions, createClaudeApi, outputFormatOf, parseUsage, priceUsage, worstCaseUsd,
 } from "../src/backend/providers/claude-api";
 import type { ApiCallDetail, ApiClient, ApiStream } from "../src/backend/providers/claude-api";
-import { ProviderError } from "../src/backend/providers/memo";
-import { NEVER } from "./providers-fixtures";
+import { ProviderError, unbudgeted } from "../src/backend/providers/memo";
+import { OPEN } from "./providers-fixtures";
 
 const KEY = "sk-ant-api03-test-key-0123456789";
 
@@ -108,7 +108,7 @@ describe("request shape", () => {
 
   test("streamText sends the model, one cached system block, the prompt as the one user message and the effort", async () => {
     const { claude, seen } = api({ deltas: ["hi"] });
-    await claude.streamText(req({ effort: "high" }), () => {}, NEVER);
+    await claude.streamText(req({ effort: "high" }), () => {}, OPEN);
     expect(seen).toHaveLength(1);
     expect(seen[0]!.via).toBe("stream");
     const p = seen[0]!.params;
@@ -122,14 +122,14 @@ describe("request shape", () => {
 
   test("sonnet maps to claude-sonnet-5-5", async () => {
     const { claude, seen } = api({ deltas: ["hi"] });
-    await claude.streamText(req({ model: "sonnet" }), () => {}, NEVER);
+    await claude.streamText(req({ model: "sonnet" }), () => {}, OPEN);
     expect(seen[0]!.params.model).toBe("claude-sonnet-5-5");
   });
 
   test("no sampling, thinking, budget or forced tool parameter is sent, on either path", async () => {
     const { claude, seen } = api((n) => (n === 0 ? { deltas: ["x"] } : { final: message({ text: '{"concepts":[]}' }) }));
-    await claude.streamText(req(), () => {}, NEVER);
-    await claude.structured(req(), Out, NEVER);
+    await claude.streamText(req(), () => {}, OPEN);
+    await claude.structured(req(), Out, OPEN);
     expect(seen.map((s) => s.via)).toEqual(["stream", "create"]);
     for (const s of seen) {
       const keys = Object.keys(s.params);
@@ -140,11 +140,11 @@ describe("request shape", () => {
 
   test("a model other than opus or sonnet throws a non-retryable error and sends nothing", async () => {
     const { claude, seen } = api({ deltas: ["x"] });
-    const err = await claude.streamText(req({ model: "haiku" }), () => {}, NEVER).catch((e) => e);
+    const err = await claude.streamText(req({ model: "haiku" }), () => {}, OPEN).catch((e) => e);
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.retryable).toBe(false);
     expect(err.message).toContain("haiku");
-    expect((await claude.structured(req({ model: "claude-opus-5-5" }), Out, NEVER).catch((e) => e)).retryable).toBe(false);
+    expect((await claude.structured(req({ model: "claude-opus-5-5" }), Out, OPEN).catch((e) => e)).retryable).toBe(false);
     expect(seen).toHaveLength(0);
   });
 
@@ -165,7 +165,7 @@ describe("streamText", () => {
   test("deltas reach onText in order and the final text is returned", async () => {
     const { claude } = api({ deltas: ["Hel", "lo ", "there"] });
     const got: string[] = [];
-    const out = await claude.streamText(req(), (d) => got.push(d), NEVER);
+    const out = await claude.streamText(req(), (d) => got.push(d), OPEN);
     expect(got).toEqual(["Hel", "lo ", "there"]);
     expect(out.text).toBe("Hello there");
   });
@@ -175,14 +175,14 @@ describe("streamText", () => {
       deltas: ["a"],
       final: message({ blocks: [{ type: "thinking", thinking: "", signature: "s" }, { type: "text", text: "first ", citations: null }, { type: "text", text: "second", citations: null }] }),
     });
-    expect((await claude.streamText(req(), () => {}, NEVER)).text).toBe("first second");
+    expect((await claude.streamText(req(), () => {}, OPEN)).text).toBe("first second");
   });
 });
 
 describe("structured", () => {
   test("asks for the schema through output_config.format and returns the validated output", async () => {
     const { claude, seen } = api({ final: message({ text: '{"concepts":["row picture"]}' }) });
-    const { output } = await claude.structured(req({ effort: "low" }), Out, NEVER);
+    const { output } = await claude.structured(req({ effort: "low" }), Out, OPEN);
     expect(output).toEqual({ concepts: ["row picture"] });
     const p = seen[0]!.params;
     expect(seen[0]!.via).toBe("create");
@@ -200,7 +200,7 @@ describe("structured", () => {
 
   test("output that does not match the schema is a non-retryable error that still carries usage", async () => {
     const { claude } = api({ final: message({ text: '{"concepts":"not a list"}', usage: { input: 10, output: 4 } }) });
-    const err = await claude.structured(req(), Out, NEVER).catch((e) => e);
+    const err = await claude.structured(req(), Out, OPEN).catch((e) => e);
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.retryable).toBe(false);
     expect(err.message).toContain("failed validation");
@@ -209,7 +209,7 @@ describe("structured", () => {
 
   test("text that is not JSON is a non-retryable error", async () => {
     const { claude } = api({ final: message({ text: "Sure, here you go." }) });
-    const err = await claude.structured(req(), Out, NEVER).catch((e) => e);
+    const err = await claude.structured(req(), Out, OPEN).catch((e) => e);
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.retryable).toBe(false);
   });
@@ -217,7 +217,7 @@ describe("structured", () => {
   test("a schema that cannot be expressed as JSON Schema is refused before any call", async () => {
     const { claude, seen } = api({ final: message() });
     const unrepresentable = z.object({ when: z.date() });
-    const err = await claude.structured(req(), unrepresentable, NEVER).catch((e) => e);
+    const err = await claude.structured(req(), unrepresentable, OPEN).catch((e) => e);
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.retryable).toBe(false);
     expect(seen).toHaveLength(0);
@@ -227,7 +227,7 @@ describe("structured", () => {
 describe("usage and cost", () => {
   test("opus: fresh input, 1 hour cache writes, cache reads and output, priced from the table", async () => {
     const { claude } = api({ deltas: ["x"], final: message({ usage: { input: 1000, creation: 2000, read: 5000, output: 500, breakdown: { m5: 0, h1: 2000 } } }) });
-    const { usage } = await claude.streamText(req(), () => {}, NEVER);
+    const { usage } = await claude.streamText(req(), () => {}, OPEN);
     // 1000 * 4 + 2000 * 8 + 5000 * 0.2 + 500 * 20, per million
     expect(usage.cost.kind).toBe("estimated");
     if (usage.cost.kind !== "estimated") throw new Error("unreachable");
@@ -249,13 +249,13 @@ describe("usage and cost", () => {
 
   test("a cache write with no TTL breakdown is priced as the 1 hour write the request asked for", async () => {
     const { claude } = api({ deltas: ["x"], final: message({ usage: { input: 0, creation: 1_000_000, read: 0, output: 0, breakdown: null } }) });
-    const { usage } = await claude.streamText(req(), () => {}, NEVER);
+    const { usage } = await claude.streamText(req(), () => {}, OPEN);
     expect(usage.cost).toEqual({ kind: "estimated", usd: 8, basis: "anthropic_api_list_price" });
   });
 
   test("a response that omits cache fields still reports usage", async () => {
     const { claude } = api({ deltas: ["x"], final: message({ usage: { input: 50, output: 5, creation: null, read: null } }) });
-    const { usage } = await claude.streamText(req(), () => {}, NEVER);
+    const { usage } = await claude.streamText(req(), () => {}, OPEN);
     expect(usage.inputTokens).toBe(50);
     expect(usage.cacheReadTokens).toBe(0);
     expect(usage.cost.kind).toBe("estimated");
@@ -263,14 +263,14 @@ describe("usage and cost", () => {
 
   test("a model with no price is reported as unknown cost, never zero", async () => {
     const { claude } = api({ deltas: ["x"], final: message({ model: "claude-mystery-9" }) });
-    const { usage } = await claude.streamText(req(), () => {}, NEVER);
+    const { usage } = await claude.streamText(req(), () => {}, OPEN);
     expect(usage.cost.kind).toBe("unknown");
   });
 
   test("onResponse sees every completed response, with the split the memo does not store", async () => {
     const seen: ApiCallDetail[] = [];
     const { claude } = api({ deltas: ["x"], final: message({ usage: { input: 10, creation: 20, read: 30, output: 40, breakdown: { m5: 5, h1: 15 } } }) }, { onResponse: (d) => seen.push(d) });
-    await claude.streamText(req(), () => {}, NEVER);
+    await claude.streamText(req(), () => {}, OPEN);
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ model: "claude-opus-5-5", stopReason: "end_turn", usage: { fresh: 10, creation5m: 5, creation1h: 15, read: 30, output: 40 } });
   });
@@ -292,7 +292,7 @@ describe("worstCaseUsd", () => {
 
   test("the schema the runner reserves for is the one the adapter sends", async () => {
     const { claude, seen } = api({ final: message({ text: '{"concepts":[]}' }) });
-    await claude.structured(req(), Out, NEVER);
+    await claude.structured(req(), Out, OPEN);
     expect(seen[0]!.params.output_config?.format).toEqual(outputFormatOf(Out));
   });
 });
@@ -302,7 +302,7 @@ describe("stop reasons", () => {
 
   test("a refusal is a non-retryable failure that names the category and carries usage", async () => {
     const { claude } = stopped("refusal", { type: "refusal", category: "cyber", explanation: "declined" });
-    const err = await claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    const err = await claude.streamText(req(), () => {}, OPEN).catch((e) => e);
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.retryable).toBe(false);
     expect(err.message).toContain("refus");
@@ -312,7 +312,7 @@ describe("stop reasons", () => {
 
   test("a max_tokens stop is a non-retryable failure, on both paths", async () => {
     const { claude } = stopped("max_tokens");
-    for (const run of [() => claude.streamText(req(), () => {}, NEVER), () => claude.structured(req(), Out, NEVER)]) {
+    for (const run of [() => claude.streamText(req(), () => {}, OPEN), () => claude.structured(req(), Out, OPEN)]) {
       const err = await run().catch((e) => e);
       expect(err).toBeInstanceOf(ProviderError);
       expect(err.retryable).toBe(false);
@@ -322,7 +322,7 @@ describe("stop reasons", () => {
 
   test("any other stop that is not a finished answer fails", async () => {
     for (const stop of ["tool_use", "pause_turn", "model_context_window_exceeded", null]) {
-      const err = await stopped(stop).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+      const err = await stopped(stop).claude.streamText(req(), () => {}, OPEN).catch((e) => e);
       expect(err).toBeInstanceOf(ProviderError);
       expect(err.retryable).toBe(false);
     }
@@ -330,14 +330,14 @@ describe("stop reasons", () => {
 
   test("end_turn and stop_sequence are answers", async () => {
     for (const stop of ["end_turn", "stop_sequence"]) {
-      expect((await stopped(stop).claude.streamText(req(), () => {}, NEVER)).text).toBe("partial");
+      expect((await stopped(stop).claude.streamText(req(), () => {}, OPEN)).text).toBe("partial");
     }
   });
 
   test("a failed stop is still reported to onResponse, so a runner can record it", async () => {
     const seen: ApiCallDetail[] = [];
     const { claude } = api({ deltas: ["p"], final: message({ stop: "refusal" }) }, { onResponse: (d) => seen.push(d) });
-    await claude.streamText(req(), () => {}, NEVER).catch(() => {});
+    await claude.streamText(req(), () => {}, OPEN).catch(() => {});
     expect(seen.map((d) => d.stopReason)).toEqual(["refusal"]);
   });
 });
@@ -369,30 +369,30 @@ describe("errors", () => {
 
   test.each(retryable)("%s is retryable", async (_name, fail) => {
     const { claude } = api({ fail });
-    const err = await claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    const err = await claude.streamText(req(), () => {}, OPEN).catch((e) => e);
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.retryable).toBe(true);
-    expect((await api({ fail }).claude.structured(req(), Out, NEVER).catch((e) => e)).retryable).toBe(true);
+    expect((await api({ fail }).claude.structured(req(), Out, OPEN).catch((e) => e)).retryable).toBe(true);
   });
 
   test.each(terminal)("%s is not retryable", async (_name, fail) => {
     const { claude } = api({ fail });
-    const err = await claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    const err = await claude.streamText(req(), () => {}, OPEN).catch((e) => e);
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.retryable).toBe(false);
-    expect((await api({ fail }).claude.structured(req(), Out, NEVER).catch((e) => e)).retryable).toBe(false);
+    expect((await api({ fail }).claude.structured(req(), Out, OPEN).catch((e) => e)).retryable).toBe(false);
   });
 
   test("a stream that ends without a message is retryable, and an unknown error is not", async () => {
-    expect((await api({ fail: new Anthropic.AnthropicError("stream ended without producing a Message") }).claude.streamText(req(), () => {}, NEVER).catch((e) => e)).retryable).toBe(true);
-    const odd = await api({ fail: new TypeError("bug") }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    expect((await api({ fail: new Anthropic.AnthropicError("stream ended without producing a Message") }).claude.streamText(req(), () => {}, OPEN).catch((e) => e)).retryable).toBe(true);
+    const odd = await api({ fail: new TypeError("bug") }).claude.streamText(req(), () => {}, OPEN).catch((e) => e);
     expect(odd).toBeInstanceOf(ProviderError);
     expect(odd.retryable).toBe(false);
   });
 
   test("the error message carries the status and the SDK text, truncated", async () => {
     const long = "z".repeat(2_000);
-    const err = await api({ fail: new Anthropic.BadRequestError(400, body(long), undefined, headers) }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    const err = await api({ fail: new Anthropic.BadRequestError(400, body(long), undefined, headers) }).claude.streamText(req(), () => {}, OPEN).catch((e) => e);
     expect(err.message).toContain("400");
     expect(err.message.length).toBeLessThan(700);
   });
@@ -422,14 +422,14 @@ describe("which failures may have been billed", () => {
   ];
 
   test.each(notBilled)("HTTP %s is not billed and carries its status", async (_name, fail, status) => {
-    const err = await api({ fail }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    const err = await api({ fail }).claude.streamText(req(), () => {}, OPEN).catch((e) => e);
     expect(err).toBeInstanceOf(ApiCallError);
     expect(err.billing).toBe("not_billed");
     expect(err.status).toBe(status);
   });
 
   test.each(maybeBilled)("%s may have been billed", async (_name, fail) => {
-    for (const run of [(c: ReturnType<typeof api>["claude"]) => c.streamText(req(), () => {}, NEVER), (c: ReturnType<typeof api>["claude"]) => c.structured(req(), Out, NEVER)]) {
+    for (const run of [(c: ReturnType<typeof api>["claude"]) => c.streamText(req(), () => {}, OPEN), (c: ReturnType<typeof api>["claude"]) => c.structured(req(), Out, OPEN)]) {
       const err = await run(api({ fail }).claude).catch((e) => e);
       expect(err).toBeInstanceOf(ApiCallError);
       expect(err.billing).toBe("maybe_billed");
@@ -437,9 +437,9 @@ describe("which failures may have been billed", () => {
   });
 
   test("our own timeout may have been billed, and a refusal to send anything is not billed", async () => {
-    const timedOut = await api({ hold: true }).claude.streamText(req({ timeoutMs: 20 }), () => {}, NEVER).catch((e) => e);
+    const timedOut = await api({ hold: true }).claude.streamText(req({ timeoutMs: 20 }), () => {}, OPEN).catch((e) => e);
     expect(timedOut.billing).toBe("maybe_billed");
-    const refused = await api({ deltas: ["x"] }).claude.streamText(req({ model: "haiku" }), () => {}, NEVER).catch((e) => e);
+    const refused = await api({ deltas: ["x"] }).claude.streamText(req({ model: "haiku" }), () => {}, OPEN).catch((e) => e);
     expect(refused.billing).toBe("not_billed");
   });
 });
@@ -448,7 +448,7 @@ describe("abort and timeout", () => {
   test("abort rejects with an AbortError, so the memo records it as aborted, and cancels the request", async () => {
     const { claude, seen } = api({ hold: true });
     const c = new AbortController();
-    const pending = claude.streamText(req(), () => {}, c.signal).catch((e) => e);
+    const pending = claude.streamText(req(), () => {}, unbudgeted(c.signal)).catch((e) => e);
     await Bun.sleep(5);
     c.abort();
     const err = await pending;
@@ -460,7 +460,7 @@ describe("abort and timeout", () => {
   test("abort on the structured path rejects the same way", async () => {
     const { claude } = api({ hold: true });
     const c = new AbortController();
-    const pending = claude.structured(req(), Out, c.signal).catch((e) => e);
+    const pending = claude.structured(req(), Out, unbudgeted(c.signal)).catch((e) => e);
     await Bun.sleep(5);
     c.abort();
     expect((await pending).name).toBe("AbortError");
@@ -470,13 +470,13 @@ describe("abort and timeout", () => {
     const { claude, seen } = api({ deltas: ["x"] });
     const c = new AbortController();
     c.abort();
-    expect((await claude.streamText(req(), () => {}, c.signal).catch((e) => e)).name).toBe("AbortError");
+    expect((await claude.streamText(req(), () => {}, unbudgeted(c.signal)).catch((e) => e)).name).toBe("AbortError");
     expect(seen).toHaveLength(0);
   });
 
   test("timeoutMs rejects with a retryable ProviderError and cancels the request", async () => {
     const { claude, seen } = api({ hold: true });
-    const err = await claude.streamText(req({ timeoutMs: 20 }), () => {}, NEVER).catch((e) => e);
+    const err = await claude.streamText(req({ timeoutMs: 20 }), () => {}, OPEN).catch((e) => e);
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.retryable).toBe(true);
     expect(err.message).toContain("timed out");
@@ -486,17 +486,17 @@ describe("abort and timeout", () => {
   test("a caller aborted while waiting for a slot never sends, and the slot it never held is not freed", async () => {
     const { claude, seen } = api((n) => (n === 0 ? { hold: true } : { deltas: ["ok"] }), { maxConcurrent: 1 });
     const first = new AbortController();
-    const holding = claude.streamText(req(), () => {}, first.signal).catch((e) => e);
+    const holding = claude.streamText(req(), () => {}, unbudgeted(first.signal)).catch((e) => e);
     await Bun.sleep(5);
     const queued = new AbortController();
-    const waiting = claude.streamText(req(), () => {}, queued.signal).catch((e) => e);
+    const waiting = claude.streamText(req(), () => {}, unbudgeted(queued.signal)).catch((e) => e);
     await Bun.sleep(5);
     queued.abort();
     expect((await waiting).name).toBe("AbortError");
     expect(seen).toHaveLength(1);
     first.abort();
     expect((await holding).name).toBe("AbortError");
-    expect((await claude.streamText(req(), () => {}, NEVER)).text).toBe("ok");
+    expect((await claude.streamText(req(), () => {}, OPEN)).text).toBe("ok");
   });
 
   test("at most maxConcurrent calls run at once", async () => {
@@ -519,7 +519,7 @@ describe("abort and timeout", () => {
       },
     };
     const claude = createClaudeApi({ apiKey: KEY, maxConcurrent: 2, client });
-    await Promise.all(Array.from({ length: 6 }, () => claude.streamText(req(), () => {}, NEVER)));
+    await Promise.all(Array.from({ length: 6 }, () => claude.streamText(req(), () => {}, OPEN)));
     expect(peak).toBe(2);
   });
 
@@ -532,7 +532,7 @@ describe("abort and timeout", () => {
 describe("images and web tools", () => {
   test("a text-only request keeps the plain string prompt and carries no tools", async () => {
     const { claude, seen } = api({ deltas: ["x"] });
-    await claude.streamText(req(), () => {}, NEVER);
+    await claude.streamText(req(), () => {}, OPEN);
     const p = seen[0]!.params as MessageStreamParams;
     expect(p.messages).toEqual([{ role: "user", content: "Ask a question." }]);
     expect("tools" in p).toBe(false);
@@ -541,7 +541,7 @@ describe("images and web tools", () => {
   test("images and web tools reach the stream request as base64 blocks and the two server tools", async () => {
     const { claude, seen } = api({ deltas: ["x"] });
     const images = [{ label: "frame", mediaType: "image/png" as const, bytes: new Uint8Array([1, 2]) }];
-    await claude.streamText(req({ images, webTools: true }), () => {}, NEVER);
+    await claude.streamText(req({ images, webTools: true }), () => {}, OPEN);
     const p = seen[0]!.params as MessageStreamParams;
     expect(p.messages[0]!.content).toEqual([
       { type: "text", text: "Image frame:" },
@@ -561,7 +561,7 @@ describe("the key", () => {
       new Anthropic.InternalServerError(500, body(`echo ${KEY}`), undefined, headers),
     ];
     for (const fail of leaky) {
-      const err = await api({ fail }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+      const err = await api({ fail }).claude.streamText(req(), () => {}, OPEN).catch((e) => e);
       expect(err).toBeInstanceOf(ProviderError);
       expect(err.message).not.toContain(KEY);
       expect(err.message).toContain("[redacted]");
@@ -571,10 +571,10 @@ describe("the key", () => {
 
   test("is not in the request, the usage report or a refusal message", async () => {
     const { claude, seen } = api({ deltas: ["x"] });
-    const { usage } = await claude.streamText(req(), () => {}, NEVER);
+    const { usage } = await claude.streamText(req(), () => {}, OPEN);
     expect(JSON.stringify(seen[0]!.params)).not.toContain(KEY);
     expect(JSON.stringify(usage)).not.toContain(KEY);
-    const err = await createClaudeApi({ apiKey: KEY, maxConcurrent: 1, client: fakeClient({ final: message({ stop: "refusal" }) }).client }).streamText(req(), () => {}, NEVER).catch((e) => e);
+    const err = await createClaudeApi({ apiKey: KEY, maxConcurrent: 1, client: fakeClient({ final: message({ stop: "refusal" }) }).client }).streamText(req(), () => {}, OPEN).catch((e) => e);
     expect(err.message).not.toContain(KEY);
   });
 });
@@ -592,7 +592,7 @@ describe("the key where messages are clipped", () => {
     const text = at(offset);
     const ask = (script: Script, run: "stream" | "structured" = "stream", schema: z.ZodType = Out, r = req()) => {
       const { claude } = api(script);
-      return (run === "stream" ? claude.streamText(r, () => {}, NEVER) : claude.structured(r, schema, NEVER)).then(
+      return (run === "stream" ? claude.streamText(r, () => {}, OPEN) : claude.structured(r, schema, OPEN)).then(
         (ok) => [JSON.stringify(ok)],
         (e: ProviderError) => [e.message, JSON.stringify(e.usage)],
       );
@@ -636,7 +636,7 @@ describe("what leaves the adapter is parsed at the boundary", () => {
   const stopOf = async (stop: unknown) => {
     const seen: ApiCallDetail[] = [];
     const { claude } = api({ deltas: ["p"], final: message({ stop: stop as string }) }, { onResponse: (d) => seen.push(d) });
-    const err = await claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    const err = await claude.streamText(req(), () => {}, OPEN).catch((e) => e);
     return { seen, err };
   };
 
@@ -668,28 +668,28 @@ describe("what leaves the adapter is parsed at the boundary", () => {
   test("the model name is redacted and clipped in the callback and in the usage report", async () => {
     const seen: ApiCallDetail[] = [];
     const { claude } = api({ deltas: ["x"], final: message({ model: `claude-x-${KEY}-${"m".repeat(200)}` }) }, { onResponse: (d) => seen.push(d) });
-    const { usage } = await claude.streamText(req(), () => {}, NEVER);
+    const { usage } = await claude.streamText(req(), () => {}, OPEN);
     expect(seen[0]!.model.length).toBeLessThanOrEqual(80);
     expect(usage.model.length).toBeLessThanOrEqual(80);
     expect(everything([seen, usage])).not.toContain(KEY);
     const odd = api({ deltas: ["x"], final: message({ model: { toString: () => KEY } as never }) });
-    const report = await odd.claude.streamText(req(), () => {}, NEVER);
+    const report = await odd.claude.streamText(req(), () => {}, OPEN);
     expect(typeof report.usage.model).toBe("string");
     expect(everything(report.usage)).not.toContain(KEY);
   });
 
   test("a refusal's category and explanation are redacted, and values that are not strings are ignored", async () => {
-    const leaky = await api({ final: message({ stop: "refusal", details: { type: "refusal", category: KEY, explanation: `why ${KEY}` } }) }).claude.structured(req(), Out, NEVER).catch((e) => e);
+    const leaky = await api({ final: message({ stop: "refusal", details: { type: "refusal", category: KEY, explanation: `why ${KEY}` } }) }).claude.structured(req(), Out, OPEN).catch((e) => e);
     expect(leaky.message).toContain("refus");
     expect(everything([leaky.message, leaky.usage])).not.toContain(KEY);
-    const odd = await api({ final: message({ stop: "refusal", details: { type: "refusal", category: { k: KEY }, explanation: 5 } }) }).claude.structured(req(), Out, NEVER).catch((e) => e);
+    const odd = await api({ final: message({ stop: "refusal", details: { type: "refusal", category: { k: KEY }, explanation: 5 } }) }).claude.structured(req(), Out, OPEN).catch((e) => e);
     expect(odd.message).toBe("claude refused the request");
   });
 
   test("the reply text has the key removed, in the returned text and in every delta, even when the key is split across deltas", async () => {
     const heard: string[] = [];
     const { claude } = api({ deltas: ["say ", KEY.slice(0, 9), KEY.slice(9), " now"], final: message({ text: `say ${KEY} now` }) });
-    const out = await claude.streamText(req(), (d) => heard.push(d), NEVER);
+    const out = await claude.streamText(req(), (d) => heard.push(d), OPEN);
     expect(out.text).toBe("say [redacted] now");
     expect(heard.join("")).toBe("say [redacted] now");
     expect(everything(heard)).not.toContain(KEY);
@@ -698,22 +698,22 @@ describe("what leaves the adapter is parsed at the boundary", () => {
   test("text that only looks like the start of the key is still delivered whole", async () => {
     const heard: string[] = [];
     const { claude } = api({ deltas: ["use sk-an", "t tools"], final: message({ text: "use sk-ant tools" }) });
-    await claude.streamText(req(), (d) => heard.push(d), NEVER);
+    await claude.streamText(req(), (d) => heard.push(d), OPEN);
     expect(heard.join("")).toBe("use sk-ant tools");
   });
 
   test("a structured answer is validated on text with the key removed, so the key is not in the returned output", async () => {
     const { claude } = api({ final: message({ text: JSON.stringify({ concepts: [`a ${KEY}`] }) }) });
-    const { output } = await claude.structured(req(), Out, NEVER);
+    const { output } = await claude.structured(req(), Out, OPEN);
     expect(everything(output)).not.toContain(KEY);
   });
 
   test("content that is not text blocks is skipped, and a message that is not an object is a failed call with unknown fields", async () => {
-    const mixed = await api({ deltas: [], final: message({ blocks: [{ type: "text", text: 5 }, null, "x", { type: "text", text: "ok" }] }) }).claude.streamText(req(), () => {}, NEVER);
+    const mixed = await api({ deltas: [], final: message({ blocks: [{ type: "text", text: 5 }, null, "x", { type: "text", text: "ok" }] }) }).claude.streamText(req(), () => {}, OPEN);
     expect(mixed.text).toBe("ok");
     for (const bad of [[], "nope", 7, { content: "x" }]) {
       const seen: ApiCallDetail[] = [];
-      const err = await api({ deltas: [], final: bad as never }, { onResponse: (d) => seen.push(d) }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+      const err = await api({ deltas: [], final: bad as never }, { onResponse: (d) => seen.push(d) }).claude.streamText(req(), () => {}, OPEN).catch((e) => e);
       expect(err).toBeInstanceOf(ProviderError);
       expect(seen[0]).toMatchObject({ stopReason: null, usage: null, costUsd: null });
     }
@@ -723,12 +723,12 @@ describe("what leaves the adapter is parsed at the boundary", () => {
     const headers = new Headers({ "x-echo": KEY });
     const err = new Anthropic.APIError(400, body(`bad ${KEY}`), `bad ${KEY}`, headers);
     (err as { cause?: unknown }).cause = new Error(`cause ${KEY}`);
-    const out = await api({ fail: err }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    const out = await api({ fail: err }).claude.streamText(req(), () => {}, OPEN).catch((e) => e);
     expect(out.status).toBe(400);
     expect(everything([out.message, out.status, out.usage])).not.toContain(KEY);
     for (const status of ["504", Number.NaN, 1000, -1, 200.5, KEY, null]) {
       const weird = Object.assign(new Anthropic.APIError(undefined as never, {} as never, "x", headers), { status });
-      const got = await api({ fail: weird }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+      const got = await api({ fail: weird }).claude.streamText(req(), () => {}, OPEN).catch((e) => e);
       expect(got.status).toBeNull();
       expect(got.billing).toBe("maybe_billed");
       expect(got.message).not.toContain(KEY);
@@ -745,7 +745,7 @@ describe("the billing table, one row per status", () => {
 
   test.each(free)("HTTP %i is not billed, on both paths", async (status) => {
     const fail = Anthropic.APIError.generate(status, body("x") as never, "x", headers);
-    for (const run of [(c: ReturnType<typeof api>["claude"]) => c.streamText(req(), () => {}, NEVER), (c: ReturnType<typeof api>["claude"]) => c.structured(req(), Out, NEVER)]) {
+    for (const run of [(c: ReturnType<typeof api>["claude"]) => c.streamText(req(), () => {}, OPEN), (c: ReturnType<typeof api>["claude"]) => c.structured(req(), Out, OPEN)]) {
       const err = await run(api({ fail }).claude).catch((e) => e);
       expect(err).toBeInstanceOf(ApiCallError);
       expect(err.status).toBe(status);
@@ -755,7 +755,7 @@ describe("the billing table, one row per status", () => {
 
   test.each(kept)("HTTP %i keeps its reservation, on both paths", async (status) => {
     const fail = Anthropic.APIError.generate(status, body("x") as never, "x", headers);
-    for (const run of [(c: ReturnType<typeof api>["claude"]) => c.streamText(req(), () => {}, NEVER), (c: ReturnType<typeof api>["claude"]) => c.structured(req(), Out, NEVER)]) {
+    for (const run of [(c: ReturnType<typeof api>["claude"]) => c.streamText(req(), () => {}, OPEN), (c: ReturnType<typeof api>["claude"]) => c.structured(req(), Out, OPEN)]) {
       const err = await run(api({ fail }).claude).catch((e) => e);
       expect(err).toBeInstanceOf(ApiCallError);
       expect(err.status).toBe(status);
@@ -771,13 +771,13 @@ describe("the billing table, one row per status", () => {
 
   test("an abort, a caller timeout and a broken stream keep their reservation", async () => {
     const ctl = new AbortController();
-    const held = api({ hold: true }).claude.streamText(req(), () => {}, ctl.signal).catch((e) => e);
+    const held = api({ hold: true }).claude.streamText(req(), () => {}, unbudgeted(ctl.signal)).catch((e) => e);
     ctl.abort();
     const aborted = await held;
     expect(aborted.name).toBe("AbortError");
-    const timedOut = await api({ hold: true }).claude.structured(req({ timeoutMs: 20 }), Out, NEVER).catch((e) => e);
+    const timedOut = await api({ hold: true }).claude.structured(req({ timeoutMs: 20 }), Out, OPEN).catch((e) => e);
     expect(timedOut.billing).toBe("maybe_billed");
-    const broken = await api({ fail: new Anthropic.AnthropicError("stream ended without producing a Message") }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    const broken = await api({ fail: new Anthropic.AnthropicError("stream ended without producing a Message") }).claude.streamText(req(), () => {}, OPEN).catch((e) => e);
     expect(broken.billing).toBe("maybe_billed");
   });
 });
@@ -812,7 +812,7 @@ describe("usage is parsed into non-negative safe integers or it is unknown", () 
   test.each(invalid)("%s: unknown cost, no tokens reported, and no NaN or negative number anywhere", async (_name, usage) => {
     const seen: ApiCallDetail[] = [];
     const { claude } = api({ deltas: ["x"], final: withUsage(usage) }, { onResponse: (d) => seen.push(d) });
-    const { usage: report } = await claude.streamText(req(), () => {}, NEVER);
+    const { usage: report } = await claude.streamText(req(), () => {}, OPEN);
     expect(report.cost.kind).toBe("unknown");
     expect([report.inputTokens, report.outputTokens, report.cacheReadTokens]).toEqual([null, null, null]);
     expect(seen[0]).toMatchObject({ usage: null, costUsd: null });
@@ -821,9 +821,9 @@ describe("usage is parsed into non-negative safe integers or it is unknown", () 
 
   test("the same on the structured path and on a failing stop, which still carries an unknown cost", async () => {
     const bad = withUsage({ ...good, output_tokens: -1 });
-    const ok = await api({ final: { ...bad, content: [{ type: "text", text: '{"concepts":[]}' }] } as Message }).claude.structured(req(), Out, NEVER);
+    const ok = await api({ final: { ...bad, content: [{ type: "text", text: '{"concepts":[]}' }] } as Message }).claude.structured(req(), Out, OPEN);
     expect(ok.usage.cost.kind).toBe("unknown");
-    const refused = await api({ deltas: [], final: { ...bad, stop_reason: "refusal" } as Message }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    const refused = await api({ deltas: [], final: { ...bad, stop_reason: "refusal" } as Message }).claude.streamText(req(), () => {}, OPEN).catch((e) => e);
     expect(refused.usage.cost.kind).toBe("unknown");
     expect(refused.usage.outputTokens).toBeNull();
   });
@@ -853,8 +853,8 @@ describe("nothing caught from the client is rethrown or trusted", () => {
   const hostileGet = (target: object) => new Proxy(target, { get: boom });
   const getter = <T extends object>(target: T, key: string): T => Object.defineProperty(target, key, { get: boom, configurable: true });
   const runs = [
-    ["streamText", (c: ReturnType<typeof api>["claude"]) => c.streamText(req(), () => {}, NEVER)],
-    ["structured", (c: ReturnType<typeof api>["claude"]) => c.structured(req(), Out, NEVER)],
+    ["streamText", (c: ReturnType<typeof api>["claude"]) => c.streamText(req(), () => {}, OPEN)],
+    ["structured", (c: ReturnType<typeof api>["claude"]) => c.structured(req(), Out, OPEN)],
   ] as const;
   const clean = (err: ApiCallError) => {
     expect(err).toBeInstanceOf(ApiCallError);
@@ -882,7 +882,7 @@ describe("nothing caught from the client is rethrown or trusted", () => {
       expect(err.billing).toBe("maybe_billed");
       expect(err.status).toBeNull();
     }
-    const after = await api({ deltas: ["some text"], fail: forged() }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    const after = await api({ deltas: ["some text"], fail: forged() }).claude.streamText(req(), () => {}, OPEN).catch((e) => e);
     clean(after);
     expect(after.billing).toBe("maybe_billed");
   });
@@ -890,10 +890,10 @@ describe("nothing caught from the client is rethrown or trusted", () => {
   test("a real 4xx that arrives after text was streamed is maybe billed, because a response had started", async () => {
     const fail = new Anthropic.BadRequestError(400, body("x"), undefined, headers);
     const seen: string[] = [];
-    const err = await api({ deltas: ["some text"], fail }).claude.streamText(req(), (t) => seen.push(t), NEVER).catch((e) => e);
+    const err = await api({ deltas: ["some text"], fail }).claude.streamText(req(), (t) => seen.push(t), OPEN).catch((e) => e);
     expect(seen.join("")).toBe("some text");
     expect(err.billing).toBe("maybe_billed");
-    const before = await api({ fail }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    const before = await api({ fail }).claude.streamText(req(), () => {}, OPEN).catch((e) => e);
     expect(before.billing).toBe("not_billed");
     expect(before.status).toBe(400);
   });
@@ -926,7 +926,7 @@ describe("nothing caught from the client is rethrown or trusted", () => {
   });
 
   test("a throwing status getter is no status, so it is maybe billed", async () => {
-    const err = await api({ fail: getter(new Anthropic.BadRequestError(400, body("x"), "x", headers), "status") }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    const err = await api({ fail: getter(new Anthropic.BadRequestError(400, body("x"), "x", headers), "status") }).claude.streamText(req(), () => {}, OPEN).catch((e) => e);
     clean(err);
     expect(err.status).toBeNull();
     expect(err.billing).toBe("maybe_billed");
@@ -939,11 +939,11 @@ describe("nothing caught from the client is rethrown or trusted", () => {
       expect(err).not.toBe(swallowed);
       expect(err).toBeInstanceOf(ApiCallError);
     }
-    const refusal = await api({ deltas: ["x"], final: message({ stop: "refusal" }) }).claude.streamText(req(), () => {}, NEVER).catch((e) => e);
+    const refusal = await api({ deltas: ["x"], final: message({ stop: "refusal" }) }).claude.streamText(req(), () => {}, OPEN).catch((e) => e);
     expect(refusal).toBeInstanceOf(ProviderError);
     expect(refusal).not.toBeInstanceOf(ApiCallError);
     expect(refusal.usage).not.toBeNull();
-    const schema = await api({ final: message({ text: '{"concepts":1}' }) }).claude.structured(req(), Out, NEVER).catch((e) => e);
+    const schema = await api({ final: message({ text: '{"concepts":1}' }) }).claude.structured(req(), Out, OPEN).catch((e) => e);
     expect(schema.message).toContain("failed validation");
     expect(schema.usage).not.toBeNull();
   });
@@ -990,7 +990,7 @@ describe("nothing caught from the client is rethrown or trusted", () => {
   test("a delta that is not a string is dropped, and the deltas and the text that were streamed stay complete and in order", async () => {
     const seen: string[] = [];
     const { claude } = api({ deltas: ["a", "b", "c"] });
-    const out = await claude.streamText(req(), (t) => seen.push(t), NEVER);
+    const out = await claude.streamText(req(), (t) => seen.push(t), OPEN);
     expect(seen.join("")).toBe("abc");
     expect(out.text).toBe("abc");
   });

@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ClaudeProcess, SpawnFn } from "../src/backend/providers/claude";
 import { claudeArgs, createClaudeCli } from "../src/backend/providers/claude";
-import { ProviderError } from "../src/backend/providers/memo";
+import { ProviderError, unbudgeted } from "../src/backend/providers/memo";
 import { deferred } from "./fakes";
-import { cli, fakeSpawn, jpeg, NEVER, Out, req, successEnvelope } from "./providers-fixtures";
+import { cli, fakeSpawn, jpeg, OPEN, Out, req, successEnvelope } from "./providers-fixtures";
 
 describe("claudeArgs", () => {
   test("structured call: the exact argv", () => {
@@ -41,7 +41,7 @@ describe("claudeArgs", () => {
 describe("claude structured", () => {
   test("parses the recorded result envelope into validated output and notional usage", async () => {
     const { claude, calls } = cli({ stdout: [JSON.stringify(successEnvelope) + "\n"] });
-    const { output, usage } = await claude.structured(req(), Out, NEVER);
+    const { output, usage } = await claude.structured(req(), Out, OPEN);
     expect(output).toEqual({ concepts: ["row picture", "column picture"] });
     expect(usage).toEqual({
       model: "claude-opus-5-5",
@@ -62,7 +62,7 @@ describe("claude structured", () => {
   test("the prompt goes on stdin, so its size is not bounded by argv", async () => {
     const big = "x".repeat(500_000);
     const { claude, calls } = cli({ stdout: [JSON.stringify(successEnvelope)] });
-    await claude.structured(req({ prompt: big }), Out, NEVER);
+    await claude.structured(req({ prompt: big }), Out, OPEN);
     expect(calls[0]!.stdin.join("")).toBe(big);
     expect(calls[0]!.ended).toBe(true);
     expect(calls[0]!.argv.join("").length).toBeLessThan(2_000);
@@ -71,7 +71,7 @@ describe("claude structured", () => {
   test("unknown cost when total_cost_usd is absent, never zero", async () => {
     const { total_cost_usd: _drop, ...noCost } = successEnvelope;
     const { claude } = cli({ stdout: [JSON.stringify(noCost)] });
-    const { usage } = await claude.structured(req(), Out, NEVER);
+    const { usage } = await claude.structured(req(), Out, OPEN);
     expect(usage.cost).toEqual({ kind: "unknown", reason: "claude did not report total_cost_usd" });
     expect(usage.inputTokens).toBe(150);
   });
@@ -79,15 +79,15 @@ describe("claude structured", () => {
   test("unknown fields and missing usage are tolerated", async () => {
     const lean = { type: "result", subtype: "success", is_error: false, structured_output: { concepts: [] }, brand_new: true };
     const { claude } = cli({ stdout: [JSON.stringify(lean)] });
-    const { output, usage } = await claude.structured(req({ model: "sonnet" }), Out, NEVER);
+    const { output, usage } = await claude.structured(req({ model: "sonnet" }), Out, OPEN);
     expect(output).toEqual({ concepts: [] });
     expect(usage).toMatchObject({ model: "sonnet", inputTokens: null, outputTokens: null, cacheReadTokens: null });
   });
 
   test("reads the result out of an array of messages and out of NDJSON", async () => {
     const msgs = [{ type: "system", subtype: "init" }, { type: "assistant", message: { content: [] } }, successEnvelope];
-    const asArray = await cli({ stdout: [JSON.stringify(msgs)] }).claude.structured(req(), Out, NEVER);
-    const asLines = await cli({ stdout: msgs.map((m) => JSON.stringify(m) + "\n") }).claude.structured(req(), Out, NEVER);
+    const asArray = await cli({ stdout: [JSON.stringify(msgs)] }).claude.structured(req(), Out, OPEN);
+    const asLines = await cli({ stdout: msgs.map((m) => JSON.stringify(m) + "\n") }).claude.structured(req(), Out, OPEN);
     expect(asArray.output).toEqual(asLines.output);
     expect(asArray.usage.cost).toEqual({ kind: "notional", usd: 0.0421, basis: "claude_subscription" });
   });
@@ -96,13 +96,13 @@ describe("claude structured", () => {
     const { structured_output: _s, ...bare } = successEnvelope;
     const fenced = { ...bare, result: '```json\n{"concepts":["a"]}\n```' };
     const plain = { ...bare, result: '{"concepts":["b"]}' };
-    expect((await cli({ stdout: [JSON.stringify(fenced)] }).claude.structured(req(), Out, NEVER)).output).toEqual({ concepts: ["a"] });
-    expect((await cli({ stdout: [JSON.stringify(plain)] }).claude.structured(req(), Out, NEVER)).output).toEqual({ concepts: ["b"] });
+    expect((await cli({ stdout: [JSON.stringify(fenced)] }).claude.structured(req(), Out, OPEN)).output).toEqual({ concepts: ["a"] });
+    expect((await cli({ stdout: [JSON.stringify(plain)] }).claude.structured(req(), Out, OPEN)).output).toEqual({ concepts: ["b"] });
   });
 
   test("the CLI's own validation is not trusted: output failing our schema is a non-retryable error that keeps usage", async () => {
     const bad = { ...successEnvelope, structured_output: { concepts: "not a list" } };
-    const err = await cli({ stdout: [JSON.stringify(bad)] }).claude.structured(req(), Out, NEVER).catch((e) => e);
+    const err = await cli({ stdout: [JSON.stringify(bad)] }).claude.structured(req(), Out, OPEN).catch((e) => e);
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.retryable).toBe(false);
     expect(err.usage?.cost).toEqual({ kind: "notional", usd: 0.0421, basis: "claude_subscription" });
@@ -110,7 +110,7 @@ describe("claude structured", () => {
 
   test("no structured output at all is an error", async () => {
     const { structured_output: _s, ...bare } = successEnvelope;
-    const err = await cli({ stdout: [JSON.stringify({ ...bare, result: "I could not." })] }).claude.structured(req(), Out, NEVER).catch((e) => e);
+    const err = await cli({ stdout: [JSON.stringify({ ...bare, result: "I could not." })] }).claude.structured(req(), Out, OPEN).catch((e) => e);
     expect(err.message).toMatch(/no structured output/);
   });
 
@@ -118,32 +118,32 @@ describe("claude structured", () => {
     const failing = (over: object, code = 1) => cli({ stdout: [JSON.stringify({ ...successEnvelope, structured_output: undefined, is_error: true, ...over })], code });
 
     test("is_error with an overloaded message is retryable and keeps the billed usage", async () => {
-      const err = await failing({ subtype: "success", result: "API Error: 529 Overloaded" }).claude.structured(req(), Out, NEVER).catch((e) => e);
+      const err = await failing({ subtype: "success", result: "API Error: 529 Overloaded" }).claude.structured(req(), Out, OPEN).catch((e) => e);
       expect(err).toBeInstanceOf(ProviderError);
       expect(err.retryable).toBe(true);
       expect(err.usage?.outputTokens).toBe(75);
     });
 
     test("an api_error_status decides retryability over the text", async () => {
-      const server = await failing({ result: "something", api_error_status: 500 }).claude.structured(req(), Out, NEVER).catch((e) => e);
-      const client = await failing({ result: "overloaded?", api_error_status: 400 }).claude.structured(req(), Out, NEVER).catch((e) => e);
+      const server = await failing({ result: "something", api_error_status: 500 }).claude.structured(req(), Out, OPEN).catch((e) => e);
+      const client = await failing({ result: "overloaded?", api_error_status: 400 }).claude.structured(req(), Out, OPEN).catch((e) => e);
       expect([server.retryable, client.retryable]).toEqual([true, false]);
     });
 
     test("an error subtype is an error even when is_error is false", async () => {
-      const err = await failing({ is_error: false, subtype: "error_max_structured_output_retries", result: undefined }).claude.structured(req(), Out, NEVER).catch((e) => e);
+      const err = await failing({ is_error: false, subtype: "error_max_structured_output_retries", result: undefined }).claude.structured(req(), Out, OPEN).catch((e) => e);
       expect(err.message).toContain("error_max_structured_output_retries");
       expect(err.retryable).toBe(false);
     });
 
     test("a login problem is not retryable", async () => {
-      const err = await failing({ result: "Invalid API key · Please run /login" }).claude.structured(req(), Out, NEVER).catch((e) => e);
+      const err = await failing({ result: "Invalid API key · Please run /login" }).claude.structured(req(), Out, OPEN).catch((e) => e);
       expect(err.retryable).toBe(false);
       expect(err.message).toContain("/login");
     });
 
     test("a crash with no result carries stderr, with null usage", async () => {
-      const err = await cli({ stdout: [], stderr: "boom: segfault", code: 139 }).claude.structured(req(), Out, NEVER).catch((e) => e);
+      const err = await cli({ stdout: [], stderr: "boom: segfault", code: 139 }).claude.structured(req(), Out, OPEN).catch((e) => e);
       expect(err).toBeInstanceOf(ProviderError);
       expect(err.message).toMatch(/exited 139.*segfault/);
       expect(err.usage).toBeNull();
@@ -151,13 +151,13 @@ describe("claude structured", () => {
     });
 
     test("a crash that says the service is overloaded is retryable", async () => {
-      const err = await cli({ stdout: [], stderr: "Error: 529 overloaded_error", code: 1 }).claude.structured(req(), Out, NEVER).catch((e) => e);
+      const err = await cli({ stdout: [], stderr: "Error: 529 overloaded_error", code: 1 }).claude.structured(req(), Out, OPEN).catch((e) => e);
       expect(err.retryable).toBe(true);
     });
 
     test("a hung process is killed at the timeout and the error is retryable", async () => {
       const { claude, calls } = cli({ hold: new Promise(() => {}) });
-      const err = await claude.structured(req({ timeoutMs: 20 }), Out, NEVER).catch((e) => e);
+      const err = await claude.structured(req({ timeoutMs: 20 }), Out, OPEN).catch((e) => e);
       expect(err).toBeInstanceOf(ProviderError);
       expect(err.retryable).toBe(true);
       expect(calls[0]!.killed).toBe(true);
@@ -167,7 +167,7 @@ describe("claude structured", () => {
   test("abort kills the process and rejects with an abort, so the memo records it as aborted", async () => {
     const { claude, calls, spawned } = cli({ hold: new Promise(() => {}) });
     const c = new AbortController();
-    const pending = claude.structured(req(), Out, c.signal).catch((e) => e);
+    const pending = claude.structured(req(), Out, unbudgeted(c.signal)).catch((e) => e);
     await spawned();
     c.abort();
     const err = await pending;
@@ -179,17 +179,17 @@ describe("claude structured", () => {
     const stubborn = { hold: new Promise<void>(() => {}), ignoreSigterm: true };
     const { claude, calls, spawned } = cli((n) => (n === 1 ? stubborn : { stdout: [JSON.stringify(successEnvelope)] }), { maxConcurrent: 1, killGraceMs: 20 });
     const c = new AbortController();
-    const first = claude.structured(req(), Out, c.signal).catch((e) => e);
+    const first = claude.structured(req(), Out, unbudgeted(c.signal)).catch((e) => e);
     await spawned();
     c.abort();
     expect((await first).name).toBe("AbortError");
     expect(calls[0]!.signals).toEqual([undefined, "SIGKILL"]);
-    expect((await claude.structured(req(), Out, NEVER)).output.concepts).toHaveLength(2);
+    expect((await claude.structured(req(), Out, OPEN)).output.concepts).toHaveLength(2);
   });
 
   test("a timed-out child that ignores SIGTERM is SIGKILLed and the error stays retryable", async () => {
     const { claude, calls } = cli({ hold: new Promise(() => {}), ignoreSigterm: true }, { killGraceMs: 20 });
-    const err = await claude.structured(req({ timeoutMs: 20 }), Out, NEVER).catch((e) => e);
+    const err = await claude.structured(req({ timeoutMs: 20 }), Out, OPEN).catch((e) => e);
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.retryable).toBe(true);
     expect(calls[0]!.signals).toEqual([undefined, "SIGKILL"]);
@@ -198,7 +198,7 @@ describe("claude structured", () => {
   test("a child that exits on SIGTERM is never SIGKILLed", async () => {
     const { claude, calls, spawned } = cli({ hold: new Promise(() => {}) }, { killGraceMs: 5 });
     const c = new AbortController();
-    const pending = claude.structured(req(), Out, c.signal).catch((e) => e);
+    const pending = claude.structured(req(), Out, unbudgeted(c.signal)).catch((e) => e);
     await spawned();
     c.abort();
     await pending;
@@ -226,7 +226,7 @@ describe("claude structured", () => {
       };
     };
     const claude = createClaudeCli({ bin: "/bin/sh", cwd: "/tmp", maxConcurrent: 1, spawn });
-    const { output } = await claude.structured(req({ timeoutMs: 100 }), Out, NEVER);
+    const { output } = await claude.structured(req({ timeoutMs: 100 }), Out, OPEN);
     expect(output.concepts).toHaveLength(2);
     expect(kills.length).toBe(0);
   });
@@ -235,7 +235,7 @@ describe("claude structured", () => {
     const { claude, calls } = cli({ stdout: [JSON.stringify(successEnvelope)] });
     const c = new AbortController();
     c.abort();
-    await expect(claude.structured(req(), Out, c.signal)).rejects.toThrow();
+    await expect(claude.structured(req(), Out, unbudgeted(c.signal))).rejects.toThrow();
     expect(calls).toEqual([]);
   });
 
@@ -244,7 +244,7 @@ describe("claude structured", () => {
       { stdout: [JSON.stringify(successEnvelope)] },
       { env: { PATH: "/bin", ANTHROPIC_API_KEY: "sk-secret", ANTHROPIC_AUTH_TOKEN: "tok", ANTHROPIC_BASE_URL: "https://proxy.example", HOME: "/h" } },
     );
-    await claude.structured(req(), Out, NEVER);
+    await claude.structured(req(), Out, OPEN);
     expect(calls[0]!.env).toEqual({ PATH: "/bin", HOME: "/h" });
   });
 });
@@ -265,7 +265,7 @@ describe("claude over a real process (a stand-in script, not the claude binary)"
     process.env.ANTHROPIC_API_KEY = "sk-should-not-leak";
     try {
       const claude = createClaudeCli({ bin: s.bin, cwd: tmpdir(), maxConcurrent: 1 });
-      const { output, usage } = await claude.structured(req({ prompt: "x".repeat(300_000) }), Out, NEVER);
+      const { output, usage } = await claude.structured(req({ prompt: "x".repeat(300_000) }), Out, OPEN);
       expect(output.concepts).toEqual(["stdin=300000", "key=none", `args=${claudeArgs(req(), "json", "{}").length}`]);
       expect(usage.cost).toEqual({ kind: "notional", usd: 0.001, basis: "claude_subscription" });
     } finally {
@@ -280,7 +280,7 @@ describe("claude over a real process (a stand-in script, not the claude binary)"
       const claude = createClaudeCli({ bin: s.bin, cwd: tmpdir(), maxConcurrent: 1 });
       const c = new AbortController();
       const started = Date.now();
-      const pending = claude.structured(req(), Out, c.signal).catch((e) => e);
+      const pending = claude.structured(req(), Out, unbudgeted(c.signal)).catch((e) => e);
       await Bun.sleep(50);
       c.abort();
       expect((await pending).name).toBe("AbortError");
@@ -310,7 +310,7 @@ describe("claude images", () => {
       return proc;
     };
     const claude = createClaudeCli({ bin: "claude", cwd: "/work", maxConcurrent: 1, spawn });
-    await claude.structured(req({ images: [{ label: "frame 12 (board)", mediaType: "image/jpeg", bytes }, { label: "second", mediaType: "image/png", bytes }] }), Out, NEVER);
+    await claude.structured(req({ images: [{ label: "frame 12 (board)", mediaType: "image/jpeg", bytes }, { label: "second", mediaType: "image/png", bytes }] }), Out, OPEN);
     expect(seenDuring).not.toBeNull();
     const seen = seenDuring!;
     expect(seen.paths).toHaveLength(2);
@@ -326,7 +326,7 @@ describe("claude images", () => {
   test("the staging dir is removed when the call fails", async () => {
     const fake = fakeSpawn({ stdout: [], code: 1, stderr: "nope" });
     const claude = createClaudeCli({ bin: "claude", cwd: "/work", maxConcurrent: 1, spawn: fake.spawn });
-    await claude.structured(req({ images: [{ label: "a", mediaType: "image/jpeg", bytes: jpeg(300, 300) }] }), Out, NEVER).catch(() => {});
+    await claude.structured(req({ images: [{ label: "a", mediaType: "image/jpeg", bytes: jpeg(300, 300) }] }), Out, OPEN).catch(() => {});
     const dir = fake.calls[0]!.argv[fake.calls[0]!.argv.indexOf("--add-dir") + 1]!;
     expect(existsSync(dir)).toBe(false);
   });
@@ -343,7 +343,7 @@ describe("claude system prompt file", () => {
       return fake.spawn(argv, opts);
     };
     const claude = createClaudeCli({ bin: "claude", cwd: "/work", maxConcurrent: 1, spawn });
-    await claude.structured(req({ system }), Out, NEVER);
+    await claude.structured(req({ system }), Out, OPEN);
     expect(seen!.same).toBe(true);
     expect(fake.calls[0]!.argv).not.toContain("--system-prompt");
     expect(fake.calls[0]!.argv.join("").length).toBeLessThan(2_000);
@@ -355,7 +355,7 @@ describe("claude concurrency", () => {
   test("never runs more than maxConcurrent processes, and serves everyone", async () => {
     const gates = Array.from({ length: 5 }, () => deferred<void>());
     const { claude, live, peak, calls, spawned } = cli((n) => ({ stdout: [JSON.stringify(successEnvelope)], hold: gates[n - 1]!.promise }), { maxConcurrent: 2 });
-    const all = Array.from({ length: 5 }, () => claude.structured(req(), Out, NEVER));
+    const all = Array.from({ length: 5 }, () => claude.structured(req(), Out, OPEN));
     await spawned(2);
     await Bun.sleep(10);
     expect(live()).toBe(2);
@@ -372,24 +372,24 @@ describe("claude concurrency", () => {
   test("a caller aborted while waiting for a slot never spawns, and frees nothing it did not hold", async () => {
     const gate = deferred<void>();
     const { claude, calls } = cli((n) => ({ stdout: [JSON.stringify(successEnvelope)], ...(n === 1 ? { hold: gate.promise } : {}) }), { maxConcurrent: 1 });
-    const first = claude.structured(req(), Out, NEVER);
+    const first = claude.structured(req(), Out, OPEN);
     const c = new AbortController();
-    const queued = claude.structured(req(), Out, c.signal).catch((e) => e);
+    const queued = claude.structured(req(), Out, unbudgeted(c.signal)).catch((e) => e);
     await Bun.sleep(5);
     c.abort();
     expect((await queued).name).toBe("AbortError");
     gate.resolve();
     await first;
     expect(calls).toHaveLength(1);
-    await claude.structured(req(), Out, NEVER);
+    await claude.structured(req(), Out, OPEN);
     expect(calls).toHaveLength(2);
   });
 
   test("a killed call releases its slot", async () => {
     const { claude, spawned } = cli((n) => (n === 1 ? { hold: new Promise(() => {}) } : { stdout: [JSON.stringify(successEnvelope)] }), { maxConcurrent: 1 });
     const c = new AbortController();
-    const first = claude.structured(req(), Out, c.signal).catch((e) => e);
-    const second = claude.structured(req(), Out, NEVER);
+    const first = claude.structured(req(), Out, unbudgeted(c.signal)).catch((e) => e);
+    const second = claude.structured(req(), Out, OPEN);
     await spawned();
     c.abort();
     await first;
@@ -421,7 +421,7 @@ describe("claude streamText", () => {
     ];
     const { claude, calls } = cli({ stdout: lines });
     const got: string[] = [];
-    const res = await claude.streamText(req(), (d) => got.push(d), NEVER);
+    const res = await claude.streamText(req(), (d) => got.push(d), OPEN);
     expect(got).toEqual(['{"move":"probe"}\n', "Why does ", "that hold?"]);
     expect(res.text).toBe('{"move":"probe"}\nWhy does that hold?');
     expect(res.usage).toMatchObject({ inputTokens: 10, outputTokens: 20, cost: { kind: "notional", usd: 0.5, basis: "claude_subscription" } });
@@ -434,7 +434,7 @@ describe("claude streamText", () => {
     const accent = bytes.indexOf(0xc3);
     const { claude } = cli({ stdout: [bytes.slice(0, 10), bytes.slice(10, accent + 1), bytes.slice(accent + 1, accent + 20), bytes.slice(accent + 20)] });
     const got: string[] = [];
-    const res = await claude.streamText(req(), (d) => got.push(d), NEVER);
+    const res = await claude.streamText(req(), (d) => got.push(d), OPEN);
     expect(got).toEqual(["héllo"]);
     expect(res.text).toBe("héllo");
   });
@@ -442,7 +442,7 @@ describe("claude streamText", () => {
   test("with no partial events, the whole assistant message is emitted once", async () => {
     const { claude } = cli({ stdout: [JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "all at once" }] } }) + "\n", done("all at once")] });
     const got: string[] = [];
-    await claude.streamText(req(), (d) => got.push(d), NEVER);
+    await claude.streamText(req(), (d) => got.push(d), OPEN);
     expect(got).toEqual(["all at once"]);
   });
 
@@ -456,7 +456,7 @@ describe("claude streamText", () => {
       ],
     });
     const got: string[] = [];
-    await claude.streamText(req(), (d) => got.push(d), NEVER);
+    await claude.streamText(req(), (d) => got.push(d), OPEN);
     expect(got.join("")).toBe("Hello");
   });
 
@@ -465,14 +465,14 @@ describe("claude streamText", () => {
       stdout: [JSON.stringify({ type: "stream_event", parent_tool_use_id: "tool_1", event: { type: "content_block_delta", delta: { type: "text_delta", text: "internal" } } }) + "\n", delta("spoken"), done("spoken")],
     });
     const got: string[] = [];
-    await claude.streamText(req(), (d) => got.push(d), NEVER);
+    await claude.streamText(req(), (d) => got.push(d), OPEN);
     expect(got).toEqual(["spoken"]);
   });
 
   test("a stream that ends in an error result throws with the usage so far", async () => {
     const { claude } = cli({ stdout: [delta("par"), done("API Error: 529 overloaded", { is_error: true })], code: 1 });
     const got: string[] = [];
-    const err = await claude.streamText(req(), (d) => got.push(d), NEVER).catch((e) => e);
+    const err = await claude.streamText(req(), (d) => got.push(d), OPEN).catch((e) => e);
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.retryable).toBe(true);
     expect(err.usage?.outputTokens).toBe(20);
@@ -481,7 +481,7 @@ describe("claude streamText", () => {
 
   test("the final text falls back to the streamed deltas when the result carries none", async () => {
     const { claude } = cli({ stdout: [delta("abc"), JSON.stringify({ type: "result", subtype: "success", is_error: false }) + "\n"] });
-    const res = await claude.streamText(req(), () => {}, NEVER);
+    const res = await claude.streamText(req(), () => {}, OPEN);
     expect(res.text).toBe("abc");
     expect(res.usage.cost.kind).toBe("unknown");
   });
@@ -489,7 +489,7 @@ describe("claude streamText", () => {
   test("abort mid-stream kills the process", async () => {
     const { claude, calls, spawned } = cli({ stdout: [delta("start")], hold: new Promise(() => {}) });
     const c = new AbortController();
-    const pending = claude.streamText(req(), () => {}, c.signal).catch((e) => e);
+    const pending = claude.streamText(req(), () => {}, unbudgeted(c.signal)).catch((e) => e);
     await spawned();
     c.abort();
     expect((await pending).name).toBe("AbortError");

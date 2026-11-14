@@ -207,7 +207,7 @@ export function interpretTask(claude: ClaudeCli, frameBytes: FrameBytes): Task<I
       const evidence = describeEvidence(input.newMaterial, input.gaps, frameBytes);
       const existing = input.existingClaims.length > 0 ? input.existingClaims.map((c) => `- ${c.id}: ${c.text}`).join("\n") : "- none";
       const prompt = `${evidence.text}\n\nExisting claims:\n${existing}`;
-      const { output, usage } = await claude.structured(request(INTERPRET_SYSTEM, prompt, evidence.images, { effort: "high", webTools: false }), interpretationSchema, ctx.signal);
+      const { output, usage } = await claude.structured(request(INTERPRET_SYSTEM, prompt, evidence.images, { effort: "high", webTools: false }), interpretationSchema, ctx);
       return { output: toInterpretation(output, bundleIds(input.newMaterial), new Set(input.existingClaims.map((c) => c.id)), usage, attemptNo >= INTERPRET_MAX_ATTEMPTS), usage };
     },
     decode: (stored) => {
@@ -280,7 +280,7 @@ export function reviseTask(claude: ClaudeCli, frameBytes: FrameBytes): Task<Revi
         `Assumptions: ${o.assumptions.length > 0 ? o.assumptions.join("; ") : "none"}`,
         `Check verdict: ${input.check.verdict}${input.check.p === null ? "" : ` (p = ${input.check.p.toFixed(2)})`}`,
       ].join("\n");
-      const { output, usage } = await claude.structured(request(REVISE_SYSTEM, prompt, evidence.images, { effort: "high", webTools: false }), draftSchema, ctx.signal);
+      const { output, usage } = await claude.structured(request(REVISE_SYSTEM, prompt, evidence.images, { effort: "high", webTools: false }), draftSchema, ctx);
       return { output: toDraft(output, bundleIds(input.evidence), usage), usage };
     },
     decode: (stored) => draftSchema.parse(stored) as unknown as ClaimDraft,
@@ -306,7 +306,7 @@ export function resourceSearchTask(claude: ClaudeCli): Task<ResourceSearchInput,
         "Claims the lecture supports:",
         ...input.supportedClaims.map((c) => `- ${c.text} (evidence: ${c.evidence.join(", ")})`),
       ].join("\n");
-      const { output, usage } = await claude.structured(request(RESOURCE_SYSTEM, prompt, [], { effort: "medium", webTools: true }), resourceSchema, ctx.signal);
+      const { output, usage } = await claude.structured(request(RESOURCE_SYSTEM, prompt, [], { effort: "medium", webTools: true }), resourceSchema, ctx);
       return { output: toConnections(output, input), usage };
     },
     decode: (stored) => z.array(connectionSchema).parse(stored) as unknown as readonly ResourceConnection[],

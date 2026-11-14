@@ -38,7 +38,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { ProviderError } from "./memo";
-import type { UsageReport } from "./memo";
+import type { SendContext, UsageReport } from "./memo";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -54,15 +54,16 @@ export type ClaudeRequest = {
   readonly timeoutMs: number;
 };
 
+/** Every request is sent through `send.admit()`, called after the concurrency queue and right before the request leaves, so a budget is asked at that moment. */
 export type ClaudeCli = {
   /** --output-format json + --json-schema. Output re-validated with `schema`; the CLI's validation is not trusted alone. */
-  structured<O>(req: ClaudeRequest, schema: z.ZodType<O>, signal: AbortSignal): Promise<{ readonly output: O; readonly usage: UsageReport }>;
+  structured<O>(req: ClaudeRequest, schema: z.ZodType<O>, send: SendContext): Promise<{ readonly output: O; readonly usage: UsageReport }>;
   /**
    * --output-format stream-json. Calls onText per assistant text delta; resolves with the CLI's final answer text
    * (the `result` field, else the streamed deltas). If the model takes tool turns first, deltas include the text
    * of those turns while `text` is only the last one, so streaming callers should not attach images.
    */
-  streamText(req: ClaudeRequest, onText: (delta: string) => void, signal: AbortSignal): Promise<{ readonly text: string; readonly usage: UsageReport }>;
+  streamText(req: ClaudeRequest, onText: (delta: string) => void, send: SendContext): Promise<{ readonly text: string; readonly usage: UsageReport }>;
 };
 
 /** Pure, unit-tested: the exact argv for a request. The one place auth policy lives. */
@@ -348,13 +349,15 @@ export function createClaudeCli(opts: {
     return Object.fromEntries(Object.entries(merged).filter((e): e is [string, string] => e[1] !== undefined));
   };
 
-  async function execute(req: ClaudeRequest, output: "json" | "stream-json", jsonSchema: string | null, signal: AbortSignal, onLine?: (line: string) => void): Promise<Outcome> {
+  async function execute(req: ClaudeRequest, output: "json" | "stream-json", jsonSchema: string | null, send: SendContext, onLine?: (line: string) => void): Promise<Outcome> {
+    const signal = send.signal;
     const release = await limiter.acquire(signal);
     let staged: Awaited<ReturnType<typeof stageFiles>> | null = null;
     try {
       signal.throwIfAborted();
       staged = await stageFiles(req, imageRoot);
       signal.throwIfAborted();
+      send.admit();
       const proc = spawn([opts.bin, ...claudeArgs(req, output, jsonSchema, staged.imageDir, staged.systemFile)], { cwd: opts.cwd, env: childEnv() });
 
       let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -413,8 +416,8 @@ export function createClaudeCli(opts: {
   }
 
   return {
-    async structured<O>(req: ClaudeRequest, schema: z.ZodType<O>, signal: AbortSignal) {
-      const run = await execute(req, "json", toJsonSchema(schema), signal);
+    async structured<O>(req: ClaudeRequest, schema: z.ZodType<O>, send: SendContext) {
+      const run = await execute(req, "json", toJsonSchema(schema), send);
       const { result, usage } = settle(req, run);
       const payload = structuredPayload(result);
       if (payload === undefined) throw new ProviderError("claude returned no structured output", usage, false);
@@ -423,9 +426,9 @@ export function createClaudeCli(opts: {
       return { output: parsed.data, usage };
     },
 
-    async streamText(req, onText, signal) {
+    async streamText(req, onText, send) {
       const deltas = createDeltaReader(onText);
-      const run = await execute(req, "stream-json", null, signal, (line) => {
+      const run = await execute(req, "stream-json", null, send, (line) => {
         try {
           deltas.read(JSON.parse(line));
         } catch {

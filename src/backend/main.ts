@@ -9,11 +9,16 @@
  *   claude   AFTERCLASS_CLAUDE_BACKEND=cli | api. Default cli: every Claude task runs through `claude -p` on the subscription.
  *            api: EVERY Claude task calls the Messages API (paid, priced from usage), so no `claude` binary is needed. api with no key
  *            refuses to start. Replay mode builds no Claude adapter, so the setting does nothing there.
- *   voice    Tutor speech from ElevenLabs through POST /voice/speech, live mode with a key only; otherwise GET /voice says
- *            unavailable and the app speaks with Chrome's voice. AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL.
+ *   voice    Tutor speech from ElevenLabs through POST /voice/speech, local live mode with a key only; otherwise GET /voice says
+ *            unavailable and the app speaks with Chrome's voice. Hosted mode ignores the key: voice is not budgeted. AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL.
  *   token    ~/.config/afterclass/pairing-token (0600), created on first boot, printed with "listening on 127.0.0.1:<port>".
  *   data     $AFTERCLASS_DATA (default ./data): afterclass.sqlite, frames/
  *   mode     AFTERCLASS_MODE=live | replay. Unset: live when a keys file exists, replay otherwise.
+ *   budget   Live mode only; replay never touches it. Every paid request reserves against this month's (UTC) per-user and total
+ *            budgets as it is sent (providers/budget.ts), and boot settles what a previous process left. AFTERCLASS_BUDGET_USER_USD and AFTERCLASS_BUDGET_TOTAL_USD set them in dollars.
+ *            Hosted (AFTERCLASS_AUTH=clerk, or AFTERCLASS_HOST not loopback) defaults to 5 and 50; local has no cap unless set.
+ *            Stop switch: AFTERCLASS_STOP_PAID_CALLS=1, or a file named stop-paid-calls in the config dir, which is looked for
+ *            before every request (create it to stop new paid requests, delete it to resume; requests already sent finish).
  *   hosted   The container image sets AFTERCLASS_HOST=0.0.0.0, AFTERCLASS_HEALTH_ANY_HOST=1, AFTERCLASS_BUILD_APP=0 and
  *            AFTERCLASS_CONFIG_DIR. Unset, the backend binds 127.0.0.1 and every route keeps the localhost Host check.
  *            AFTERCLASS_HEALTH_ANY_HOST=1 relaxes the Host check for GET /health only, for the load balancer's health check.
@@ -44,6 +49,7 @@ import { buildApp } from "../../scripts/build-app";
 import { stableId } from "../shared/ids";
 import type { CaptureId, EvidenceId, UserId } from "../shared/ids";
 import type { AssessableClaim, BoundaryJudgment, BoundaryWindow, Evidence, Frame, Passage, Verdict } from "../shared/domain";
+import { heldMessage } from "../shared/allowance";
 import { LOCAL_USER, ensureLocalUser, openDb, scopeDb, signedInUsers, userForIdentity } from "./db";
 import type { Db, UserDb } from "./db";
 import { clerkScriptUrl, createClerkVerifier, frontendApiOf } from "./clerk";
@@ -52,6 +58,8 @@ import type { Devices } from "./devices";
 import type { ClerkConfig, Rejection, Verifier } from "./clerk";
 import { createMemo, ProviderError } from "./providers/memo";
 import type { Memo, MemoMode, Task } from "./providers/memo";
+import { createBudget } from "./providers/budget";
+import type { BudgetLimits } from "./providers/budget";
 import { createLedger } from "./providers/ledger";
 import type { Ledger } from "./providers/ledger";
 import { createJevClient } from "./providers/jev";
@@ -105,7 +113,7 @@ export type TaskSet = {
 export type Env = Readonly<Record<string, string | undefined>>;
 
 export type MainOptions = {
-  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_CLAUDE_BACKEND, AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_HOST, AFTERCLASS_HEALTH_ANY_HOST, AFTERCLASS_BUILD_APP, AFTERCLASS_CONFIG_DIR, AFTERCLASS_EXTENSION_ID, AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL, and the sign-in settings AFTERCLASS_AUTH, AFTERCLASS_CLERK_ISSUER, AFTERCLASS_CLERK_JWKS_URL, AFTERCLASS_CLERK_PUBLISHABLE_KEY, AFTERCLASS_PUBLIC_ORIGIN. */
+  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_CLAUDE_BACKEND, AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_HOST, AFTERCLASS_HEALTH_ANY_HOST, AFTERCLASS_BUILD_APP, AFTERCLASS_CONFIG_DIR, AFTERCLASS_EXTENSION_ID, AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL, the budget settings AFTERCLASS_BUDGET_USER_USD, AFTERCLASS_BUDGET_TOTAL_USD, AFTERCLASS_STOP_PAID_CALLS, and the sign-in settings AFTERCLASS_AUTH (also hosted or not, for the budget), AFTERCLASS_CLERK_ISSUER, AFTERCLASS_CLERK_JWKS_URL, AFTERCLASS_CLERK_PUBLISHABLE_KEY, AFTERCLASS_PUBLIC_ORIGIN. */
   readonly env?: Env;
   /** Holds keys.env and pairing-token. Defaults to AFTERCLASS_CONFIG_DIR, then ~/.config/afterclass. */
   readonly configDir?: string;
@@ -236,6 +244,42 @@ export function buildTasks(jev: JevClient, claude: ClaudeCli, frameBytes: FrameB
   };
 }
 
+// ───────────────────────────── budgets ─────────────────────────────
+
+/** Derek, 2026-11-13: "$5 per user and $50 total". */
+export const HOSTED_LIMITS: BudgetLimits = { userUsd: 5, totalUsd: 50 };
+export const STOP_FILE = "stop-paid-calls";
+
+const LOOPBACK = new Set(["", "127.0.0.1", "localhost", "::1"]);
+
+function usdSetting(name: string, text: string | undefined): number | null {
+  if (text === undefined || text === "") return null;
+  const usd = Number(text);
+  if (!Number.isFinite(usd) || usd < 0) throw new Error(`${name} must be a dollar amount of 0 or more, got "${text}"`);
+  return usd;
+}
+
+/** Hosted means people other than the machine's owner can reach the backend. */
+export function isHosted(env: Env): boolean {
+  return env.AFTERCLASS_AUTH === "clerk" || !LOOPBACK.has(env.AFTERCLASS_HOST ?? "");
+}
+
+/** A hosted backend's calls are capped by default. */
+export function resolveBudgetLimits(env: Env): BudgetLimits {
+  const hosted = isHosted(env);
+  const userUsd = usdSetting("AFTERCLASS_BUDGET_USER_USD", env.AFTERCLASS_BUDGET_USER_USD);
+  const totalUsd = usdSetting("AFTERCLASS_BUDGET_TOTAL_USD", env.AFTERCLASS_BUDGET_TOTAL_USD);
+  return hosted ? { userUsd: userUsd ?? HOSTED_LIMITS.userUsd, totalUsd: totalUsd ?? HOSTED_LIMITS.totalUsd } : { userUsd, totalUsd };
+}
+
+/** The stop switch: the environment at boot, or the file, which is looked for before every request. */
+export function stopSwitch(env: Env, configDir: string): () => boolean {
+  const flag = env.AFTERCLASS_STOP_PAID_CALLS ?? "";
+  if (!["", "0", "1"].includes(flag)) throw new Error(`AFTERCLASS_STOP_PAID_CALLS must be 1 or 0, got "${flag}"`);
+  const file = join(configDir, STOP_FILE);
+  return flag === "1" ? () => true : () => existsSync(file);
+}
+
 const parsePort = (text: string | undefined): number | null => {
   if (text === undefined || text === "") return null;
   const n = Number(text);
@@ -349,13 +393,18 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   const apiKey = keys.TYPESAFE_API_KEY;
   const voiceId = env.AFTERCLASS_ELEVENLABS_VOICE_ID || DEFAULT_VOICE_ID;
   const voiceModel = env.AFTERCLASS_ELEVENLABS_MODEL || DEFAULT_VOICE_MODEL;
-  if (keys.ELEVENLABS_API_KEY !== undefined) checkVoiceSettings(voiceId, voiceModel);
+  // Derek, 2026-11-13: "we can keep elevenlabs off for now". Voice runs outside the budget, so hosted mode never uses the key.
+  const voiceIgnored = isHosted(env) && keys.ELEVENLABS_API_KEY !== undefined;
+  const voiceKey = isHosted(env) ? undefined : keys.ELEVENLABS_API_KEY;
+  if (voiceKey !== undefined) checkVoiceSettings(voiceId, voiceModel);
   if (mode === "live" && apiKey === undefined) throw new Error(`${keysPath} has no TYPESAFE_API_KEY; refusing to start`);
   const claudeBackend = resolveClaudeBackend(env.AFTERCLASS_CLAUDE_BACKEND);
   const anthropicKey = keys.AFTERCLASS_ANTHROPIC_API_KEY;
   if (mode === "live" && claudeBackend === "api" && anthropicKey === undefined) {
     throw new Error(`AFTERCLASS_CLAUDE_BACKEND=api needs AFTERCLASS_ANTHROPIC_API_KEY in ${keysPath}; refusing to start`);
   }
+  const budgetLimits = resolveBudgetLimits(env);
+  const paidCallsStopped = stopSwitch(env, configDir);
   // Hosted mode has no pairing token: sign-in replaces it.
   const token = auth.kind === "local" ? loadPairingToken(join(configDir, "pairing-token")) : "";
   const port = options.port ?? parsePort(env.AFTERCLASS_PORT) ?? DEFAULT_PORT;
@@ -384,6 +433,10 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
 
   // Injected tasks make no live call, so the memo may run them. Without them, replay never runs a task at all.
   const memoMode: MemoMode = mode === "replay" && !options.tasks ? "replay" : "live";
+  // One budget for every user, on the raw db: the total cap sums all of them. Each user's memo reserves as its own user.
+  const budget = mode === "live" ? createBudget(rawDb, { limits: budgetLimits, stopped: paidCallsStopped }) : null;
+  // Before any request: what a previous process left unsettled gets its usage event (R17) and counts at its price, or its reservation when unpriced.
+  const interrupted = budget?.reconcileInterrupted() ?? 0;
 
   let alive = true;
   let scheduler: Scheduler | null = null;
@@ -411,8 +464,8 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     // evidence is created after the tasks that need its bytes; the tasks only read it when a call runs
     const frameBytes: FrameBytes = (id) => evidence.frameBytes(id);
     const tasks: TaskSet = options.tasks ?? buildTasks(providers.jev, providers.claude, frameBytes);
-    const memo = createMemo(db, memoMode);
-    const ledger = createLedger(db);
+    const memo = createMemo(db, memoMode, budget === null ? {} : { budget });
+    const ledger = createLedger(db, budget);
 
     const evidence: EvidenceStoreWithProbe = createEvidence(db, dataDir, {
       lookupFrameChange: (input) => memo.lookup(tasks.frameChange, input),
@@ -517,7 +570,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
           result = await memo.run(tasks.wrapUp, input);
         }
         if (result.kind === "hit") return result.value;
-        throw new Error(result.kind === "failed" ? `wrap-up failed: ${result.lastError}` : `wrap-up ${result.kind}`);
+        throw new Error(result.kind === "failed" ? `wrap-up failed: ${result.lastError}` : result.kind === "held" ? heldMessage(result.hold) : `wrap-up ${result.kind}`);
       },
       snapshotEvidenceInTx: evidence.snapshotInTx,
       links: preparation.linkSuggestions,
@@ -551,9 +604,9 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     };
 
     const voice: Voice =
-      keys.ELEVENLABS_API_KEY === undefined
+      voiceKey === undefined
         ? unavailableVoice
-        : createVoice({ apiKey: keys.ELEVENLABS_API_KEY, voiceId, model: voiceModel, db, ...(options.fetch ? { fetch: options.fetch } : {}) });
+        : createVoice({ apiKey: voiceKey, voiceId, model: voiceModel, db, ...(options.fetch ? { fetch: options.fetch } : {}) });
 
     return { tasks, evidence, served, segmentation, preparation, reviews, record, ledger, memo, diagrams, voice, captures, db };
   }
@@ -662,7 +715,16 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       ? "mode: live (Jev with the key from keys.env; Claude through claude -p on your login)"
       : `mode: replay (${keysFile ? "AFTERCLASS_MODE=replay" : "no keys file"}: Jev unavailable, Claude unavailable, every live call is refused)`,
   );
-  log(keys.ELEVENLABS_API_KEY !== undefined ? `voice: ElevenLabs (model ${voiceModel}, voice ${voiceId})` : "voice: unavailable (no ELEVENLABS_API_KEY in keys.env, or replay mode); the app speaks with Chrome's voice");
+  const cap = (usd: number | null) => (usd === null ? "no cap" : `$${usd}`);
+  if (budget !== null) log(`budget per month (UTC): ${cap(budgetLimits.userUsd)} per user, ${cap(budgetLimits.totalUsd)} in total; stop switch: ${join(configDir, STOP_FILE)}${paidCallsStopped() ? " (on)" : ""}`);
+  if (interrupted > 0) log(`budget: ${interrupted} call(s) a previous process left unfinished are recorded at unknown cost and count at their reservation`);
+  log(
+    voiceKey !== undefined
+      ? `voice: ElevenLabs (model ${voiceModel}, voice ${voiceId})`
+      : voiceIgnored
+        ? "voice: ELEVENLABS_API_KEY is ignored in hosted mode, where ElevenLabs stays off; the app speaks with Chrome's voice"
+        : "voice: unavailable (no ELEVENLABS_API_KEY in keys.env, or replay mode); the app speaks with Chrome's voice",
+  );
   if (auth.kind === "clerk") log(`sign-in: Clerk for ${auth.publicOrigin}; the extension connects through ${auth.publicOrigin}/app/connect-extension`);
   if (auth.kind === "clerk" && extensionId === "") logError("backend: AFTERCLASS_EXTENSION_ID is not set, so no extension can connect until it is");
   // The token is printed only for a loopback bind. A hosted container's log goes to CloudWatch, which is not a place for a secret.

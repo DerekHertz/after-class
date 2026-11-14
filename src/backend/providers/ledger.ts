@@ -5,10 +5,12 @@
  *
  * R17: "Every paid call records a usage event; unknown cost is stored as unknown, not zero."
  * Summaries total per cost kind and report unknown as a count with usd null, never as $0.
+ * A summary also carries the user's allowance for the month when a budget runs (see budget.ts).
  */
 import type { MemoKey } from "../../shared/ids";
 import type { Cost, Provider, Purpose, UsageEvent, UsageSummary } from "../../shared/domain";
 import type { UserDb } from "../db";
+import type { Budget } from "./budget";
 
 type Filter = { readonly sinceMs?: number; readonly purpose?: Purpose };
 
@@ -62,7 +64,7 @@ function costOf(r: Row): Cost {
   }
 }
 
-export function createLedger(db: UserDb): Ledger {
+export function createLedger(db: UserDb, budget: Budget | null = null): Ledger {
   const where = (f: Filter | undefined) => {
     const clauses: string[] = ["user_id = ?"];
     const args: (string | number)[] = [db.userId];
@@ -103,7 +105,7 @@ export function createLedger(db: UserDb): Ledger {
         return [p, { calls: row?.calls ?? 0, errors: row?.errors ?? 0, unknownCost: row?.unknown_cost ?? 0 }];
       }),
     ) as UsageSummary["byPurpose"];
-    return { byKind, byPurpose };
+    return { byKind, byPurpose, allowance: budget === null ? null : budget.allowance(db.userId) };
   }
 
   function stages(filter?: Filter): readonly StageUsage[] {

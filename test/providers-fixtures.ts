@@ -3,6 +3,7 @@ import type { ClaudeProcess, ClaudeRequest, SpawnFn } from "../src/backend/provi
 import { createClaudeCli } from "../src/backend/providers/claude";
 import type { JevClient, JevRequest } from "../src/backend/providers/jev";
 import type { BoundaryInput, ClaimSupportInput } from "../src/backend/providers/jev-tasks";
+import { unbudgeted } from "../src/backend/providers/memo";
 import type { UsageReport } from "../src/backend/providers/memo";
 import type { Frame, Passage } from "../src/shared/domain";
 
@@ -44,7 +45,9 @@ export const withBytes = (f: Frame, bytes: Uint8Array = jpeg(f.width, f.height))
 
 export const NEVER = new AbortController().signal;
 
-export const ctx = { signal: NEVER, streamTo: null };
+/** An adapter call with no budget. */
+export const OPEN = unbudgeted(NEVER);
+export const ctx = { ...OPEN, streamTo: null };
 
 export const answersBody = (answers: unknown, usage: unknown = { input_tokens: 1234, output_tokens: 5 }) => ({ model: "jev-1.13.0", answers, usage });
 

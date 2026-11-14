@@ -221,6 +221,8 @@ Amendment (2026-11-13), Derek: "i can pay, but is jev worth keeping?" The agent 
 
 Amendment (2026-11-13), Derek: "I'm still in beta testing, so I don't to make a full production application yet. But I want to make sure that we have the flexibility to get there if needed." Then: "approve #175, $5 per user and $50 total. we can keep elevenlabs off for now". The agent drafted this paragraph. The beta runs the current app, on SQLite in one process, on one EC2 server in us-east-2 behind Caddy, with Clerk sign-in. The ECS, RDS and S3 stack above, and the move to PostgreSQL, are the path to production for when the beta outgrows one server. The per-user budget is $5 a month and the monthly total is $50. ElevenLabs stays off in the hosted beta, so the browser's own voice is used. The conditions in the paragraph above still hold before the first hosted live call. No rule text changed.
 
+Amendment (2026-11-13), Derek, on a learner who reaches a cap partway through a review: "i think it should be allowed to finish". The agent drafted this paragraph. Finishing a review is exempt from the per-user budget and the monthly total. When a cap holds the tutor's call on a turn that can only wrap up, code says the wrap-up line without a call, and the wrap-up that saves the review runs past either cap. The stop switch still halts both. The wrap-up still records a usage event and counts toward the month (R17), so a finished review can take a month past its cap by one wrap-up. No rule text changed.
+
 ## Experiments and pass bars (adopted by Derek, 2026-11-03)
 
 Set before any results; not to be tuned to fit observations. Derek runs the tests that need him later.

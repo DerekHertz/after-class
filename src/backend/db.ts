@@ -57,6 +57,8 @@ export const TABLE_SCOPES: { readonly [table: string]: TableScope } = {
   memo_failures: "user",
   usage_events: "user",
   voice_usage_events: "user",
+  // Per user, though the monthly total sums every user's rows: that sum is the only read across users.
+  budget_holds: "user",
   capture_facts: "user",
   frames: "user",
   evidence_snapshots: "user",

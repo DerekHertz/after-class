@@ -112,6 +112,8 @@
 .scene-shell .front-row-scene .current-exchange .line[data-question] p { font: 600 clamp(1.4rem, 2.7cqw, 2.7rem)/1.28 'After Class Pixel', var(--font); letter-spacing: .01em; }
 .front-row-scene[data-board-align="center"] .current-exchange .line[data-question] { text-align: center; }
 .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) .note { margin: .8em 0 0; padding: 8px 12px; background: color-mix(in srgb, var(--fr-board-fill) 82%, var(--fr-board-ink)); color: var(--fr-board-ink); border: 2px solid var(--fr-board-ink-soft); border-radius: 0; font-size: 1rem; }
+/* A note under the tutor's line (a held or failed turn) reads at note size, not at the size of the question it sits with. */
+.scene-shell .front-row-scene .current-exchange .lines .line p.note { margin: .8em 0 0; font: 500 1rem/1.35 'After Class Pixel', var(--font); letter-spacing: normal; }
 .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) .note-error { color: var(--fr-board-ink); border-left-width: 10px; font-weight: 600; }
 .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) :is(button, .citation) { min-height: 40px; padding: 6px 12px; border: 2px solid var(--fr-board-ink-soft); border-radius: 0; background: transparent; color: var(--fr-board-ink); font: 500 1rem/1.15 'After Class Pixel', var(--font); text-decoration: none; }
 .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) .citation::before { filter: var(--fr-board-icon-filter, none); }

@@ -15,6 +15,11 @@
  *    result or the failure. No other module calls `Task.attempt`.
  *  - Replay mode: lookups work, a miss throws `ReplayMiss`, so a recorded
  *    database is a labelled replay sample with no provider constructed.
+ *  - Budgets: an adapter calls `ctx.admit()` immediately before each paid request leaves the process, after any queue,
+ *    so the stop switch and the caps are asked at the moment of sending and a call that sends several requests reserves
+ *    for each. Each hold is priced as its response is read, so the next request is admitted against what is already
+ *    known to be spent. The holds settle in the usage event's transaction. A refusal throws `BudgetHeld` and the run resolves
+ *    `held`. If nothing was sent it records no usage event; if earlier requests were sent, it records their cost.
  *  - Per user: a memo is built on a `UserDb` and reads and writes only that user's rows, which are keyed by
  *    (user_id, key). The key itself stays a hash of the call alone, so it does not change when a user is added and
  *    the later shared cache of lecture-only rows can use it as it is. A `MemoKey` is therefore unique only within one
@@ -25,9 +30,13 @@
  */
 import { canonicalJson, stableId } from "../../shared/ids";
 import type { CaptureId, IdPart, MemoKey } from "../../shared/ids";
-import type { Cost, Provider, Purpose, Seq, UsageEvent, UsageOutcome } from "../../shared/domain";
+import type { BudgetHold, Cost, Provider, Purpose, Seq, UsageEvent, UsageOutcome } from "../../shared/domain";
 import { asSeq } from "../db";
 import type { UserDb } from "../db";
+import type { Budget, Reservation } from "./budget";
+
+/** One admitted request of an attempt: its hold, and its own cost once the adapter has priced it. */
+type Ticket = { readonly reservation: Reservation | null; cost: Cost | null };
 
 /** What a provider adapter reports for one attempt. Numbers it doesn't know stay null. */
 export type UsageReport = {
@@ -38,11 +47,25 @@ export type UsageReport = {
   readonly cost: Cost;
 };
 
-/** A provider failure, with usage when the provider billed before failing. */
+/**
+ * A provider failure, with usage when the provider billed before failing. `not_billed` is for a failure the adapter knows
+ * cost nothing (a request turned away before any model ran); with no usage it is recorded as a known zero, not as unknown.
+ */
 export class ProviderError extends Error {
   override readonly name = "ProviderError";
-  constructor(message: string, readonly usage: UsageReport | null, readonly retryable: boolean) {
+  constructor(message: string, readonly usage: UsageReport | null, readonly retryable: boolean, readonly billing: "not_billed" | "maybe_billed" = "maybe_billed") {
     super(message);
+  }
+}
+
+/**
+ * Thrown by `admit` when a budget refuses a request, so the request is never sent. `usage` is what the attempt's earlier
+ * requests cost, or null when this was its first. The adapter passes it on unchanged apart from that usage.
+ */
+export class BudgetHeld extends Error {
+  override readonly name = "BudgetHeld";
+  constructor(readonly hold: BudgetHold, readonly usage: UsageReport | null) {
+    super(`held by the budget (${hold.reason})`);
   }
 }
 
@@ -53,8 +76,22 @@ export class ReplayMiss extends Error {
   }
 }
 
-export type AttemptContext = {
+/** One request `admit` let through. An adapter that sends several requests in one attempt reports each one's cost here. */
+export type Admitted = { priced(cost: Cost): void };
+
+/** What an adapter needs to send paid requests: the abort signal, and `admit`, called immediately before each request is sent. */
+export type SendContext = {
   readonly signal: AbortSignal;
+  /** Throws `BudgetHeld` when the request must not be sent. */
+  admit(): Admitted;
+};
+
+/** A context with no budget, for scripts and tests that call an adapter directly. */
+export function unbudgeted(signal: AbortSignal): SendContext {
+  return { signal, admit: () => ({ priced: () => {} }) };
+}
+
+export type AttemptContext = SendContext & {
   /** Raw text deltas for streaming tasks (the tutor). The stored value is still the final output. */
   readonly streamTo: ((delta: string) => void) | null;
 };
@@ -86,6 +123,10 @@ export type Lookup<O> =
   | { readonly kind: "inflight"; readonly key: MemoKey }
   | { readonly kind: "missing"; readonly key: MemoKey };
 
+/** What `run` adds to a lookup: a budget refused a request before it was sent, so nothing was stored and the key stays missing. */
+export type Held = { readonly kind: "held"; readonly key: MemoKey; readonly hold: BudgetHold };
+export type RunResult<O> = Lookup<O> | Held;
+
 /** Passed into pure derivations so they stay testable with a Map. */
 export type LookupFn = <I, O>(task: Task<I, O>, input: I) => Lookup<O>;
 
@@ -93,7 +134,7 @@ export type LookupFn = <I, O>(task: Task<I, O>, input: I) => Lookup<O>;
  * R8: "Results from cancelled or outdated jobs never overwrite current preparation or my notes."
  * A settled lookup counts only if it was stored before the covering cutoff (a stop-early Seq).
  */
-export function appliesBefore<O>(l: Lookup<O>, cutoff: Seq | null): l is Extract<Lookup<O>, { kind: "hit" | "failed" }> {
+export function appliesBefore<O>(l: RunResult<O>, cutoff: Seq | null): l is Extract<Lookup<O>, { kind: "hit" | "failed" }> {
   if (l.kind !== "hit" && l.kind !== "failed") return false;
   return cutoff === null || l.atSeq < cutoff;
 }
@@ -129,10 +170,11 @@ export type Memo = {
    * promise (single-flight; only the first caller's `streamTo` gets deltas).
    * Otherwise attempts until success, a non-retryable error, or `maxAttempts`.
    * An aborted attempt records an `aborted` usage event and resolves `missing`.
+   * An attempt the budget refuses resolves `held`; the key stays missing, so asking again later runs it.
    * `onRetry` runs after a retryable failure and before the next attempt, so a caller that
    * has been given the failed attempt's `streamTo` deltas can drop them.
    */
-  run<I, O>(task: Task<I, O>, input: I, opts?: MemoRunOptions): Promise<Lookup<O>>;
+  run<I, O>(task: Task<I, O>, input: I, opts?: MemoRunOptions): Promise<RunResult<O>>;
   /** User retry: forget terminal failures so demand re-runs them. Never deletes hits. */
   clearFailures(keys: readonly MemoKey[]): void;
   /** Exact input, output and usage for a key (PRD acceptance: inspectable preprocessing). */
@@ -143,6 +185,8 @@ export type MemoOptions = {
   readonly now?: () => number;
   /** Delay before retry attempt n+1 after n failures. */
   readonly retryDelayMs?: (failures: number) => number;
+  /** main.ts passes one in live mode. Without one, attempts are not budgeted (replay mode and tests). */
+  readonly budget?: Budget;
 };
 
 type InputRow = { provider: Provider; purpose: Purpose; version: string; model: string; input_json: string };
@@ -155,6 +199,12 @@ type UsageRow = {
 };
 
 const NEVER = new AbortController().signal;
+
+/** A request of several that its adapter never priced. It settles at its reservation. */
+const UNPRICED: Cost = { kind: "unknown", reason: "request not priced" };
+
+/** The cost of a failure the adapter says was turned away before any model ran. */
+const NOT_BILLED: Cost = { kind: "estimated", usd: 0, basis: "rejected before any model ran" };
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? `${err.name}: ${err.message}` : String(err);
@@ -201,8 +251,9 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): Memo {
   const now = opts.now ?? Date.now;
   const retryDelayMs = opts.retryDelayMs ?? ((n: number) => Math.min(30_000, 1000 * 2 ** (n - 1)));
-  const inflight = new Map<MemoKey, Promise<Lookup<unknown>>>();
+  const inflight = new Map<MemoKey, Promise<RunResult<unknown>>>();
   const userId = db.userId;
+  const budget = opts.budget ?? null;
 
   const q = {
     insertInput: db.sql.query(
@@ -250,10 +301,16 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
     return settled(task as Task<unknown, O>, key);
   }
 
-  /** Must run inside a transaction: the attempt number and the event commit together. */
-  function recordUsage<I, O>(task: Task<I, O>, key: MemoKey, captureId: CaptureId | null, outcome: UsageOutcome, usage: UsageReport | null, startedMs: number, why: string): void {
+  /**
+   * Must run inside a transaction: the attempt number, the event and the budget settlement commit together. One request
+   * settles at the event's cost. Of several, each settles at the cost its adapter priced, or at its reservation when it
+   * has none, so a continuation of unknown cost never erases what the earlier requests are known to have cost.
+   */
+  function recordUsage<I, O>(task: Task<I, O>, key: MemoKey, captureId: CaptureId | null, outcome: UsageOutcome, usage: UsageReport | null, startedMs: number, why: string, tickets: readonly Ticket[], notBilled = false): void {
     const attemptNo = q.nextAttempt.get(userId, key)!.n;
-    const cost = costColumns(usage?.cost ?? { kind: "unknown", reason: `no usage reported (${why})` });
+    const recorded = usage?.cost ?? (notBilled ? NOT_BILLED : { kind: "unknown", reason: `no usage reported (${why})` });
+    for (const t of tickets) if (t.reservation !== null) budget!.settle(t.reservation, tickets.length === 1 ? recorded : (t.cost ?? UNPRICED));
+    const cost = costColumns(recorded);
     q.insertUsage.run(
       stableId("use", userId, key, attemptNo), userId, key, captureId, attemptNo, task.provider, usage?.model ?? task.model, task.purpose, outcome,
       usage?.inputTokens ?? null, usage?.outputTokens ?? null, usage?.cacheReadTokens ?? null,
@@ -261,27 +318,45 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
     );
   }
 
-  async function attemptLoop<I, O>(task: Task<I, O>, input: I, key: MemoKey, signal: AbortSignal, streamTo: ((d: string) => void) | null, onRetry: (() => void) | null, captureId: CaptureId | null): Promise<Lookup<O>> {
+  async function attemptLoop<I, O>(task: Task<I, O>, input: I, key: MemoKey, signal: AbortSignal, streamTo: ((d: string) => void) | null, onRetry: (() => void) | null, captureId: CaptureId | null): Promise<RunResult<O>> {
     q.insertInput.run(userId, key, task.provider, task.purpose, task.version, task.model, canonicalJson(task.canonicalInput(input)), Math.round(now()));
     let failures = q.failure.get(userId, key)?.attempts ?? 0;
     while (true) {
       if (signal.aborted) return { kind: "missing", key };
+      const tickets: Ticket[] = [];
+      const admit = (): Admitted => {
+        const admission = budget?.reserve(userId, task.purpose, key) ?? null;
+        if (admission?.kind === "held") throw new BudgetHeld(admission.hold, null);
+        const ticket: Ticket = { reservation: admission?.reservation ?? null, cost: null };
+        tickets.push(ticket);
+        return {
+          priced: (cost) => {
+            ticket.cost = cost;
+            if (ticket.reservation !== null) budget!.price(ticket.reservation, cost);
+          },
+        };
+      };
       const startedMs = now();
-      let outcome: { ok: true; usage: UsageReport; encoded: string; value: O } | { ok: false; usage: UsageReport | null; message: string; retryable: boolean };
+      let outcome:
+        | { ok: true; usage: UsageReport; encoded: string; value: O }
+        | { ok: false; usage: UsageReport | null; message: string; retryable: boolean; notBilled: boolean; held: BudgetHeld | null };
       try {
-        const result = await task.attempt(input, { signal, streamTo });
+        const result = await task.attempt(input, { signal, admit, streamTo });
         try {
           const encoded = JSON.stringify(result.output);
           outcome = { ok: true, usage: result.usage, encoded, value: task.decode(JSON.parse(encoded)) };
         } catch (err) {
-          outcome = { ok: false, usage: result.usage, message: `invalid output: ${errorMessage(err)}`, retryable: false };
+          outcome = { ok: false, usage: result.usage, message: `invalid output: ${errorMessage(err)}`, retryable: false, notBilled: false, held: null };
         }
       } catch (err) {
+        const held = err instanceof BudgetHeld ? err : null;
         outcome = {
           ok: false,
-          usage: err instanceof ProviderError ? err.usage : null,
+          usage: held?.usage ?? (err instanceof ProviderError ? err.usage : null),
           message: errorMessage(err),
           retryable: err instanceof ProviderError && err.retryable,
+          notBilled: err instanceof ProviderError && err.billing === "not_billed",
+          held,
         };
       }
 
@@ -291,18 +366,23 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
           const atSeq = db.nextSeq();
           q.insertHit.run(userId, key, encoded, atSeq, Math.round(now()));
           q.deleteFailure.run(userId, key);
-          recordUsage(task, key, captureId, "ok", usage, startedMs, "ok");
+          recordUsage(task, key, captureId, "ok", usage, startedMs, "ok", tickets);
           return { kind: "hit", key, value, atSeq } as const;
         });
       }
-      const { usage, message, retryable } = outcome;
+      const { usage, message, retryable, notBilled, held } = outcome;
+      if (held !== null) {
+        // The requests sent before the refusal were paid for, so they get their usage event. The key stays missing.
+        if (tickets.length > 0) db.tx(() => recordUsage(task, key, captureId, "error", usage, startedMs, message, tickets, notBilled));
+        return { kind: "held", key, hold: held.hold };
+      }
       if (signal.aborted) {
-        db.tx(() => recordUsage(task, key, captureId, "aborted", usage, startedMs, "aborted"));
+        db.tx(() => recordUsage(task, key, captureId, "aborted", usage, startedMs, "aborted", tickets, notBilled));
         return { kind: "missing", key };
       }
       const terminal = !retryable || failures + 1 >= task.maxAttempts;
       db.tx(() => {
-        recordUsage(task, key, captureId, "error", usage, startedMs, message);
+        recordUsage(task, key, captureId, "error", usage, startedMs, message, tickets, notBilled);
         failures = q.upsertFailure.get(userId, key, message, db.nextSeq(), terminal ? 1 : 0)!.attempts;
       });
       if (terminal) return settled(task as Task<unknown, O>, key);
@@ -311,10 +391,10 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
     }
   }
 
-  function run<I, O>(task: Task<I, O>, input: I, runOpts: MemoRunOptions = {}): Promise<Lookup<O>> {
+  function run<I, O>(task: Task<I, O>, input: I, runOpts: MemoRunOptions = {}): Promise<RunResult<O>> {
     const key = keyOf(task, input);
     const flying = inflight.get(key);
-    if (flying) return flying as Promise<Lookup<O>>;
+    if (flying) return flying as Promise<RunResult<O>>;
     const done = settled(task as Task<unknown, O>, key);
     if (done.kind !== "missing") return Promise.resolve(done);
     if (mode === "replay") return Promise.reject(new ReplayMiss(task.purpose, key));

@@ -22,13 +22,14 @@ const api: AppApi = holdReview ? { ...fixtureApi, review: async (id) => { await 
 const unsent = createMemoryUnsent();
 const speaker = { beginTurn() {}, speak() {}, stop() {} };
 const clean = new URLSearchParams(location.search).get("clean") === "1";
-/** `?account=1` shows the hosted app's sign-out control, so its place in each layout can be checked. */
-const account = new URLSearchParams(location.search).get("account") === "1" ? <SignOutButton clerk={{ signOut: async () => {} } as unknown as ClerkClient} /> : undefined;
+/** `?account=1` previews the hosted app: the sign-out control, so its place in each layout can be checked, and the learner's usage page. */
+const hosted = new URLSearchParams(location.search).get("account") === "1";
+const account = hosted ? <SignOutButton clerk={{ signOut: async () => {} } as unknown as ClerkClient} /> : undefined;
 function Preview() {
   const path = usePathname();
   const calls = useSyncExternalStore(requestLedger.subscribe, requestLedger.snapshot);
   const home = path === "/app/" || path === "/app" || (path === "/" && scenario.startsWith("home"));
-  const page = home ? "home" : path.includes("/record") || scenario.startsWith("record") ? "record" : path.includes("/capture") || scenario.startsWith("capture") ? "capture" : path.includes("/usage") || scenario === "usage" ? "usage" : "review";
+  const page = home ? "home" : path.includes("/record") || scenario.startsWith("record") ? "record" : path.includes("/capture") || scenario.startsWith("capture") ? "capture" : path.includes("/usage") || scenario.startsWith("usage") ? "usage" : "review";
   return <>
     <aside className="fixture-toolbar" aria-label="Preview fixtures" hidden={clean}>
       <strong>Deterministic UI fixture</strong><span>No live lecture or model calls.</span>
@@ -42,7 +43,7 @@ function Preview() {
       <details><summary>Request ledger</summary><pre>{calls || "No requests"}</pre></details>
     </aside>
     <AppearanceProvider><SceneShell account={account}>
-      {page === "home" ? <HomeScreen api={api} /> : page === "capture" ? <CaptureScreen api={api} captureId={ids.capture} /> : page === "record" ? <RecordScreen api={api} reviewId={recordReviewId} /> : page === "usage" ? <UsageScreen api={api} /> : <ReviewScreen api={api} reviewId={ids.review} speaker={speaker} speech={speech} unsent={unsent} />}
+      {page === "home" ? <HomeScreen api={api} /> : page === "capture" ? <CaptureScreen api={api} captureId={ids.capture} /> : page === "record" ? <RecordScreen api={api} reviewId={recordReviewId} /> : page === "usage" ? <UsageScreen api={api} hosted={hosted} /> : <ReviewScreen api={api} reviewId={ids.review} speaker={speaker} speech={speech} unsent={unsent} />}
     </SceneShell></AppearanceProvider>
   </>;
 }

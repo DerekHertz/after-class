@@ -61,7 +61,7 @@ function App({ services: { api, speaker, speech, unsent }, extensionId }: { read
     case "record":
       return <RecordScreen api={api} reviewId={route.reviewId === null ? null : parseId("rvw", route.reviewId)} />;
     case "usage":
-      return <UsageScreen api={api} browsers={extensionId !== null} />;
+      return <UsageScreen api={api} hosted={extensionId !== null} />;
     case "connect_extension":
       return <ConnectExtensionScreen api={api} extensionId={extensionId} />;
     case "not_found":

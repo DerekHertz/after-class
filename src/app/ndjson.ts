@@ -54,9 +54,9 @@ export async function* ndjson(body: ReadableStream<Uint8Array>): AsyncGenerator<
 const CUT_OFF: TurnEvent = { type: "turn_failed", error: "The connection closed before the tutor finished.", retryable: true };
 
 /**
- * Validated tutor events. A stream that ends without `turn_complete` or
- * `turn_failed` is a dropped connection, reported as a retryable failure so the
- * caller never waits on a turn that is gone.
+ * Validated tutor events. A stream that ends without `turn_complete`,
+ * `turn_failed` or `turn_held` is a dropped connection, reported as a retryable
+ * failure so the caller never waits on a turn that is gone.
  */
 export async function* tutorEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<TurnEvent> {
   try {
@@ -64,7 +64,7 @@ export async function* tutorEvents(body: ReadableStream<Uint8Array>): AsyncGener
       const parsed = turnEventz.safeParse(raw);
       if (!parsed.success) throw new StreamError(`unexpected tutor event: ${z.prettifyError(parsed.error)}`);
       yield parsed.data;
-      if (parsed.data.type === "turn_complete" || parsed.data.type === "turn_failed") return;
+      if (parsed.data.type === "turn_complete" || parsed.data.type === "turn_failed" || parsed.data.type === "turn_held") return;
     }
   } catch (e) {
     if (e instanceof StreamError) throw e;
