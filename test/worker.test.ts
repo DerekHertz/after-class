@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildExtension, copyBuild, hostedOriginFrom, manifestFiles } from "../scripts/build-extension";
+import { buildExtension, copyBuild, extensionIdFromKey, HOSTED_EXTENSION_ID, HOSTED_KEY, hostedOriginFrom, manifestFiles } from "../scripts/build-extension";
 import type { CaptureFactBody } from "../src/shared/domain";
 import type { CaptureId } from "../src/shared/ids";
 import { randomId } from "../src/shared/ids";
@@ -607,6 +607,9 @@ describe("extension build", () => {
     expect(manifest.host_permissions).toEqual(["https://www.youtube.com/*", "https://useafterclass.com/*"]);
     expect(manifest.externally_connectable).toEqual({ matches: ["https://useafterclass.com/*"] });
     expect(manifest.name).toBe("After Class");
+    expect(extensionIdFromKey(manifest.key)).toBe("jambcaokhnaonnemlbpnppijaojlohgl");
+    expect(manifest.key).toBe(HOSTED_KEY);
+    expect(HOSTED_EXTENSION_ID).toBe("jambcaokhnaonnemlbpnppijaojlohgl");
     for (const f of ["worker.js", "popup.js", "options.js"]) {
       const code = readFileSync(join(hosted, f), "utf8");
       expect(code, f).toContain('"https://useafterclass.com"');
