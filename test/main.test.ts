@@ -662,7 +662,7 @@ describe("AFTERCLASS_CLAUDE_BACKEND", () => {
     const jev = { ask: () => Promise.reject(new Error("no Jev call in this test")) };
     const ctx = { ...unbudgeted(new AbortController().signal), streamTo: null };
     const empty = { passages: [], frames: [], gaps: [] };
-    const tasks = buildTasks(jev, adapter, () => null, UNASKED_CACHE, "sonnet");
+    const tasks = buildTasks(jev, { preparation: adapter, interactive: adapter }, () => null, UNASKED_CACHE, "sonnet");
     expect([tasks.tutor.model, tasks.wrapUp.model]).toEqual(["sonnet", "sonnet"]);
     await Promise.allSettled([
       tasks.tutor.attempt({ state: reviewState("rev_aaaaaaaaaaaaaaaaaaaaaaaaaa" as never, [], [], 0, 0), allowed: ["wrap_up"], claims: [], evidence: empty, turns: [], priorObservations: [], repairNote: null, scope: {} } as unknown as TutorInput, ctx),
@@ -672,7 +672,7 @@ describe("AFTERCLASS_CLAUDE_BACKEND", () => {
     expect(models).toEqual({ tutor: "sonnet", wrapUp: "sonnet", other: "opus" });
   });
 
-  test("buildTasks gives every task the one adapter it is passed", async () => {
+  test("buildTasks gives every task an adapter", async () => {
     const seen: string[] = [];
     const adapter: ClaudeCli = {
       structured: (req) => {
@@ -687,7 +687,7 @@ describe("AFTERCLASS_CLAUDE_BACKEND", () => {
     const jev = { ask: () => Promise.reject(new Error("no Jev call in this test")) };
     const ctx = { ...unbudgeted(new AbortController().signal), streamTo: null };
     const empty = { passages: [], frames: [], gaps: [] };
-    const tasks = buildTasks(jev, adapter, () => null, UNASKED_CACHE);
+    const tasks = buildTasks(jev, { preparation: adapter, interactive: adapter }, () => null, UNASKED_CACHE);
     await Promise.allSettled([
       tasks.tutor.attempt({ state: reviewState("rev_aaaaaaaaaaaaaaaaaaaaaaaaaa" as never, [], [], 0, 0), allowed: ["wrap_up"], claims: [], evidence: empty, turns: [], priorObservations: [], repairNote: null, scope: {} } as unknown as TutorInput, ctx),
       tasks.wrapUp.attempt({ turns: [], claims: [], threads: [] }, ctx),
