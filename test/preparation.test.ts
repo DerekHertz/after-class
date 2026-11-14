@@ -8,6 +8,8 @@ import type { Lookup, Task } from "../src/backend/providers/memo";
 import type { ClaudeCli } from "../src/backend/providers/claude";
 import type { ClaimSupportInput } from "../src/backend/providers/jev-tasks";
 import type { WorkItem } from "../src/backend/scheduler";
+import { slotDep } from "../src/backend/deps";
+import type { Dep, ReadDep } from "../src/backend/deps";
 import { createPreparation } from "../src/backend/preparation";
 import { assessable, deriveClaimStatus, validateDraft } from "../src/backend/preparation/core";
 import type { Check } from "../src/backend/preparation/core";
@@ -64,7 +66,7 @@ const checkCanonical = (i: ClaimSupportInput): IdPart => ({
   frames: i.frames.map((f) => f.frame.id),
 });
 
-function world(opts: { readonly interpret?: Task<InterpretationInput, InterpretationOutput> } = {}) {
+function world(opts: { readonly interpret?: Task<InterpretationInput, InterpretationOutput>; readonly read?: ReadDep; readonly changed?: (keys: readonly Dep[]) => void } = {}) {
   const db = testUserDb();
   const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
   const captureId = randomId("cap") as CaptureId;
@@ -105,6 +107,8 @@ function world(opts: { readonly interpret?: Task<InterpretationInput, Interpreta
     clearFailures: memo.clearFailures,
     tasks,
     frameBytes: () => new Uint8Array([0xff, 0xd8]),
+    ...(opts.read ? { read: opts.read } : {}),
+    ...(opts.changed ? { changed: opts.changed } : {}),
   });
 
   /** Segmentation's side: append a revision of chunk `ordinal` covering [start, end). */
@@ -451,6 +455,22 @@ describe("preparation", () => {
     await w.drain();
     expect(w.prep.resources(conceptId)).toEqual({ state: "found", connections: [found] });
     expect(w.prep.prep(r1.id)).toEqual(prep);
+  });
+
+  test("a frozen input slot is a dependency: demand reports reading it, and freezing it is announced once, after its commit", async () => {
+    const reads = new Set<Dep>();
+    const announced: Dep[][] = [];
+    const w = world({ read: (d) => void reads.add(d), changed: (keys) => void announced.push([...keys]) });
+    const r1 = w.close(0, 0, 20);
+    w.script.interpret = () => ok(output([{ label: "Elimination", claims: [draft("pivots", [P[0]!])] }]));
+    w.script.resources = () => ok([]);
+    await w.drain();
+    const conceptId = w.prep.prep(r1.id).claims[0]!.conceptId;
+    expect(announced).toContainEqual([slotDep("resource_search", conceptId)]);
+    expect(announced.filter((keys) => keys[0] === slotDep("resource_search", conceptId))).toHaveLength(1);
+    reads.clear();
+    w.prep.demand(w.captureId);
+    expect(reads.has(slotDep("resource_search", conceptId))).toBe(true);
   });
 
   test("R6: a failed resource search leaves the chunk ready", async () => {

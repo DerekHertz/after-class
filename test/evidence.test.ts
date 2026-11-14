@@ -7,6 +7,8 @@ import { FRAME_DEFAULTS } from "../src/extension/content/frames";
 import type { CaptureFact } from "../src/shared/domain";
 import { randomId, stableId } from "../src/shared/ids";
 import { Material, interval, media } from "../src/shared/time";
+import { REMOVALS, captureDep, sourceDep } from "../src/backend/deps";
+import type { Dep } from "../src/backend/deps";
 import { JPEG, OTHER, SRC, VIDEO, exceptStalls, harness, keyOf, stream, textsOf } from "./evidence-fixtures";
 
 describe("R1: evidence only from intervals watched while capture was on", () => {
@@ -405,6 +407,75 @@ describe("an upload invalidates only its own capture", () => {
     b.span(0, 10);
     h.evidence.ingest({ captureId: b.captureId, facts: b.facts });
     expect(textsOf(h.evidence.bundle(h.evidence.watchedMaterial(b.captureId)).passages)).toEqual(["a new lecture"]);
+  });
+});
+
+describe("what a write changes and what a read depends on", () => {
+  function listened() {
+    const h = harness();
+    const changed: { captureId: unknown; keys: readonly Dep[] }[] = [];
+    const reads = new Set<Dep>();
+    const evidence = createEvidence(h.db, h.dir, {
+      lookupFrameChange: () => ({ kind: "missing", key: stableId("key", "x") }),
+      runFrameChange: async () => undefined,
+      frameChangeKey: keyOf,
+      onChange: (captureId, keys) => void changed.push({ captureId, keys }),
+      read: (dep) => void reads.add(dep),
+      now: () => h.clock.t,
+    });
+    return { ...h, evidence, changed, reads };
+  }
+
+  test("an upload reports its capture and every source the capture has facts about, including one an earlier batch introduced", () => {
+    const h = listened();
+    const s = stream();
+    s.control("start");
+    s.source({ video: OTHER });
+    s.span(0, 10, { video: OTHER });
+    s.source();
+    s.span(0, 10);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts.slice(0, 3) });
+    h.evidence.ingest({ captureId: s.captureId, facts: [s.control("stop")] });
+    expect(h.changed.map((c) => c.captureId)).toEqual([s.captureId, s.captureId]);
+    expect(new Set(h.changed[1]!.keys)).toEqual(new Set([captureDep(s.captureId), sourceDep(sourceIdOf(OTHER))]));
+  });
+
+  test("a bundle depends on the sources of its material and on removals, a capture's own demand on that capture", () => {
+    const h = listened();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.span(0, 10);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    h.reads.clear();
+    h.evidence.bundle(Material.of([[SRC, [interval(0, 10)]]]));
+    expect(h.reads).toEqual(new Set([sourceDep(SRC), REMOVALS]));
+    h.reads.clear();
+    h.evidence.watchOrder(s.captureId);
+    expect(h.reads).toEqual(new Set([captureDep(s.captureId), REMOVALS]));
+    h.reads.clear();
+    h.evidence.frameDemand(s.captureId);
+    expect(h.reads.has(captureDep(s.captureId))).toBe(true);
+  });
+
+  test("a deletion by the user and a sweep that removed something report removals, and a sweep that removed nothing does not", () => {
+    const h = listened();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.transcript([[0, 4, "hello"]]);
+    s.span(0, 10);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    h.changed.length = 0;
+
+    h.evidence.sweepExpired(h.clock.t, 30);
+    expect(h.changed).toEqual([]);
+    h.evidence.deleteByUser(h.evidence.captureBundle(s.captureId).passages.map((p) => p.id as never), "r");
+    expect(h.changed).toEqual([{ captureId: null, keys: [REMOVALS] }]);
+    h.changed.length = 0;
+    h.clock.t += 31 * 86_400_000;
+    h.evidence.sweepExpired(h.clock.t, 30);
+    expect(h.changed).toEqual([{ captureId: null, keys: [REMOVALS] }]);
   });
 });
 

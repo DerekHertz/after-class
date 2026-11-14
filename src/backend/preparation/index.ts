@@ -36,6 +36,8 @@ import type { Lookup, RunResult, Task } from "../providers/memo";
 import type { ClaimSupportInput } from "../providers/jev-tasks";
 import { asSeq } from "../db";
 import type { UserDb } from "../db";
+import { slotDep } from "../deps";
+import type { Dep, ReadDep } from "../deps";
 import type { WorkItem } from "../scheduler";
 import { assessable, checkVerdict, claimInside, cutoffFor, deriveClaimStatus, isFinished, locate, normalizeLabel, validateDraft } from "./core";
 import type { Check, ControlFact, Located } from "./core";
@@ -143,9 +145,17 @@ export function createPreparation(db: UserDb, deps: {
   tasks: PreparationTasks;
   /** Frame JPEG bytes for claim checks. Absent ⇒ a check citing a frame fails, so its claim ends unverified. */
   frameBytes?: (id: EvidenceId) => Uint8Array | null;
+  /** Called for each frozen slot a derivation reads. A slot is shared by every capture that reaches the same claim or concept. */
+  read?: ReadDep;
+  /** After a slot is first frozen, once its transaction commits. */
+  changed?: (changed: readonly Dep[]) => void;
 }): Preparation {
   const { tasks } = deps;
   const { userId } = db;
+  const frozenSlot = (kind: FrozenKind, subject: string) => {
+    deps.read?.(slotDep(kind, subject));
+    return q.frozen.get(userId, kind, subject);
+  };
   // Every statement carries the handle's user as its first parameter. Ids that two users can derive alike (a claim id
   // from the interpretation's memo key, a concept id from a label, a subject id from a chunk revision) are keyed with it.
   const q = {
@@ -177,6 +187,7 @@ export function createPreparation(db: UserDb, deps: {
       const prior = q.frozen.get(userId, f.kind, f.subject);
       if (prior) return prior.memo_key === key;
       q.freeze.run(userId, f.kind, f.subject, captureId, key, JSON.stringify(f.json), db.nextSeq());
+      db.afterCommit(() => deps.changed?.([slotDep(f.kind, f.subject)]));
       return true;
     });
   }
@@ -246,7 +257,7 @@ export function createPreparation(db: UserDb, deps: {
    * never rewritten, so a retried check or a cached revision can't key a second one.
    */
   function revisionSlot(captureId: CaptureId, id: ClaimId, original: ClaimDraft, c1: Check | null, unit: Unit): RevisionInput | null {
-    const prior = q.frozen.get(userId, "revision", id);
+    const prior = frozenSlot("revision", id);
     const check = prior ? (JSON.parse(prior.input_json) as { readonly check: Check }).check : c1 && c1.verdict !== "yes" ? c1 : null;
     if (check === null) return null;
     const input: RevisionInput = { original, check, evidence: unit.input.newMaterial };
@@ -362,7 +373,7 @@ export function createPreparation(db: UserDb, deps: {
       byConcept.set(c.concept.id, entry);
     }
     return [...byConcept.values()].flatMap(({ concept, claims }) => {
-      const prior = q.frozen.get(userId, "resource_search", concept.id);
+      const prior = frozenSlot("resource_search", concept.id);
       const input: ResourceSearchInput = prior ? (JSON.parse(prior.input_json) as ResourceSearchInput) : { concept, supportedClaims: claims };
       const l = deps.lookup(tasks.searchResources, input);
       return open(l) ? [need(tasks.searchResources, input, l.key, prior ? null : { kind: "resource_search", subject: concept.id, json: input })] : [];

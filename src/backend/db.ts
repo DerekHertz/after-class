@@ -23,6 +23,11 @@ export type Db = {
   /** Monotonic across every fact table. Rolled back with its transaction, so a Seq is never handed out twice. */
   nextSeq(): Seq;
   tx<T>(fn: () => T): T;
+  /**
+   * Runs `fn` once the outermost transaction commits, or at once outside a transaction. A rollback drops it, and so does
+   * the rollback of the nested transaction (savepoint) it was registered in. For notifications about writes.
+   */
+  afterCommit(fn: () => void): void;
   close(): void;
 };
 
@@ -124,7 +129,7 @@ export function signedInUsers(db: Db): UserId[] {
 export function scopeDb(db: Db, userId: UserId): UserDb {
   const known = db.sql.query<{ id: string }, [string]>("SELECT id FROM users WHERE id = ?").get(userId);
   if (!known) throw new Error(`scopeDb: no such user ${userId}`);
-  return { sql: db.sql, nextSeq: () => db.nextSeq(), tx: (fn) => db.tx(fn), close: () => db.close(), userId };
+  return { sql: db.sql, nextSeq: () => db.nextSeq(), tx: (fn) => db.tx(fn), afterCommit: (fn) => db.afterCommit(fn), close: () => db.close(), userId };
 }
 
 /** Table name → owning module, read from the CREATE TABLE statements above. */
@@ -181,10 +186,37 @@ export function openDb(path: string, migrations: typeof MIGRATIONS = MIGRATIONS)
   }
 
   const bump = sql.query<{ value: number }, []>("UPDATE seq_counter SET value = value + 1 WHERE id = 1 RETURNING value");
+  let depth = 0;
+  const committed: (() => void)[] = [];
+  const tx = <T>(fn: () => T): T => {
+    const mark = committed.length;
+    depth++;
+    let value: T;
+    try {
+      value = sql.transaction(fn)();
+    } catch (e) {
+      committed.length = mark;
+      throw e;
+    } finally {
+      depth--;
+    }
+    if (depth > 0) return value;
+    let failure: { readonly error: unknown } | null = null;
+    for (const notify of committed.splice(0)) {
+      try {
+        notify();
+      } catch (error) {
+        failure ??= { error };
+      }
+    }
+    if (failure !== null) throw failure.error;
+    return value;
+  };
   return {
     sql,
     nextSeq: () => asSeq(bump.get()!.value),
-    tx: <T>(fn: () => T): T => sql.transaction(fn)(),
+    tx,
+    afterCommit: (fn) => (depth === 0 ? fn() : void committed.push(fn)),
     close: () => sql.close(),
   };
 }

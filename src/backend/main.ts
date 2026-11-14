@@ -51,7 +51,9 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { buildApp } from "../../scripts/build-app";
 import { stableId } from "../shared/ids";
-import type { CaptureId, EvidenceId, MemoKey, UserId } from "../shared/ids";
+import type { CaptureId, EvidenceId, UserId } from "../shared/ids";
+import { memoDep } from "./deps";
+import type { Dep, ReadDep } from "./deps";
 import type { AssessableClaim, BoundaryJudgment, BoundaryWindow, Evidence, Frame, Passage, Verdict } from "../shared/domain";
 import { heldMessage } from "../shared/allowance";
 import { LOCAL_USER, ensureLocalUser, openDb, scopeDb, signedInUsers, userForIdentity } from "./db";
@@ -395,14 +397,14 @@ type UserGraph = Omit<Modules, "scheduler"> & {
   readonly voice: Voice;
   /**
    * The captures that can have demand. All of them at boot. A capture leaves when a pump finds no demand in it, and comes
-   * back when ingest, retry, stop early or a deletion touches it, or when a memo key it read changes (`asleep`), so a pump
+   * back when ingest, retry or stop early touches it, or when anything its derivation read changes (`asleep`), so a pump
    * derives only what can have work.
    */
   readonly live: Set<CaptureId>;
-  /** The captures that left `live`, each with the memo keys its last derivation read. A change to one of those keys wakes it. */
-  readonly asleep: Map<CaptureId, ReadonlySet<MemoKey>>;
-  /** Runs `fn` and returns the memo keys it looked up. */
-  readonly reading: <T>(fn: () => T) => { readonly value: T; readonly keys: ReadonlySet<MemoKey> };
+  /** The captures that left `live`, each with the keys its last derivation read (`Dep`). A change to one of those keys wakes it. */
+  readonly asleep: Map<CaptureId, ReadonlySet<Dep>>;
+  /** Runs `fn` and returns the keys its stores reported reading. */
+  readonly reading: <T>(fn: () => T) => { readonly value: T; readonly keys: ReadonlySet<Dep> };
 };
 
 type Composed = {
@@ -518,59 +520,65 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     const frameBytes: FrameBytes = (id) => evidence.frameBytes(id);
     const tasks: TaskSet = options.tasks ?? buildTasks(providers.jev, providers.claude, frameBytes, tutorCache(db), tutorModel);
     const live = new Set<CaptureId>();
-    const asleep = new Map<CaptureId, ReadonlySet<MemoKey>>();
+    const asleep = new Map<CaptureId, ReadonlySet<Dep>>();
     const wake = (captureId: CaptureId) => {
       asleep.delete(captureId);
       live.add(captureId);
     };
     /**
-     * Memo state is shared: captures of one user can interpret the same text and so share a key. A key that gets a hit, a
-     * terminal failure or a cleared failure changes what every capture that read it demands, not only the one whose job
-     * or retry wrote it. Those captures wake. Waking every capture of the user would derive them all on each job's result.
+     * A capture that sleeps keeps the keys its last derivation read, and every store reports a read where it makes one and
+     * a write by the keys it changed. A write wakes the sleepers that read one of its keys, so a capture wakes whenever
+     * any input its demand reads changes, whichever capture or job changed it, and no list of such inputs sits here.
+     * Waking every capture of the user instead would derive every lecture on each job result and each upload.
      */
-    const memo = createMemo(db, memoMode, {
-      ...(budget === null ? {} : { budget }),
-      onChange(keys) {
-        let woke = false;
-        for (const [captureId, read] of asleep) {
-          if (keys.some((k) => read.has(k))) {
-            wake(captureId);
-            woke = true;
-          }
+    const changed = (keys: readonly Dep[]): boolean => {
+      let woke = false;
+      for (const [captureId, read] of asleep) {
+        if (keys.some((k) => read.has(k))) {
+          wake(captureId);
+          woke = true;
         }
-        if (woke) pumpSoon();
-      },
-    });
-    const ledger = createLedger(db, budget);
-    let readKeys: Set<MemoKey> | null = null;
-    const lookup: LookupFn = (task, input) => {
-      const looked = memo.lookup(task, input);
-      readKeys?.add(looked.key);
-      return looked;
+      }
+      return woke;
+    };
+    let readDeps: Set<Dep> | null = null;
+    const read: ReadDep = (dep) => {
+      readDeps?.add(dep);
     };
     const reading = <T>(fn: () => T) => {
-      const outer = readKeys;
-      const keys = new Set<MemoKey>();
-      readKeys = keys;
+      const outer = readDeps;
+      const keys = new Set<Dep>();
+      readDeps = keys;
       try {
         return { value: fn(), keys };
       } finally {
-        readKeys = outer;
+        readDeps = outer;
       }
+    };
+    const memo = createMemo(db, memoMode, {
+      ...(budget === null ? {} : { budget }),
+      onChange(keys) {
+        if (changed(keys.map(memoDep))) pumpSoon();
+      },
+    });
+    const ledger = createLedger(db, budget);
+    const lookup: LookupFn = (task, input) => {
+      const looked = memo.lookup(task, input);
+      read(memoDep(looked.key));
+      return looked;
     };
     const evidence: EvidenceStoreWithProbe = createEvidence(db, dataDir, {
       lookupFrameChange: (input) => lookup(tasks.frameChange, input),
       // The first frame of a source has nothing to compare with: evidence keeps it without a call, and so does this.
       runFrameChange: (input, signal) => (input.before === null ? Promise.resolve(null) : memo.run(tasks.frameChange, input, { signal })),
       frameChangeKey: (input) => memo.key(tasks.frameChange, input),
-      onChange(captureId) {
-        if (captureId === null) {
-          for (const id of evidence.captures()) wake(id);
-          pump();
-        } else {
-          wake(captureId);
-          pumpSoon();
-        }
+      read,
+      onChange(captureId, keys) {
+        // A capture's first upload is the only way a capture enters the working set after boot.
+        if (captureId !== null) wake(captureId);
+        changed(keys);
+        if (captureId === null) pump();
+        else pumpSoon();
       },
     });
     for (const id of evidence.captures()) live.add(id);
@@ -617,6 +625,10 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       clearFailures: memo.clearFailures,
       tasks: tasks.preparation,
       frameBytes: evidence.frameBytes,
+      read,
+      changed: (keys) => {
+        if (changed(keys)) pumpSoon();
+      },
     });
     // Stop early is a fact that cancels work by derivation; the pump is what aborts what is already running.
     const preparation: Preparation = { ...preparationBase, stopEarly: (captureId, ids) => {

@@ -30,10 +30,12 @@ import { Material } from "../../shared/time";
 import type { MediaSeconds } from "../../shared/time";
 import { asSeq } from "../db";
 import type { UserDb } from "../db";
+import { REMOVALS, captureDep, sourceDep } from "../deps";
+import type { Dep, ReadDep } from "../deps";
 import type { WorkItem } from "../scheduler";
 import type { Lookup } from "../providers/memo";
 import type { FrameChangeInput } from "../providers/jev-tasks";
-import { adInside, bundleToJson, clipGap, dedupeGaps, foldCapture, frameInside, selectScope } from "./core";
+import { adInside, bundleToJson, clipGap, dedupeGaps, foldCapture, frameInside, selectScope, sourceIdOf } from "./core";
 import type { EvidenceBundleJson, FrameEntry, Projection, StoredFact } from "./core";
 
 /** Newly watched material in WATCH order (not media order): what segmentation windows over. */
@@ -137,14 +139,20 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   lookupFrameChange(input: FrameChangeInput): Lookup<Verdict>;
   runFrameChange(input: FrameChangeInput, signal: AbortSignal): Promise<unknown>;
   frameChangeKey(input: FrameChangeInput): MemoKey;
-  /** After a write: the capture whose facts changed, or null when evidence anywhere may have (a deletion by the user). */
-  onChange(captureId: CaptureId | null): void;
+  /**
+   * After a write commits: the capture whose facts changed, or null when evidence anywhere may have (a deletion by the user,
+   * the retention sweep), and the keys of what the write changed. A derivation that read one of them is stale.
+   */
+  onChange(captureId: CaptureId | null, changed: readonly Dep[]): void;
+  /** Called for each key a read depends on that a write to another capture can change. Absent where nothing listens. */
+  read?: ReadDep;
   /** Clock for received and created timestamps. Defaults to Date.now. */
   now?: () => number;
 }): EvidenceStoreWithProbe {
   const now = deps.now ?? Date.now;
   const userId = db.userId;
   const abs = (rel: string) => join(dataDir, rel);
+  const read: ReadDep = deps.read ?? (() => {});
 
   let projections = new Map<CaptureId, Projection>();
   let captureIds: CaptureId[] | null = null;
@@ -170,6 +178,15 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
      FROM capture_facts c WHERE c.user_id = ? AND c.capture_id = ? ORDER BY c.client_seq`,
   );
 
+  /**
+   * Every source a capture has a fact about. A bundle gathers a source's facts from every capture that watched it, so a
+   * write to this capture can change the bundle of any capture that shares one of these. Facts only add to the set, and a
+   * removal reports REMOVALS instead. It reads the capture's own rows, so its cost does not grow with the lectures stored.
+   */
+  const sourcesOf = db.sql.query<{ video_id: string }, [string, string]>(
+    "SELECT DISTINCT json_extract(body_json, '$.videoId') AS video_id FROM capture_facts WHERE user_id = ? AND capture_id = ? AND json_extract(body_json, '$.videoId') IS NOT NULL",
+  );
+
   function project(captureId: CaptureId): Projection {
     const hit = projections.get(captureId);
     if (hit) return hit;
@@ -188,9 +205,16 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     return captureIds;
   }
 
+  /** A capture's own facts, read for its own demand. Bundles read other captures through `allProjections` and key by source. */
+  const projectOwn = (captureId: CaptureId): Projection => {
+    read(captureDep(captureId));
+    return project(captureId);
+  };
+
   const allProjections = () => allCaptureIds().map(project);
 
   function deleted(): ReadonlyMap<string, number> {
+    read(REMOVALS);
     return new Map(
       db.sql
         .query<{ evidence_id: string; deleted_ms: number }, [string]>("SELECT evidence_id, deleted_ms FROM evidence_deletions WHERE user_id = ?")
@@ -351,7 +375,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
       });
       if (fresh.length > 0) {
         invalidateCapture(captureId);
-        deps.onChange(captureId);
+        db.afterCommit(() => deps.onChange(captureId, [captureDep(captureId), ...sourcesOf.all(userId, captureId).map((r) => sourceDep(sourceIdOf(r.video_id)))]));
       }
       return { ackedThroughSeq: ackedThrough(captureId) };
     },
@@ -398,7 +422,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     },
 
     watchOrder(captureId) {
-      const p = project(captureId);
+      const p = projectOwn(captureId);
       const dead = deleted();
       return {
         passages: p.passages.filter((w) => !dead.has(w.passage.id)),
@@ -410,6 +434,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     },
 
     bundle(material) {
+      for (const sourceId of Material.sources(material)) read(sourceDep(sourceId));
       const dead = deleted();
       const scope = selectScope(allProjections(), material);
       const passages = new Map<EvidenceId, Passage>();
@@ -463,7 +488,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     frameDemand(captureId) {
       const dead = deleted();
       const items: WorkItem[] = [];
-      for (const e of project(captureId).frames) {
+      for (const e of projectOwn(captureId).frames) {
         if (dead.has(e.frame.id)) continue;
         const { teaching, input } = judge(e);
         if (teaching !== "unjudged" || input === null) continue;
@@ -528,7 +553,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
       });
       unlinkUnreferenced(files);
       invalidate();
-      deps.onChange(null);
+      db.afterCommit(() => deps.onChange(null, [REMOVALS]));
     },
 
     sweepExpired(nowMs, retentionDays) {
@@ -587,6 +612,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
         }
       }
       invalidate();
+      if (framesDeleted + factsDeleted + snapshotsDeleted > 0) db.afterCommit(() => deps.onChange(null, [REMOVALS]));
       return { framesDeleted, factsDeleted, snapshotsDeleted };
     },
 

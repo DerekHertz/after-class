@@ -189,7 +189,7 @@ export type MemoOptions = {
   readonly budget?: Budget;
   /**
    * After a write that changes what `lookup` answers for these keys: a hit stored, a failure recorded, a failure cleared.
-   * Not called for an aborted attempt or a budget hold, which leave the key missing. Never called inside a transaction.
+   * Not called for an aborted attempt or a budget hold, which leave the key missing. Called after the outermost transaction commits, and not at all when it rolls back.
    */
   readonly onChange?: (keys: readonly MemoKey[]) => void;
 };
@@ -258,6 +258,7 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
   const retryDelayMs = opts.retryDelayMs ?? ((n: number) => Math.min(30_000, 1000 * 2 ** (n - 1)));
   const inflight = new Map<MemoKey, Promise<RunResult<unknown>>>();
   const userId = db.userId;
+  const notify = (keys: readonly MemoKey[]) => db.afterCommit(() => opts.onChange?.(keys));
   const budget = opts.budget ?? null;
 
   const q = {
@@ -374,7 +375,7 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
           recordUsage(task, key, captureId, "ok", usage, startedMs, "ok", tickets);
           return { kind: "hit", key, value, atSeq } as const;
         });
-        opts.onChange?.([key]);
+        notify([key]);
         return hit;
       }
       const { usage, message, retryable, notBilled, held } = outcome;
@@ -393,7 +394,7 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
         failures = q.upsertFailure.get(userId, key, message, db.nextSeq(), terminal ? 1 : 0)!.attempts;
       });
       if (terminal) {
-        opts.onChange?.([key]);
+        notify([key]);
         return settled(task as Task<unknown, O>, key);
       }
       onRetry?.();
@@ -417,7 +418,7 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
     db.tx(() => {
       for (const k of keys) q.deleteFailure.run(userId, k);
     });
-    if (keys.length > 0) opts.onChange?.(keys);
+    if (keys.length > 0) notify(keys);
   }
 
   function inspect(key: MemoKey): MemoInspection | null {
