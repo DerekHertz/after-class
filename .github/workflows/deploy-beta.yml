@@ -1,7 +1,8 @@
 name: deploy-beta
 
 # Manual only, run from master with a release tag. It deploys the image built from the tag's commit, which must be on
-# master and carry the same version in package.json. The job runs in the protected `production` environment, so Derek
+# master and carry the same version in package.json. Master's check-release-tag.ts checks both before the tag's commit
+# is checked out, so no code from the tag runs first. The job runs in the protected `production` environment, so Derek
 # approves each run, and the AWS role's trust policy accepts only that environment's token. The environment must allow
 # deployments from master only, because the token's subject carries no branch. It never runs on pull requests.
 on:
@@ -35,7 +36,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: refs/tags/${{ inputs.tag }}
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -48,13 +48,13 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          bun run scripts/check-release-tag.ts "$TAG"
-          commit=$(git rev-parse "refs/tags/${TAG}^{commit}")
-          if ! git merge-base --is-ancestor "$commit" origin/master; then
-            echo "${TAG} points at ${commit}, which is not on master"
-            exit 1
-          fi
+          commit=$(bun scripts/check-release-tag.ts "$TAG")
           echo "commit=${commit}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ steps.release.outputs.commit }}
 
       - id: aws
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0

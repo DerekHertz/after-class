@@ -140,7 +140,7 @@ To rotate a key, put the new value with `--overwrite` and restart the app, throu
 A release is a `v<major>.<minor>.<patch>` tag on a commit on `master` whose `package.json` has the same version. The first is `v0.1.0`.
 
 1. In a pull request, set `version` in `package.json` to the new version, and merge it.
-2. Tag the merge commit and push the tag. The `release` workflow checks that the tag equals the package version and creates a GitHub Release with generated notes.
+2. Tag the merge commit and push the tag. The `release` workflow checks that the tag is on `master` and equals the package version, and creates a GitHub Release with generated notes.
 
    ```
    git switch master && git pull
@@ -154,7 +154,7 @@ A release is a `v<major>.<minor>.<patch>` tag on a commit on `master` whose `pac
    gh workflow run deploy-beta --ref master -f tag=v0.1.0
    ```
 
-   The workflow runs from `master`, because the environment allows no other branch. It checks out the tag, refuses a tag that does not equal the package version or whose commit is not on `master`, and deploys the image built from the tag's commit. The image tag on ECR and on the server is still that commit's hash. Redeploying an older tag is a rollback.
+   The workflow runs from `master`, because the environment allows no other branch. With `master`'s own `scripts/check-release-tag.ts`, it refuses a tag whose commit is not on a freshly fetched `master` or whose `package.json` there has another version. Only then does it check out the tag's commit, and it deploys the image built from the tag's commit. The image tag on ECR and on the server is still that commit's hash. Redeploying an older tag is a rollback.
 
 Only Derek may create, move or delete a `v*` tag. The ruleset is `infra/github/tag-ruleset.json`. It applies to every account except the repository admin role, which on this personal repository is Derek alone. Because Derek bypasses it, the rule against force pushes does not stop Derek himself, so never move a pushed release tag. Apply it once:
 
