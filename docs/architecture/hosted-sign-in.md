@@ -37,7 +37,7 @@ afterclass.example {
 
 ## How a request is checked
 
-- The browser loads ClerkJS 6.42.2 from the Frontend API host. Clerk's sign-in card appears on a paper page while signed out.
+- The browser loads ClerkJS 6.42.3 from the Frontend API host. Clerk's sign-in card appears on a paper page while signed out.
 - Each request from the app sends `Authorization: Bearer <session token>`. The backend checks the RS256 signature against Clerk's JWKS, the expiry, the issuer, and that `azp` is the public origin. It then finds or creates the user for the token's subject.
 - Each request from the extension sends `Authorization: Bearer <device token>`, described below.
 - Each route in `ROUTES` names the tokens it accepts. A token of another kind answers 401.

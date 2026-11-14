@@ -42,10 +42,13 @@ export const MAX_KEY_AGE_MS = 60 * 60 * 1000;
 const JWKS_TIMEOUT_MS = 5_000;
 const SUBJECT_MAX = 256;
 
-/** The ClerkJS build the review app loads. Pinned to an exact version at least 7 days old. */
-export const CLERK_JS_VERSION = "6.42.2";
+/**
+ * The ClerkJS build the review app loads. Pinned to an exact version at least 7 days old, and no older than the
+ * production instance's "Minimum ClerkJS version" protection (6.42.3 when it was created), or Clerk refuses every sign-in.
+ */
+export const CLERK_JS_VERSION = "6.42.3";
 /** ClerkJS 6 ships its prebuilt UI as this separate package, released together with ClerkJS: keep the two from one release. */
-export const CLERK_UI_VERSION = "1.42.3";
+export const CLERK_UI_VERSION = "1.42.4";
 
 const SEGMENT = /^[A-Za-z0-9_-]+$/;
 const RSA = { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" } as const;

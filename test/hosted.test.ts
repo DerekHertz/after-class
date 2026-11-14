@@ -25,8 +25,8 @@ import { EXTENSION_ORIGIN, EXT_ID, TOKEN, connectDevice, fixtureApp, raw, regist
 
 registerCleanup();
 
-const SCRIPT = "https://clerk.afterclass.test/npm/@clerk/clerk-js@6.42.2/dist/clerk.browser.js";
-const UI_SCRIPT = "https://clerk.afterclass.test/npm/@clerk/ui@1.42.3/dist/ui.browser.js";
+const SCRIPT = "https://clerk.afterclass.test/npm/@clerk/clerk-js@6.42.3/dist/clerk.browser.js";
+const UI_SCRIPT = "https://clerk.afterclass.test/npm/@clerk/ui@1.42.4/dist/ui.browser.js";
 const PARAM_KIND: Record<string, IdKind> = { captureId: "cap", reviewId: "rvw", topicId: "cpt", evidenceId: "ev", noteId: "note", linkId: "lnk", observationId: "obs", deviceId: "dev" };
 
 let key: SigningKey;
