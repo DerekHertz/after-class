@@ -21,6 +21,12 @@ After Class is a work-in-progress study companion for YouTube lectures. You can 
 | Store evidence locally and cache model work | SQLite holds capture and review state, frame files live on disk, and cached results can be reused. Replay mode lets developers exercise recorded paths with live model calls disabled. |
 | Keep capture and review separate | The extension works alongside the YouTube player. The review runs in its own web view, where lecture evidence, review history, and saved notes open over the room. |
 
+## Hosted beta
+
+A small invite-only beta runs at [useafterclass.com](https://useafterclass.com). It runs the same app on one server, with Clerk sign-in through Google or email. Sign-up is by invitation only. The server holds the model keys, so testers need no terminal or accounts beyond sign-in. Spending is capped at $5 per user and $50 in total each month, and the hosted beta uses the browser's voice instead of ElevenLabs. The Chrome extension is not in the Chrome Web Store yet.
+
+Releases are `v0.x` tags on master. The release workflow builds an image and records its digest, and the maintainer deploys a tag with `scripts/deploy-beta.sh`. The [infrastructure guide](infra/README.md) covers the server, keys, releases and costs.
+
 ## Try the study room
 
 From the repository root, with Bun installed (development version 1.4.3):
