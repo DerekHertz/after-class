@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { readKeys } from "../src/backend/main";
 import { type Host, installScript, makeHost, readLog, stub } from "./beta-host";
 
@@ -94,6 +94,23 @@ describe("afterclass-fetch-keys", () => {
     expect(existsSync(join(host.runtime, "keys.env"))).toBe(false);
   });
 
+  test("a value that readKeys would read back changed fails closed: quoted, padded, multiline, non-ASCII or ending in a newline", () => {
+    for (const bad of ['"quoted-key"', "'quoted-key'", " key", "key ", "key\n", "key\n\n", "key\r", "a\nb", "key\tx", "k\u00e9y", "None"]) {
+      const host = keysHost({ ...both, [`${PREFIX}/TYPESAFE_API_KEY`]: bad });
+      const run = fetchKeys(host);
+      expect(run.status, JSON.stringify(bad)).toBe(1);
+      expect(run.output).toContain(`${PREFIX}/TYPESAFE_API_KEY is empty or not one line`);
+      expect(existsSync(join(host.runtime, "keys.env"))).toBe(false);
+    }
+  });
+
+  test("any other printable value reaches the app byte for byte", () => {
+    const odd = "a=b$c#d;e`f\\g!h|i&j*k<l>m";
+    const host = keysHost({ ...both, [`${PREFIX}/TYPESAFE_API_KEY`]: odd });
+    expect(fetchKeys(host).status).toBe(0);
+    expect(readKeys(join(host.runtime, "keys.env")).TYPESAFE_API_KEY).toBe(odd);
+  });
+
   test("a runtime folder that is not on tmpfs is refused before any key is read", () => {
     const host = keysHost(both, "xfs");
     const run = fetchKeys(host);
@@ -140,5 +157,33 @@ describe("afterclass-app-start", () => {
     const run = start(true);
     expect(run.status).not.toBe(0);
     expect(appRun(run.log)).toBeUndefined();
+  });
+});
+
+describe("infra/README.md key upload", () => {
+  test("the documented commands send each key to the CLI on stdin, never in its arguments", () => {
+    const readme = readFileSync(resolve(import.meta.dir, "../infra/README.md"), "utf8");
+    const block = readme.split("```").find((part) => part.includes("read -rs JEV_KEY"));
+    expect(block).toBeDefined();
+    const host = makeHost("afterclass-readme-keys-test-");
+    stub(
+      host.bin,
+      "aws",
+      `printf '%s\\0' "$@" >> ${host.root}/argv
+for arg; do [ "$prev" = --name ] && name=$arg; prev=$arg; done
+for arg; do [ "$arg" = file:///dev/stdin ] && cat > "${host.root}/$(basename "$name")"; done
+exit 0`,
+    );
+    const result = Bun.spawnSync(["bash", "-c", block!], {
+      stdin: new TextEncoder().encode(`${JEV}\n${ANTHROPIC}\n`),
+      env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` },
+    });
+    expect(result.exitCode).toBe(0);
+    const argv = readFileSync(join(host.root, "argv"), "utf8");
+    expect(argv).not.toContain(JEV);
+    expect(argv).not.toContain(ANTHROPIC);
+    expect(argv.split("\0").filter((arg) => arg === "--overwrite")).toHaveLength(2);
+    expect(readFileSync(join(host.root, "TYPESAFE_API_KEY"), "utf8")).toBe(JEV);
+    expect(readFileSync(join(host.root, "AFTERCLASS_ANTHROPIC_API_KEY"), "utf8")).toBe(ANTHROPIC);
   });
 });

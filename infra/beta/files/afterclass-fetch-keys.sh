@@ -2,10 +2,13 @@
 # Usage: afterclass-fetch-keys <uid> <gid>. Run by afterclass-app-start before every start of the app. Reads the app's
 # keys from Parameter Store and writes them as keys.env, mode 0600 and owned by the container's user, into the unit's
 # runtime folder. That folder is on tmpfs and systemd removes it when the unit stops, so a key never reaches a disk.
-# A parameter that is missing, empty or unreadable fails the start. No value is ever printed.
+# A parameter that is missing, unreadable, or not one line of printable characters without spaces or quotes fails the
+# start, because readKeys would read such a value back changed. No value is ever printed.
 set -euo pipefail
 # A run under bash -x would print every value it reads.
 set +x
+# Bash alone reads this, so [[:graph:]] below means printable ASCII. It is not exported to aws.
+LC_ALL=C
 
 . /etc/afterclass/settings.env
 
@@ -34,10 +37,13 @@ trap 'rm -f "$tmp"' EXIT
 
 for name in "${names[@]}"; do
   parameter="${KEY_PARAMETER_PREFIX}/${name}"
-  value=$(aws ssm get-parameter --region "$AWS_REGION" --name "$parameter" --with-decryption \
-    --query Parameter.Value --output text) || fail "cannot read ${parameter}"
-  if [ -z "$value" ] || [ "$value" = None ] || [[ "$value" == *$'\n'* ]]; then
-    fail "${parameter} is empty or spans more than one line"
+  # The x keeps the trailing newlines that command substitution would strip, so a value ending in one is seen.
+  raw=$(aws ssm get-parameter --region "$AWS_REGION" --name "$parameter" --with-decryption \
+    --query Parameter.Value --output text && printf x) || fail "cannot read ${parameter}"
+  value=${raw%$'\n'x}
+  # readKeys trims spaces and strips one pair of quotes, so a value with either would reach the app changed.
+  if [[ "$raw" != *$'\n'x || ! "$value" =~ ^[[:graph:]]+$ || "$value" == *[\"\']* || "$value" = None ]]; then
+    fail "${parameter} is empty or not one line of printable characters without spaces or quotes"
   fi
   printf '%s=%s\n' "$name" "$value" >> "$tmp"
 done

@@ -82,13 +82,13 @@ Derek's first beta setup.
    terraform apply shared.tfplan
    ```
 
-3. Store the app's keys in Parameter Store, then create the beta server. The keys must exist before the plan, because the `aws/ssm` key that Terraform looks up appears with the account's first SecureString parameter. Each command reads the value from the terminal, so it stays out of the shell history.
+3. Store the app's keys in Parameter Store, then create the beta server. Derek's two parameters are already in place, so on his account this is only for a rotation. The keys must exist before the plan, because the `aws/ssm` key that Terraform looks up appears with the account's first SecureString parameter. Each command reads the value from the terminal without echo and hands it to the CLI on stdin, so it stays out of the shell history and out of the process list that `ps` shows. A value must be one line of printable characters without spaces or quotes, or the app refuses to start.
 
    ```
-   read -rs JEV_KEY && aws ssm put-parameter --region us-east-2 --type SecureString \
-     --name /afterclass/beta/TYPESAFE_API_KEY --value "$JEV_KEY" && unset JEV_KEY
-   read -rs ANTHROPIC_KEY && aws ssm put-parameter --region us-east-2 --type SecureString \
-     --name /afterclass/beta/AFTERCLASS_ANTHROPIC_API_KEY --value "$ANTHROPIC_KEY" && unset ANTHROPIC_KEY
+   read -rs JEV_KEY && printf '%s' "$JEV_KEY" | aws ssm put-parameter --region us-east-2 --type SecureString \
+     --overwrite --name /afterclass/beta/TYPESAFE_API_KEY --value file:///dev/stdin && unset JEV_KEY
+   read -rs ANTHROPIC_KEY && printf '%s' "$ANTHROPIC_KEY" | aws ssm put-parameter --region us-east-2 --type SecureString \
+     --overwrite --name /afterclass/beta/AFTERCLASS_ANTHROPIC_API_KEY --value file:///dev/stdin && unset ANTHROPIC_KEY
    ```
 
    ```
@@ -131,9 +131,9 @@ When sign-in lands and the domain exists, run `terraform apply` in `beta/` again
 
 The app runs live, with Claude through the Messages API and Clerk sign-in, so it needs `TYPESAFE_API_KEY` and `AFTERCLASS_ANTHROPIC_API_KEY`. ElevenLabs stays off in the beta, so there is no key for it. The keys are SecureString parameters under `/afterclass/beta/`, encrypted with the default `aws/ssm` key. No key is in Terraform, its state, `user_data`, the image or the data volume.
 
-At every start of the app unit, `afterclass-fetch-keys` reads both parameters and writes `keys.env`, mode 0600 and owned by the container's user, into `/run/afterclass-app`. systemd creates that folder on tmpfs at each start and removes it at each stop. The script refuses a folder that is not on tmpfs, prints no value even under `bash -x`, and fails the start when a parameter is missing, empty, unreadable or longer than one line. The app container mounts the folder read-only at `/data/config`, where the image's `AFTERCLASS_CONFIG_DIR` points. The failure is a line that starts with `afterclass-fetch-keys:` in `journalctl -u afterclass-app`, and systemd tries again every 5 seconds.
+At every start of the app unit, `afterclass-fetch-keys` reads both parameters and writes `keys.env`, mode 0600 and owned by the container's user, into `/run/afterclass-app`. systemd creates that folder on tmpfs at each start and removes it at each stop. The script refuses a folder that is not on tmpfs, prints no value even under `bash -x`, and fails the start when a parameter is missing, unreadable, or not one line of printable characters without spaces or quotes. The app container mounts the folder read-only at `/data/config`, where the image's `AFTERCLASS_CONFIG_DIR` points. The failure is a line that starts with `afterclass-fetch-keys:` in `journalctl -u afterclass-app`, and systemd tries again every 5 seconds.
 
-To rotate a key, put the new value with `--overwrite` and restart the app, through Session Manager: `systemctl restart afterclass-app`. A deploy restarts it too.
+To rotate a key, put the new value with the step 3 command and restart the app, through Session Manager: `systemctl restart afterclass-app`. A deploy restarts it too.
 
 ## Releases
 
