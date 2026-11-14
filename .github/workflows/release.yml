@@ -1,10 +1,11 @@
 name: release
 
-# A pushed v<major>.<minor>.<patch> tag becomes a GitHub Release with generated notes and an arm64 image on GHCR. The tag
-# must be on master and equal the version in package.json at the tagged commit. A tag push runs this file and the check as
-# the tag has them, so the tag ruleset (infra/github/tag-ruleset.json) decides who can cut a release. The image holds no
-# keys, since the server reads them from Parameter Store at start. Derek deploys it with scripts/deploy-beta.sh
-# (infra/README.md, Releases).
+# A pushed v<major>.<minor>.<patch> tag becomes an arm64 image on GHCR and then a GitHub Release whose image-digest.txt
+# names that image by digest. The tag must be on master and equal the version in package.json at the tagged commit. A tag
+# push runs this file and the check as the tag has them, so the tag ruleset (infra/github/tag-ruleset.json) decides who can
+# cut a release. GHCR tags are mutable, so scripts/deploy-beta.sh deploys the digest in the release, never a tag. The
+# release is written last, so it never names an image that was not pushed and checked. The image holds no keys, since the
+# server reads them from Parameter Store at start.
 on:
   push:
     tags: ["v*"]
@@ -13,11 +14,11 @@ permissions:
   contents: read
 
 jobs:
-  release:
+  check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: write
+      contents: read
     outputs:
       commit: ${{ steps.check.outputs.commit }}
     steps:
@@ -36,43 +37,74 @@ jobs:
           set -euo pipefail
           commit=$(bun scripts/check-release-tag.ts "$TAG")
           echo "commit=${commit}" >> "$GITHUB_OUTPUT"
-      - name: Create the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "$TAG"
 
   image:
-    needs: release
+    needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.release.outputs.commit }}
+          ref: ${{ needs.check.outputs.commit }}
       # The Dockerfile builds its dependency stages on the runner's own platform and its last stage runs nothing, so an
-      # x86 runner builds the arm64 image without emulation.
-      - name: Push the arm64 image to GHCR, tagged by commit and by release
+      # x86 runner builds the arm64 image without emulation. Every run builds and pushes, so a stale or planted image under
+      # the commit tag is replaced, never promoted. The digest comes from this push's own output.
+      - id: push
+        name: Push the arm64 image to GHCR and tag it by commit and by release
         env:
           REGISTRY_TOKEN: ${{ github.token }}
           ACTOR: ${{ github.actor }}
           TAG: ${{ github.ref_name }}
-          COMMIT: ${{ needs.release.outputs.commit }}
+          COMMIT: ${{ needs.check.outputs.commit }}
         run: |
           set -euo pipefail
           image=ghcr.io/derekhertz/after-class
           printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
-          # A rerun keeps the image it already pushed, so the digest a server saved never changes under the same commit.
-          if docker manifest inspect "${image}:${COMMIT}" >/dev/null 2>&1; then
-            echo "${image}:${COMMIT} already exists, not rebuilding"
-          else
-            docker build --platform linux/arm64 \
-              --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
-              --tag "${image}:${COMMIT}" .
-            docker push "${image}:${COMMIT}"
+          docker build --platform linux/arm64 \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --tag "${image}:${COMMIT}" .
+          pushed=$(docker push "${image}:${COMMIT}")
+          printf '%s\n' "$pushed"
+          digest=$(printf '%s\n' "$pushed" | sed -n -E "s/^${COMMIT}: digest: (sha256:[0-9a-f]{64}) size: [0-9]+$/\1/p")
+          docker buildx imagetools create --tag "${image}:${TAG}" "${image}@${digest}"
+          for ref in "${image}:${COMMIT}" "${image}:${TAG}"; do
+            now=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$ref")
+            if [ "$now" != "$digest" ]; then
+              echo "${ref} is ${now}, not the ${digest} this run pushed" >&2
+              exit 1
+            fi
+          done
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: [check, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Record the image digest in the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ needs.check.outputs.commit }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "the image job passed no digest" >&2
+            exit 1
           fi
-          docker buildx imagetools create --tag "${image}:${TAG}" "${image}:${COMMIT}"
+          record="${RUNNER_TEMP}/image-digest.txt"
+          printf 'commit %s\ndigest %s\n' "$COMMIT" "$DIGEST" > "$record"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null; then
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$record"
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "$TAG" "$record"
+          fi
