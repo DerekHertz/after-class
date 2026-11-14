@@ -6,6 +6,8 @@
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
+import { APPEARANCE_STORAGE_KEY, COMPACT_ROOM_LAYERS, DEFAULT_ROOM, FULL_ROOM_QUERY, ROOM_ART_PREFIX, ROOM_LAYER_ORDER, SHARED_ROOM_ART, ownKey } from "../src/shared/room-art";
+import type { RoomArtTable } from "../src/shared/room-art";
 
 const REPO = resolve(import.meta.dir, "..");
 
@@ -17,7 +19,7 @@ const REPO = resolve(import.meta.dir, "..");
  */
 export const INLINE_LIMIT = 2048;
 const DATA_URL = /url\((["']?)data:([a-z]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)\1\)/g;
-const EXTENSIONS: Record<string, string> = { "image/png": "png", "image/svg+xml": "svg", "font/ttf": "ttf" };
+const EXTENSIONS: Record<string, string> = { "image/webp": "webp", "image/svg+xml": "svg", "font/ttf": "ttf" };
 
 /**
  * The fonts the signed-out screen draws with. A font file is only requested once text that uses it is on the page, which
@@ -26,6 +28,37 @@ const EXTENSIONS: Record<string, string> = { "image/png": "png", "image/svg+xml"
  * drawing in a fallback face and then jumping.
  */
 const FIRST_SCREEN_FONTS = ["pixelify-sans", "dm-sans-400"];
+
+/**
+ * The art a room needs, as bundle URLs, found by name: Bun and `externalizeDataUrls` both emit `<source name>-<8 hash chars>.<ext>`.
+ * The page carries it as JSON, for the script below and for src/app/art-prefetch.ts. `emitted` is every file in the bundle.
+ */
+export function roomArtTable(emitted: readonly string[], layerNames: readonly string[]): RoomArtTable {
+  const url = (stem: string): string => {
+    const file = emitted.filter((f) => new RegExp(`^${stem}-[a-z0-9]{8}\\.webp$`).test(f));
+    if (file.length !== 1) throw new Error(`the review app's CSS must draw ${stem}.webp exactly once in the bundle; found ${file.length}`);
+    return `/app/${file[0]}`;
+  };
+  const rooms: Record<string, { plate: string; layers: string[]; compact: string[] }> = {};
+  for (const [scene, prefix] of Object.entries(ROOM_ART_PREFIX)) {
+    const own = layerNames.filter((n) => n.startsWith(`${prefix}-`));
+    const first = ROOM_LAYER_ORDER.map((layer) => `${prefix}-${layer}`);
+    for (const stem of first) if (!own.includes(stem)) throw new Error(`${scene} has no ${stem} in assets/front-row-v2`);
+    const layers = [...first, ...own.filter((n) => !first.includes(n)).sort()];
+    rooms[scene] = { plate: url(scene), layers: layers.map(url), compact: COMPACT_ROOM_LAYERS.map((layer) => url(`${prefix}-${layer}`)) };
+  }
+  return { rooms, shared: SHARED_ROOM_ART.map(url) };
+}
+
+/**
+ * Runs while the page is still being parsed, before the stylesheet and the script, and so before the app can say which room
+ * the learner is in. It reads their saved room, validated as parseAppearance validates it, and asks for the art that the first
+ * screen is about to draw: on a review page the layers the window's layout draws (a phone's draws only the background), and
+ * the room's plate everywhere else. A page nothing has saved a room for gets the default room's.
+ */
+function preloadScript(): string {
+  return `(function(){${ownKey.toString().replace(/\s+/g, " ")}try{var t=JSON.parse(document.getElementById("room-art").textContent),s;try{s=JSON.parse(localStorage.getItem(${JSON.stringify(APPEARANCE_STORAGE_KEY)})).scene}catch(e){}var r=t.rooms[ownKey(t.rooms,s)?s:${JSON.stringify(DEFAULT_ROOM)}];var u=/^\\/app\\/review(\\/|$)/.test(location.pathname)?(matchMedia(${JSON.stringify(FULL_ROOM_QUERY)}).matches?r.layers:r.compact):[r.plate];for(var i=0;i<u.length;i++){var l=document.createElement("link");l.rel="preload";l.as="image";l.href=u[i];document.head.appendChild(l)}}catch(e){}})()`;
+}
 
 function sourceNames(dir: string, names = new Map<string, string>()): Map<string, string> {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -93,6 +126,11 @@ export async function buildApp(outDir: string, root = REPO): Promise<void> {
     if (file === undefined) throw new Error(`the first-screen font ${stem} is not in the review app's CSS`);
     return `<link rel="preload" href="/app/${file}" as="font" type="font/ttf" crossorigin>`;
   });
+  const layers = readdirSync(join(root, "src/app/assets/front-row-v2")).map((f) => basename(f, extname(f)));
+  const table = JSON.stringify(roomArtTable(readdirSync(out), layers)).replaceAll("<", "\\u003c");
+  const artTags = `<script type="application/json" id="room-art">${table}</script><script>${preloadScript()}</script>`;
+  html = html.replace('<link rel="stylesheet"', () => `${artTags}<link rel="stylesheet"`);
+  if (!html.includes('id="room-art"')) throw new Error("build-app.ts could not find the stylesheet link to place the room art ahead of");
   writeFileSync(page, html.replace("</head>", () => `${preloads.join("")}</head>`));
   const licenses: [string, string][] = [
     ["Feather icons", "src/app/assets/icons-v2/LICENSE"],

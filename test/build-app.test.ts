@@ -2,6 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { appendFileSync, cpSync, existsSync, readFileSync, readdirSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { INLINE_LIMIT, buildApp } from "../scripts/build-app";
+import { FRONT_ROW_ROOMS } from "../src/app/front-row";
+import { parseAppearance } from "../src/app/appearance";
+import { FULL_ROOM_QUERY, ROOM_ART_PREFIX } from "../src/shared/room-art";
+import type { RoomArtTable } from "../src/shared/room-art";
 import { HASHED_APP_FILE } from "../src/backend/http";
 import { tmpDir } from "./tmp";
 
@@ -54,6 +58,66 @@ describe("the review app bundle", () => {
     }
   });
 
+  describe("the room art the page names", () => {
+    /** The page's own script, run against a page that has the saved room and the address given. */
+    async function preloaded(saved: string | null, pathname: string, full = true): Promise<{ table: RoomArtTable; hrefs: string[] }> {
+      const { out } = await built();
+      const page = readFileSync(join(out, "index.html"), "utf8");
+      const json = page.match(/<script type="application\/json" id="room-art">(.*?)<\/script>/)![1]!;
+      const script = page.match(/<script>(.*?)<\/script>/)![1]!;
+      const links: { rel?: string; as?: string; href?: string }[] = [];
+      const document = { getElementById: () => ({ textContent: json }), createElement: () => ({}), head: { appendChild: (l: object) => links.push(l) } };
+      const matchMedia = (query: string) => { expect(query).toBe(FULL_ROOM_QUERY); return { matches: full }; };
+      new Function("document", "localStorage", "location", "matchMedia", script)(document, { getItem: () => saved }, { pathname }, matchMedia);
+      expect(links.every((l) => l.rel === "preload" && l.as === "image")).toBe(true);
+      return { table: JSON.parse(json) as RoomArtTable, hrefs: links.map((l) => l.href!) };
+    }
+
+    test("every file in the table is in the bundle, each room's review starts with its background, and every extra a room draws is in it", async () => {
+      const { out } = await built();
+      const { table } = await preloaded(null, "/app/");
+      const urls = [...Object.values(table.rooms).flatMap((r) => [r.plate, ...r.layers, ...r.compact]), ...table.shared];
+      expect(urls.filter((u) => !existsSync(join(out, u.slice("/app/".length))))).toEqual([]);
+      for (const [scene, prefix] of Object.entries(ROOM_ART_PREFIX)) {
+        const room = table.rooms[scene]!;
+        expect(room.layers[0]).toMatch(new RegExp(`^/app/${prefix}-background-[a-z0-9]{8}\\.webp$`));
+        expect(room.compact).toEqual([room.layers[0]!]);
+        expect(room.plate).toMatch(new RegExp(`^/app/${scene}-[a-z0-9]{8}\\.webp$`));
+        for (const extra of FRONT_ROW_ROOMS[scene as keyof typeof FRONT_ROW_ROOMS].extras) expect(room.layers.some((u) => u.startsWith(`/app/${prefix}-${extra.name}-`))).toBe(true);
+      }
+    });
+
+    test("a page that is not a review preloads the saved room's plate, and a review preloads that room's layers, background first", async () => {
+      const harbor = JSON.stringify({ scene: "study-bench" });
+      const home = await preloaded(harbor, "/app/");
+      expect(home.hrefs).toEqual([home.table.rooms["study-bench"]!.plate]);
+      const review = await preloaded(harbor, "/app/review/rvw_abc");
+      expect(review.hrefs).toEqual([...review.table.rooms["study-bench"]!.layers]);
+      expect((await preloaded(harbor, "/app/reviews")).hrefs).toEqual([home.table.rooms["study-bench"]!.plate]);
+    });
+
+    test("a phone or a short window, whose layout draws only the background, preloads only that", async () => {
+      const harbor = JSON.stringify({ scene: "study-bench" });
+      const compact = await preloaded(harbor, "/app/review/rvw_abc", false);
+      expect(compact.hrefs).toEqual([...compact.table.rooms["study-bench"]!.compact]);
+      expect(compact.hrefs).toHaveLength(1);
+      expect((await preloaded(harbor, "/app/", false)).hrefs).toEqual([compact.table.rooms["study-bench"]!.plate]);
+    });
+
+    test("with no saved room, or one the app would not accept, the default room's art is preloaded", async () => {
+      const garbage = [null, "not json", "null", "[]", "5", "{}", JSON.stringify({ scene: "attic" }), JSON.stringify({ scene: "constructor" }), JSON.stringify({ scene: "__proto__" }),
+        JSON.stringify({ scene: "toString" }), JSON.stringify({ scene: "hasOwnProperty" }), JSON.stringify({ scene: ["study-bench"] }), JSON.stringify({ scene: { toString: "study-bench" } }), JSON.stringify({ scene: 7 }), JSON.stringify({ scene: null }), '{"__proto__":{"scene":"study-bench"}}'];
+      for (const saved of garbage) {
+        const { table, hrefs } = await preloaded(saved, "/app/");
+        expect({ saved, hrefs }).toEqual({ saved, hrefs: [table.rooms["last-desk"]!.plate] });
+        const review = await preloaded(saved, "/app/review/rvw_abc");
+        expect({ saved, hrefs: review.hrefs }).toEqual({ saved, hrefs: [...table.rooms["last-desk"]!.layers] });
+        expect(review.hrefs.every((h) => h.startsWith("/app/"))).toBe(true);
+        expect({ saved, scene: parseAppearance(saved).scene }).toEqual({ saved, scene: "last-desk" });
+      }
+    });
+  });
+
   test("every file but the page and the notices carries a content hash in its name, so a long cache lifetime is safe", async () => {
     const { files } = await built();
     expect(files.filter((f) => f !== "index.html" && f !== "asset-notices.txt" && !/-[a-z0-9]{8}\.[a-z]+$/.test(f))).toEqual([]);
@@ -82,18 +146,18 @@ describe("a file name the server caches for a year", () => {
   const edits: [string, (root: string) => void][] = [
     ["an image is renamed with the same bytes", (root) => {
       const art = join(root, "src/app/assets/front-row-v2");
-      renameSync(join(art, "harbor-lamp.png"), join(art, "harbor-light.png"));
+      renameSync(join(art, "harbor-lamp.webp"), join(art, "harbor-light.webp"));
       const css = join(root, "src/app/front-row.css");
-      writeFileSync(css, readFileSync(css, "utf8").replace("harbor-lamp.png", "harbor-light.png"));
+      writeFileSync(css, readFileSync(css, "utf8").replace("harbor-lamp.webp", "harbor-light.webp"));
     }],
     ["an image too large to inline is renamed with the same bytes", (root) => {
-      const art = join(root, "src/app/assets/scenes-v2");
-      renameSync(join(art, "bell.png"), join(art, "chime.png"));
-      const css = join(root, "src/app/reference.css");
-      writeFileSync(css, readFileSync(css, "utf8").replace("bell.png", "chime.png"));
+      const art = join(root, "src/app/assets/companions-v3");
+      renameSync(join(art, "pip.webp"), join(art, "pip-large.webp"));
+      const css = join(root, "src/app/hd-companion.css");
+      writeFileSync(css, readFileSync(css, "utf8").replace("companions-v3/pip.webp", "companions-v3/pip-large.webp"));
     }],
-    ["an image the stylesheet inlines changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/front-row-v2/harbor-lamp.png"), "\0")],
-    ["an image too large to inline changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/scenes-v2/bell.png"), "\0")],
+    ["an image the stylesheet inlines changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/front-row-v2/harbor-lamp.webp"), "\0")],
+    ["an image too large to inline changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/companions-v3/pip.webp"), "\0")],
     ["a stylesheet rule changes", (root) => appendFileSync(join(root, "src/app/completion.css"), "\n.release-probe { order: 7; }\n")],
     ["the script changes", (root) => appendFileSync(join(root, "src/app/main.tsx"), "\nconsole.info('release-probe');\n")],
   ];

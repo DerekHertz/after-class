@@ -16,7 +16,7 @@ type Hex = `#${string}`;
 export type Edges = { readonly top: number; readonly right: number; readonly bottom: number; readonly left: number };
 
 /**
- * A layer drawn as a nine-slice. Sizes and cuts are in asset pixels, which are `ROOM_ART.scale` per plate pixel. `slice`
+ * A layer drawn as a nine-slice. Sizes and cuts are in asset pixels, one per plate pixel. `slice`
  * is how far the four cuts sit from each edge, so the corners keep their size and the middle stretches. `inner` is the
  * plain area the text may use, as its distance from each edge.
  */
@@ -89,10 +89,10 @@ export type FrontRowRoom = {
 
 /**
  * Layout constants shared by the rooms, in `u`, the screen pixels of one plate pixel at the object scale (front-row.css
- * defines `--fr-u`). The assets are exact doubles of the generated art, `scale` asset pixels to a plate pixel.
+ * defines `--fr-u`). The layers in assets/front-row-v2 are stored at plate resolution, one asset pixel to a plate pixel,
+ * so every size and cut below is in asset pixels and in plate pixels at once.
  */
 export const ROOM_ART = {
-  scale: 2,
   plate: { width: 1586, height: 992 },
   /** The desk hides this much of the background's bottom, so a tall window need not magnify the background. */
   deskCovers: 170,
@@ -130,13 +130,13 @@ export const FRONT_ROW_ROOMS = {
     surfaceName: "Chalkboard",
     background: { anchorX: 1, anchorY: 0.22, wall: { from: 0, to: 1228 } },
     board: {
-      art: { size: { width: 2946, height: 1688 }, slice: { top: 88, right: 128, bottom: 124, left: 128 }, inner: { top: 88, right: 130, bottom: 126, left: 128 } },
+      art: { size: { width: 1473, height: 844 }, slice: { top: 44, right: 64, bottom: 62, left: 64 }, inner: { top: 44, right: 65, bottom: 63, left: 64 } },
       align: "start", top: "12cqh", gapAboveDesk: 64, sideMargin: 36, maxAspect: 2.7, minAspect: 1.3,
       tone: "dark", fill: "#18564b", ink: "#f6efd9", inkSoft: "#c9e6cf",
     },
-    desk: { art: { size: { width: 4344, height: 718 }, slice: { top: 0, right: 300, bottom: 0, left: 300 } } },
+    desk: { art: { size: { width: 2172, height: 359 }, slice: { top: 0, right: 150, bottom: 0, left: 150 } } },
     mat: {
-      art: { size: { width: 2916, height: 970 }, slice: { top: 56, right: 60, bottom: 60, left: 56 }, inner: { top: 56, right: 60, bottom: 60, left: 56 } },
+      art: { size: { width: 1458, height: 485 }, slice: { top: 28, right: 30, bottom: 30, left: 28 }, inner: { top: 28, right: 30, bottom: 30, left: 28 } },
       tone: "light", fill: "#fef0e2", ink: "#1e2b45", inkSoft: "#4b5468", actions: "below",
     },
     companionBottom: 16,
@@ -154,13 +154,13 @@ export const FRONT_ROW_ROOMS = {
     surfaceName: "Learning board",
     background: { anchorX: 0.5, anchorY: 0.3, wall: { from: 0, to: 1586 } },
     board: {
-      art: { size: { width: 2892, height: 1660 }, slice: { top: 112, right: 430, bottom: 484, left: 430 }, inner: { top: 104, right: 112, bottom: 476, left: 112 } },
+      art: { size: { width: 1446, height: 830 }, slice: { top: 56, right: 215, bottom: 242, left: 215 }, inner: { top: 52, right: 56, bottom: 238, left: 56 } },
       align: "center", top: "15cqh", gapAboveDesk: -120, sideMargin: 170, maxAspect: 2.7, minAspect: null,
       tone: "dark", fill: "#096359", ink: "#fbf6e6", inkSoft: "#dff3e6",
     },
-    desk: { art: { size: { width: 4344, height: 724 }, slice: { top: 0, right: 240, bottom: 0, left: 240 } } },
+    desk: { art: { size: { width: 2172, height: 362 }, slice: { top: 0, right: 120, bottom: 0, left: 120 } } },
     mat: {
-      art: { size: { width: 2872, height: 956 }, slice: { top: 88, right: 88, bottom: 88, left: 88 }, inner: { top: 88, right: 88, bottom: 88, left: 88 } },
+      art: { size: { width: 1436, height: 478 }, slice: { top: 44, right: 44, bottom: 44, left: 44 }, inner: { top: 44, right: 44, bottom: 44, left: 44 } },
       tone: "light", fill: "#feebcd", ink: "#22252e", inkSoft: "#4f4a40", actions: "beside",
     },
     companionBottom: 40,
@@ -179,13 +179,13 @@ export const FRONT_ROW_ROOMS = {
     surfaceName: "Projection screen",
     background: { anchorX: 0, anchorY: 0.22, wall: { from: 376, to: 1586 } },
     board: {
-      art: { size: { width: 2926, height: 1646 }, slice: { top: 208, right: 200, bottom: 100, left: 200 }, inner: { top: 208, right: 200, bottom: 100, left: 200 } },
+      art: { size: { width: 1463, height: 823 }, slice: { top: 104, right: 100, bottom: 50, left: 100 }, inner: { top: 104, right: 100, bottom: 50, left: 100 } },
       align: "start", top: "7cqh", gapAboveDesk: 52, sideMargin: 36, maxAspect: 2.7, minAspect: 1.3,
       tone: "light", fill: "#fbe1c5", ink: "#191d42", inkSoft: "#3b3f63",
     },
-    desk: { art: { size: { width: 4344, height: 820 }, slice: { top: 0, right: 220, bottom: 0, left: 220 } } },
+    desk: { art: { size: { width: 2172, height: 410 }, slice: { top: 0, right: 110, bottom: 0, left: 110 } } },
     mat: {
-      art: { size: { width: 2910, height: 866 }, slice: { top: 72, right: 72, bottom: 72, left: 72 }, inner: { top: 72, right: 72, bottom: 72, left: 72 } },
+      art: { size: { width: 1455, height: 433 }, slice: { top: 36, right: 36, bottom: 36, left: 36 }, inner: { top: 36, right: 36, bottom: 36, left: 36 } },
       tone: "dark", fill: "#2c3a61", ink: "#f8ead0", inkSoft: "#d9cdb5", actions: "beside",
     },
     companionBottom: 16,
@@ -206,7 +206,7 @@ function nineSlice(prefix: string, art: Pick<NineSlice, "slice">): CSSProperties
   const { top, right, bottom, left } = art.slice;
   return {
     [`--fr-${prefix}-slice`]: `${top} ${right} ${bottom} ${left}`,
-    [`--fr-${prefix}-bw`]: [top, right, bottom, left].map((n) => u(n / ROOM_ART.scale)).join(" "),
+    [`--fr-${prefix}-bw`]: [top, right, bottom, left].map((n) => u(n)).join(" "),
   };
 }
 
@@ -214,8 +214,8 @@ function nineSlice(prefix: string, art: Pick<NineSlice, "slice">): CSSProperties
 function textInsets(prefix: string, art: NineSlice, pad: { readonly x: number; readonly y: number }): CSSProperties {
   const { top, right, bottom, left } = art.inner;
   return {
-    [`--fr-${prefix}-it`]: u(top / ROOM_ART.scale + pad.y), [`--fr-${prefix}-ir`]: u(right / ROOM_ART.scale + pad.x),
-    [`--fr-${prefix}-ib`]: u(bottom / ROOM_ART.scale + pad.y), [`--fr-${prefix}-il`]: u(left / ROOM_ART.scale + pad.x),
+    [`--fr-${prefix}-it`]: u(top + pad.y), [`--fr-${prefix}-ir`]: u(right + pad.x),
+    [`--fr-${prefix}-ib`]: u(bottom + pad.y), [`--fr-${prefix}-il`]: u(left + pad.x),
   };
 }
 
@@ -228,7 +228,7 @@ export function roomStyle(scene: SceneId): CSSProperties {
     "--fr-phone-x": room.phoneArtX,
     "--fr-board-top": board.top, "--fr-board-gap": u(board.gapAboveDesk), "--fr-board-margin": u(board.sideMargin * 2),
     "--fr-board-max-aspect": board.maxAspect, "--fr-board-min-aspect": board.minAspect ?? 0,
-    "--fr-desk-reach": u(ROOM_ART.deskReach), "--fr-desk-h": u(desk.art.size.height / ROOM_ART.scale),
+    "--fr-desk-reach": u(ROOM_ART.deskReach), "--fr-desk-h": u(desk.art.size.height),
     "--fr-mat-reserve": u(ROOM_ART.matSideReserve * 2), "--fr-mat-max": u(ROOM_ART.matMaxWidth),
     "--fr-mat-top": u(ROOM_ART.matTop), "--fr-mat-bottom": u(ROOM_ART.matBottom),
     "--fr-side-inset": ROOM_ART.sideInset,

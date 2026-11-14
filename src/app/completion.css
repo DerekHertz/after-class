@@ -8,7 +8,7 @@
 .review-complete-next { border-top: 1px solid var(--border); margin-top: var(--space-2); }
 .review-complete summary { cursor: pointer; font-size: 1rem; font-weight: 600; margin: var(--space-2) 0 var(--space-1); }
 
-/* In the room the summary is written on the review notebook's page. The frame is review-notebook.png cut by the same
+/* In the room the summary is written on the review notebook's page. The frame is review-notebook.webp cut by the same
    ROOM_OBJECTS slices as the held notebook, at a fixed scale --u so the page grows with its content and the room stays
    in view around it. Ink and controls match the held notebook. */
 .scene-shell .front-row .front-row-notices .note.review-complete {

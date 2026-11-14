@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
+import { ownKey } from "../shared/room-art";
 
 /** Scene IDs are what browsers have saved, so they stay; each now names one of the three front-row skins. */
 export const SCENES = {
@@ -29,7 +30,7 @@ export function parseAppearance(raw: string | null): Appearance {
     const v = value as Record<string, unknown>;
     return {
       detail: "hd-pixel",
-      scene: typeof v.scene === "string" && Object.hasOwn(SCENES, v.scene) ? v.scene as SceneId : DEFAULT_APPEARANCE.scene,
+      scene: ownKey(SCENES, v.scene) ? v.scene as SceneId : DEFAULT_APPEARANCE.scene,
       companion: typeof v.companion === "string" && Object.hasOwn(COMPANIONS, v.companion) ? v.companion as CompanionId : DEFAULT_APPEARANCE.companion,
       visible: typeof v.visible === "boolean" ? v.visible : DEFAULT_APPEARANCE.visible,
       motion: v.motion === "reduced" ? "reduced" : "system",

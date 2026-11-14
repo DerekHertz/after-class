@@ -7,9 +7,24 @@ type Rgba = readonly [number, number, number, number];
 
 const CHANNELS: Readonly<Record<number, number>> = { 0: 1, 2: 3, 4: 2, 6: 4 };
 
+export type { Png };
+
+/** A shipped raster, PNG or WebP, decoded to RGBA. WebP goes through Bun.Image to PNG first. */
+export async function readImage(url: URL): Promise<Png> {
+  if (!url.pathname.endsWith(".webp")) return readPng(url);
+  const png = decodePng(Buffer.from(await new Bun.Image(readFileSync(url)).png().bytes()), url.pathname);
+  // The PNG Bun writes always has an alpha channel, so a WebP's transparency is whether any pixel is not opaque.
+  let transparent = false;
+  for (let i = 3; i < png.rgba.length && !transparent; i += 4) transparent = png.rgba[i]! < 255;
+  return { ...png, alpha: transparent };
+}
+
 export function readPng(url: URL): Png {
-  const file = readFileSync(url);
-  if (file.subarray(1, 4).toString() !== "PNG") throw new Error(`${url.pathname} is not a PNG`);
+  return decodePng(readFileSync(url), url.pathname);
+}
+
+function decodePng(file: Buffer, name: string): Png {
+  if (file.subarray(1, 4).toString() !== "PNG") throw new Error(`${name} is not a PNG`);
   let offset = 8;
   let width = 0, height = 0, colorType = 0;
   const data: Buffer[] = [];
@@ -20,14 +35,14 @@ export function readPng(url: URL): Png {
     if (type === "IHDR") {
       width = body.readUInt32BE(0);
       height = body.readUInt32BE(4);
-      if (body[8] !== 8 || body[12] !== 0) throw new Error(`${url.pathname}: only 8-bit non-interlaced PNGs are supported`);
+      if (body[8] !== 8 || body[12] !== 0) throw new Error(`${name}: only 8-bit non-interlaced PNGs are supported`);
       colorType = body[9]!;
     } else if (type === "IDAT") data.push(body);
     else if (type === "IEND") break;
     offset += 12 + length;
   }
   const channels = CHANNELS[colorType];
-  if (channels === undefined) throw new Error(`${url.pathname}: unsupported colour type ${colorType}`);
+  if (channels === undefined) throw new Error(`${name}: unsupported colour type ${colorType}`);
   const raw = inflateSync(Buffer.concat(data));
   const stride = width * channels;
   const pixels = new Uint8Array(stride * height);

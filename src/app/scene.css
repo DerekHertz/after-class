@@ -31,9 +31,9 @@
 .appearance-options button[aria-pressed="true"] small { color: inherit; }
 /* Thumbnails are the rooms' own blank plates, so a preview shows the skin it selects. */
 .room-raster { display: block; width: 100%; aspect-ratio: 1585 / 992; background-repeat: no-repeat; background-position: center; background-size: cover; }
-.room-raster[data-room="last-desk"] { background-image: url('./assets/front-row/last-desk.png'); }
-.room-raster[data-room="projection-booth"] { background-image: url('./assets/front-row/projection-booth.png'); }
-.room-raster[data-room="study-bench"] { background-image: url('./assets/front-row/study-bench.png'); }
+.room-raster[data-room="last-desk"] { background-image: url('./assets/front-row/last-desk.webp'); }
+.room-raster[data-room="projection-booth"] { background-image: url('./assets/front-row/projection-booth.webp'); }
+.room-raster[data-room="study-bench"] { background-image: url('./assets/front-row/study-bench.webp'); }
 .companion-choice .companion-raster { height: 112px; max-width: 100%; }
 .appearance-preferences { display: flex; flex-wrap: wrap; gap: 8px 20px; padding-top: 12px; border-top: 2px dashed #2a1a0b55; }
 .appearance-preferences label { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; }

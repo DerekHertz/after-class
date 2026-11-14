@@ -9,6 +9,7 @@
     "dev": "bun run src/backend/main.ts",
     "build:ext": "bun run scripts/build-extension.ts",
     "build:app": "bun run scripts/build-app.ts",
+    "build:art": "bun run scripts/build-art.ts",
     "lint": "oxlint src scripts test e2e --max-warnings 0",
     "test:browser": "playwright test --config scripts/playwright.config.ts"
   },
