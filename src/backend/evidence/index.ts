@@ -74,8 +74,13 @@ export type EvidenceStore = {
   bundle(material: Material): EvidenceBundle;
   get(ids: readonly EvidenceId[]): ReadonlyMap<EvidenceId, Evidence | DeletedEvidence>;
   frameBytes(id: EvidenceId): Uint8Array | null;
-  /** Frame-change judgments still needed (frames with teaching "unjudged"). */
+  /**
+   * Frame-change judgments still needed (frames with teaching "unjudged"), except those still waiting for their caption
+   * window (`FrameEntry.windowOpenSinceMs`, for at most `frameHoldMs`). It asks `wakeAt` for a pump when the first wait ends.
+   */
   frameDemand(captureId: CaptureId): readonly WorkItem[];
+  /** Every judgment the frames inside `material` still need, waiting or not: a reader that freezes the material asks these first. */
+  frameDemandIn(material: Material): readonly WorkItem[];
   /**
    * Called by record.save inside the save transaction: copy cited evidence
    * (passage text + interval, frame file hard-link) into evidence_snapshots.
@@ -132,6 +137,9 @@ function unlinkQuiet(path: string): boolean {
   }
 }
 
+/** 15 s of media at 1x completes a frame's caption window about 20 s after it arrives, span flushes included. */
+export const FRAME_HOLD_MS = 60_000;
+
 const isJpeg = (b: Uint8Array) => b.length > JPEG_MAGIC.length && JPEG_MAGIC.every((m, i) => b[i] === m);
 
 export function createEvidence(db: UserDb, dataDir: string, deps: {
@@ -146,10 +154,15 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   onChange(captureId: CaptureId | null, changed: readonly Dep[]): void;
   /** Called for each key a read depends on that a write to another capture can change. Absent where nothing listens. */
   read?: ReadDep;
-  /** Clock for received and created timestamps. Defaults to Date.now. */
+  /** Clock for received and created timestamps, and for how long a frame waits. Defaults to Date.now. */
   now?: () => number;
+  /** The longest an unanswered frame waits for its caption window. Defaults to FRAME_HOLD_MS. */
+  frameHoldMs?: number;
+  /** Asks for a pump of this capture at `atMs`, when a frame stops waiting for its caption window. */
+  wakeAt?(captureId: CaptureId, atMs: number): void;
 }): EvidenceStoreWithProbe {
   const now = deps.now ?? Date.now;
+  const frameHoldMs = deps.frameHoldMs ?? FRAME_HOLD_MS;
   const userId = db.userId;
   const abs = (rel: string) => join(dataDir, rel);
   const read: ReadDep = deps.read ?? (() => {});
@@ -175,10 +188,10 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   };
 
   const loadFacts = db.sql.query<
-    { seq: number; client_seq: number; wall_ms: number; body_json: string; has_bytes: number },
+    { seq: number; client_seq: number; wall_ms: number; body_json: string; received_ms: number; has_bytes: number },
     [string, string]
   >(
-    `SELECT c.seq, c.client_seq, c.wall_ms, c.body_json,
+    `SELECT c.seq, c.client_seq, c.wall_ms, c.body_json, c.received_ms,
             CASE WHEN EXISTS (SELECT 1 FROM frames f WHERE f.user_id = c.user_id AND f.seq = c.seq) THEN 1 ELSE 0 END AS has_bytes
      FROM capture_facts c WHERE c.user_id = ? AND c.capture_id = ? ORDER BY c.client_seq`,
   );
@@ -198,7 +211,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     const stored: StoredFact[] = loadFacts.all(userId, captureId).map((r) => {
       const { jpegOk, ...body } = JSON.parse(r.body_json) as { kind: CaptureFact["kind"]; jpegOk?: boolean };
       const fact = { captureId, clientSeq: r.client_seq, wallMs: r.wall_ms, ...body, ...(body.kind === "frame" ? { jpegBase64: "" } : {}) } as CaptureFact;
-      return { seq: asSeq(r.seq), fact, hasBytes: r.has_bytes === 1, jpeg: jpegOk === true };
+      return { seq: asSeq(r.seq), fact, hasBytes: r.has_bytes === 1, jpeg: jpegOk === true, receivedMs: r.received_ms };
     });
     const p = foldCapture(captureId, stored);
     projections.set(captureId, p);
@@ -274,7 +287,6 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   /** "Uncertain visual → keep the frame." */
   function judge(e: FrameEntry): { readonly teaching: FrameTeaching; readonly input: FrameChangeInput | null } {
     if (!e.before) return { teaching: "kept", input: null };
-    if (!e.windowComplete) return { teaching: "unjudged", input: null };
     const input = inputOf(e);
     const found = deps.lookupFrameChange(input);
     if (found.kind === "hit") return { teaching: found.value === "yes" ? "kept" : found.value === "no" ? "dropped" : "uncertain", input };
@@ -282,6 +294,21 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   }
 
   const withTeaching = (e: FrameEntry): Frame => ({ ...e.frame, teaching: judge(e).teaching });
+
+  const frameWork = (input: FrameChangeInput): WorkItem => ({
+    key: deps.frameChangeKey(input), purpose: "frame_change", provider: "jev", run: (signal) => deps.runFrameChange(input, signal),
+  });
+
+  /** The frames a bundle of `material` draws from, deleted ones left out. */
+  function framesIn(material: Material): readonly FrameEntry[] {
+    for (const sourceId of Material.sources(material)) read(sourceDep(sourceId));
+    const dead = deleted();
+    const seen = new Map<EvidenceId, FrameEntry>();
+    for (const p of selectScope(allProjections(), material)) {
+      for (const e of p.frames) if (!dead.has(e.frame.id) && !seen.has(e.frame.id) && frameInside(material, e.frame)) seen.set(e.frame.id, e);
+    }
+    return [...seen.values()];
+  }
 
   const frameRow = db.sql.query<{ path: string }, [string, string]>("SELECT path FROM frames WHERE user_id = ? AND evidence_id = ?");
   const snapshotRow = db.sql.query<SnapshotRow, [string, string]>(
@@ -465,21 +492,19 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     },
 
     bundle(material) {
-      for (const sourceId of Material.sources(material)) read(sourceDep(sourceId));
+      const frames = new Map<EvidenceId, Frame>();
+      for (const e of framesIn(material)) {
+        const frame = withTeaching(e);
+        if (frame.teaching === "kept" || frame.teaching === "uncertain") frames.set(frame.id, frame);
+      }
       const dead = deleted();
       const scope = selectScope(allProjections(), material);
       const passages = new Map<EvidenceId, Passage>();
-      const frames = new Map<EvidenceId, Frame>();
       const ads = new Map<string, AdRecord>();
       const gaps: Gap[] = [];
       for (const p of scope) {
         for (const w of p.passages) {
           if (!dead.has(w.passage.id) && Material.covers(material, w.passage.sourceId, w.passage.interval)) passages.set(w.passage.id, w.passage);
-        }
-        for (const e of p.frames) {
-          if (dead.has(e.frame.id) || frames.has(e.frame.id) || !frameInside(material, e.frame)) continue;
-          const frame = withTeaching(e);
-          if (frame.teaching === "kept" || frame.teaching === "uncertain") frames.set(frame.id, frame);
         }
         for (const g of p.gaps) gaps.push(...clipGap(material, g));
         for (const a of p.ads) if (adInside(material, a)) ads.set(`${a.sourceId}|${a.atContentS}|${a.wallDurationMs}`, a);
@@ -518,14 +543,26 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
 
     frameDemand(captureId) {
       const dead = deleted();
+      const at = now();
       const items: WorkItem[] = [];
+      let wake = Infinity;
       for (const e of projectOwn(captureId).frames) {
         if (dead.has(e.frame.id)) continue;
         const { teaching, input } = judge(e);
         if (teaching !== "unjudged" || input === null) continue;
-        items.push({ key: deps.frameChangeKey(input), purpose: "frame_change", provider: "jev", run: (signal) => deps.runFrameChange(input, signal) });
+        const until = e.windowOpenSinceMs === null ? -Infinity : e.windowOpenSinceMs + frameHoldMs;
+        if (until > at) wake = Math.min(wake, until);
+        else items.push(frameWork(input));
       }
+      if (wake !== Infinity) deps.wakeAt?.(captureId, wake);
       return items;
+    },
+
+    frameDemandIn(material) {
+      return framesIn(material).flatMap((e) => {
+        const { teaching, input } = judge(e);
+        return teaching === "unjudged" && input !== null ? [frameWork(input)] : [];
+      });
     },
 
     snapshotInTx(ids) {

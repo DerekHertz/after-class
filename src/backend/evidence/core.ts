@@ -284,7 +284,7 @@ export function deriveAds(facts: readonly CaptureFact[]): AdRecord[] {
  * A stored fact. `hasBytes` is true when its frame row (and file) still exists.
  * `jpeg` is true for a frame fact whose bytes were a JPEG when it arrived, even if the user deleted the frame since.
  */
-export type StoredFact = { readonly seq: Seq; readonly fact: CaptureFact; readonly hasBytes: boolean; readonly jpeg: boolean };
+export type StoredFact = { readonly seq: Seq; readonly fact: CaptureFact; readonly hasBytes: boolean; readonly jpeg: boolean; readonly receivedMs: number };
 
 export type FrameEntry = {
   /** `teaching` is "unjudged" here: it derives from the memo at read time. */
@@ -297,12 +297,12 @@ export type FrameEntry = {
   /** Watched passages within ±15 s media. */
   readonly nearby: readonly Passage[];
   /**
-   * True once `nearby` can no longer grow: the watched media has passed the window's far edge and no transcript
-   * segment near the frame is still being watched (half watched, with its end ahead of the watched media), or the video has played to its end, the viewer has moved to another
-   * video, or the capture is paused or stopped. A judgment before then
-   * would be keyed on a caption list that is about to change, and would be asked again.
+   * When the frame's fact arrived (server time), while `nearby` can still grow. Null once it cannot: the watched media has
+   * passed the window's far edge with no caption near the frame still half watched, the video played to its end, the viewer
+   * moved to another video, or the capture is paused or stopped. Asking while the window is open keys the question on a
+   * caption list about to change. Facts cannot show a YouTube pause or a rewind, so evidence bounds the wait in wall time.
    */
-  readonly windowComplete: boolean;
+  readonly windowOpenSinceMs: number | null;
 };
 
 export type Projection = {
@@ -334,6 +334,7 @@ export function foldCapture(captureId: CaptureId, stored: readonly StoredFact[])
   const facts = rows.map((r) => r.fact);
   const seqOf = new Map<CaptureFact, Seq>(rows.map((r) => [r.fact, r.seq]));
   const bytesOf = new Map<CaptureFact, boolean>(rows.map((r) => [r.fact, r.hasBytes]));
+  const receivedOf = new Map<CaptureFact, number>(rows.map((r) => [r.fact, r.receivedMs]));
   const jpegOf = new Map<CaptureFact, boolean>(rows.map((r) => [r.fact, r.jpeg]));
 
   const spans = classifySpans(facts, durationLookup(facts));
@@ -389,12 +390,12 @@ export function foldCapture(captureId: CaptureId, stored: readonly StoredFact[])
 
   const allPassages = passages.map((p) => p.passage);
   const currentSource = currentVideo === null ? null : sourceIdOf(currentVideo);
-  const candidates: Omit<FrameEntry, "before" | "nearby" | "windowComplete">[] = [];
+  const candidates: (Omit<FrameEntry, "before" | "nearby" | "windowOpenSinceMs"> & { readonly receivedMs: number })[] = [];
   for (const f of facts) {
     if (f.kind !== "frame" || !bytesOf.get(f)) continue;
     const sourceId = sourceIdOf(f.videoId);
     if (!holdsPoint(Material.get(visible, sourceId), f.mediaS)) continue;
-    candidates.push({ frame: frameOf(captureId, sourceId, f), captureId, clientSeq: f.clientSeq, seq: seqOf.get(f)! });
+    candidates.push({ frame: frameOf(captureId, sourceId, f), captureId, clientSeq: f.clientSeq, seq: seqOf.get(f)!, receivedMs: receivedOf.get(f)! });
   }
   const bySource = new Map<SourceId, typeof candidates>();
   for (const c of candidates) bySource.set(c.frame.sourceId, [...(bySource.get(c.frame.sourceId) ?? []), c]);
@@ -408,10 +409,11 @@ export function foldCapture(captureId: CaptureId, stored: readonly StoredFact[])
       const watchedEnd = Math.max(-Infinity, ...Material.get(watched, c.frame.sourceId).intervals().map((i) => i.end));
       const halfWatched = partial.some((g) => g.sourceId === c.frame.sourceId && g.interval.start < m + NEARBY_S && g.interval.end > m - NEARBY_S && g.interval.end > watchedEnd);
       const duration = durationOf(c.frame.sourceId);
-      const closed =
-        status.state !== "capturing" || c.frame.sourceId !== currentSource || (duration !== null && watchedEnd >= duration - END_SLACK_S);
-      const windowComplete = closed || (watchedEnd >= m + NEARBY_S && !halfWatched);
-      const entry: FrameEntry = { ...c, before, nearby, windowComplete };
+      const left = status.state !== "capturing" || c.frame.sourceId !== currentSource;
+      const ended = duration !== null && watchedEnd >= duration - END_SLACK_S;
+      const windowComplete = left || ((ended || watchedEnd >= m + NEARBY_S) && !halfWatched);
+      const { receivedMs, ...rest } = c;
+      const entry: FrameEntry = { ...rest, before, nearby, windowOpenSinceMs: windowComplete ? null : receivedMs };
       built.set(c.frame.id, entry);
       before = entry;
     }

@@ -139,6 +139,8 @@ export function createPreparation(db: UserDb, deps: {
   chunk(id: ChunkRevisionId): ChunkRevision | null;
   currentChunks(captureId: CaptureId): readonly ChunkRevision[];
   bundle(material: Material): EvidenceBundle;
+  /** The frame judgments `bundle(material)` still lacks. An interpretation waits for them, so no frame is left out for being unjudged. */
+  frameDemandIn(material: Material): readonly WorkItem[];
   lookup<I, O>(task: Task<I, O>, input: I): Lookup<O>;
   run<I, O>(task: Task<I, O>, input: I, signal: AbortSignal): Promise<RunResult<O>>;
   clearFailures: (keys: readonly Lookup<unknown>["key"][]) => void;
@@ -344,12 +346,14 @@ export function createPreparation(db: UserDb, deps: {
   const inside = (c: ClaimView, m: Material) => claimInside(m, c.cited, c.origin.unit.where);
 
   /** The part of a chunk revision no interpretation covers yet: what its delta job reads. */
-  function residual(v: View, rev: ChunkRevision): { readonly state: InterpretationState | null; readonly need: Need | null } {
+  function residual(v: View, rev: ChunkRevision): { readonly state: InterpretationState | null; readonly need: Need | null; readonly frames?: readonly WorkItem[] } {
     const material = Material.subtract(rev.material, v.covered);
     if (Material.isEmpty(material)) return { state: null, need: null };
     const bundle = deps.bundle(material);
     if (bundle.passages.length === 0 && bundle.frames.length === 0) return { state: "done", need: null };
     if (cutoffFor((m) => Material.contains(m, material), v.controls) !== null) return { state: "cancelled", need: null };
+    const frames = deps.frameDemandIn(material);
+    if (frames.length > 0) return { state: "pending", need: null, frames };
     // A delta waits for the jobs it extends, so the claims it may supersede are in its context.
     if (overlapping(v, rev.material).some((u) => u.state === "pending")) return { state: "pending", need: null };
     const input: InterpretationInput = {
@@ -378,13 +382,14 @@ export function createPreparation(db: UserDb, deps: {
   function demand(captureId: CaptureId): readonly WorkItem[] {
     const v = view(captureId);
     const current = deps.currentChunks(captureId);
+    const residuals = current.map((r) => residual(v, r));
     const needs: Need[] = [
       ...v.units.flatMap((u) => (u.state === "pending" && open(u.lookup) ? [need(tasks.interpret, u.unit.input, u.lookup.key)] : [])),
-      ...current.flatMap((r) => residual(v, r).need ?? []),
+      ...residuals.flatMap((r) => r.need ?? []),
       ...v.claims.flatMap((c) => (c.next && current.some((r) => inside(c, r.material)) ? [c.next] : [])),
     ];
     const seen = new Set<MemoKey>();
-    return needs.filter((n) => !seen.has(n.key) && !!seen.add(n.key)).map((n) => workItem(captureId, n));
+    return [...residuals.flatMap((r) => r.frames ?? []), ...needs.filter((n) => !seen.has(n.key) && !!seen.add(n.key)).map((n) => workItem(captureId, n))];
   }
 
   function control(captureId: CaptureId, action: ControlFact["action"], ids: readonly ChunkRevisionId[]): Seq {

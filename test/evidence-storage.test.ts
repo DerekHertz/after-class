@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { asSeq } from "../src/backend/db";
-import { createEvidence } from "../src/backend/evidence";
+import { FRAME_HOLD_MS, createEvidence } from "../src/backend/evidence";
 import type { FrameChangeInput } from "../src/backend/providers/jev-tasks";
 import type { Evidence } from "../src/shared/domain";
 import type { EvidenceId } from "../src/shared/ids";
@@ -17,7 +17,7 @@ describe("frames and Jev judgments", () => {
     s.control("start");
     s.source();
     s.transcript([[0, 6, "near"], [100, 104, "far"]]);
-    s.span(0, 70);
+    s.span(0, 60);
     s.frame("f1", 5);
     s.frame("f2", 20);
     s.frame("f3", 40);
@@ -31,6 +31,8 @@ describe("frames and Jev judgments", () => {
     const { h, s, id } = frameStream();
     const teaching = () => Object.fromEntries(h.evidence.watchOrder(s.captureId).frameCandidates.map((f) => [f.id, f.teaching]));
     expect(teaching()).toEqual({ [id("f1")]: "kept", [id("f2")]: "unjudged", [id("f3")]: "unjudged", [id("f4")]: "unjudged" });
+    expect(h.evidence.frameDemand(s.captureId)).toHaveLength(2);
+    h.clock.t += FRAME_HOLD_MS;
     expect(h.evidence.frameDemand(s.captureId)).toHaveLength(3);
     expect(new Set(h.evidence.frameDemand(s.captureId).map((w) => w.key)).size).toBe(3);
 
@@ -68,7 +70,7 @@ describe("frames and Jev judgments", () => {
   });
 });
 
-describe("a frame is judged once, when its caption window is complete", () => {
+describe("an unanswered frame waits for its caption window before it is asked", () => {
   const demanded = (h: ReturnType<typeof harness>, s: ReturnType<typeof stream>) => h.evidence.frameDemand(s.captureId).length;
 
   test("while the capture runs, a frame waits until the watched media passes 15 s beyond it", () => {
@@ -117,29 +119,6 @@ describe("a frame is judged once, when its caption window is complete", () => {
     s.frame("b", 5);
     h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
     expect(demanded(h, s)).toBe(1);
-  });
-
-  test("the input asked once is the input a growing capture ends with", () => {
-    const h = harness();
-    const s = stream();
-    s.control("start");
-    s.source();
-    s.transcript([[0, 4, "one"], [10, 14, "two"], [18, 21, "three"], [40, 44, "far"]]);
-    s.frame("a", 1);
-    s.frame("b", 5);
-    const asked: string[][] = [];
-    const store = createEvidence(h.db, h.dir, {
-      lookupFrameChange: (input) => (asked.push(textsOf(input.nearbyPassages)), { kind: "missing", key: keyOf(input) }),
-      runFrameChange: async () => undefined, frameChangeKey: keyOf, onChange: () => {},
-    });
-    for (let t = 0; t < 60; t += 5) {
-      store.ingest({ captureId: s.captureId, facts: s.facts.splice(0) });
-      store.ingest({ captureId: s.captureId, facts: [s.span(t, t + 5)] });
-      store.frameDemand(s.captureId);
-    }
-    expect(asked.length).toBeGreaterThan(0);
-    expect(new Set(asked.map((a) => a.join("|"))).size).toBe(1);
-    expect(asked[0]).toEqual(["one", "two", "three"]);
   });
 
   test("a video played to its end, or left for another video, has no more captions coming", () => {

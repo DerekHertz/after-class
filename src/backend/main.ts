@@ -141,6 +141,8 @@ export type MainOptions = {
   readonly anthropic?: ApiClient;
   /** How long an upload may wait for the pump it triggers. Default INGEST_PUMP_MS; a test widens it to see the order. */
   readonly ingestPumpMs?: number;
+  /** How long an unanswered frame waits for its caption window. Default FRAME_HOLD_MS; a test shortens it. */
+  readonly frameHoldMs?: number;
   readonly log?:(text: string) => void;
   readonly error?: (text: string) => void;
 };
@@ -581,6 +583,8 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       },
     });
     const ledger = createLedger(db, budget);
+    /** Per capture, the earliest pump a waiting frame asked for that has not fired yet. */
+    const wakes = new Map<CaptureId, number>();
     const lookup: LookupFn = (task, input) => {
       const looked = memo.lookup(task, input);
       read(memoDep(looked.key));
@@ -592,6 +596,18 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       runFrameChange: (input, signal) => (input.before === null ? Promise.resolve(null) : memo.run(tasks.frameChange, input, { signal })),
       frameChangeKey: (input) => memo.key(tasks.frameChange, input),
       read,
+      ...(options.frameHoldMs === undefined ? {} : { frameHoldMs: options.frameHoldMs }),
+      wakeAt(captureId, atMs) {
+        const set = wakes.get(captureId);
+        if (set !== undefined && set <= atMs) return;
+        wakes.set(captureId, atMs);
+        setTimeout(() => {
+          if (wakes.get(captureId) === atMs) wakes.delete(captureId);
+          if (!alive) return;
+          wake(captureId);
+          pump();
+        }, Math.max(0, atMs - Date.now())).unref?.();
+      },
       onChange(captureId, keys) {
         // A capture's first upload is the only way a capture enters the working set after boot.
         if (captureId !== null) wake(captureId);
@@ -639,6 +655,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       chunk: segmentation.revision,
       currentChunks: segmentation.current,
       bundle: evidence.bundle,
+      frameDemandIn: evidence.frameDemandIn,
       lookup,
       run: (task, input, signal) => memo.run(task, input, { signal }),
       clearFailures: memo.clearFailures,
