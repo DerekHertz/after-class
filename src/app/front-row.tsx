@@ -7,27 +7,24 @@ import { clearReaction } from "./room/reaction-store";
 import { sourceButtonLabel } from "./room-object";
 import type { RoomObject } from "./room-object";
 import { layoutRoom } from "./room/layout";
-import type { FullRoomLayout, NineSliceLayer, Rect, Size } from "./room/layout";
+import type { FullRoomLayout, Rect, Size } from "./room/layout";
+import { RoomStage } from "./room/stage";
 import { FRONT_ROW_ROOMS } from "./room/rooms";
-import type { Edges, FrontRowRoom } from "./room/rooms";
+import type { FrontRowRoom } from "./room/rooms";
 import { FULL_ROOM_QUERY } from "../shared/room-art";
 
 declare module "react" {
   interface CSSProperties { [variable: `--${string}`]: string | number | undefined }
 }
 
-/** A nine-slice's cuts in asset pixels, as border-image-slice reads them. */
-const slice = ({ top, right, bottom, left }: Edges): string => `${top} ${right} ${bottom} ${left}`;
-
-/** The room's art and colours as the custom properties front-row.css reads: the nine-slice cuts, the surface colours, then the palette. */
+/** The room's colours as the custom properties front-row.css reads: the surface colours, then the palette. */
 export function roomStyle(scene: SceneId): CSSProperties {
   const room: FrontRowRoom = FRONT_ROW_ROOMS[scene];
-  const { board, desk, mat } = room;
+  const { board, mat } = room;
   const style: CSSProperties = {
     "--fr-phone-x": room.phoneArtX,
     "--fr-board-fill": board.fill, "--fr-board-ink": board.ink, "--fr-board-ink-soft": board.inkSoft,
     "--fr-mat-fill": mat.fill, "--fr-mat-ink": mat.ink, "--fr-mat-ink-soft": mat.inkSoft,
-    "--fr-board-slice": slice(board.art.slice), "--fr-desk-slice": slice(desk.art.slice), "--fr-mat-slice": slice(mat.art.slice),
   };
   for (const [name, value] of Object.entries(room.palette)) style[`--fr-${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`] = value;
   return style;
@@ -76,9 +73,9 @@ export function FrontRowScene({ scene, layout, appearance, activity, boardRef }:
   useEffect(() => { clearReaction(); }, [scene, appearance.companion, appearance.visible]);
   return (
     <div ref={sceneRef} className="front-row-scene" data-room={scene} data-board-tone={room.board.tone} data-mat-tone={room.mat.tone} data-mat-actions={room.mat.actions} data-board-align={room.board.align} data-phase={layout.kind}>
-      {/* The window's layers, back to front, with every control placed on them from room/layout.ts. */}
+      {/* The room's painted layers on one canvas, with every control placed over them from room/layout.ts. */}
       <div className="front-row-stage" style={full ? stageStyle(full) : undefined}>
-        <RoomLayers room={room} full={full} />
+        <RoomStage scene={scene} composition={composition} />
         {layout.kind === "setup" ? layout.form : <>
           <ScrollArea area="board" label={room.surfaceName} areaRef={boardRef}>{layout.board}</ScrollArea>
           <ScrollArea area="desk" label="Your desk">{layout.desk}</ScrollArea>
@@ -96,7 +93,6 @@ export function FrontRowScene({ scene, layout, appearance, activity, boardRef }:
 }
 
 const box = ({ left, top, width, height }: Rect): CSSProperties => ({ left, top, width, height });
-const edges = ({ top, right, bottom, left }: Edges): string => `${top}px ${right}px ${bottom}px ${left}px`;
 
 /**
  * The scale the board's type follows, and the two text areas. The setup form draws its own text areas, so they are placed
@@ -137,24 +133,6 @@ const onFullRoomChange = (change: () => void) => {
 /** Whether the window is large enough for the room built from layers, asked the way front-row.css's media queries ask. */
 function useFullRoom(): boolean {
   return useSyncExternalStore(onFullRoomChange, () => fullRoom?.matches ?? false, () => false);
-}
-
-/** The room's pictures, drawn behind its text and controls. The wrapper has no box, so each layer stacks by its own z-index. */
-function RoomLayers({ room, full }: { readonly room: FrontRowRoom; readonly full: FullRoomLayout | null }) {
-  const layers = full?.layers;
-  const nineSlice = (layer: NineSliceLayer | undefined) => layer && { ...box(layer.rect), "--fr-bw": edges(layer.border) };
-  return (
-    <div className="front-row-art" aria-hidden="true">
-      <span data-layer="background" style={layers && box(layers.background)} />
-      <span data-layer="board" style={nineSlice(layers?.board)} />
-      <span data-layer="desk" style={nineSlice(layers?.desk)} />
-      {room.extras.map((extra, i) => {
-        const placed = layers?.extras[i];
-        return <span key={`${extra.name}-${i}`} data-extra={extra.name} style={placed && { ...box(placed.rect), zIndex: placed.z }} />;
-      })}
-      <span data-layer="mat" style={nineSlice(layers?.mat)} />
-    </div>
-  );
 }
 
 /**

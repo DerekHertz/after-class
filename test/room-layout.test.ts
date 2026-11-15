@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { SceneId } from "../src/app/appearance";
 import { layoutRoom } from "../src/app/room/layout";
 import type { FullRoomLayout, Rect, Size } from "../src/app/room/layout";
-import { FRONT_ROW_ROOMS } from "../src/app/room/rooms";
+import { FRONT_ROW_ROOMS, ROOM_ART } from "../src/app/room/rooms";
 
 const rooms = Object.keys(FRONT_ROW_ROOMS) as SceneId[];
 const full = (scene: SceneId, window: Size): FullRoomLayout => {
@@ -184,6 +184,31 @@ describe("the layout is what the stylesheet drew before it moved here", () => {
   }
 });
 
-test("a phone or short window recomposes the room, so nothing is placed", () => {
-  for (const scene of rooms) expect(layoutRoom(scene, { width: 390, height: 844 }, "compact")).toEqual({ composition: "compact" });
+describe("a phone or short window recomposes the room over its background alone", () => {
+  const compact = (scene: SceneId, window: Size) => {
+    const layout = layoutRoom(scene, window, "compact");
+    if (layout.composition !== "compact") throw new Error("a compact window lays out the compact room");
+    return layout;
+  };
+  const phones: Size[] = [{ width: 320, height: 700 }, { width: 390, height: 844 }, { width: 899, height: 900 }, { width: 1440, height: 559 }, { width: 600, height: 300 }];
+
+  test("the background covers the window from its top edge at the plate's own proportions", () => {
+    for (const scene of rooms) for (const window of phones) {
+      const { background: bg } = compact(scene, window).layers;
+      const covers = bg.left <= EPS && bg.top === 0 && right(bg) >= window.width - EPS && bottom(bg) >= window.height - EPS;
+      const tight = Math.abs(bg.width - window.width) < EPS || Math.abs(bg.height - window.height) < EPS;
+      const aspect = Math.abs(bg.width / bg.height - ROOM_ART.plate.width / ROOM_ART.plate.height) < EPS;
+      expect({ scene, window, covers, tight, aspect }).toEqual({ scene, window, covers: true, tight: true, aspect: true });
+    }
+  });
+
+  test("each room shows the part of its picture its phone layout names: the rail's right, the harbor's middle, the canal's left", () => {
+    const window = { width: 390, height: 844 };
+    const { background: rail } = compact("last-desk", window).layers;
+    const { background: harbor } = compact("study-bench", window).layers;
+    const { background: canal } = compact("projection-booth", window).layers;
+    expect(right(rail)).toBeCloseTo(window.width, 9);
+    expect(harbor.left + harbor.width / 2).toBeCloseTo(window.width / 2, 9);
+    expect(canal.left).toBeCloseTo(0, 9);
+  });
 });

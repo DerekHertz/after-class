@@ -36,7 +36,7 @@ const FIRST_SCREEN_FONTS = ["pixelify-sans", "dm-sans-400"];
 export function roomArtTable(emitted: readonly string[], layerNames: readonly string[]): RoomArtTable {
   const url = (stem: string): string => {
     const file = emitted.filter((f) => new RegExp(`^${stem}-[a-z0-9]{8}\\.webp$`).test(f));
-    if (file.length !== 1) throw new Error(`the review app's CSS must draw ${stem}.webp exactly once in the bundle; found ${file.length}`);
+    if (file.length !== 1) throw new Error(`the review app must ship ${stem}.webp exactly once in the bundle; found ${file.length}`);
     return `/app/${file[0]}`;
   };
   const rooms: Record<string, { plate: string; layers: string[]; compact: string[] }> = {};

@@ -1,0 +1,57 @@
+import type { Size } from "./layout";
+import type { Draw } from "./scene";
+
+/** Device pixels per CSS pixel on each axis. */
+export type Scale = { readonly x: number; readonly y: number };
+
+/** One `drawImage` call: the picture's source rect in its own pixels and the destination rect in device pixels. */
+export type Piece = {
+  readonly sx: number; readonly sy: number; readonly sw: number; readonly sh: number;
+  readonly dx: number; readonly dy: number; readonly dw: number; readonly dh: number;
+};
+
+/**
+ * The `drawImage` calls that paint `draw` from a picture of `natural` size at `scale`, on the device pixels Chrome painted
+ * the same layer on when CSS drew it, so the canvas keeps the room's pixels.
+ */
+export function pieces(draw: Draw, natural: Size, scale: Scale): readonly Piece[] {
+  const box = snap(draw, scale);
+  const { width: w, height: h } = natural;
+  if (draw.kind === "image") return [{ sx: 0, sy: 0, sw: w, sh: h, dx: box.left, dy: box.top, dw: box.right - box.left, dh: box.bottom - box.top }];
+  const { slice, border } = draw;
+  // As Chrome paints border-image: each border width floors to whole device pixels, measured in from the snapped box's own
+  // edges, after widths that would overlap all shrink by one factor.
+  const fit = Math.min(1, (box.right - box.left) / ((border.left + border.right) * scale.x || 1), (box.bottom - box.top) / ((border.top + border.bottom) * scale.y || 1));
+  const width = (edge: number, s: number) => Math.floor(edge * s * fit);
+  const xs = [box.left, box.left + width(border.left, scale.x), box.right - width(border.right, scale.x), box.right];
+  const ys = [box.top, box.top + width(border.top, scale.y), box.bottom - width(border.bottom, scale.y), box.bottom];
+  const us = [0, slice.left, w - slice.right, w];
+  const vs = [0, slice.top, h - slice.bottom, h];
+  const out: Piece[] = [];
+  for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) {
+    const piece = { sx: us[col]!, sy: vs[row]!, sw: us[col + 1]! - us[col]!, sh: vs[row + 1]! - vs[row]!, dx: xs[col]!, dy: ys[row]!, dw: xs[col + 1]! - xs[col]!, dh: ys[row + 1]! - ys[row]! };
+    if (piece.sw > 0 && piece.sh > 0 && piece.dw > 0 && piece.dh > 0) out.push(piece);
+  }
+  return out;
+}
+
+/**
+ * Snaps a span of `start` and `size` CSS pixels to whole device pixels as Chrome snaps a box: each value truncates to
+ * 1/64 pixel, the start rounds half up, and the size rounds together with the start's signed fraction. A background
+ * image also ends no later than its rounded size from the start, as Chrome's BackgroundImageGeometry clips its tile.
+ */
+function snapSpan(start: number, size: number, scale: number, image: boolean): readonly [number, number] {
+  const fixed = (v: number) => Math.trunc(v * scale * 64) / 64;
+  const round = (v: number) => Math.floor(v + 0.5);
+  const [at, length] = [fixed(start), fixed(size)];
+  const fraction = at % 1;
+  const from = round(at);
+  const to = from + round(fraction + length) - round(fraction);
+  return [from, image ? Math.min(to, from + round(length)) : to];
+}
+
+function snap({ rect, kind }: Draw, s: Scale) {
+  const [left, right] = snapSpan(rect.left, rect.width, s.x, kind === "image");
+  const [top, bottom] = snapSpan(rect.top, rect.height, s.y, kind === "image");
+  return { left, right, top, bottom };
+}

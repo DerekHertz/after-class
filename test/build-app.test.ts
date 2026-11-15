@@ -168,8 +168,8 @@ describe("a file name the server caches for a year", () => {
     ["an image is renamed with the same bytes", (root) => {
       const art = join(root, "src/app/assets/front-row-v2");
       renameSync(join(art, "harbor-lamp.webp"), join(art, "harbor-light.webp"));
-      const css = join(root, "src/app/front-row.css");
-      writeFileSync(css, readFileSync(css, "utf8").replace("harbor-lamp.webp", "harbor-light.webp"));
+      const stage = join(root, "src/app/room/art.ts");
+      writeFileSync(stage, readFileSync(stage, "utf8").replace("harbor-lamp.webp", "harbor-light.webp"));
     }],
     ["an image too large to inline is renamed with the same bytes", (root) => {
       const art = join(root, "src/app/assets/companions-v3");
@@ -177,7 +177,8 @@ describe("a file name the server caches for a year", () => {
       const css = join(root, "src/app/hd-companion.css");
       writeFileSync(css, readFileSync(css, "utf8").replace("companions-v3/pip.webp", "companions-v3/pip-large.webp"));
     }],
-    ["an image the stylesheet inlines changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/front-row-v2/harbor-lamp.webp"), "\0")],
+    ["an image the stylesheet inlines changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/front-row/study-bench.webp"), "\0")],
+    ["a layer the stage imports changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/front-row-v2/harbor-lamp.webp"), "\0")],
     ["an image too large to inline changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/companions-v3/pip.webp"), "\0")],
     ["a stylesheet rule changes", (root) => appendFileSync(join(root, "src/app/completion.css"), "\n.release-probe { order: 7; }\n")],
     ["the script changes", (root) => appendFileSync(join(root, "src/app/main.tsx"), "\nconsole.info('release-probe');\n")],

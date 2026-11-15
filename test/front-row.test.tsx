@@ -6,6 +6,7 @@ import type { CompanionId, SceneId } from "../src/app/appearance";
 import { FrontRowScene, reserveNavSpace, roomStyle } from "../src/app/front-row";
 import type { FrontRowLayout } from "../src/app/front-row";
 import { FRONT_ROW_ROOMS, ROOM_ART } from "../src/app/room/rooms";
+import { ROOM_LAYER_ART } from "../src/app/room/art";
 import type { NineSlice } from "../src/app/room/rooms";
 import { APPEARANCE_STORAGE_KEY, DEFAULT_ROOM, ROOM_ART_PREFIX } from "../src/shared/room-art";
 import { OBJECT_ART_SIZE, ROOM_OBJECTS } from "../src/app/room-object";
@@ -97,30 +98,28 @@ describe("each room's text sits on its own art and reads clearly", () => {
   });
 });
 
-describe("each room's art is named where the build and the stylesheet agree", () => {
+describe("each room's art is named where the build, the stage and the stylesheet agree", () => {
   const css = readFileSync(new URL("../src/app/front-row.css", import.meta.url), "utf8");
+  const file = (url: string) => url.split("/").pop();
 
-  test("ROOM_ART_PREFIX is the prefix of the layers the stylesheet draws for each room, and its plate is named for the scene", () => {
+  test("ROOM_ART_PREFIX is the prefix of every layer the stage draws for each room, and its plate is named for the scene", () => {
     expect(ROOM_ART_PREFIX).toEqual(ART);
     expect(Object.keys(ROOM_ART_PREFIX).sort()).toEqual(Object.keys(SCENES).sort());
     expect({ key: APPEARANCE_STORAGE_KEY, room: DEFAULT_ROOM }).toEqual({ key: APPEARANCE_KEY, room: DEFAULT_APPEARANCE.scene });
     for (const scene of rooms) {
       const p = ART[scene];
-      expect(css).toContain(`.scene-shell[data-scene="${scene}"] { --fr-bg: url('./assets/front-row-v2/${p}-background.webp'); --fr-board-art: url('./assets/front-row-v2/${p}-board.webp'); --fr-desk-art: url('./assets/front-row-v2/${p}-desk.webp'); --fr-mat-art: url('./assets/front-row-v2/${p}-mat.webp'); }`);
+      const { extras, ...layers } = ROOM_LAYER_ART[scene];
+      expect(Object.fromEntries(Object.entries(layers).map(([name, url]) => [name, file(url)]))).toEqual({ background: `${p}-background.webp`, board: `${p}-board.webp`, desk: `${p}-desk.webp`, mat: `${p}-mat.webp` });
+      expect(Object.entries(extras).map(([name, url]) => [name, file(url)])).toEqual(FRONT_ROW_ROOMS[scene].extras.filter((e, i, all) => all.findIndex((o) => o.name === e.name) === i).map((e) => [e.name, `${p}-${e.name}.webp`]));
+      expect(css).toContain(`.scene-shell[data-scene="${scene}"] { --fr-bg: url('./assets/front-row-v2/${p}-background.webp'); }`);
       expect(css).toContain(`[data-room="${scene}"]) { --fr-plate: url('./assets/front-row/${scene}.webp'); }`);
-      for (const extra of FRONT_ROW_ROOMS[scene].extras) expect(css).toContain(`url('./assets/front-row-v2/${p}-${extra.name}.webp')`);
     }
-  });
-
-  test("the room's own layers, the background among them, are drawn pixelated, so storing them at their true resolution changes no pixel", () => {
-    expect(css).toContain(".front-row-art > [data-layer=\"background\"] { z-index: 0; background-image: var(--fr-bg); }");
-    expect(css.split("\n").some((line) => line.includes(".front-row-art > * {") && line.includes("image-rendering: pixelated"))).toBe(true);
   });
 });
 
 describe("room geometry", () => {
-  test("the roomStyle custom properties carry the nine-slice cuts and the palette", () => {
-    expect(roomStyle("last-desk")).toMatchObject({ "--fr-board-slice": "44 64 62 64", "--fr-mat-slice": "28 30 30 28", "--fr-desk-slice": "0 150 0 150" });
+  test("the roomStyle custom properties carry the surface colours and the palette", () => {
+    expect(roomStyle("last-desk")).toMatchObject({ "--fr-board-fill": FRONT_ROW_ROOMS["last-desk"].board.fill, "--fr-mat-ink": FRONT_ROW_ROOMS["last-desk"].mat.ink });
     expect(roomStyle("study-bench")).toMatchObject({ "--fr-field-ink": FRONT_ROW_ROOMS["study-bench"].palette.fieldInk, "--fr-phone-x": "50%" });
   });
 
@@ -139,8 +138,8 @@ describe("switching room or companion keeps one tree", () => {
   const scene = (room: SceneId, companion: CompanionId, visible = true) => renderToStaticMarkup(
     <FrontRowScene scene={room} layout={layout} appearance={{ companion, visible, motion: "system" }} activity="idle" />,
   );
-  // The art layers differ by room, but they sit in one wrapper ahead of the text areas, so they never move the response field.
-  const skeleton = (html: string) => html.replace(/<div class="front-row-art"[^>]*>.*?<\/div>/, "<art/>").replace(/ (data-[a-z-]+|style|aria-label)="[^"]*"/g, "").replace(/>[^<]+</g, "><");
+  // Every room paints its art on the one canvas ahead of the text areas, so the art never moves the response field.
+  const skeleton = (html: string) => html.replace(/ (data-[a-z-]+|style|aria-label)="[^"]*"/g, "").replace(/>[^<]+</g, "><");
 
   test("every room renders the same elements in the same order, so the draft is never remounted", () => {
     const shapes = new Set(rooms.map((room) => skeleton(scene(room, "mote"))));
