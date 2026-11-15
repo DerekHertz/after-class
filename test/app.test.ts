@@ -424,9 +424,9 @@ describe("citedInWatchOrder", () => {
   });
 
   test("the watch order is the capture that started first, each capture in the order it saw its videos", () => {
-    expect(sourceWatchOrder([{ sourceIds: [b], startedMs: 2 }, { sourceIds: [a, b], startedMs: 1 }])).toEqual([a, b]);
+    expect(sourceWatchOrder([{ sourceIds: [b], firstSeq: 2 }, { sourceIds: [a, b], firstSeq: 1 }])).toEqual([a, b]);
     // A late upload puts A's capture first in the newest-first list, but A was still watched first.
-    expect(sourceWatchOrder([{ sourceIds: [a], startedMs: 1 }, { sourceIds: [b], startedMs: 2 }])).toEqual([a, b]);
+    expect(sourceWatchOrder([{ sourceIds: [a], firstSeq: 1 }, { sourceIds: [b], firstSeq: 2 }])).toEqual([a, b]);
     expect(sourceWatchOrder(null)).toEqual([]);
   });
 });
