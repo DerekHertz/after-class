@@ -1,0 +1,15 @@
+Use your built-in image generation tool (not code, not SVG, not a script) to generate ONE image. Save the generated PNG unchanged as `live-room.png` in the current folder. Do not draw or edit anything with code. In your final message give the saved path, the original path of the generated file, and the image's pixel size.
+
+Attached references: `reference.jpg` is a screenshot of the current app's Lantern Canal Film Club review screen (ignore its interface buttons and text). `rail-mockup.png` is an approved mockup of a different room, the Rail-side Classroom, made "alive" and "grown"; match its level of life, detail and finish, but keep this room's own evening mood. `companion.png` is the companion character's sheet (three poses side by side; use the left, idle pose as the character design).
+
+Image prompt:
+A design mockup of the same Lantern Canal Film Club room, seen from the same front-row seat and the same framing as reference.jpg, 16:10 landscape, about 1586x992. Match reference.jpg exactly in style: soft painted anime pixel-art look with fine dark outlines, the same pixel density, the same palette, the same rainy blue evening outside and warm lantern light inside. No vector look, no photoreal, no blur.
+
+Keep: the large cream pull-down projection screen on the navy wooden-plank wall, with its roller bar and pull tab; the window on the left showing the rainy canal town at dusk with paper lanterns, a stone arch bridge, a pagoda and a willow; the film projector on a small shelf at the left casting its warm beam toward the screen; the wooden desk across the bottom; the dark navy answer mat in the middle of the desk. Keep the screen and the mat the same size and position as in reference.jpg.
+
+This mockup shows the room "alive" and "grown" after many study sessions:
+- Rain streaks and a few drops on the window glass, lantern reflections shimmering on the canal, the projector beam with a few tiny bright dust specks floating in it.
+- Rewards the learner has earned, placed naturally: a neat stack of round film canisters at the right end of the desk; a small paper lantern glowing warmly and a little potted fern on the left; a short string of warm fairy lights along the top of the wall; two small framed movie-poster shapes on the wall beside the window showing only simple abstract shapes (no writing); a striped popcorn box on the projector shelf.
+- The companion, from companion.png, sits on the left end of the desk, about the same size relative to the frame as in reference.jpg, turned slightly toward the screen and looking up at it, curious. Above its head, a small white pixel-art emote speech balloon with a dark outline containing only a single large blue question-mark symbol.
+
+The projection screen is completely blank plain cream, and the answer mat is completely blank plain navy: they will hold real interface text added later. No text, letters, numbers, words, logos, user-interface buttons, or people anywhere in the image (the question mark in the balloon is the only symbol).
