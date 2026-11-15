@@ -85,6 +85,19 @@ function externalizeDataUrls(css: string, out: string, names: Map<string, string
   });
 }
 
+/** The npm packages whose code the bundle contains, from Bun's list of the files it read. */
+export function bundledPackages(inputs: readonly string[]): string[] {
+  const names = inputs.map((input) => /node_modules\/((?:@[^/]+\/)?[^/]+)\//.exec(input)?.[1]).filter((name) => name !== undefined);
+  return [...new Set(names)].sort();
+}
+
+function packageLicense(root: string, pkg: string): string {
+  const dir = join(root, "node_modules", pkg);
+  const file = readdirSync(dir).find((f) => /^licen[cs]e(\.(md|txt))?$/i.test(f));
+  if (file === undefined) throw new Error(`the bundled package ${pkg} has no license file, and its notice must ship in asset-notices.txt`);
+  return join("node_modules", pkg, file);
+}
+
 /**
  * A cached file must never be paired with a newer release, so each immutable name is a function of the file's final bytes.
  * Bun names the stylesheet by a hash of what it read, and `externalizeDataUrls` then rewrites it (the extracted names depend
@@ -100,6 +113,7 @@ export async function buildApp(outDir: string, root = REPO): Promise<void> {
     target: "browser",
     publicPath: "/app/",
     minify: true,
+    metafile: true,
     throw: false,
   });
   if (!result.success) throw new Error(`build of the review app failed:\n${result.logs.map(String).join("\n")}`);
@@ -139,6 +153,7 @@ export async function buildApp(outDir: string, root = REPO): Promise<void> {
     ["Pixelify Sans", "src/app/assets/fonts-v2/OFL-PixelifySans.txt"],
     ["Companion animation frames", "src/app/assets/meshy-CC-BY-4.0.txt"],
   ];
+  for (const pkg of bundledPackages(Object.keys(result.metafile?.inputs ?? {}))) licenses.push([pkg, packageLicense(root, pkg)]);
   const notices = licenses.map(([name, path]) => `${name}\n\n${readFileSync(join(root, path), "utf8")}`).join("\n\n");
   writeFileSync(join(out, "asset-notices.txt"), notices);
   console.log(`built the review app into ${out}`);

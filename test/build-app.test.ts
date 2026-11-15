@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { appendFileSync, cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { INLINE_LIMIT, buildApp } from "../scripts/build-app";
+import { INLINE_LIMIT, buildApp, bundledPackages } from "../scripts/build-app";
 import { FRONT_ROW_ROOMS } from "../src/app/front-row";
 import { parseAppearance } from "../src/app/appearance";
 import { FULL_ROOM_QUERY, ROOM_ART_PREFIX } from "../src/shared/room-art";
@@ -132,10 +132,14 @@ describe("the review app bundle", () => {
     expect(files.filter((f) => f !== "index.html" && f !== "asset-notices.txt" && !/-[a-z0-9]{8}\.[a-z]+$/.test(f))).toEqual([]);
   });
 
-  test("the shipped notices credit Meshy for the companion frames under CC BY 4.0, beside the font and icon licenses", () => {
+  test("bundledPackages names each npm package once, scoped ones included", () => {
+    expect(bundledPackages(["/r/node_modules/react/index.js", "/r/node_modules/react/cjs/a.js", "/r/node_modules/@scope/pkg/x.js", "/r/src/app/main.tsx"])).toEqual(["@scope/pkg", "react"]);
+  });
+
+  test("the shipped notices credit Meshy for the companion frames under CC BY 4.0, beside the font, icon and bundled package licenses", () => {
     const { out } = built();
     const notices = readFileSync(join(out, "asset-notices.txt"), "utf8");
-    for (const name of ["Feather icons", "Young Serif", "DM Sans", "Pixelify Sans", "Companion animation frames"]) expect(notices).toContain(name);
+    for (const name of ["Feather icons", "Young Serif", "DM Sans", "Pixelify Sans", "Companion animation frames", "react", "react-dom", "scheduler", "zod"]) expect(notices).toContain(`${name}\n\n`);
     expect(notices).toContain("Credit: Meshy (https://www.meshy.ai)");
     expect(notices).toContain("https://creativecommons.org/licenses/by/4.0/");
   });
