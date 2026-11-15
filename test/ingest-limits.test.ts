@@ -5,7 +5,7 @@ import { createEvidence } from "../src/backend/evidence";
 import { IngestRefused, resolveIngestLimits } from "../src/backend/evidence/ingest-limits";
 import type { IngestLimits } from "../src/backend/evidence/ingest-limits";
 import { jpegSize } from "../src/backend/evidence/jpeg";
-import { classifyStatus, createMemoryOutbox, flushCapture } from "../src/extension/worker/outbox";
+import { MAX_RETRY_AFTER_MS, QUOTA_RETRY_MS, classifyStatus, createMemoryOutbox, flushCapture, parseRetryAfter } from "../src/extension/worker/outbox";
 import type { Transport } from "../src/extension/worker/outbox";
 import { MAX_FRAME_BASE64_CHARS, MAX_FRAME_BYTES } from "../src/shared/domain";
 import type { CaptureFactBody } from "../src/shared/domain";
@@ -140,6 +140,105 @@ describe("a per-user stored-bytes quota", () => {
   });
 });
 
+describe("a batch that writes nothing stays read-only", () => {
+  const broke = () => roomy({ minFreeBytes: 1000, freeBytes: () => 0, maxUserBytes: 1 });
+
+  test("a heartbeat for an unknown capture creates no ownership row, however many arrive with no free disk", () => {
+    const h = harness({ limits: broke() });
+    for (let i = 0; i < 100; i++) expect(h.evidence.ingest({ captureId: randomId("cap"), facts: [] }).ackedThroughSeq).toBe(-1);
+    expect(count(h, "capture_owners")).toBe(0);
+    expect(count(h, "capture_facts")).toBe(0);
+  });
+
+  test("over HTTP the same heartbeat is answered and writes nothing", async () => {
+    const { base, stored } = start(undefined, { limits: broke() });
+    for (let i = 0; i < 3; i++) {
+      const r = await post(base, "/ingest", { captureId: randomId("cap"), facts: [] }, JSON_HEADERS);
+      expect(r.status).toBe(200);
+    }
+    expect(stored()).toBe(0);
+  });
+
+  test("a batch of facts the capture already holds is a heartbeat, and a batch with something new still meets the floor", () => {
+    let free = 1e12;
+    const h = harness({ limits: roomy({ minFreeBytes: 1000, freeBytes: () => free }) });
+    const s = stream();
+    s.control("start");
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    free = 0;
+    expect(h.evidence.ingest({ captureId: s.captureId, facts: s.facts }).ackedThroughSeq).toBe(0);
+    s.span(0, 5);
+    expect(() => h.evidence.ingest({ captureId: s.captureId, facts: s.facts })).toThrow(IngestRefused);
+    expect(count(h, "capture_facts")).toBe(1);
+  });
+});
+
+describe("storage is counted in bytes", () => {
+  const cjk = (n: number) => "\u6f22".repeat(n);
+  const lecture = () => {
+    const s = stream();
+    s.control("start");
+    s.transcript([[0, 4, cjk(5000)]]);
+    return s;
+  };
+
+  test("a CJK transcript is charged its UTF-8 bytes against the quota", () => {
+    const h = harness({ limits: roomy({ maxUserBytes: 25_000 }) });
+    const a = lecture();
+    h.evidence.ingest({ captureId: a.captureId, facts: a.facts });
+    const stored = h.db.sql.query<{ n: number }, []>("SELECT SUM(LENGTH(CAST(body_json AS BLOB))) AS n FROM capture_facts").get()!.n;
+    expect(stored).toBeGreaterThan(15_000);
+    const b = lecture();
+    expect(() => h.evidence.ingest({ captureId: b.captureId, facts: b.facts })).toThrow(IngestRefused);
+  });
+
+  test("a CJK batch counts its UTF-8 bytes against the disk floor", () => {
+    const h = harness({ limits: roomy({ minFreeBytes: 90_000, freeBytes: () => 100_000 }) });
+    const a = lecture();
+    expect(() => h.evidence.ingest({ captureId: a.captureId, facts: a.facts })).toThrow(IngestRefused);
+    expect(count(h, "capture_facts")).toBe(0);
+  });
+});
+
+describe("a cited snapshot keeps its charge after raw expiry", () => {
+  test("the frame a note keeps counts against the quota once the raw frame row is gone", () => {
+    const clock = { t: 1_000_000 };
+    const h = harness({ clock, limits: roomy({ maxUserBytes: 100_000 }) });
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.span(0, 10);
+    s.frame("f1", 3, { jpeg: b64(headerJpeg(640, 360, 60_000)) });
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    const frame = stableId("ev", s.captureId, "f1");
+    h.evidence.snapshotInTx([frame]);
+    h.db.sql.run("INSERT INTO note_evidence (user_id, note_id, evidence_id) VALUES (?, ?, ?)", [h.db.userId, stableId("note", "cites"), frame]);
+    h.evidence.sweepExpired(clock.t + 31 * 86_400_000, 30);
+    expect(count(h, "frames")).toBe(0);
+    expect(count(h, "evidence_snapshots")).toBe(1);
+
+    const next = stream();
+    next.control("start");
+    next.frame("g1", 1, { jpeg: b64(headerJpeg(640, 360, 60_000)) });
+    expect(() => h.evidence.ingest({ captureId: next.captureId, facts: next.facts })).toThrow(IngestRefused);
+  });
+
+  test("while the raw frame still exists, its hard-linked snapshot is not charged twice", () => {
+    const h = harness({ limits: roomy({ maxUserBytes: 100_000 }) });
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.span(0, 10);
+    s.frame("f1", 3, { jpeg: b64(headerJpeg(640, 360, 40_000)) });
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    h.evidence.snapshotInTx([stableId("ev", s.captureId, "f1")]);
+    const next = stream();
+    next.control("start");
+    next.frame("g1", 1, { jpeg: b64(headerJpeg(640, 360, 40_000)) });
+    expect(() => h.evidence.ingest({ captureId: next.captureId, facts: next.facts })).not.toThrow();
+  });
+});
+
 describe("a disk floor", () => {
   test("below the floor ingest is refused with a retryable 503, nothing is written, and above it ingest works", async () => {
     let free = 1500 * MIB;
@@ -193,6 +292,18 @@ describe("the extension meets a refusal without looping or dropping the capture"
       expect(out.remaining).toBe(4);
       expect(await store.deadLetters(CAP)).toHaveLength(0);
     }
+  });
+});
+
+describe("a refusal's wait is read from the response", () => {
+  test("Retry-After is whole seconds, capped, and 507 carries its own window", () => {
+    expect(parseRetryAfter("300")).toBe(300_000);
+    expect(parseRetryAfter("999999")).toBe(MAX_RETRY_AFTER_MS);
+    expect(parseRetryAfter("soon")).toBeUndefined();
+    expect(parseRetryAfter(null)).toBeUndefined();
+    expect(classifyStatus(503, "120")).toMatchObject({ retryable: true, waitMs: 120_000 });
+    expect(classifyStatus(503).waitMs).toBeUndefined();
+    expect(classifyStatus(507)).toMatchObject({ retryable: false, waitMs: QUOTA_RETRY_MS });
   });
 });
 

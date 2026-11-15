@@ -7,7 +7,7 @@
 import { stableId } from "../shared/ids";
 import { BUDGET_HOLDS } from "./migrations-budget";
 import { DEVICES_MIGRATION } from "./devices";
-import { FRAME_BYTES } from "./migrations-frame-bytes";
+import { SIZE_COLUMNS } from "./migrations-frame-bytes";
 import { OBSERVATION_STATUSES, RECORD_USER_ID } from "./migrations-record";
 import { TUTOR_CACHE } from "./migrations-review";
 
@@ -551,7 +551,7 @@ SELECT capture_id, MIN(user_id), 0 FROM frames
 WHERE capture_id NOT IN (SELECT capture_id FROM capture_owners) GROUP BY capture_id;
 ${appendOnly("capture_owners")}`,
     },
-    FRAME_BYTES,
+    ...SIZE_COLUMNS,
   ],
 
   segmentation: [

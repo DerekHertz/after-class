@@ -434,8 +434,17 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     `INSERT INTO frames (user_id, evidence_id, capture_id, source_id, frame_id, media_s, width, height, path, seq, bytes)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
   );
-  const storedBytes = db.sql.query<{ n: number }, [string, string]>(
-    "SELECT (SELECT COALESCE(SUM(bytes), 0) FROM frames WHERE user_id = ?) + (SELECT COALESCE(SUM(LENGTH(body_json)), 0) FROM capture_facts WHERE user_id = ?) AS n",
+  /**
+   * What the user's rows hold on disk, in bytes. Text is measured as a BLOB because SQLite's LENGTH of TEXT counts characters. A
+   * snapshot's frame is a hard link to the frame row's file until raw expiry deletes that row, so it is charged only once no
+   * frame row has its evidence id.
+   */
+  const storedBytes = db.sql.query<{ n: number }, [string, string, string, string]>(
+    `SELECT (SELECT COALESCE(SUM(bytes), 0) FROM frames WHERE user_id = ?)
+          + (SELECT COALESCE(SUM(LENGTH(CAST(body_json AS BLOB))), 0) FROM capture_facts WHERE user_id = ?)
+          + (SELECT COALESCE(SUM(LENGTH(CAST(text AS BLOB))), 0) FROM evidence_snapshots WHERE user_id = ?)
+          + (SELECT COALESCE(SUM(s.bytes), 0) FROM evidence_snapshots s
+             WHERE s.user_id = ? AND NOT EXISTS (SELECT 1 FROM frames f WHERE f.user_id = s.user_id AND f.evidence_id = s.evidence_id)) AS n`,
   );
   const otherOwner = db.sql.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM capture_owners WHERE capture_id = ? AND user_id <> ?");
   const claimCapture = db.sql.query("INSERT INTO capture_owners (capture_id, user_id, claimed_ms) VALUES (?, ?, ?) ON CONFLICT DO NOTHING");
@@ -496,18 +505,18 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
         if (f.kind === "frame") body.jpegOk = frames.get(f.clientSeq)!.jpeg;
         const json = JSON.stringify(body);
         bodies.set(f.clientSeq, json);
-        incoming += json.length;
+        incoming += Buffer.byteLength(json, "utf8");
         const frame = frames.get(f.clientSeq);
         if (frame?.stored) incoming += frame.bytes.length;
       }
-      // Before any file is written, and only for a batch that adds something: a heartbeat still refreshes the ack of a user at quota.
-      if (incoming > 0) {
-        if (limits.maxUserBytes > 0 && storedBytes.get(userId, userId)!.n + incoming > limits.maxUserBytes) {
-          throw new IngestRefused("quota", `this account has reached its ${Math.floor(limits.maxUserBytes / 1048576)} MiB storage limit`);
-        }
-        if (limits.minFreeBytes > 0 && limits.freeBytes() - incoming < limits.minFreeBytes) {
-          throw new IngestRefused("disk", "the server is low on disk space; retry later");
-        }
+      // A batch with nothing new is a heartbeat: it answers the ack and writes nothing, not even the capture's ownership row, so it is
+      // not metered. Every batch that does write is, before any file is written.
+      if (fresh.length === 0) return { ackedThroughSeq: ackedThrough(captureId) };
+      if (limits.maxUserBytes > 0 && storedBytes.get(userId, userId, userId, userId)!.n + incoming > limits.maxUserBytes) {
+        throw new IngestRefused("quota", `this account has reached its ${Math.floor(limits.maxUserBytes / 1048576)} MiB storage limit`);
+      }
+      if (limits.minFreeBytes > 0 && limits.freeBytes() - incoming < limits.minFreeBytes) {
+        throw new IngestRefused("disk", "the server is low on disk space; retry later");
       }
       for (const frame of frames.values()) if (frame.stored) writeAtomic(abs(frame.path), frame.bytes);
 
@@ -525,10 +534,8 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
           }
         }
       });
-      if (fresh.length > 0) {
-        invalidateCapture(captureId);
-        db.afterCommit(() => deps.onChange(captureId, [captureDep(captureId), ...sourcesOf.all(userId, captureId).map((r) => sourceDep(sourceIdOf(r.video_id)))]));
-      }
+      invalidateCapture(captureId);
+      db.afterCommit(() => deps.onChange(captureId, [captureDep(captureId), ...sourcesOf.all(userId, captureId).map((r) => sourceDep(sourceIdOf(r.video_id)))]));
       return { ackedThroughSeq: ackedThrough(captureId) };
     },
 
@@ -688,9 +695,9 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
             }
           }
           db.sql.run(
-            `INSERT INTO evidence_snapshots (user_id, evidence_id, kind, source_id, start_s, end_s, text, frame_path, created_ms, width, height)
-             VALUES (?, ?, 'frame', ?, ?, ?, NULL, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
-            [userId, id, f.sourceId, f.mediaS, f.mediaS, link, now(), f.width, f.height],
+            `INSERT INTO evidence_snapshots (user_id, evidence_id, kind, source_id, start_s, end_s, text, frame_path, created_ms, width, height, bytes)
+             VALUES (?, ?, 'frame', ?, ?, ?, NULL, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+            [userId, id, f.sourceId, f.mediaS, f.mediaS, link, now(), f.width, f.height, statSync(abs(link)).size],
           );
         }
       });
