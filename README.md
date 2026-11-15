@@ -58,3 +58,7 @@ Build both interfaces with `bun run build:app` and `bun run build:ext`. Use `bun
 - [Architecture and module boundaries](src/MODULES.md)
 - [Lifecycle models in TLA+](docs/flows/model/)
 - [Current room and companion design](docs/design/front-row/README.md)
+
+## License
+
+All rights reserved. See [LICENSE](LICENSE). Fonts, icons and the Meshy-generated companion frames keep their own licenses, listed there and shipped with the app in `asset-notices.txt`.
