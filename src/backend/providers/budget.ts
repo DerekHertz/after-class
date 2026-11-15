@@ -51,7 +51,9 @@ import type { Db } from "../db";
  *   learner's turn with a quarter of their $5 unused.
  *   Jev: $0.042 per million input tokens, output free (`JEV_INPUT_USD_PER_MTOK` in jev.ts). The measured calls of a 13.6 minute
  *   lecture ran 420 to 10,632 input tokens, so $0.00002 to $0.00045 each. $0.0005 covers the largest of them. A Jev response
- *   with tokens settles at its priced amount, so this figure is only counted for one that reported none.
+ *   with tokens settles at its priced amount, so this figure is only counted for one that reported none. It is also the bound
+ *   when a process ends before a response was read: that call settles at this reservation with an unknown cost (R17), which
+ *   understates a call over about 11,900 input tokens. Once a response's usage is read its price is stored, so a later crash settles at it.
  */
 export const ESTIMATE_USD: Readonly<Record<Purpose, number>> = {
   boundary: 0.0005,
@@ -103,7 +105,12 @@ export type Budget = {
 export const INTERRUPTED = "the process ended before the call finished, so it may have been billed";
 
 const MICROS = 1_000_000;
-const toMicros = (usd: number): number => Math.round(usd * MICROS);
+/**
+ * Whole micro-dollars, rounded up so a held or settled amount is never below the cost it stands for. The 1e-6 micro tolerance
+ * only absorbs floating point error, so 1,000,000 tokens at $0.042 is 42,000 micros and not 42,001. A recorded `cost_usd` keeps
+ * the exact estimate, so the settled amount is at most one micro above it.
+ */
+const toMicros = (usd: number): number => Math.ceil(usd * MICROS - 1e-6);
 
 /** The calendar month in UTC, "YYYY-MM". */
 export function periodOf(ms: number): string {

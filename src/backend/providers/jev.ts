@@ -13,7 +13,7 @@
  */
 import { z } from "zod";
 import { ProviderError } from "./memo";
-import type { UsageReport } from "./memo";
+import type { Admitted, UsageReport } from "./memo";
 import type { Cost } from "../../shared/domain";
 
 export type JevQuestion =
@@ -43,7 +43,7 @@ export type JevClient = {
    * whole request on Jev's side, so we fail fast and the task maps it to uncertain.
    * Throws ProviderError (retryable: status >= 500 || 429), with usage when the response carried it.
    */
-  ask<Q extends string>(req: JevRequest<Q>, signal: AbortSignal): Promise<{ readonly answers: Readonly<Record<Q, JevAnswer>>; readonly usage: UsageReport }>;
+  ask<Q extends string>(req: JevRequest<Q>, signal: AbortSignal, admitted?: Admitted): Promise<{ readonly answers: Readonly<Record<Q, JevAnswer>>; readonly usage: UsageReport }>;
 };
 
 export const JEV_IMAGE_LIMITS = {
@@ -154,11 +154,15 @@ const answerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("score"), score: z.number(), probabilities: z.record(z.string(), z.number()) }),
 ]);
 
-const responseSchema = z.object({
+const usageSchema = z.object({ input_tokens: z.number().nonnegative().nullish(), output_tokens: z.number().nonnegative().nullish() });
+
+/** The envelope without its answers: the billing fields are read from it on their own, so a bad answer never hides them. */
+const envelopeSchema = z.object({
   model: z.string().nullish(),
-  answers: z.record(z.string(), answerSchema),
-  usage: z.object({ input_tokens: z.number().nullish(), output_tokens: z.number().nullish() }).nullish(),
+  usage: usageSchema.nullish(),
 });
+
+const answersSchema = z.object({ answers: z.record(z.string(), answerSchema) });
 
 const errorSchema = z.object({
   message: z.string().nullish(),
@@ -200,7 +204,7 @@ export function createJevClient(opts: {
   const timeoutMs = opts.timeoutMs ?? 60_000;
 
   return {
-    async ask<Q extends string>(req: JevRequest<Q>, signal: AbortSignal) {
+    async ask<Q extends string>(req: JevRequest<Q>, signal: AbortSignal, admitted?: Admitted) {
       validateQuestions(req.questions);
       validateImages(req);
 
@@ -251,10 +255,10 @@ export function createJevClient(opts: {
       } catch {
         throw new ProviderError(`jev ${res.status}: response is not JSON`, null, false);
       }
-      const parsed = responseSchema.safeParse(json);
-      if (!parsed.success) throw new ProviderError(`jev response did not match the expected shape: ${parsed.error.message.slice(0, 300)}`, null, false);
-
-      const { model, answers, usage } = parsed.data;
+      // Usage is read before the answers are checked. Jev bills the tokens whether or not the answers are usable.
+      const envelope = envelopeSchema.safeParse(json);
+      const model = envelope.success ? envelope.data.model : null;
+      const usage = envelope.success ? envelope.data.usage : null;
       const billedModel = model ?? req.model;
       const inputTokens = usage?.input_tokens ?? null;
       const report: UsageReport = {
@@ -264,6 +268,11 @@ export function createJevClient(opts: {
         cacheReadTokens: null,
         cost: jevCost(billedModel, inputTokens),
       };
+      admitted?.priced(report.cost);
+
+      const parsed = answersSchema.safeParse(json);
+      if (!parsed.success) throw new ProviderError(`jev response did not match the expected shape: ${parsed.error.message.slice(0, 300)}`, report, false);
+      const { answers } = parsed.data;
 
       const out: Partial<Record<Q, JevAnswer>> = {};
       for (const id of Object.keys(req.questions) as Q[]) {

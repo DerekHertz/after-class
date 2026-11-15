@@ -189,7 +189,7 @@ function buildBoundaryTask(jev: JevClient, questions: BoundaryQuestions | undefi
     canonicalInput: (i) => ({ window: i.window.id, new: ids(i.newPassages), context: ids(i.contextPassages), frames: frameIds(i.frames) }),
     async attempt(i, ctx) {
       const images = i.frames.map((f, n) => image(`frame_${n}`, f));
-      ctx.admit();
+      const admitted = ctx.admit();
       const { answers, usage } = await jev.ask<BoundaryQuestionKey>(
         {
           model: JEV_MODEL,
@@ -202,6 +202,7 @@ function buildBoundaryTask(jev: JevClient, questions: BoundaryQuestions | undefi
           images,
         },
         ctx.signal,
+        admitted,
       );
       const pNewConcept = probability(answers.new_concept);
       const pStoppingPoint = probability(answers.stopping_point);
@@ -249,7 +250,7 @@ export function frameChangeTask(jev: JevClient, questions?: FrameChangeQuestions
     async attempt(i, ctx) {
       if (i.before === null) return { output: "uncertain", usage: NO_CALL };
       const images = [image("frame_before", i.before), image("frame_after", i.after)];
-      ctx.admit();
+      const admitted = ctx.admit();
       const { answers, usage } = await jev.ask(
         {
           model: JEV_MODEL,
@@ -258,6 +259,7 @@ export function frameChangeTask(jev: JevClient, questions?: FrameChangeQuestions
           images,
         },
         ctx.signal,
+        admitted,
       );
       return { output: toVerdictAt(probability(answers.teaching_change), th), usage };
     },
@@ -283,7 +285,7 @@ export function claimSupportTask(jev: JevClient): Task<ClaimSupportInput, { read
     }),
     async attempt(i, ctx) {
       const images = i.frames.map((f, n) => image(`frame_${n}`, f));
-      ctx.admit();
+      const admitted = ctx.admit();
       const { answers, usage } = await jev.ask(
         {
           model: JEV_MODEL,
@@ -297,6 +299,7 @@ export function claimSupportTask(jev: JevClient): Task<ClaimSupportInput, { read
           images,
         },
         ctx.signal,
+        admitted,
       );
       const p = probability(answers.supported);
       return { output: { verdict: toVerdict(p), p }, usage };

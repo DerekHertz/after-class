@@ -451,4 +451,38 @@ describe("Jev spend", () => {
     expect(w.db.sql.query("SELECT cost_kind, cost_usd FROM usage_events").get()).toEqual({ cost_kind: "unknown", cost_usd: null });
     expect(used(w.budget, w.db)).toBe(ESTIMATE_USD.frame_change);
   });
+  const jevTask = (tokens: number, answer: unknown = { type: "noul", noul: 0.2 }) =>
+    frameChangeTask(createJevClient({ apiKey: "k", fetch: scriptedFetch(() => json({ model: "jev-1.13.0", answers: { teaching_change: answer }, usage: { input_tokens: tokens, output_tokens: 3 } })).fetch }));
+  const pair = { before: withBytes(frame("a")), after: withBytes(frame("b")), nearbyPassages: [] };
+  const settledMicros = (db: Db) => db.sql.query<{ settled_micros: number }, []>("SELECT settled_micros FROM budget_holds").all().map((h) => h.settled_micros);
+
+  test("a process that ends after a valid response is reconciled at the price already read, not the reservation", async () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    const task = jevTask(30_000);
+    void w.memo.run({ ...task, attempt: async (i, c) => (await task.attempt(i, c), new Promise<never>(() => {})) }, pair);
+    await new Promise((r) => setTimeout(r, 20));
+    const next = createBudget(w.db, { limits: { userUsd: 5, totalUsd: 50 }, stopped: () => false });
+    expect(next.reconcileInterrupted()).toBe(1);
+    expect(settledMicros(w.db)).toEqual([1260]);
+    expect(w.db.sql.query("SELECT cost_kind FROM usage_events").get()).toEqual({ cost_kind: "unknown" });
+  });
+
+  test("an answer that fails validation still settles at the price of the tokens Jev billed", async () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    const out = await w.memo.run(jevTask(30_000, { type: "noul", noul: 1.5 }), pair);
+    expect(out.kind).toBe("failed");
+    expect(w.db.sql.query<{ cost_kind: string; cost_usd: number }, []>("SELECT cost_kind, cost_usd FROM usage_events").get()).toEqual({ cost_kind: "estimated", cost_usd: expect.closeTo(0.00126, 9) as unknown as number });
+    expect(settledMicros(w.db)).toEqual([1260]);
+  });
+
+  test("a settled amount is never below the cost recorded for it, down to a response of 11 tokens", async () => {
+    for (const [tokens, micros] of [[5364, 226], [11, 1], [0, 0]] as const) {
+      const w = world({ userUsd: 5, totalUsd: 50 });
+      await w.memo.run(jevTask(tokens), pair);
+      const [settled] = settledMicros(w.db);
+      const recorded = w.db.sql.query<{ cost_usd: number }, []>("SELECT cost_usd FROM usage_events").get()!.cost_usd;
+      expect(settled).toBe(micros);
+      expect(settled! / 1_000_000).toBeGreaterThanOrEqual(recorded);
+    }
+  });
 });
