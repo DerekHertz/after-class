@@ -390,12 +390,13 @@ describe("starting reviews that never got tutoring is limited", () => {
     } finally {
       (Bun as any).serve = original;
     }
+    const peer = { requestIP: () => null };
     const request = (id: string) =>
-      handler!(new Request(`http://127.0.0.1:39555/captures/${r.world.captureId}/reviews`, {
+      (handler as unknown as (req: Request, srv: typeof peer) => Response | Promise<Response>)(new Request(`http://127.0.0.1:39555/captures/${r.world.captureId}/reviews`, {
         method: "POST",
         headers: { host: "127.0.0.1:39555", authorization: "Bearer test-token", "content-type": "application/json" },
         body: JSON.stringify({ choice: "prepared_only", reviewId: id }),
-      }));
+      }), peer);
     const refused = await request(randomId("rvw"));
     expect(refused.status).toBe(429);
     expect(((await refused.json()) as { error: string }).error).toBe(new ReviewLimitError().message);
