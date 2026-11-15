@@ -970,3 +970,15 @@ describe("AFTERCLASS_CLAUDE_BACKEND", () => {
     for (const text of [usage, b.logs.join("\n"), b.errors.join("\n")]) expect(text).not.toContain(MESSAGES_KEY);
   }, 30_000);
 });
+
+describe("disk watch", () => {
+  test("the app logs one disk reading at start, for the beta's free-space alarm", async () => {
+    const b = await boot({}, { AFTERCLASS_MIN_FREE_MB: "1" });
+    const readings = b.logs.filter((l) => l.startsWith('{"event":"disk"'));
+    expect(readings).toHaveLength(1);
+    const r = JSON.parse(readings[0]!);
+    expect(r.floorMib).toBe(1);
+    expect(r.freeMib).toBeGreaterThan(0);
+    expect(r.totalMib).toBeGreaterThanOrEqual(r.freeMib);
+  });
+});
