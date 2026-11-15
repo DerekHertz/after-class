@@ -40,14 +40,15 @@ function hostedServer() {
   const w = world();
   const verifier = createClerkVerifier({ issuer: ISSUER, jwksUrl: "https://clerk.afterclass.test/.well-known/jwks.json", authorizedParties: [PUBLIC_ORIGIN] }, { fetch: fakeJwks([key]).fetch });
   const devices = createDevices(w.db);
+  const appDir = fixtureApp();
   const server = serve({
     hosted: { publicOrigin: PUBLIC_ORIGIN, extensionId: EXT_ID, clerk: { scriptUrl: SCRIPT, uiScriptUrl: UI_SCRIPT, publishableKey: PUBLISHABLE_KEY }, userFor: hostedCallers(clerkUsers(verifier, w.db), devices), devices },
     port: 0,
     modulesFor: () => ({ ledger: { summary: () => ({ total: { known: 0, unknown: 0 } }) } as never, evidence: w.evidence, reviews: w.reviews }),
-    appDir: fixtureApp(),
+    appDir,
   });
   const port = server.port as number;
-  return { ...w, server, port, base: `http://127.0.0.1:${port}`, stop: () => server.stop(true) };
+  return { ...w, server, port, appDir, base: `http://127.0.0.1:${port}`, stop: () => server.stop(true) };
 }
 
 const bearerFor = async (over: Record<string, unknown> = {}) => `Bearer ${await sign(key, claims(over))}`;
@@ -136,12 +137,53 @@ describe("hosted requests", () => {
     expect(asset.status).toBe(200);
   });
 
-  test("GET / redirects to the app, /health answers anyone, and an unrouted path is still a 404", async () => {
+  test("GET / is the public landing page, /health answers anyone, and an unrouted path is still a 404", async () => {
     const home = await raw(s.port, "/", { Host: "afterclass.test" });
-    expect(home.status).toBe(302);
-    expect(home.headers.get("location")).toBe("/app/");
+    expect(home.status).toBe(200);
+    expect(home.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(home.body).toContain("<h1>After Class</h1>");
+    expect(home.body).toMatch(/invite-only/i);
+    expect(home.body).toContain("ask the person who invited you");
+    expect(home.body).toContain(`<a class="button" href="/app/">Sign in</a>`);
+    expect(home.body).toContain("<title>After Class: study YouTube lectures by explaining them</title>");
+    expect(home.body).toContain('<meta name="description" content="After Class is a study companion');
+    expect(home.body).toContain(`<link rel="canonical" href="${PUBLIC_ORIGIN}/">`);
     expect((await raw(s.port, "/health", { Host: "10.0.0.7:8080" })).status).toBe(200);
     expect((await raw(s.port, "/nope", {})).status).toBe(404);
+  });
+
+  test("the public pages run no script, load nothing from another site, and carry HSTS and a strict policy", async () => {
+    for (const path of ["/", "/privacy"]) {
+      const r = await raw(s.port, path, { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate" });
+      expect(r.status, path).toBe(200);
+      expect(r.body, path).not.toMatch(/<script|<iframe|<form|\bon[a-z]+=|https?:\/\/(?!afterclass\.test)/i);
+      expect(r.headers.get("strict-transport-security"), path).toBe("max-age=31536000");
+      const csp = r.headers.get("content-security-policy")!;
+      expect(csp, path).toContain("default-src 'none'");
+      expect(csp, path).not.toMatch(/script-src|unsafe-eval/);
+      expect(csp, path).toContain("frame-ancestors 'none'");
+      expect(r.headers.get("x-content-type-options"), path).toBe("nosniff");
+    }
+    expect((await raw(s.port, "/", {}, "POST")).status).toBe(405);
+  });
+
+  test("the public pages draw with the built app's room art and fonts when it has them, and read fine without", async () => {
+    expect((await raw(s.port, "/", {})).body).not.toContain("url('/app/");
+    writeFileSync(join(s.appDir, "last-desk-0a1b2c3d.webp"), "x");
+    writeFileSync(join(s.appDir, "pixelify-sans-0a1b2c3d.ttf"), "x");
+    writeFileSync(join(s.appDir, "dm-sans-400-0a1b2c3d.ttf"), "x");
+    const page = (await raw(s.port, "/", {})).body;
+    expect(page).toContain("--plate:url('/app/last-desk-0a1b2c3d.webp')");
+    expect(page).toContain("url('/app/pixelify-sans-0a1b2c3d.ttf')");
+    expect(page).toContain("url('/app/dm-sans-400-0a1b2c3d.ttf')");
+  });
+
+  test("/privacy names who processes the data, canonicalises to itself and links back", async () => {
+    const r = await raw(s.port, "/privacy", {});
+    for (const name of ["Clerk", "Anthropic", "TypeSafe", "us-east-2"]) expect(r.body).toContain(name);
+    expect(r.body).toContain(`<link rel="canonical" href="${PUBLIC_ORIGIN}/privacy">`);
+    expect(r.body).toContain('href="/"');
+    expect(r.body).not.toMatch(/@[a-z0-9-]+\.[a-z]|mailto:/);
   });
 
   test("CORS preflight is answered only for the public origin and the pinned extension", async () => {
