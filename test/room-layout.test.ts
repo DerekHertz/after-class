@@ -133,6 +133,26 @@ describe("the layout is what the stylesheet drew before it moved here", () => {
       boardText: [849.015625, 291.265625, 1468.84375, 461.125], deskText: [547.1875, 1049.375, 1465.609375, 300.234375],
     },
   };
+  /**
+   * The full-window layers, measured from the same old stylesheet on origin/feat/live-room (5ebc01b). The desk is a
+   * getBoundingClientRect box. The background was the stage's ::before, so its box is the resolved left, top, width and
+   * height of that pseudo-element. Windows with a negative top are cropped at the top, the 1280x1270 ones at the sides,
+   * and each room anchors its crop differently (right, centre, left).
+   */
+  const measuredLayers: Record<string, { readonly background: Box; readonly desk: Box }> = {
+    "last-desk@1440x900": { background: [0, -0.149811, 1440, 900.672], desk: [0, 618.53125, 1440, 325.9375] },
+    "study-bench@1440x900": { background: [0, -0.204288, 1440, 900.672], desk: [0, 618.53125, 1440, 328.671875] },
+    "projection-booth@1440x900": { background: [0, -0.149811, 1440, 900.672], desk: [0, 618.53125, 1440, 372.25] },
+    "last-desk@1920x1080": { background: [0, -26.5997, 1920, 1200.91], desk: [0, 704.703125, 1920, 434.59375] },
+    "study-bench@1920x1080": { background: [0, -36.2724, 1920, 1200.91], desk: [0, 704.703125, 1920, 438.234375] },
+    "projection-booth@1920x1080": { background: [0, -26.5997, 1920, 1200.91], desk: [0, 704.703125, 1920, 496.328125] },
+    "last-desk@2560x1440": { background: [0, -35.4663, 2560, 1601.2], desk: [0, 939.609375, 2560, 579.46875] },
+    "study-bench@2560x1440": { background: [0, -48.3632, 2560, 1601.2], desk: [0, 939.609375, 2560, 584.3125] },
+    "projection-booth@2560x1440": { background: [0, -35.4663, 2560, 1601.2], desk: [0, 939.609375, 2560, 661.78125] },
+    "last-desk@1280x1270": { background: [-476.27, 0, 1756.27, 1098.48], desk: [0, 957.25, 1280, 362.15625] },
+    "study-bench@1280x1270": { background: [-238.135, 0, 1756.27, 1098.48], desk: [0, 957.25, 1280, 365.1875] },
+    "projection-booth@1280x1270": { background: [0, 0, 1756.27, 1098.48], desk: [0, 957.25, 1280, 413.609375] },
+  };
   const box = (r: Rect): Box => [r.left, r.top, r.width, r.height];
   const near = (a: Box, b: Box) => a.every((x, i) => Math.abs(x - b[i]!) <= 1 / 16);
 
@@ -149,6 +169,17 @@ describe("the layout is what the stylesheet drew before it moved here", () => {
       ];
       expect(got.layers.extras).toHaveLength(want.extras.length);
       for (const [name, a, b] of pairs) expect({ name, a, near: near(a, b) }).toEqual({ name, a, near: true });
+    });
+  }
+
+  for (const [key, want] of Object.entries(measuredLayers)) {
+    test(`${key} places the background and the desk where Chrome drew them`, () => {
+      const [scene, size] = key.split("@") as [SceneId, string];
+      const [width, height] = size.split("x").map(Number) as [number, number];
+      const { background, desk } = full(scene, { width, height }).layers;
+      for (const [name, a, b] of [["background", box(background), want.background], ["desk", box(desk.rect), want.desk]] as const) {
+        expect({ name, a, near: near(a, b) }).toEqual({ name, a, near: true });
+      }
     });
   }
 });
