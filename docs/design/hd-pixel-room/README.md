@@ -1,61 +1,47 @@
 # HD pixel rooms and ambient animation
 
-Start with **The Last Desk and original Mote**. From a fixed seat, the learner should see wind pass through the trees outside the left window. A moment later, a patch of sunlight shifts on the chalkboard. At the desk, Mote reacts when the learner draws a card or opens the notebook. The room supports any lecture.
+Start with **The Last Desk and original Mote**. From a fixed seat, the learner sees wind pass through the trees outside the left window, then a patch of sunlight shift on the chalkboard. Mote reacts when the learner draws a card or opens the notebook. The room supports any lecture.
 
-The still below is the reference for composition, materials and pixel detail. The earlier loop shows how quiet the interior can be. Its main movement is on the indoor ivy. For the next pass, put the strongest movement **beyond the glass**. The frontend now has all three HD room plates, the exterior animation frames and matched HD companion poses. The implementation notes below describe it. [Earlier 12-second loop](previous-breeze.gif) · [Shared scene and component handoff](../IMPLEMENTATION-HANDOFF.md)
+The still below is the reference for composition, materials and pixel detail. The [earlier 12-second loop](previous-breeze.gif) moved mostly the indoor ivy, so put the strongest movement **beyond the glass**. The frontend has all three HD plates, the exterior frames and matched HD companion poses. See also the [shared scene and component handoff](../IMPLEMENTATION-HANDOFF.md).
 
 ![HD Last Desk artwork with the empty companion mat, left window and sunlit chalkboard](last-desk.webp)
 
 ## Build one breeze
 
-Use the **1672 × 941** room plate as the common coordinate system. Trace the visible window panes once. Export a clean exterior backing, two or three clusters of leafy branches with transparent surrounds, and a foreground window frame. Restore the pixels behind each displaced cluster so its resting silhouette never shows through. Keep the curtain, mullions, lamp, furniture, paper and tool hit areas on their original coordinates.
+The **1672 × 941** room plate is the common coordinate system. Trace the window panes once. Export a clean exterior backing, two or three leafy branch clusters with transparent surrounds, and a foreground window frame. Restore the pixels behind each displaced cluster so its resting silhouette never shows. The curtain, mullions, lamp, furniture, paper and tool hit areas keep their coordinates.
 
 | Layer, back to front | Movement and treatment |
 | --- | --- |
-| Exterior backing and canopy | Keep distant trunks steady. Draw a few discrete poses for the nearer leaves. Start one branch first, let its neighbor follow, then allow both to settle. Clip the whole exterior to the pane openings. |
-| Frame and interior | Composite the window frame over the leaves. Keep the camera fixed for pointer, scroll and touch. Give indoor ivy at most a small delayed response near the sill. |
-| Sunlight on the board | Mask the existing lit panes on the left half of the board. Let one irregular leaf shadow cross a lit patch and fade as the outside branch settles. Keep the chalk texture, mullion shadows and dark side of the board the whole time. |
-| Desktop and companion | Mount controls, paper, mascot feet and contact shadow in the same stage coordinates. Render text, focus rings and interaction targets separately, and keep them stable. |
+| Exterior backing and canopy | Distant trunks stay steady. The nearer leaves have a few discrete poses. One branch starts, its neighbor follows, and both settle. The exterior is clipped to the pane openings. |
+| Frame and interior | The window frame sits over the leaves. The camera stays fixed for pointer, scroll and touch. Indoor ivy gets at most a small delayed response near the sill. |
+| Sunlight on the board | A mask covers the lit panes on the left half of the board. One leaf shadow crosses a lit patch and fades as the branch settles. The chalk texture, mullion shadows and dark side stay. |
+| Desktop and companion | Controls, paper, mascot feet and contact shadow share the stage coordinates. Text, focus rings and targets render separately and stay stable. |
 
-**Suggested first timing pass.** In a 12-second study, hold briefly, start the canopy at second 2, let a neighboring cluster follow about half a second later, and bring the board shadow in just after it. Allow most of the movement to settle by second 7. Try 4 to 8 native pixels at the nearest exterior leaf tips and 1 to 2 at the indoor tips. Review at ordinary laptop size and adjust until the exterior reads first. Match the first and last pose and shadow strength. Use one shared timeline for this gust so the shadow moves with the leaves that cast it. Keep it independent of cursor position and study progress.
+**Timing.** In a 12-second loop, the canopy starts at second 2, a neighboring cluster follows about half a second later, and the board shadow comes in just after. Most movement settles by second 7. Try 4 to 8 native pixels at the nearest exterior leaf tips and 1 to 2 indoors, adjusted at laptop size until the exterior reads first. The first and last poses match. One timeline drives the gust and its shadow, independent of the cursor and study progress.
 
-For Study Bench, register a new mask to its own window and catch the returning light on the bench. For Projection Booth, use its existing projector or practical lamp as the light source. Draw and approve each room's HD plate before deriving its layers.
+Study Bench uses its own window mask and catches the light on the bench. Projection Booth uses its projector or lamp as the light source. Approve each room's plate before deriving its layers.
 
-## Match the mascots at their displayed size
+## Mascots at their displayed size
 
-Use the new HD companion poses in all three rooms. The earlier standalone prototype used the same coarse sprites at both detail levels. The redrawn assets must pass these checks.
+1. Each character fits a **255 × 228** stage-pixel box on Last Desk and Study Bench, and **212 × 195** in Projection Booth, keeping its proportions and visual weight.
+2. Draw at the room's native sampling scale, matching edge steps, cluster sizes and highlight width to the nearby card-box rim and brass fittings. A larger canvas does not raise apparent resolution.
+3. Export lossless transparent frames on a common untrimmed canvas per character, with one ground anchor per pose and a ground shadow. Light each character from the room's light source, with an outline legible in afternoon light and booth lamplight.
+4. Mote, Pip, Lumi, Inkcloud Yun, Moonlit Library Mote and Pagewing Spirit Mote each get idle, card-draw and notebook-open poses. Mote lifts its wings on a draw and dips its head toward the notebook. Pip bounces and Lumi tilts its lamp head. Each gesture ends in the anchored idle pose.
 
-1. Place each character over the actual plate at its final footprint. The prototype fits a companion inside a **255 × 228** stage-pixel box on Last Desk and Study Bench, and **212 × 195** in Projection Booth. Use those as starting bounds. Keep each character's proportions and visual weight within the box.
-2. Draw at the room's native sampling scale. Compare the contour against the nearby card-box rim and the small highlights against the brass fittings. Match edge steps, cluster sizes and the width of a highlight. Enlarging the old sprite makes every cluster bigger. A larger PNG canvas alone does not raise the apparent resolution.
-3. Export transparent, lossless frames on a common untrimmed canvas per character. Store one foot or resting-point anchor for every pose, plus a ground shadow on the mat. Light the character from the room's light source. Keep the outline legible against the mat in both afternoon light and booth lamplight.
-4. Draw idle, card-draw and notebook-open poses for Mote, Pip, Lumi, Inkcloud Yun, Moonlit Library Mote and Pagewing Spirit Mote. For Mote, let the wings lift on a draw and the head dip toward the opening notebook. Give Pip a short bounce and Lumi a lamp-head tilt. Carry the same intent into each character's anatomy. Finish each gesture in its anchored idle pose.
+**Sign-off.** Review all six at desk size beside a same-scale crop of the box and mat, then a magnified nearest-neighbor crop for stair steps, blur, alpha fringes and jitter. At 100% zoom on standard and high-density displays, the smallest identifying mark reads as clearly as the neighboring props. Check each room and mascot pairing before offering that room in HD.
 
-**Art sign-off.** Review a contact sheet of all six at actual desk size, beside a crop of the box and mat at the same scale. Then inspect a magnified nearest-neighbor crop for chunky stair steps, blurred contours, alpha fringes and frame-to-frame jitter. At 100% browser zoom on standard and high-density displays, the eye, wing edge or smallest identifying mark should read as clearly as the neighboring prop details. Check each pairing of room and mascot before offering that room in HD.
+## Frontend rules
 
-## Connect it to the frontend
+- The [appearance provider](../../../src/app/appearance.tsx) keeps room, companion and detail independent, with a default for older preferences. Switching artwork never remounts the session or clears drafts.
+- The [scene shell](../../../src/app/scene.tsx) and [room tools](../../../src/app/room-tools.tsx) render one stage for the active room. Decoration is hidden from assistive technology and ignores the pointer. Stage and hotspots scale together. Thumbnails are stills, and only the active room's assets load.
+- The [companion renderer](../../../src/app/companion.tsx) plays one gesture per card draw or notebook open, keyboard included, separate from listening, waiting and saving status. The learner keeps focus and can hide the companion.
+- Playback uses cropped stepped sprite sheets and a masked shadow layer, with the still as first render and fallback. Ambient playback pauses in a hidden tab. Under reduced motion the resting art shows and the card, notebook or status text carries the action.
+- Before rollout, check a full loop with the pointer parked, the loop seam and pane edges, one reaction per keyboard action, a narrow viewport, reduced motion, a hidden companion, a room switch mid-draft, a return from a background tab and missing animation assets.
 
-- Add a presentation detail preference in the existing appearance provider. Give older saved preferences a supported default when parsing them. Keep room, companion and detail independently selectable. Switch the artwork without remounting the learning session or clearing drafts. [Appearance state](../../../src/app/appearance.tsx)
-- Render one registered stage for the active room. Keep decoration hidden from assistive technology and transparent to pointer events. Scale the stage and its hotspots together on resize. Keep the reading surface accessible at narrow widths. Use a still for room-picker thumbnails and load only the active full-size plate, frames and companion. [Scene shell](../../../src/app/scene.tsx) · [Room tools](../../../src/app/room-tools.tsx)
-- Trigger a one-shot companion gesture when the learner draws a card or opens a notebook, including by keyboard. Clear it on completion or skin change. Keep gesture state separate from listening, waiting and saving status. Keep the learner's focus and let the learner hide the companion. [Companion renderer](../../../src/app/companion.tsx)
-- Use cropped sprite sheets with stepped frames and a small masked shadow layer for playback. Use the still as the first render and fallback. Pause ambient playback when the tab is hidden. With system or app reduced motion, show the resting artwork and show actions through the open card, the notebook or the existing status text.
+## Implemented pass, 2026-11-04
 
-## Review before rollout
+New and older preferences default to HD Last Desk, with its four-pose canopy sheet and delayed chalkboard shadow. An HD review opens in the room scene. The source card box or lecture stand opens the study workspace, and Back to room restores the same draft. On mobile a separate row holds 44-pixel controls. All six companions have idle, draw and read images on a 255 × 228 canvas. The desk notebook shows the read pose and opens the notebook after a short pause.
 
-1. Capture a full Last Desk loop at normal speed with the pointer parked. The reviewer should see movement outside first, then its effect on the chalkboard. Inspect the pane edges and the loop seam. Move the pointer corner to corner and confirm the camera stays fixed.
-2. Review Mote at rest, mid-reaction and settled in the same composition. Draw twice and open the notebook by keyboard. Verify one reaction per action, readable feedback and a stable anchor.
-3. Repeat on a narrow viewport and a high-density laptop. Test reduced motion, hidden companion, switching rooms during a draft, and returning from a background tab. Verify the lecture, notebook and focus still work with animation assets unavailable.
-4. Approve the HD Last Desk and all six mascot sheets before extending the treatment to the two other rooms. Collect a still and one complete loop per room for visual review.
+The owner approved the Last Desk pass in chat. Study Bench reuses the canopy poses through its own windows, with a shadow on the desk. Projection Booth varies its lamp glow, with three dust motes and an evening tint on companions. Both await visual review at displayed size.
 
-## Implemented frontend pass, 2026-11-04
-
-The React frontend now has a saved HD pixel detail setting. New and older preferences default to HD Last Desk. Last Desk uses the registered plate, a four-pose exterior canopy sheet clipped to traced pane openings, and a delayed chalkboard shadow. Opening an HD review lands in the full room scene. Clicking the source card box or lecture stand opens the study workspace. Back to room restores the scene with the same draft and review state. Desktop tool buttons share the artwork coordinates. On mobile, a separate row holds 44-pixel controls. Source text and the learner's response stay in readable HTML next to the scene.
-
-All six companions have new lossless idle, draw and read images, each exported on a 255 × 228 canvas with a shared ground anchor. Opening a source card, source stand or source control triggers the draw pose. Opening the desk notebook shows the read pose and navigates to the existing notebook after a short pause. These interactions use the real source and notebook routes. The card opens lecture evidence. Companion and room choices stay independent, and the app's current activity continues during the gesture.
-
-The owner approved the Last Desk pass in chat. Study Bench and Projection Booth now have HD plates and registered tool coordinates, with all six companions available. Study Bench uses the shared exterior canopy poses through its own traced window openings, followed by a shadow on the sunlit desktop. Projection Booth varies the auditorium and lamp glow a little, with three drifting dust motes. Its companions get a slight evening tint. These new rooms are ready for visual review at their displayed size.
-
-[The asset manifest](../../../src/app/assets/hd-pixel/manifest.json) records asset dimensions, pose names, the ground anchor and provenance. The frontend pauses ambient playback on the document visibility event and honors system and app motion preferences. Direct browser checks cover the document event and playback state. Tab suspension on a physical laptop still needs a device check.
-
-The verification artifacts and the configurable browser check are in [the HD frontend review trail](../../trail/hd-pixel-room/browser-results.json). The production build and typecheck passed. The full test suite passed with 1,185 tests and four existing TODOs.
-
-Review the implemented [Study Bench breeze](../../trail/hd-pixel-room/study-bench.gif) and [Projection Booth glow](../../trail/hd-pixel-room/projection-booth.gif). These crops come from the working frontend at normal playback speed.
+[The asset manifest](../../../src/app/assets/hd-pixel/manifest.json) records dimensions, poses, anchor and provenance. The build and typecheck passed, and 1,185 tests passed with four existing TODOs. Tab suspension on a physical laptop still needs a device check. The [review trail](../../trail/hd-pixel-room/browser-results.json), [Study Bench breeze](../../trail/hd-pixel-room/study-bench.gif) and [Projection Booth glow](../../trail/hd-pixel-room/projection-booth.gif) hold the evidence.
