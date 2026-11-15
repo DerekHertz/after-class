@@ -524,7 +524,7 @@ describe("every capture-scoped route answers 404 for a capture id the caller doe
     for (const s of servers.splice(0)) await s.stop(true);
   });
 
-  const NOTHING = { kind: "nothing_to_review", gaps: [], unverified: [], rewatch: [] } as const;
+  const NOTHING = { kind: "nothing_to_review", heldBack: [], gaps: [], unverified: [], rewatch: [] } as const;
 
   /** Alice ingested CAP. Bob holds nothing. A third id is held by nobody. The stubs record any call that reaches a module past the boundary. */
   function rig() {

@@ -7,7 +7,7 @@ import type { SessionState } from "../src/app/controller";
 import { createReviewController, needsChecklist, needsResume, resumeOnce } from "../src/app/controller";
 import { conversationLines, owedLearnerTurn, startLive, stepStartHandoff, strandedEndTurn } from "../src/app/core";
 import { reviewViewz } from "../src/app/decode";
-import { Composer, HeaderActions, SaveBanner, TopicChecklist, UndeliveredNote } from "../src/app/review";
+import { Composer, HeaderActions, SaveBanner, showsWaitingLine, TopicChecklist, UndeliveredNote } from "../src/app/review";
 import type { Speaker } from "../src/app/speech";
 import { createSynthSpeaker } from "../src/app/speech";
 import { createMemoryUnsent } from "../src/app/unsent";
@@ -676,5 +676,174 @@ describe("the header actions while a turn settles", () => {
 
   test("they are enabled when nothing holds the lock", () => {
     expect(header({})).not.toContain("disabled");
+  });
+});
+
+describe("a page loaded while the backend still runs a turn", () => {
+  const unanswered = (o: Parameters<typeof reviewJson>[0] = {}) => parsedReview({ turns: [tutorAsk, learnerAnswer(2)], ...o });
+  const reply = turnJson(3, "tutor", { move: { kind: "ask_followup", threadId: thr }, say: "Why does that hold?" });
+  const state = (view: ReviewView): SessionState => ({
+    view, loadError: null, live: null, unsent: [], sendError: null, saving: false, saveError: null, savedSummary: null, storageDegraded: false, busy: false,
+  });
+
+  test("it waits and re-reads the review, never resends, and shows the reply once the backend says the turn is over", async () => {
+    let reads = 0;
+    const h = setup({
+      sendTurn: () => { throw new Error("no new call"); },
+      review: () => (reads++ < 3 ? unanswered({ turnInFlight: true }) : parsedReview({ turns: [tutorAsk, learnerAnswer(2), reply] })),
+    });
+    await h.controller.load();
+    expect(h.controller.getState().view?.turnInFlight).toBe(true);
+    for (let i = 0; i < 200 && h.controller.getState().view?.turnInFlight; i++) await Bun.sleep(5);
+    expect(h.controller.getState().view?.turns.map((t) => t.actor)).toEqual(["tutor", "learner", "tutor"]);
+    expect(h.sends).toEqual([]);
+    h.controller.dispose();
+  });
+
+  test("an unreadable review gives the Retry button back instead of waiting for ever", async () => {
+    let reads = 0;
+    const h = setup({
+      sendTurn: () => events(),
+      review: () => { if (reads++ === 0) return unanswered({ turnInFlight: true }); throw new Error("offline"); },
+    });
+    await h.controller.load();
+    for (let i = 0; i < 400 && h.controller.getState().view?.turnInFlight; i++) await Bun.sleep(5);
+    expect(h.controller.getState().view?.turnInFlight).toBe(false);
+    h.controller.dispose();
+  });
+
+  test("a turn that owes a move is not resumed while the backend is still running it", () => {
+    const owing = parsedReview({ turns: [tutorAsk, learnerAnswer(2), turnJson(3, "tutor", { move: { kind: "close_thread", threadId: thr }, say: "Moving on." })], owesMove: true });
+    expect(needsResume(state(owing))).toBe(true);
+    expect(needsResume(state({ ...owing, turnInFlight: true }))).toBe(false);
+  });
+
+  test("the wire schema carries turnInFlight", () => {
+    expect(parsedReview({ turnInFlight: true }).turnInFlight).toBe(true);
+    expect(reviewViewz.safeParse({ ...reviewJson(), turnInFlight: undefined }).success).toBe(false);
+  });
+
+  const settle = async (done: () => boolean) => { for (let i = 0; i < 300 && !done(); i++) await Bun.sleep(5); };
+
+  test("a stream that fails while the backend still runs the turn is watched until the reply lands", async () => {
+    let reads = 0;
+    const h = setup({
+      sendTurn: ({ turnId }) => events({ type: "learner_turn_stored", turnId }, { type: "turn_failed", error: "connection lost", retryable: true }),
+      review: () => (reads++ < 3 ? unanswered({ turnInFlight: true }) : parsedReview({ turns: [tutorAsk, learnerAnswer(2), reply] })),
+    });
+    await h.controller.send(answer);
+    expect(h.controller.getState().view?.turnInFlight).toBe(true);
+    await settle(() => h.controller.getState().view?.turnInFlight === false);
+    expect(h.controller.getState().view?.turns.map((t) => t.actor)).toEqual(["tutor", "learner", "tutor"]);
+    expect(reads).toBeGreaterThan(3);
+    h.controller.dispose();
+  });
+
+  test("a failed stream whose reply the backend stored clears the failure and Retry", async () => {
+    let reads = 0;
+    let sent = "";
+    const h = setup({
+      sendTurn: ({ turnId }) => ((sent = turnId), events({ type: "learner_turn_stored", turnId }, { type: "turn_failed", error: "connection lost", retryable: true })),
+      review: () => (reads++ < 2 ? unanswered({ turnInFlight: true }) : parsedReview({ turns: [tutorAsk, { ...learnerAnswer(2), id: sent }, reply] })),
+    });
+    await h.controller.send(answer);
+    expect(h.controller.getState().live?.status).toBe("failed");
+    await settle(() => h.controller.getState().view?.turnInFlight === false);
+    expect(h.controller.getState().live).toBeNull();
+    h.controller.dispose();
+  });
+
+  test("a failed turn followed only by a code turn keeps its failure and Retry", async () => {
+    let sent = "";
+    const h = setup({
+      sendTurn: ({ turnId }) => ((sent = turnId), events({ type: "learner_turn_stored", turnId }, { type: "turn_failed", error: "connection lost", retryable: true })),
+      review: () => parsedReview({ turns: [tutorAsk, { ...learnerAnswer(2), id: sent }, turnJson(3, "code", { notice: { kind: "correction_applied", correctionId: "corr_x", affectedClaims: [clm] } })] }),
+    });
+    await h.controller.send(answer);
+    expect(h.controller.getState().live?.status).toBe("failed");
+    h.controller.dispose();
+  });
+
+  test("a send that settles after the page is left does not start watching", async () => {
+    let reads = 0;
+    let release = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    const h = setup({
+      sendTurn: async function* ({ turnId }) {
+        yield { type: "learner_turn_stored", turnId } as const;
+        await gate;
+        yield { type: "turn_failed", error: "connection lost", retryable: true } as const;
+      },
+      review: () => (reads++, unanswered({ turnInFlight: true })),
+    });
+    const sending = h.controller.send(answer);
+    await Bun.sleep(10);
+    h.controller.dispose();
+    const before = reads;
+    release();
+    await sending;
+    await Bun.sleep(60);
+    expect(reads - before).toBeLessThanOrEqual(1);
+  });
+
+  test("a page left before its first read returns never starts watching", async () => {
+    let reads = 0;
+    let release = () => {};
+    const h = setup({
+      sendTurn: () => events(),
+      review: () => (reads++, unanswered({ turnInFlight: true })),
+      reviewGate: new Promise<void>((r) => { release = r; }),
+    });
+    const loading = h.controller.load();
+    h.controller.dispose();
+    release();
+    await loading;
+    await Bun.sleep(60);
+    expect(reads).toBe(1);
+  });
+
+  test("a turn the backend stored but this page never saw acknowledged is no longer unsent", async () => {
+    let reads = 0;
+    const h = setup({
+      sendTurn: () => { throw new Error("no new call"); },
+      review: () => (reads++ < 2 ? unanswered({ turnInFlight: true }) : parsedReview({ turns: [tutorAsk, learnerAnswer(2), reply] })),
+    });
+    await h.unsent.put({ turnId: learnerAnswer(2).id, reviewId, act: answer, createdAtMs: 5 });
+    await h.controller.load();
+    expect(h.controller.getState().unsent).toEqual([]);
+    expect(await h.unsent.forReview(reviewId)).toEqual([]);
+    await settle(() => h.controller.getState().view?.turnInFlight === false);
+    h.controller.dispose();
+  });
+
+  test("an unsent turn the backend never stored stays unsent while a poll runs", async () => {
+    const h = setup({ sendTurn: () => { throw new Error("no new call"); }, review: () => unanswered({ turnInFlight: true }) });
+    await h.unsent.put({ turnId: randomId("turn"), reviewId, act: answer, createdAtMs: 5 });
+    await h.controller.load();
+    await Bun.sleep(30);
+    expect(h.controller.getState().unsent).toHaveLength(1);
+    h.controller.dispose();
+  });
+
+  test("no act sends a turn while the backend runs one, and nothing is left unsent", async () => {
+    const h = setup({ sendTurn: () => events(), review: () => unanswered({ turnInFlight: true }) });
+    await h.controller.load();
+    for (const act of [{ kind: "pause" }, { kind: "end" }, { kind: "resume" }] as const) expect(await h.controller.send(act)).toBe(false);
+    await h.controller.retryTurn();
+    expect(h.sends).toEqual([]);
+    expect(h.controller.getState().unsent).toEqual([]);
+    h.controller.dispose();
+  });
+
+  test("Pause and Finish are disabled while the backend runs a turn", () => {
+    const out = renderToStaticMarkup(createElement(HeaderActions, { ids: ["pause", "end"], state: state(unanswered({ turnInFlight: true })), send: () => {} }));
+    expect(out).toMatch(/<button[^>]*data-action="end"[^>]*disabled/);
+    expect(out).toMatch(/<button[^>]*data-action="pause"[^>]*disabled/);
+  });
+
+  test("the reply line gives way to the start handoff's status line", () => {
+    expect(showsWaitingLine(true, "none")).toBe(true);
+    expect(showsWaitingLine(true, "submitted")).toBe(false);
+    expect(showsWaitingLine(false, "none")).toBe(false);
   });
 });
