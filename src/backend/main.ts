@@ -77,6 +77,7 @@ import type { ApiClient } from "./providers/claude-api";
 import { claimSupportTask, productBoundaryTask, productFrameChangeTask } from "./providers/jev-tasks";
 import type { BoundaryInput, FrameChangeInput } from "./providers/jev-tasks";
 import { createEvidence } from "./evidence";
+import { readVolume, startDiskWatch } from "./evidence/disk-watch";
 import { resolveIngestLimits } from "./evidence/ingest-limits";
 import type { EvidenceStoreWithProbe } from "./evidence";
 import { PRODUCT_JEV_SETUP } from "./jev-setup";
@@ -891,6 +892,9 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   // The token is printed only for a loopback bind. A hosted container's log goes to CloudWatch, which is not a place for a secret.
   log(hostname === "127.0.0.1" && auth.kind === "local" ? `listening on 127.0.0.1:${boundPort}\npairing token: ${token}` : `listening on ${hostname}:${boundPort}`);
 
+  // The free-space reading that the beta alarm watches (infra/beta/disk-alarm.tf).
+  const stopDiskWatch = startDiskWatch({ read: readVolume(dataDir), minFreeBytes: ingestLimits.minFreeBytes, log, logError });
+
   pump();
 
   return {
@@ -901,6 +905,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     scheduler,
     async stop() {
       alive = false;
+      stopDiskWatch();
       if (ingestPump !== null) clearTimeout(ingestPump);
       await scheduler?.stop();
       await server.stop(true);
