@@ -72,6 +72,7 @@ function preparationOf(db: UserDb, script: { interpret: Answer<InterpretationOut
       passages: P.filter((p) => Material.covers(material, p.sourceId, p.interval)),
       frames: [] as Frame[], gaps: [], ads: [],
     }),
+    pin: () => null,
     lookup: memo.lookup,
     run: (task, input, signal) => memo.run(task, input, { signal }),
     clearFailures: memo.clearFailures,

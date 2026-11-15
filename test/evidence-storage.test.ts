@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { asSeq } from "../src/backend/db";
-import { createEvidence } from "../src/backend/evidence";
+import { FRAME_HOLD_MS, createEvidence } from "../src/backend/evidence";
 import type { FrameChangeInput } from "../src/backend/providers/jev-tasks";
 import type { Evidence } from "../src/shared/domain";
 import type { EvidenceId } from "../src/shared/ids";
 import { stableId } from "../src/shared/ids";
 import { Material, interval } from "../src/shared/time";
-import { DAY, JPEG, SRC, count, exceptStalls, harness, hit, keyOf, stream, textsOf } from "./evidence-fixtures";
+import { DAY, JPEG, OTHER, SRC, count, exceptStalls, harness, hit, keyOf, stream, textsOf } from "./evidence-fixtures";
 
 describe("frames and Jev judgments", () => {
   function frameStream() {
@@ -31,6 +31,8 @@ describe("frames and Jev judgments", () => {
     const { h, s, id } = frameStream();
     const teaching = () => Object.fromEntries(h.evidence.watchOrder(s.captureId).frameCandidates.map((f) => [f.id, f.teaching]));
     expect(teaching()).toEqual({ [id("f1")]: "kept", [id("f2")]: "unjudged", [id("f3")]: "unjudged", [id("f4")]: "unjudged" });
+    expect(h.evidence.frameDemand(s.captureId)).toHaveLength(2);
+    h.clock.t += FRAME_HOLD_MS;
     expect(h.evidence.frameDemand(s.captureId)).toHaveLength(3);
     expect(new Set(h.evidence.frameDemand(s.captureId).map((w) => w.key)).size).toBe(3);
 
@@ -65,6 +67,98 @@ describe("frames and Jev judgments", () => {
     expect(textsOf(f2.nearbyPassages)).toEqual(["near"]);
     expect(f2.after.bytes().length).toBeGreaterThan(0);
     expect(seen.find((i) => i.after.frame.id === id("f4"))!.nearbyPassages).toEqual([]);
+  });
+});
+
+describe("an unanswered frame waits for its caption window before it is asked", () => {
+  const demanded = (h: ReturnType<typeof harness>, s: ReturnType<typeof stream>) => h.evidence.frameDemand(s.captureId).length;
+
+  test("while the capture runs, a frame waits until the watched media passes 15 s beyond it", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.transcript([[0, 4, "one"], [22, 26, "two"]]);
+    s.span(0, 10);
+    s.frame("a", 5);
+    s.frame("b", 8);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(demanded(h, s)).toBe(0);
+    h.evidence.ingest({ captureId: s.captureId, facts: [s.span(10, 22)] });
+    expect(demanded(h, s)).toBe(0);
+    h.evidence.ingest({ captureId: s.captureId, facts: [s.span(22, 27)] });
+    expect(demanded(h, s)).toBe(1);
+    const frame = h.evidence.watchOrder(s.captureId).frameCandidates.find((f) => f.id === stableId("ev", s.captureId, "b"))!;
+    expect(frame.teaching).toBe("unjudged");
+  });
+
+  test("a caption half watched at the window edge holds the frame until the caption is whole", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.transcript([[18, 30, "long caption"]]);
+    s.span(0, 24);
+    s.frame("a", 1);
+    s.frame("b", 5);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(demanded(h, s)).toBe(0);
+    h.evidence.ingest({ captureId: s.captureId, facts: [s.span(24, 31)] });
+    expect(demanded(h, s)).toBe(1);
+  });
+
+  test("a caption half watched behind the watched media is a skip, not a caption still arriving", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.transcript([[8, 12, "skipped over"]]);
+    s.span(0, 10);
+    s.span(14, 30);
+    s.frame("a", 1);
+    s.frame("b", 5);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(demanded(h, s)).toBe(1);
+  });
+
+  test("a video played to its end, or left for another video, has no more captions coming", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.source({ durationS: 12 });
+    s.span(0, 11.5);
+    s.frame("a", 1);
+    s.frame("b", 8);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(demanded(h, s)).toBe(1);
+
+    const g = harness();
+    const t = stream();
+    t.control("start");
+    t.source();
+    t.span(0, 10);
+    t.frame("a", 1);
+    t.frame("b", 8);
+    g.evidence.ingest({ captureId: t.captureId, facts: t.facts });
+    expect(demanded(g, t)).toBe(0);
+    g.evidence.ingest({ captureId: t.captureId, facts: [t.source({ video: OTHER }), t.span(0, 5, { video: OTHER })] });
+    expect(demanded(g, t)).toBe(1);
+  });
+
+  test("a paused or stopped capture is complete as it stands", () => {
+    for (const action of ["pause", "stop"] as const) {
+      const h = harness();
+      const s = stream();
+      s.control("start");
+      s.source();
+      s.span(0, 10);
+      s.frame("a", 1);
+      s.frame("b", 8);
+      h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+      expect(demanded(h, s)).toBe(0);
+      h.evidence.ingest({ captureId: s.captureId, facts: [s.control(action)] });
+      expect(demanded(h, s)).toBe(1);
+    }
   });
 });
 

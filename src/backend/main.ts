@@ -141,6 +141,8 @@ export type MainOptions = {
   readonly anthropic?: ApiClient;
   /** How long an upload may wait for the pump it triggers. Default INGEST_PUMP_MS; a test widens it to see the order. */
   readonly ingestPumpMs?: number;
+  /** How long an unanswered frame waits for its caption window. Default FRAME_HOLD_MS; a test shortens it. */
+  readonly frameHoldMs?: number;
   readonly log?:(text: string) => void;
   readonly error?: (text: string) => void;
 };
@@ -581,6 +583,8 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       },
     });
     const ledger = createLedger(db, budget);
+    /** Per capture, the one timer for the earliest pump a waiting frame asked for, on the monotonic clock. */
+    const wakes = new Map<CaptureId, { readonly at: number; readonly timer: ReturnType<typeof setTimeout> }>();
     const lookup: LookupFn = (task, input) => {
       const looked = memo.lookup(task, input);
       read(memoDep(looked.key));
@@ -592,6 +596,21 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       runFrameChange: (input, signal) => (input.before === null ? Promise.resolve(null) : memo.run(tasks.frameChange, input, { signal })),
       frameChangeKey: (input) => memo.key(tasks.frameChange, input),
       read,
+      ...(options.frameHoldMs === undefined ? {} : { frameHoldMs: options.frameHoldMs }),
+      wakeIn(captureId, delayMs) {
+        const at = performance.now() + delayMs;
+        const set = wakes.get(captureId);
+        if (set !== undefined && set.at <= at) return;
+        if (set !== undefined) clearTimeout(set.timer);
+        const timer = setTimeout(() => {
+          wakes.delete(captureId);
+          if (!alive) return;
+          wake(captureId);
+          pump();
+        }, delayMs);
+        timer.unref?.();
+        wakes.set(captureId, { at, timer });
+      },
       onChange(captureId, keys) {
         // A capture's first upload is the only way a capture enters the working set after boot.
         if (captureId !== null) wake(captureId);
@@ -639,6 +658,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       chunk: segmentation.revision,
       currentChunks: segmentation.current,
       bundle: evidence.bundle,
+      pin: evidence.pin,
       lookup,
       run: (task, input, signal) => memo.run(task, input, { signal }),
       clearFailures: memo.clearFailures,

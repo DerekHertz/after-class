@@ -35,6 +35,7 @@ export function harness(opts: { clock?: { t: number } } = {}) {
     frameChangeKey: keyOf,
     onChange: () => void changes.n++,
     now: () => clock.t,
+    monotonic: () => clock.t,
   });
   return { db, dir, evidence, script, changes, clock };
 }

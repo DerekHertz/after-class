@@ -38,6 +38,7 @@ import { asSeq } from "../db";
 import type { UserDb } from "../db";
 import { slotDep } from "../deps";
 import type { Dep, ReadDep } from "../deps";
+import type { FramePin } from "../evidence";
 import type { WorkItem } from "../scheduler";
 import { assessable, checkVerdict, claimInside, cutoffFor, deriveClaimStatus, isFinished, locate, normalizeLabel, validateDraft } from "./core";
 import type { Check, ControlFact, Located } from "./core";
@@ -102,10 +103,23 @@ type ClaimView = {
   readonly next: Need | null;
 };
 
+/**
+ * An interpretation waiting for frames that had no verdict when it was ready. It keeps the revision, material, bundle and
+ * claims it was ready with, so the wait can only add frames to its input. It counts as a pending interpretation of its material.
+ */
+type Held = {
+  readonly rev: ChunkRevision;
+  readonly material: Material;
+  readonly existingClaims: InterpretationInput["existingClaims"];
+  readonly pin: FramePin;
+};
+
 type View = {
   readonly controls: readonly ControlFact[];
   readonly units: readonly UnitView[];
+  readonly held: readonly Held[];
   readonly claims: readonly ClaimView[];
+  /** Material a frozen or held interpretation covers. */
   readonly covered: Material;
 };
 
@@ -139,6 +153,8 @@ export function createPreparation(db: UserDb, deps: {
   chunk(id: ChunkRevisionId): ChunkRevision | null;
   currentChunks(captureId: CaptureId): readonly ChunkRevision[];
   bundle(material: Material): EvidenceBundle;
+  /** `bundle(material)` with its frames that have no verdict yet, or null when there are none. An interpretation waits on it. */
+  pin(material: Material): FramePin | null;
   lookup<I, O>(task: Task<I, O>, input: I): Lookup<O>;
   run<I, O>(task: Task<I, O>, input: I, signal: AbortSignal): Promise<RunResult<O>>;
   clearFailures: (keys: readonly Lookup<unknown>["key"][]) => void;
@@ -152,6 +168,8 @@ export function createPreparation(db: UserDb, deps: {
 }): Preparation {
   const { tasks } = deps;
   const { userId } = db;
+  /** In process only: after a restart an interpretation waiting for frames is ready again with the bundle of that moment. */
+  const holds = new Map<CaptureId, readonly Held[]>();
   const frozenSlot = (kind: FrozenKind, subject: string) => {
     deps.read?.(slotDep(kind, subject));
     return q.frozen.get(userId, kind, subject);
@@ -326,7 +344,10 @@ export function createPreparation(db: UserDb, deps: {
       }
     }
     index(captureId, units, claims);
-    return { controls, units, claims, covered: units.reduce((m, u) => Material.union(m, u.unit.material), Material.empty) };
+    const frozen = units.reduce((m, u) => Material.union(m, u.unit.material), Material.empty);
+    const held = (holds.get(captureId) ?? []).filter((h) => !Material.contains(frozen, h.material) && cutoffFor((m) => Material.contains(m, h.material), controls) === null);
+    holds.set(captureId, held);
+    return { controls, units, held, claims, covered: held.reduce((m, h) => Material.union(m, h.material), frozen) };
   }
 
   /** Records applied interpretations, which stay applied: any later stop-early has a larger Seq. */
@@ -340,34 +361,38 @@ export function createPreparation(db: UserDb, deps: {
     });
   }
 
-  const overlapping = (v: View, m: Material) => v.units.filter((u) => !Material.isEmpty(Material.intersect(u.unit.material, m)));
+  const meets = (a: Material, b: Material) => !Material.isEmpty(Material.intersect(a, b));
+  const overlapping = (v: View, m: Material) => v.units.filter((u) => meets(u.unit.material, m));
+  const pendingOver = (v: View, m: Material) => overlapping(v, m).some((u) => u.state === "pending") || v.held.some((h) => meets(h.material, m));
   const inside = (c: ClaimView, m: Material) => claimInside(m, c.cited, c.origin.unit.where);
 
-  /** The part of a chunk revision no interpretation covers yet: what its delta job reads. */
-  function residual(v: View, rev: ChunkRevision): { readonly state: InterpretationState | null; readonly need: Need | null } {
+  function interpretNeed(rev: ChunkRevision, material: Material, bundle: EvidenceBundle, existingClaims: InterpretationInput["existingClaims"]): Need {
+    const input: InterpretationInput = { chunkRevisionId: rev.id, newMaterial: bundle, existingClaims, gaps: bundle.gaps };
+    const unit: Unit = { chunkId: rev.chunkId, material, input, where: locate(bundle) };
+    const key = deps.lookup(tasks.interpret, input).key;
+    return need(tasks.interpret, input, key, { kind: "interpretation", subject: rev.id, json: encodeUnit(unit) });
+  }
+
+  /** The part of a chunk revision no interpretation covers yet: what its delta job reads. `hold` is set when it starts waiting for frames. */
+  function residual(v: View, rev: ChunkRevision): { readonly state: InterpretationState | null; readonly need: Need | null; readonly hold?: Held } {
     const material = Material.subtract(rev.material, v.covered);
     if (Material.isEmpty(material)) return { state: null, need: null };
     const bundle = deps.bundle(material);
     if (bundle.passages.length === 0 && bundle.frames.length === 0) return { state: "done", need: null };
     if (cutoffFor((m) => Material.contains(m, material), v.controls) !== null) return { state: "cancelled", need: null };
     // A delta waits for the jobs it extends, so the claims it may supersede are in its context.
-    if (overlapping(v, rev.material).some((u) => u.state === "pending")) return { state: "pending", need: null };
-    const input: InterpretationInput = {
-      chunkRevisionId: rev.id,
-      newMaterial: bundle,
-      existingClaims: v.claims.filter((c) => inside(c, rev.material)).map((c) => ({ id: c.claim.id, text: (c.claim.revision ?? c.claim.original).text })),
-      gaps: bundle.gaps,
-    };
-    const unit: Unit = { chunkId: rev.chunkId, material, input, where: locate(bundle) };
-    const key = deps.lookup(tasks.interpret, input).key;
-    return { state: "pending", need: need(tasks.interpret, input, key, { kind: "interpretation", subject: rev.id, json: encodeUnit(unit) }) };
+    if (pendingOver(v, rev.material)) return { state: "pending", need: null };
+    const existingClaims = v.claims.filter((c) => inside(c, rev.material)).map((c) => ({ id: c.claim.id, text: (c.claim.revision ?? c.claim.original).text }));
+    const pin = deps.pin(material);
+    if (pin !== null) return { state: "pending", need: null, hold: { rev, material, existingClaims, pin } };
+    return { state: "pending", need: interpretNeed(rev, material, bundle, existingClaims) };
   }
 
   function prep(chunkRevisionId: ChunkRevisionId): ChunkPrep {
     const rev = deps.chunk(chunkRevisionId);
     if (!rev) throw new Error(`prep: unknown chunk revision ${chunkRevisionId}`);
     const v = view(rev.captureId);
-    const states = [...overlapping(v, rev.material).map((u) => u.state), residual(v, rev).state];
+    const states = [...overlapping(v, rev.material).map((u) => u.state), ...(v.held.some((h) => meets(h.material, rev.material)) ? ["pending" as const] : []), residual(v, rev).state];
     const interpretation: InterpretationState =
       states.includes("pending") ? "pending" : states.includes("failed") ? "failed" : states.includes("cancelled") ? "cancelled" : "done";
     const claims = v.claims.filter((c) => inside(c, rev.material)).map((c) => c.claim);
@@ -378,13 +403,27 @@ export function createPreparation(db: UserDb, deps: {
   function demand(captureId: CaptureId): readonly WorkItem[] {
     const v = view(captureId);
     const current = deps.currentChunks(captureId);
+    const residuals = current.map((r) => residual(v, r));
+    const held: Held[] = [];
+    const frames: WorkItem[] = [];
+    const ready: Need[] = [];
+    for (const h of [...v.held, ...residuals.flatMap((r) => r.hold ?? [])]) {
+      const s = h.pin.settle();
+      // The user deleted all of it while it waited: nothing is left to interpret.
+      if (s.kind === "ready" && s.bundle.passages.length === 0 && s.bundle.frames.length === 0) continue;
+      held.push(h);
+      if (s.kind === "waiting") frames.push(...s.work);
+      else ready.push(interpretNeed(h.rev, h.material, s.bundle, h.existingClaims));
+    }
+    holds.set(captureId, held);
     const needs: Need[] = [
       ...v.units.flatMap((u) => (u.state === "pending" && open(u.lookup) ? [need(tasks.interpret, u.unit.input, u.lookup.key)] : [])),
-      ...current.flatMap((r) => residual(v, r).need ?? []),
+      ...ready,
+      ...residuals.flatMap((r) => r.need ?? []),
       ...v.claims.flatMap((c) => (c.next && current.some((r) => inside(c, r.material)) ? [c.next] : [])),
     ];
     const seen = new Set<MemoKey>();
-    return needs.filter((n) => !seen.has(n.key) && !!seen.add(n.key)).map((n) => workItem(captureId, n));
+    return [...frames, ...needs.filter((n) => !seen.has(n.key) && !!seen.add(n.key)).map((n) => workItem(captureId, n))];
   }
 
   function control(captureId: CaptureId, action: ControlFact["action"], ids: readonly ChunkRevisionId[]): Seq {
