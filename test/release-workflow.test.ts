@@ -204,7 +204,7 @@ describe("release workflow", () => {
   });
 
   /** Runs the release job's record step with a stubbed gh. */
-  function runRecordStep(opts: { exists: boolean; digest?: string }): StepRun {
+  function runRecordStep(opts: { exists: boolean; published?: boolean; digest?: string }): StepRun {
     return runStep(
       "release",
       (s) => s.run?.includes("gh release") === true,
@@ -214,7 +214,7 @@ describe("release workflow", () => {
           "gh",
           `echo "gh $*" >> ${host.log}
 case "$1 $2" in
-  "release view") exit ${opts.exists ? 0 : 1};;
+  "release view") ${opts.exists ? "" : "exit 1;"} case "$*" in *isDraft*) echo ${opts.published ? "false" : "true"};; esac;;
 esac
 exit 0`,
         ),
@@ -257,11 +257,17 @@ exit 0`,
     expect(run.output).toBe(`notes<<${delimiter}\n- Close EOF (#1)\nEOF\nnotes=evil\n${delimiter}\n`);
   });
 
-  test("a rerun replaces image-digest.txt on the existing release", () => {
+  test("a rerun replaces image-digest.txt on the existing draft", () => {
     const run = runRecordStep({ exists: true });
     expect(run.status).toBe(0);
     expect(run.log.find((line) => line.startsWith("gh release upload"))).toMatch(/^gh release upload v0\.1\.0 --repo DerekHertz\/after-class --clobber .*\/image-digest\.txt$/);
     expect(run.log.some((line) => line.startsWith("gh release create"))).toBe(false);
+  });
+
+  test("a rerun on a published release fails and changes nothing, because publishing approved the image it names", () => {
+    const run = runRecordStep({ exists: true, published: true });
+    expect(run.status).not.toBe(0);
+    expect(run.log.filter((line) => !line.startsWith("gh release view"))).toEqual([]);
   });
 
   test("a missing or malformed digest from the image job writes no release", () => {

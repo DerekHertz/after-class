@@ -245,6 +245,34 @@ describe("afterclass-autodeploy", () => {
     expect(server.log.filter((line) => line === "systemctl restart afterclass-app.service").length).toBe(restarts);
   });
 
+  test("a changed image under a handled tag is refused loudly at every check and never deployed", () => {
+    const server = new Server({ running: OLD });
+    server.github(v015);
+    server.run();
+    const restarts = server.deploys().length;
+    const rebuilt = digestOf("e");
+    server.github({ ...v015, records: { ...v015.records, "v0.1.5": record(rebuilt) }, etag: '"rerun"' });
+    for (let check = 0; check < 2; check++) {
+      const run = server.run();
+      expect(run.status).toBe(1);
+      expect(run.output).toContain(`REFUSED v0.1.5: its image-digest.txt now names ${rebuilt}, but v0.1.5 was handled as ${NEW}`);
+    }
+    expect(server.shipped().filter(({ message }) => message.includes("REFUSED v0.1.5"))).toHaveLength(2);
+    expect(server.running).toBe(NEW);
+    expect(server.deploys()).toHaveLength(restarts);
+  });
+
+  test("a changed image under a tag that failed and was rolled back is never deployed either", () => {
+    const server = new Server({ running: OLD, unhealthy: [NEW] });
+    server.github(v015);
+    server.run();
+    const restarts = server.deploys().length;
+    server.github({ ...v015, records: { ...v015.records, "v0.1.5": record(digestOf("e")) }, etag: '"rerun"' });
+    expect(server.run().output).toContain("REFUSED v0.1.5");
+    expect(server.running).toBe(OLD);
+    expect(server.deploys()).toHaveLength(restarts);
+  });
+
   test("an unchanged list is asked for with its ETag, answers 304, and reads no record", () => {
     const server = new Server({ running: OLD });
     server.github({ ...v015, etag: '"v15"' });

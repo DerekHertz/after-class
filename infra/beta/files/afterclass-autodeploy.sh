@@ -5,7 +5,10 @@
 # list answers 304 with no body to read. A GitHub error, a rate limit, a malformed image-digest.txt or a commit off master
 # deploys nothing. Every decision goes to the log group's autodeploy stream.
 #
-# The release it last acted on, as "<tag> <digest>", is in /data/afterclass/autodeploy. It acts once per release:
+# /data/afterclass/autodeploy has one "<tag> <digest>" line per release it acted on, and the last line is the one it acted
+# on last. It acts once each time a different release becomes the highest published one:
+# - A tag keeps the digest it was first acted on with. A later image-digest.txt naming another digest is refused at every
+#   check and never deployed, because publishing approved the first one.
 # - A manual deploy with scripts/deploy-beta.sh stays until a different release becomes the highest published one.
 # - A release that fails its health check is rolled back by afterclass-deploy and not tried again.
 # - Publishing an older version deploys nothing, because only the highest published version counts. To roll back from
@@ -61,6 +64,13 @@ write() {
   mv "${1}.new" "$1"
 }
 
+# Appends "<tag> <digest>" to the list of handled releases, unless it is already the last line.
+handle() {
+  [ "$(tail -n 1 "$handled" 2>/dev/null || true)" = "$1 $2" ] && return 0
+  { cat "$handled" 2>/dev/null || true; printf '%s %s\n' "$1" "$2"; } > "${handled}.new"
+  mv "${handled}.new" "$handled"
+}
+
 # Saved only once a run reaches a decision, so a run cut short by an error asks for the full list again.
 new_etag=""
 finish() {
@@ -110,14 +120,19 @@ fi
 pattern=$'^commit ([0-9a-f]{40})\ndigest (sha256:[0-9a-f]{64})$'
 if [[ ! "$record" =~ $pattern ]]; then
   say "refused ${target}: its image-digest.txt is not a commit line and a digest line"
-  write "$handled" "${target} refused"
+  handle "$target" refused
   finish
   exit 0
 fi
 commit="${BASH_REMATCH[1]}"
 digest="${BASH_REMATCH[2]}"
 
-if [ "$(cat "$handled" 2>/dev/null || true)" = "${target} ${digest}" ]; then
+pinned=$(awk -v tag="$target" '$1 == tag { digest = $2 } END { print digest }' "$handled" 2>/dev/null || true)
+if [ -n "$pinned" ] && [ "$pinned" != "$digest" ]; then
+  say "REFUSED ${target}: its image-digest.txt now names ${digest}, but ${target} was handled as ${pinned}. Nothing is deployed. A published release keeps the image it was published with, so cut a new version for a rebuilt image."
+  exit 1
+fi
+if [ "$(tail -n 1 "$handled" 2>/dev/null || true)" = "${target} ${digest}" ]; then
   say "${target} (${digest}) is already handled"
   finish
   exit 0
@@ -125,7 +140,7 @@ fi
 running=$(cat "${dir}/current-image" 2>/dev/null || true)
 if [ "$running" = "$digest" ]; then
   say "${target} (${digest}) is already running"
-  write "$handled" "${target} ${digest}"
+  handle "$target" "$digest"
   finish
   exit 0
 fi
@@ -143,7 +158,7 @@ if ! where=$(curl -fsS --max-time 20 -H 'Accept: application/vnd.github+json' "$
 fi
 if [ "$where" != identical ] && [ "$where" != behind ]; then
   say "refused ${target}: its commit ${commit} is ${where} master, not on it"
-  write "$handled" "${target} ${digest}"
+  handle "$target" "$digest"
   finish
   exit 0
 fi
@@ -152,7 +167,7 @@ say "deploying ${target} (${commit}, ${digest}) over ${running:-nothing}"
 result=0
 output=$(/usr/local/sbin/afterclass-deploy "$commit" "$digest" 2>&1) || result=$?
 while IFS= read -r line; do note "$line"; done <<<"$output"
-write "$handled" "${target} ${digest}"
+handle "$target" "$digest"
 finish
 if [ "$result" -ne 0 ]; then
   say "${target} failed and is not tried again. Publish a fixed release, or retry by hand with scripts/deploy-beta.sh ${target}."

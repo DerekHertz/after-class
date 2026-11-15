@@ -103,7 +103,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      # A rerun replaces only image-digest.txt, so notes edited in the draft stay.
+      # A rerun replaces only image-digest.txt on a draft, so notes edited in the draft stay. A published release is refused,
+      # because publishing approved the image it names. A rebuilt image needs a new version.
       - name: Record the image digest in a draft GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -119,10 +120,18 @@ jobs:
           fi
           record="${RUNNER_TEMP}/image-digest.txt"
           printf 'commit %s\ndigest %s\n' "$COMMIT" "$DIGEST" > "$record"
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null; then
-            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$record"
-          else
-            notes="${RUNNER_TEMP}/notes.md"
-            printf '%s\n' "$NOTES" > "$notes"
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "$TAG" --notes-file "$notes" "$record"
-          fi
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft) || draft=none
+          case "$draft" in
+            true)
+              gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$record"
+              ;;
+            none)
+              notes="${RUNNER_TEMP}/notes.md"
+              printf '%s\n' "$NOTES" > "$notes"
+              gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "$TAG" --notes-file "$notes" "$record"
+              ;;
+            *)
+              echo "${TAG} is published, so its image-digest.txt stays as approved. Cut a new version to release a rebuilt image." >&2
+              exit 1
+              ;;
+          esac
