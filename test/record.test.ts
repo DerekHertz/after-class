@@ -347,6 +347,26 @@ describe("the learning record", () => {
     expect(note.evidence).toEqual([ev(1)]);
   });
 
+  test("the tutor's closing line, which the summary no longer reads (#234), is kept as the tutor's words in every note and moves no status", async () => {
+    const closing = "One last thing: the solution is where both lines cross, so it satisfies both equations at once.";
+    const l = finishedReview();
+    l.turns.pop();
+    l.tutor({ kind: "wrap_up" }, closing);
+    const closingTurn = l.turns.at(-1)!;
+    const h = harness({ turns: l.turns });
+    await h.record.save(REVIEW);
+    const view = h.record.view({ reviewId: REVIEW });
+    expect(view.notes.length).toBe(2);
+    for (const note of view.notes) {
+      expect(note.generated.at(-1)).toEqual({ author: "tutor", text: closing, turnId: closingTurn.id, evidence: [] });
+      expect(note.generated.filter((s) => s.author === "learner").map((s) => s.text)).not.toContain(closing);
+    }
+    const silent = harness();
+    await silent.record.save(REVIEW);
+    const statuses = (v: typeof view) => v.observations.map((o) => [o.threadId, o.status]);
+    expect(statuses(view)).toEqual(statuses(silent.record.view({ reviewId: REVIEW })));
+  });
+
   test("observations are clamped at read: the skipped thread is not_assessed whatever was proposed", async () => {
     const h = harness();
     await h.record.save(REVIEW);

@@ -83,22 +83,34 @@ async function gatedEnd(summaryOutcomes: readonly ("ok" | "fail")[] = ["ok"]) {
     return ok({ move: { kind: "wrap_up" }, say: "That is the end of this review." });
   });
   const tasks = { ...preparationTasks(), tutor, wrapUp } as unknown as TaskSet;
-  const r = await main({ port: 0, buildApp: false, configDir: dir("afterclass-config-"), log: () => {}, error: () => {}, tasks, env: { AFTERCLASS_DATA: dir("afterclass-data-"), AFTERCLASS_MODE: "replay" } });
-  running.push(r);
-  const base = `http://127.0.0.1:${r.port}`;
-  const headers = { Authorization: `Bearer ${r.token}`, "Content-Type": "application/json" };
-  const post = (path: string, body: unknown = {}) => fetch(`${base}${path}`, { method: "POST", headers, body: JSON.stringify(body) }).then(async (res) => ({ status: res.status, body: (await res.json()) as Record<string, any> }));
-  expect((await fetch(`${base}/ingest`, { method: "POST", headers, body: JSON.stringify({ captureId: CAP, facts: FACTS }) })).status).toBe(200);
+  const configDir = dir("afterclass-config-");
+  const env = { AFTERCLASS_DATA: dir("afterclass-data-"), AFTERCLASS_MODE: "replay" };
+  const boot = async () => {
+    const r = await main({ port: 0, buildApp: false, configDir, log: () => {}, error: () => {}, tasks, env });
+    running.push(r);
+    return r;
+  };
+  let r = await boot();
+  const base = () => `http://127.0.0.1:${r.port}`;
+  const headers = () => ({ Authorization: `Bearer ${r.token}`, "Content-Type": "application/json" });
+  const post = (path: string, body: unknown = {}) => fetch(`${base()}${path}`, { method: "POST", headers: headers(), body: JSON.stringify(body) }).then(async (res) => ({ status: res.status, body: (await res.json()) as Record<string, any> }));
+  expect((await fetch(`${base()}/ingest`, { method: "POST", headers: headers(), body: JSON.stringify({ captureId: CAP, facts: FACTS }) })).status).toBe(200);
   await until(() => r.modules.segmentation.current(CAP).some((c) => r.modules.preparation.prep(c.id).finished));
   const reviewId = stableId("rvw", "wrap-up-early");
   expect((await post(`/captures/${CAP}/reviews`, { reviewId, choice: "prepared_only" })).body.kind).toBe("started");
-  const ending = fetch(`${base}/reviews/${reviewId}/turns`, { method: "POST", headers, body: JSON.stringify({ turnId: stableId("turn", "wrap-up-early"), act: { kind: "end" } }) }).then((res) => res.text());
+  const ending = fetch(`${base()}/reviews/${reviewId}/turns`, { method: "POST", headers: headers(), body: JSON.stringify({ turnId: stableId("turn", "wrap-up-early"), act: { kind: "end" } }) }).then((res) => res.text());
   return {
-    r, reviewId, wrapUp, ending,
+    get r() { return r; },
+    reviewId, wrapUp, ending,
     wasSpoken: () => spoken,
     speak: () => ((spoken = true), closingLine.resolve()),
     finishSummary: () => summary.resolve(),
     save: () => post(`/reviews/${reviewId}/save`),
+    async restart() {
+      await r.stop();
+      running.splice(running.indexOf(r), 1);
+      r = await boot();
+    },
   };
 }
 
@@ -142,13 +154,40 @@ describe("the end starts the wrap-up summary (#234)", () => {
     t.finishSummary();
   }, 30_000);
 
-  test("a failed early call answers the first save as is, and the learner's retry asks once more (#251 keeps its six requests)", async () => {
+  test("a save after the early call failed asks once more instead of reporting that failure", async () => {
     const t = await gatedEnd(["fail", "ok"]);
     await until(() => t.wrapUp.calls.length === 1);
     t.speak();
     await t.ending;
     t.finishSummary();
+    await Bun.sleep(100);
+    expect((await t.save()).body).toEqual({ kind: "saved", notes: 0, observations: 0, links: 0 });
+    expect(t.wrapUp.calls).toHaveLength(2);
+  }, 30_000);
+
+  test("a restart between the failed early call and the first save changes nothing: that save asks once more, and a failure it gets is retried by the next", async () => {
+    const t = await gatedEnd(["fail", "fail", "ok"]);
+    await until(() => t.wrapUp.calls.length === 1);
+    t.speak();
+    await t.ending;
+    t.finishSummary();
+    await Bun.sleep(100);
+    await t.restart();
     expect((await t.save()).body).toMatchObject({ kind: "save_failed", retryable: true });
+    expect(t.wrapUp.calls).toHaveLength(2);
+    expect((await t.save()).body).toEqual({ kind: "saved", notes: 0, observations: 0, links: 0 });
+    expect(t.wrapUp.calls).toHaveLength(3);
+  }, 30_000);
+
+  test("a save that joins the early call while it runs reports that call's failure, and the retry asks once more", async () => {
+    const t = await gatedEnd(["fail", "ok"]);
+    await until(() => t.wrapUp.calls.length === 1);
+    t.speak();
+    await t.ending;
+    const saving = t.save();
+    await Bun.sleep(150);
+    t.finishSummary();
+    expect((await saving).body).toMatchObject({ kind: "save_failed", retryable: true });
     expect(t.wrapUp.calls).toHaveLength(1);
     expect((await t.save()).body).toEqual({ kind: "saved", notes: 0, observations: 0, links: 0 });
     expect(t.wrapUp.calls).toHaveLength(2);

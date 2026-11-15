@@ -54,7 +54,7 @@ import { stableId } from "../shared/ids";
 import type { CaptureId, EvidenceId, ReviewId, UserId } from "../shared/ids";
 import { memoDep } from "./deps";
 import type { Dep, ReadDep } from "./deps";
-import type { AssessableClaim, BoundaryJudgment, BoundaryWindow, Evidence, Frame, Passage, Seq, Verdict } from "../shared/domain";
+import type { AssessableClaim, BoundaryJudgment, BoundaryWindow, Evidence, Frame, Passage, Verdict } from "../shared/domain";
 import { heldMessage } from "../shared/allowance";
 import { LOCAL_USER, ensureLocalUser, openDb, scopeDb, signedInUsers, userForIdentity } from "./db";
 import type { Db, UserDb } from "./db";
@@ -706,9 +706,6 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       return seq;
     } };
 
-    /** Where the early call began, until the first save claims it: that call is the first run, so its failure answers that save instead of costing it a second run. */
-    const wrapUpBegan = new Map<ReviewId, Seq>();
-
     const reviews = createReviews(db, {
       currentChunks: segmentation.current,
       chunkHistory: segmentation.history,
@@ -722,10 +719,8 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       runTutor: (input, streamTo, signal, onRetry) => memo.run(tasks.tutor, input, { signal, streamTo, onRetry, review: input.state.reviewId }),
       clearFailures: memo.clearFailures,
       startWrapUp(reviewId) {
-        const asOf = db.nextSeq();
-        wrapUpBegan.set(reviewId, asOf);
         // Later, so reading the whole review to build the input never sits in front of the tutor's reply. The save reports a failure.
-        setTimeout(() => void runWrapUp(reviewId, asOf).catch(() => {}), 0);
+        setTimeout(() => void runWrapUp(reviewId).catch(() => {}), 0);
       },
       endedInTx: (reviewId) => record.markEndedInTx(reviewId),
       nextSeq: () => db.nextSeq(),
@@ -741,10 +736,13 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
 
     /**
      * The summary call. The review's end starts it while the tutor's closing line streams (#234), and the save that follows joins it
-     * through the memo, which keys both on the same input (`wrapUpInput`). A failure stored before `asOf` answered an earlier save,
-     * so this retry clears it and asks once more; one produced at or after `asOf` is returned as is. A hit is never cleared.
+     * through the memo, which keys both on the same input (`wrapUpInput`). A failure stored before this run began, from the early call or
+     * an earlier save, is cleared and asked once more; one stored while this run waited, which it joined, is returned as is. That needs
+     * no state beyond the memo, so it holds across a restart. #251's six requests per review still bound the calls past a cap.
+     * A hit is never cleared.
      */
-    async function runWrapUp(reviewId: ReviewId, asOf: Seq): Promise<WrapUpOutput> {
+    async function runWrapUp(reviewId: ReviewId): Promise<WrapUpOutput> {
+      const asOf = db.nextSeq();
       const input = wrapUpInput(reviews.view(reviewId).turns, usableNow(reviewId));
       const run = { review: reviewId };
       let result = await memo.run(tasks.wrapUp, input, run);
@@ -759,11 +757,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     const record = createRecord(db, {
       turns: (reviewId) => reviews.view(reviewId).turns,
       claims: usableNow,
-      wrapUp(reviewId) {
-        const asOf = wrapUpBegan.get(reviewId) ?? db.nextSeq();
-        wrapUpBegan.delete(reviewId);
-        return runWrapUp(reviewId, asOf);
-      },
+      wrapUp: runWrapUp,
       snapshotEvidenceInTx: evidence.snapshotInTx,
       links: preparation.linkSuggestions,
     });

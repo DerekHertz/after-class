@@ -32,6 +32,9 @@ function sortedUnique<T extends string>(xs: Iterable<T>): T[] {
  *   source   each discussed claim's evidence-checked text and its evidence IDs
  *   learner  answers and disputes in threads about that concept, verbatim, in turn order
  *   tutor    the wrap-up summary, citing only evidence the claims or tutor turns cited
+ *   tutor    the tutor's closing wrap_up line, verbatim, with its turn ID. The summary starts before that line is written (#234)
+ *            and never reads it, so this is where a last clarification the tutor gave is kept. It names no thread, so every note
+ *            carries it, and it moves no status.
  * Every thread gets an observation; a thread the wrap-up skipped is proposed not_assessed.
  */
 export function buildBundle(reviewId: ReviewId, turns: readonly Turn[], claims: readonly AssessableClaim[], wrapUp: WrapUpOutput, links: readonly SubjectLinkSuggestion[] = []): RecordBundle {
@@ -68,6 +71,9 @@ export function buildBundle(reviewId: ReviewId, turns: readonly Turn[], claims: 
   const concepts: ConceptId[] = [];
   for (const th of threads) for (const c of conceptsOf(th.claims)) if (!concepts.includes(c)) concepts.push(c);
 
+  const closingTurn = ordered.findLast((t) => t.actor === "tutor" && t.move.kind === "wrap_up");
+  const closing: NoteSegment[] = closingTurn?.actor === "tutor" && closingTurn.say.trim() !== "" ? [{ author: "tutor", text: closingTurn.say, turnId: closingTurn.id, evidence: [] }] : [];
+
   const notes = concepts.map((conceptId): Omit<Note, "userEdit"> => {
     const threadIds = new Set(observations.filter((o) => o.conceptIds.includes(conceptId)).map((o) => o.threadId));
     const discussed = sortedUnique(threads.filter((th) => threadIds.has(th.id)).flatMap((th) => th.claims))
@@ -82,7 +88,7 @@ export function buildBundle(reviewId: ReviewId, turns: readonly Turn[], claims: 
     const tutor: NoteSegment[] = wrapUp.notes
       .filter((n) => n.conceptId === conceptId)
       .map((n) => ({ author: "tutor", text: n.tutorSummary, turnId: null, evidence: sortedUnique(n.evidence.filter((id) => known.has(id))) as EvidenceId[] }));
-    const generated = [...source, ...learner, ...tutor];
+    const generated = [...source, ...learner, ...tutor, ...closing];
     return {
       id: stableId("note", reviewId, conceptId),
       reviewId,
