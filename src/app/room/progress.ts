@@ -9,7 +9,8 @@
  *
  * The record already applies those rules when it derives `Observation.status`. This module adds one more: only
  * `independent` grows understanding. `partial` and `after_help` are shown as effort, apart and smaller, never as
- * understood. Every other status awards nothing. There is no clock and no streak: the output depends only on the
+ * understood. Every other status awards nothing. An independent observation that names no topic awards nothing either:
+ * understanding is counted per topic, and there is no topic to count. There is no clock and no streak: the output depends only on the
  * observations given, so a later review can add to it and never takes anything away.
  */
 import type { Observation, RecordedStatus } from "../../shared/domain";
@@ -39,7 +40,7 @@ export type EffortMark = { readonly reviewId: ReviewId; readonly threads: number
 export type Progress = {
   /** Distinct topics with at least one saved `independent` observation. The only count that grows the room. */
   readonly understood: Count;
-  /** Saved reviews with at least one saved observation. */
+  /** Reviews with at least one saved question thread. GET /record carries no list of saved reviews, so a save with zero threads is not visible here and is not counted. */
   readonly reviews: Count;
   /** Saved threads that ended `partial` or `after_help`. Effort, never understanding. */
   readonly effort: Count;
@@ -66,24 +67,19 @@ function kindOf(status: RecordedStatus): Kind {
   }
 }
 
-/** An observation about a topic counts that topic; one with no topic stands alone, so it is never dropped or merged. */
-function topicKeys(o: Observation): readonly string[] {
-  return o.conceptIds.length > 0 ? o.conceptIds : [o.id];
-}
-
 export function slotIds(room: RoomId): readonly UnlockId[] {
   return Array.from({ length: UNLOCKS_PER_ROOM }, (_, i) => `${room}/${i + 1}` as UnlockId);
 }
 
 export function deriveProgress(observations: readonly Observation[]): Progress {
-  const topics = new Set<ConceptId | string>();
+  const topics = new Set<ConceptId>();
   const reviews = new Set<ReviewId>();
   const effortByReview = new Map<ReviewId, number>();
   let effort = 0;
   for (const o of observations) {
     reviews.add(o.reviewId);
     const kind = kindOf(o.status);
-    if (kind === "understood") for (const k of topicKeys(o)) topics.add(k);
+    if (kind === "understood") for (const k of o.conceptIds) topics.add(k);
     else if (kind === "effort") {
       effort += 1;
       effortByReview.set(o.reviewId, (effortByReview.get(o.reviewId) ?? 0) + 1);
@@ -94,7 +90,7 @@ export function deriveProgress(observations: readonly Observation[]): Progress {
   const unlocks = { "last-desk": slotIds("last-desk").slice(0, open), "study-bench": slotIds("study-bench").slice(0, open), "projection-booth": slotIds("projection-booth").slice(0, open) } satisfies Record<RoomId, readonly UnlockId[]>;
   return {
     understood: { value: understood, label: "topics explained on your own" },
-    reviews: { value: reviews.size, label: "saved reviews" },
+    reviews: { value: reviews.size, label: "reviews with a saved question" },
     effort: { value: effort, label: "questions answered with some help or only in part" },
     effortMarks: [...effortByReview].map(([reviewId, threads]) => ({ reviewId, threads })),
     unlocks,
