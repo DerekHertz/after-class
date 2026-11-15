@@ -1,4 +1,5 @@
 import type { SceneId } from "../appearance";
+import { AMBIENT, ambientDraws } from "./ambient";
 import { ROOM_LAYER_ART } from "./art";
 import type { NineSliceLayer, Rect, RoomLayout } from "./layout";
 import { FRONT_ROW_ROOMS } from "./rooms";
@@ -15,13 +16,18 @@ export type Sampling = "pixelated" | "smooth";
  * picture into `rect`. `nine-slice` cuts the picture `slice` asset pixels from each edge, keeps the corners at `border`
  * screen pixels, and stretches the edges and the middle, as CSS `border-image` with `fill` does.
  */
-export type Draw =
+export type PictureDraw =
   | { readonly kind: "image"; readonly src: string; readonly rect: Rect; readonly sampling: Sampling }
   | { readonly kind: "nine-slice"; readonly src: string; readonly rect: Rect; readonly slice: Edges; readonly border: Edges };
 
+/** Plain squares of one colour at one opacity, in CSS pixels of the stage: the ambient specks of room/ambient.ts. */
+export type Specks = { readonly kind: "specks"; readonly color: string; readonly alpha: number; readonly rects: readonly Rect[] };
+
+export type Draw = PictureDraw | Specks;
+
 /**
  * What the stage paints, back to front. `next` is the `performance.now()` time at which the list changes by itself, so the
- * stage runs its frame loop only while it is not null. Nothing animates yet, so it is always null and the stage paints only
+ * stage runs its frame loop only while it is not null. It is null while the room is still, and the stage then paints only
  * when the room, the window or a decoded picture changes.
  */
 export type DrawList = { readonly draws: readonly Draw[]; readonly next: number | null };
@@ -32,8 +38,12 @@ export type DrawList = { readonly draws: readonly Draw[]; readonly next: number 
  */
 const DEPTH = { background: 0, board: 2, desk: 5, mat: 6 } as const;
 
-/** The draw list of `scene` laid out as `layout`. Layers of equal depth keep the order they are listed in, the mat last. */
-export function buildScene(scene: SceneId, layout: RoomLayout): DrawList {
+/**
+ * The draw list of `scene` laid out as `layout`. Layers of equal depth keep the order they are listed in, the mat last.
+ * `now` is the `performance.now()` time of the frame, or null while the room is still (see motion.ts): the room's ambient
+ * life is drawn only for a time.
+ */
+export function buildScene(scene: SceneId, layout: RoomLayout, now: number | null = null): DrawList {
   const art = ROOM_LAYER_ART[scene];
   if (layout.composition === "compact") {
     return { draws: [{ kind: "image", src: art.background, rect: layout.layers.background, sampling: "smooth" }], next: null };
@@ -49,5 +59,7 @@ export function buildScene(scene: SceneId, layout: RoomLayout): DrawList {
     ...extras.map((extra) => ({ z: extra.z, draw: { kind: "image", src: extraArt[extra.name]!, rect: extra.rect, sampling: "pixelated" } as const })),
     { z: DEPTH.mat, draw: nineSlice(art.mat, mat, room.mat.art.slice) },
   ];
-  return { draws: layered.sort((a, b) => a.z - b.z).map(({ draw }) => draw), next: null };
+  const ambient = now === null ? null : ambientDraws(AMBIENT[scene], layout, now);
+  if (ambient !== null) layered.push(...ambient.draws);
+  return { draws: layered.sort((a, b) => a.z - b.z).map(({ draw }) => draw), next: ambient?.next ?? null };
 }

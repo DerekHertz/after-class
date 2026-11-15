@@ -8,6 +8,7 @@ import { sourceButtonLabel } from "./room-object";
 import type { RoomObject } from "./room-object";
 import { layoutRoom } from "./room/layout";
 import type { FullRoomLayout, Rect, Size } from "./room/layout";
+import { useMotion } from "./room/motion";
 import { RoomStage } from "./room/stage";
 import { FRONT_ROW_ROOMS } from "./room/rooms";
 import type { FrontRowRoom } from "./room/rooms";
@@ -68,6 +69,7 @@ export function FrontRowScene({ scene, layout, appearance, activity, boardRef }:
   const sceneRef = useRef<HTMLDivElement>(null);
   const size = useContentSize(sceneRef);
   const composition = useFullRoom() ? "full" : "compact";
+  const motion = useMotion(appearance.motion, composition);
   const placed = size === null ? null : layoutRoom(scene, size, composition);
   const full = placed?.composition === "full" ? placed : null;
   useEffect(() => { clearReaction(); }, [scene, appearance.companion, appearance.visible]);
@@ -75,7 +77,7 @@ export function FrontRowScene({ scene, layout, appearance, activity, boardRef }:
     <div ref={sceneRef} className="front-row-scene" data-room={scene} data-board-tone={room.board.tone} data-mat-tone={room.mat.tone} data-mat-actions={room.mat.actions} data-board-align={room.board.align} data-phase={layout.kind}>
       {/* The room's painted layers on one canvas, with every control placed over them from room/layout.ts. */}
       <div className="front-row-stage" style={full ? stageStyle(full) : undefined}>
-        <RoomStage scene={scene} composition={composition} />
+        <RoomStage scene={scene} composition={composition} motion={motion} />
         {layout.kind === "setup" ? layout.form : <>
           <ScrollArea area="board" label={room.surfaceName} areaRef={boardRef}>{layout.board}</ScrollArea>
           <ScrollArea area="desk" label="Your desk">{layout.desk}</ScrollArea>

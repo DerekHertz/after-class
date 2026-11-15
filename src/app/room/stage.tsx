@@ -3,18 +3,19 @@ import type { SceneId } from "../appearance";
 import { layoutRoom } from "./layout";
 import type { Composition, Size } from "./layout";
 import { buildScene } from "./scene";
-import type { Draw, DrawList } from "./scene";
+import type { Draw, DrawList, Specks } from "./scene";
 import { pieces } from "./paint";
 import { ROOM_LAYER_ART } from "./art";
 import type { Scale } from "./paint";
 
 /**
  * The canvas behind the room's text and controls. It paints the draw list of `scene` at the window's device pixels and
- * repaints only when the room, its size or a decoded picture changes, or while the list says something moves. Until every
+ * repaints only when the room, its size or a decoded picture changes, or while the list says something moves, which it does
+ * only when `motion` is on (room/motion.ts). Until every
  * picture of a room has decoded it keeps the room it last finished, or stays empty so the page's backdrop shows through.
  * Its `data-stage` attribute says which, and front-row.css holds the room's words back only while it is `waiting`.
  */
-export function RoomStage({ scene, composition }: { readonly scene: SceneId; readonly composition: Composition }) {
+export function RoomStage({ scene, composition, motion }: { readonly scene: SceneId; readonly composition: Composition; readonly motion: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<Stage | null>(null);
   useLayoutEffect(() => {
@@ -29,7 +30,7 @@ export function RoomStage({ scene, composition }: { readonly scene: SceneId; rea
     stageRef.current = stage;
     return () => { stage.stop(); stageRef.current = null; };
   }, []);
-  useLayoutEffect(() => { stageRef.current?.show(scene, composition); }, [scene, composition]);
+  useLayoutEffect(() => { stageRef.current?.show(scene, composition, motion); }, [scene, composition, motion]);
   return <canvas ref={canvasRef} className="front-row-canvas" aria-hidden="true" />;
 }
 
@@ -40,7 +41,7 @@ export function RoomStage({ scene, composition }: { readonly scene: SceneId; rea
 type StageState = "waiting" | "painted" | "off";
 const setState = (canvas: HTMLCanvasElement, state: StageState) => { canvas.dataset.stage = state; };
 
-type Wanted = { readonly scene: SceneId; readonly composition: Composition };
+type Wanted = { readonly scene: SceneId; readonly composition: Composition; readonly motion: boolean };
 /** The canvas's box: its size in CSS pixels and the device pixels of its backing store. */
 type Box = { readonly css: Size; readonly device: Size };
 
@@ -49,6 +50,8 @@ class Stage {
   private shown: SceneId | null = null;
   private box: Box | null = null;
   private frame: number | null = null;
+  /** Waits out the time until the list's `next`, so a room that changes a few times a second does not wake every frame. */
+  private timer: ReturnType<typeof setTimeout> | null = null;
   /** Set when a change arrived while the tab was hidden, so the stage paints it once the tab shows again. */
   private stale = false;
   /** The pictures this stage waits on, so it stops waiting on those of a room it no longer shows. */
@@ -72,8 +75,8 @@ class Stage {
     canvas.addEventListener("contextrestored", this.paint);
   }
 
-  show(scene: SceneId, composition: Composition): void {
-    this.wanted = { scene, composition };
+  show(scene: SceneId, composition: Composition, motion: boolean): void {
+    this.wanted = { scene, composition, motion };
     this.paint();
   }
 
@@ -83,7 +86,7 @@ class Stage {
     this.release();
     document.removeEventListener("visibilitychange", this.onVisibility);
     this.canvas.removeEventListener("contextrestored", this.paint);
-    if (this.frame !== null) cancelAnimationFrame(this.frame);
+    this.cancelFrame();
     this.wanted = null;
   }
 
@@ -113,15 +116,21 @@ class Stage {
     this.paint();
   }
 
-  private paint = (): void => {
+  private cancelFrame(): void {
     if (this.frame !== null) cancelAnimationFrame(this.frame);
-    this.frame = null;
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.frame = this.timer = null;
+  }
+
+  private paint = (): void => {
+    this.cancelFrame();
     this.release();
     const { wanted, box } = this;
     if (wanted === null || box === null || box.css.width === 0 || box.css.height === 0) return;
     this.stale = document.hidden;
     if (this.stale) return;
-    const list = (scene: SceneId) => buildScene(scene, layoutRoom(scene, box.css, wanted.composition));
+    const now = wanted.motion ? performance.now() : null;
+    const list = (scene: SceneId) => buildScene(scene, layoutRoom(scene, box.css, wanted.composition), now);
     let drawn: DrawList | null = list(wanted.scene);
     if (this.decoded(drawn)) this.shown = wanted.scene;
     else drawn = this.shown === null ? null : list(this.shown);
@@ -131,7 +140,9 @@ class Stage {
     context.clearRect(0, 0, box.device.width, box.device.height);
     if (drawn !== null) for (const draw of drawn.draws) paintDraw(context, draw, scaleOf(box));
     setState(this.canvas, drawn === null ? "waiting" : "painted");
-    if (drawn?.next != null) this.frame = requestAnimationFrame(this.paint);
+    if (drawn?.next != null) {
+      this.timer = setTimeout(() => { this.timer = null; this.frame = requestAnimationFrame(this.paint); }, Math.max(0, drawn.next - performance.now()));
+    }
   };
 
   /**
@@ -141,6 +152,7 @@ class Stage {
   private decoded(list: DrawList): boolean {
     let all = true;
     for (const draw of list.draws) {
+      if (draw.kind === "specks") continue;
       const entry = picture(draw.src);
       if (entry.state !== "pending") continue;
       entry.waiting.add(this.paint);
@@ -190,6 +202,7 @@ if (typeof document !== "undefined") {
 }
 
 function paintDraw(context: CanvasRenderingContext2D, draw: Draw, scale: Scale): void {
+  if (draw.kind === "specks") return paintSpecks(context, draw, scale);
   const { image, state } = pictures.get(draw.src)!;
   if (state !== "decoded") return;
   const smooth = draw.kind === "image" && draw.sampling === "smooth";
@@ -198,4 +211,15 @@ function paintDraw(context: CanvasRenderingContext2D, draw: Draw, scale: Scale):
   for (const { sx, sy, sw, sh, dx, dy, dw, dh } of pieces(draw, { width: image.naturalWidth, height: image.naturalHeight }, scale)) {
     context.drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh);
   }
+}
+
+/** Fills each speck on whole device pixels, at least one, so a speck is never smeared across two. */
+function paintSpecks(context: CanvasRenderingContext2D, { color, alpha, rects }: Specks, scale: Scale): void {
+  context.fillStyle = color;
+  context.globalAlpha = alpha;
+  for (const { left, top, width, height } of rects) {
+    const [x, y] = [Math.round(left * scale.x), Math.round(top * scale.y)];
+    context.fillRect(x, y, Math.max(1, Math.round((left + width) * scale.x) - x), Math.max(1, Math.round((top + height) * scale.y) - y));
+  }
+  context.globalAlpha = 1;
 }
