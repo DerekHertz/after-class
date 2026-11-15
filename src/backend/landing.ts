@@ -109,19 +109,21 @@ function privacy(origin: string, signIn: string, files: Files): string {
 <p>After Class is an invite-only beta. This page says what the beta stores and who processes it.</p>
 <h2>What it stores</h2>
 <ul>
-<li>Your sign-in. Clerk handles sign-in with Google or email, and After Class receives the account id Clerk assigns you.</li>
+<li>Your sign-in. After Class receives only the account id Clerk assigns you.</li>
 <li>What the Chrome extension captures while you watch a lecture on YouTube: the captions, the frames of the video, and the intervals you watched.</li>
-<li>Your reviews, with the questions asked, your answers, and your notes.</li>
+<li>Your reviews, with the questions asked, your answers, your notes and their edits.</li>
+<li>A record of each AI call made for you, with its cost and its result, and the server's error logs.</li>
 </ul>
 <h2>Who processes it</h2>
 <ul>
-<li>Clerk, for sign-in.</li>
-<li>Anthropic, whose Claude model prepares each lecture for review and plays the tutor. It receives the captions and frames it needs, and your answers.</li>
+<li>Clerk runs sign-in with Google or email. It keeps your sign-in details and session, and sets cookies for them on the sign-in and app pages.</li>
+<li>Anthropic, whose Claude model prepares each lecture for review and plays the tutor. It receives the captions and frames it needs, and your answers. While it prepares a lecture, it can search the web and read public pages about the lecture's topics to suggest resources.</li>
 <li>TypeSafe, which runs Jev. Jev answers short yes or no questions about the lecture, such as where one topic ends and whether the evidence supports a claim, and it can receive captions and frames for them.</li>
-<li>Amazon Web Services. The server and its database run in the us-east-2 region (Ohio), and a daily snapshot of the disk keeps the last 7.</li>
+<li>Your browser, if you answer by voice. The microphone button uses the browser's own speech recognition, which in Chrome can send the audio to Google. After Class receives only the recognized text.</li>
+<li>Amazon Web Services. The server and its database run in the us-east-2 region (Ohio). A daily snapshot of the disk keeps the last 7, and server logs are kept for 14 days.</li>
 </ul>
 <h2>Deleting</h2>
-<p>In the app you can delete a note, and you can delete a piece of captured evidence everywhere it is used. A deleted item can remain in a daily disk snapshot until that snapshot expires, after 7 days.</p>
+<p>Deleting a note in the app hides it, but the database keeps its text. Deleting a piece of captured evidence removes its frames from the server and from your reviews, but the database keeps its caption text and the AI results made from it. Copies also stay in the disk snapshots for up to 7 days. Full erasure of your data is not built yet.</p>
 <h2>This site</h2>
 <p>This page and the home page run no script and load nothing from another site.</p>
 <nav><a href="/">Back to the home page</a> <span class="muted">&middot;</span> <a href="${escape(signIn)}">Sign in</a></nav>`,
