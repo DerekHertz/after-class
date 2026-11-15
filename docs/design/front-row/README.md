@@ -1,6 +1,6 @@
 # Front-row review skins
 
-The review screen puts the learner at a front-row desk. The board shows the current question, and the editable Your thinking field lies on the desk mat. Issue #129 chose three skins, and the learner can pick any of them in **Room & companion**.
+The review screen puts the learner at a front-row desk. The board shows the current question, and the editable Your thinking field lies on the desk mat. The owner chose three skins for issue #129, and the learner can pick any of them in **Room & companion**.
 
 ## Selected designs and art
 

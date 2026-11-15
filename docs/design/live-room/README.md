@@ -1,6 +1,6 @@
 # Brief: a live, gamified review room
 
-Draft, 2026-11-14. Settled with the owner in a design session. Untracked until the owner says to commit it. Nothing in `src/` has changed.
+Settled with the owner in a design session on 2026-11-14.
 
 ## What the owner asked for
 
