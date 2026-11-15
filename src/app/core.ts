@@ -713,12 +713,12 @@ export function noteView(note: Note): NoteView {
 }
 
 /**
- * Every source in the order the learner watched it: oldest capture first, and within a capture the order the capture
- * first saw each video. The lecture list carries that order from the capture's own sources, so it is not guessed
+ * Every source in the order the learner watched it: captures by when their first fact arrived, which a late upload never
+ * moves, and within a capture the order the capture first saw each video. The lecture list carries that order from the capture's own sources, so it is not guessed
  * from evidence ids, which are hashes and sort at random.
  */
-export function sourceWatchOrder(lectures: readonly { readonly sourceIds: readonly SourceId[] }[] | null): readonly SourceId[] {
-  return [...new Set([...(lectures ?? [])].reverse().flatMap((l) => l.sourceIds))];
+export function sourceWatchOrder(lectures: readonly { readonly sourceIds: readonly SourceId[]; readonly startedMs: number }[] | null): readonly SourceId[] {
+  return [...new Set([...(lectures ?? [])].sort((a, b) => a.startedMs - b.startedMs).flatMap((l) => l.sourceIds))];
 }
 
 /**

@@ -21,14 +21,14 @@ const noReads: ResumeApi = {
 const data: LecturesResponse = {
   lectures: [
     {
-      captureId: cap, sourceTitles: ["Locks - Operating Systems", "Deadlock - Operating Systems"], sourceIds: [stableId("src", "locks"), stableId("src", "deadlock")], videos: 2, watchedSeconds: 1800, status: { state: "stopped" },
+      captureId: cap, sourceTitles: ["Locks - Operating Systems", "Deadlock - Operating Systems"], sourceIds: [stableId("src", "locks"), stableId("src", "deadlock")], startedMs: 1000, videos: 2, watchedSeconds: 1800, status: { state: "stopped" },
       reviews: [
         { reviewId: rActive, startedMs: 3, phase: "active", saved: "unsaved", mainQuestions: 1 },
         { reviewId: rEnded, startedMs: 2, phase: "ended", saved: "unsaved", mainQuestions: 0 },
         { reviewId: rSaved, startedMs: 1, phase: "ended", saved: "saved", mainQuestions: 3 },
       ],
     },
-    { captureId: cap2, sourceTitles: ["Semaphores"], sourceIds: [stableId("src", "semaphores")], videos: 1, watchedSeconds: 30, status: { state: "capturing" }, reviews: [] },
+    { captureId: cap2, sourceTitles: ["Semaphores"], sourceIds: [stableId("src", "semaphores")], startedMs: 2000, videos: 1, watchedSeconds: 30, status: { state: "capturing" }, reviews: [] },
   ],
 };
 

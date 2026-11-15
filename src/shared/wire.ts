@@ -291,12 +291,13 @@ const captureViewz = z.object({
   watchedSeconds: z.number(),
 }) satisfies z.ZodType<CaptureView>;
 
-/** GET /lectures: every capture, newest first, with its reviews. `sourceTitles` and `sourceIds` are the lecture videos, in the order the capture first saw them. */
+/** GET /lectures: every capture, newest first, with its reviews. `sourceTitles` and `sourceIds` are the lecture videos, in the order the capture first saw them. `startedMs` is when the capture's first fact arrived. */
 export const lecturesResponse = z.object({
   lectures: z.array(z.object({
     captureId: idOf("cap"),
     sourceTitles: z.array(z.string()),
     sourceIds: z.array(idOf("src")),
+    startedMs: z.number().int().nonnegative(),
     videos: z.number().int().min(0),
     watchedSeconds: z.number(),
     status: captureViewz.shape.status,

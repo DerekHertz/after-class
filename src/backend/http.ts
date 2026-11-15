@@ -532,7 +532,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
             const saved: ReviewSaveState = record ? record.saveState(rid) : "unsaved";
             return { reviewId: rid, startedMs, phase: v.state.phase, saved, mainQuestions: v.state.mainQuestions };
           });
-          return { captureId: id, sourceTitles: c.sources.map((s) => s.title), sourceIds: c.sources.map((s) => s.id), videos: c.sources.length, watchedSeconds: c.watchedSeconds, status: c.status, reviews: reviewList };
+          return { captureId: id, sourceTitles: c.sources.map((s) => s.title), sourceIds: c.sources.map((s) => s.id), startedMs: evidence.captureStartedMs(id) ?? 0, videos: c.sources.length, watchedSeconds: c.watchedSeconds, status: c.status, reviews: reviewList };
         });
         return reply("lectures", { lectures }, cors);
       }
