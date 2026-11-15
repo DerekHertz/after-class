@@ -739,6 +739,42 @@ describe("a page loaded while the backend still runs a turn", () => {
     h.controller.dispose();
   });
 
+  test("a failed stream whose reply the backend stored clears the failure and Retry", async () => {
+    let reads = 0;
+    let sent = "";
+    const h = setup({
+      sendTurn: ({ turnId }) => ((sent = turnId), events({ type: "learner_turn_stored", turnId }, { type: "turn_failed", error: "connection lost", retryable: true })),
+      review: () => (reads++ < 2 ? unanswered({ turnInFlight: true }) : parsedReview({ turns: [tutorAsk, { ...learnerAnswer(2), id: sent }, reply] })),
+    });
+    await h.controller.send(answer);
+    expect(h.controller.getState().live?.status).toBe("failed");
+    await settle(() => h.controller.getState().view?.turnInFlight === false);
+    expect(h.controller.getState().live).toBeNull();
+    h.controller.dispose();
+  });
+
+  test("a send that settles after the page is left does not start watching", async () => {
+    let reads = 0;
+    let release = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    const h = setup({
+      sendTurn: async function* ({ turnId }) {
+        yield { type: "learner_turn_stored", turnId } as const;
+        await gate;
+        yield { type: "turn_failed", error: "connection lost", retryable: true } as const;
+      },
+      review: () => (reads++, unanswered({ turnInFlight: true })),
+    });
+    const sending = h.controller.send(answer);
+    await Bun.sleep(10);
+    h.controller.dispose();
+    const before = reads;
+    release();
+    await sending;
+    await Bun.sleep(60);
+    expect(reads - before).toBeLessThanOrEqual(1);
+  });
+
   test("a page left before its first read returns never starts watching", async () => {
     let reads = 0;
     let release = () => {};
