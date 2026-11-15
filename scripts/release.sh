@@ -1,13 +1,15 @@
 #!/bin/bash
-# Usage: scripts/release.sh [<release tag>], from a clone of the repository on your own machine. It shows which release
-# useafterclass.com runs and the release tags after it, prints the notes and warnings for the tag you give or the newest
-# one, runs that release's image locally until you press Enter, and deploys it only when you answer y. The deploy is
-# scripts/deploy-beta.sh with the digest read here at the start, so a release whose image-digest.txt changes after you saw
-# it is refused, not deployed. Only the deploy needs AWS, under your own `aws login`. Nothing on GitHub or the server can
-# start a deploy. Needs git, bun, gh, curl, docker and the AWS CLI.
+# Usage: scripts/release.sh [--live <tag>] [<release tag>], from a clone of the repository on your own machine. It asks
+# for your `aws login` first and reads which release the server runs through Systems Manager, because a network filter
+# can block or rewrite useafterclass.com. It lists the release tags after that one, prints the notes and warnings for the
+# tag you give or the newest one, runs that release's image locally until you press Enter, and deploys it only when you
+# answer y. The deploy is scripts/deploy-beta.sh with the digest and commit read here at the start, so a release whose
+# record changes after you saw it is refused, not deployed. After the deploy it reads the server again, then checks
+# useafterclass.com from this machine. --live names the release the server runs when the server cannot be read, and the
+# screen then says the base is yours, not read. Nothing on GitHub or the server can start a deploy. Needs git, bun, gh,
+# curl, docker and the AWS CLI.
 set -euo pipefail
 
-site=https://useafterclass.com
 github_repository=DerekHertz/after-class
 release_tag='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 
@@ -16,47 +18,67 @@ fail() {
   echo "release: $*" >&2
   exit 1
 }
-
-# The version in the site's GET /health, or nothing when it cannot be read or names none.
-live_version() {
-  local health
-  health=$(curl -fsS --max-time 10 --max-filesize 4096 "${site}/health" 2>/dev/null) || return 0
-  if [[ "$health" =~ \"version\":\"([0-9]+\.[0-9]+\.[0-9]+)\" ]]; then echo "${BASH_REMATCH[1]}"; fi
+usage() {
+  echo "usage: scripts/release.sh [--live v<major>.<minor>.<patch>] [v<major>.<minor>.<patch>]" >&2
+  exit 2
 }
 
 newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n' "$1" "$2" | sort -V | tail -n 1)" = "$1" ]; }
 
 cd "$(dirname "$0")/.."
+claimed=""
+if [ "${1:-}" = --live ]; then
+  if [ $# -lt 2 ] || [[ ! "$2" =~ $release_tag ]]; then usage; fi
+  claimed="$2"
+  shift 2
+fi
+[ $# -le 1 ] || usage
 tag="${1:-}"
-if [ -n "$tag" ] && [[ ! "$tag" =~ $release_tag ]]; then
-  echo "usage: scripts/release.sh [v<major>.<minor>.<patch>]" >&2
-  exit 2
+if [ -n "$tag" ] && [[ ! "$tag" =~ $release_tag ]]; then usage; fi
+
+signed_in() { aws sts get-caller-identity --region us-east-2 --query Account --output text >/dev/null 2>&1; }
+if ! signed_in; then
+  say "reading the server and deploying need your AWS sign-in. Run \`aws login\` in another terminal, then press Enter here. Ctrl-C stops."
+  read -r _ || true
+  signed_in || fail "still no AWS sign-in. Run \`aws login\`, then scripts/release.sh again."
 fi
 
-live=$(live_version)
 git fetch --quiet --no-tags origin '+refs/heads/master:refs/remotes/origin/master' '+refs/tags/v*:refs/tags/v*' \
   || fail "cannot fetch master and the release tags from origin"
 mapfile -t tags < <(git tag --list 'v*' | grep -E "$release_tag" | sort -V)
+
+unverified() {
+  echo
+  say "UNVERIFIED BASE. The server's release could not be read, and you passed --live ${live}."
+  say "The notes and warnings start from ${live}. If the server runs another release, they are wrong."
+  echo
+}
+
+if read_back=$(bun scripts/live-release.ts server); then
+  read -r live live_digest <<<"$read_back"
+  if [ -n "$claimed" ] && [ "$claimed" != "$live" ]; then
+    fail "the server runs ${live}, not the ${claimed} you passed with --live. Run it without --live."
+  fi
+  claimed=""
+  say "useafterclass.com runs ${live}, image ${live_digest}, read from the server."
+elif [ -n "$claimed" ]; then
+  [[ " ${tags[*]} " == *" ${claimed} "* ]] || fail "--live ${claimed} is not a release tag"
+  live="$claimed"
+  unverified
+else
+  fail "there is no base for the notes, so nothing was tried or deployed. If you know which release it runs, pass it: scripts/release.sh --live <tag>${tag:+ ${tag}}"
+fi
+
 after=()
 for t in "${tags[@]}"; do
-  if [ -z "$live" ] || newer "$t" "v${live}"; then after+=("$t"); fi
+  if newer "$t" "$live"; then after+=("$t"); fi
 done
-
-if [ -n "$live" ]; then
-  say "useafterclass.com runs v${live}."
-  say "release tags after it: ${after[*]:-none}"
-else
-  say "useafterclass.com did not report its version, so every release tag is listed."
-  say "release tags: ${after[*]:-none}"
-fi
+say "release tags after it: ${after[*]:-none}"
 
 if [ -z "$tag" ]; then
   if [ "${#after[@]}" -eq 0 ]; then
-    next=v0.1.0
-    if [ -n "$live" ]; then
-      IFS=. read -r major minor patch <<<"$live"
-      next="v${major}.${minor}.$((patch + 1))"
-    fi
+    IFS=. read -r major minor patch <<<"${live#v}"
+    next="v${major}.${minor}.$((patch + 1))"
     say "nothing to deploy. To redeploy or roll back, pass a tag."
     say "to cut ${next}, merge a pull request that sets \"version\": \"${next#v}\" in package.json, then tag its merge commit:"
     cat <<EOF
@@ -84,7 +106,7 @@ digest="${BASH_REMATCH[2]}"
 echo
 say "${tag} is commit ${commit}"
 say "its image is ghcr.io/derekhertz/after-class@${digest}"
-say "this digest is the one tried and deployed. If the release names another one later, nothing deploys."
+say "this commit and digest are the ones tried and deployed. If the release names others later, nothing deploys."
 echo
 bun scripts/release-notes.ts "$tag" "$commit" "$live"
 
@@ -92,6 +114,7 @@ scripts/try-release.sh "$tag" "$digest" "$commit" || fail "the local try of ${ta
 
 echo
 bun scripts/release-notes.ts --warnings "$tag" "$commit" "$live"
+if [ -n "$claimed" ]; then unverified; fi
 answer=""
 read -r -p "Deploy ${tag} to useafterclass.com? [y/N] " answer || true
 if [ "$answer" != y ]; then
@@ -99,20 +122,22 @@ if [ "$answer" != y ]; then
   exit 0
 fi
 
-signed_in() { aws sts get-caller-identity --region us-east-2 --query Account --output text >/dev/null 2>&1; }
-if ! signed_in; then
-  say "the deploy needs your AWS sign-in. Run \`aws login\` in another terminal, then press Enter here. Ctrl-C stops."
-  read -r _ || true
-  signed_in || fail "still no AWS sign-in, so ${tag} was not deployed. Run \`aws login\`, then scripts/release.sh ${tag}."
-fi
-
 scripts/deploy-beta.sh "$tag" "$digest" "$commit"
 
-for _ in $(seq 1 24); do
-  if [ "$(live_version)" = "${tag#v}" ]; then
-    say "useafterclass.com now runs ${tag}."
-    exit 0
+read_back=$(bun scripts/live-release.ts server) \
+  || fail "the deploy of ${tag} reported healthy, but the server could not be read back, so it is unconfirmed. Run scripts/release.sh to read it again."
+read -r now now_digest <<<"$read_back"
+if [ "$now" != "$tag" ] || [ "$now_digest" != "$digest" ]; then
+  fail "after the deploy, the server runs ${now}, image ${now_digest}, not ${tag}, image ${digest}."
+fi
+say "the server runs ${tag}, image ${digest}, and its /health answers."
+
+if public=$(bun scripts/live-release.ts public); then
+  if [ "$public" = "$tag" ]; then
+    say "useafterclass.com reports ${tag} to this machine too."
+  else
+    say "WARNING useafterclass.com reports ${public} to this machine, not ${tag}. The server runs ${tag}. Check the site from another network."
   fi
-  sleep 5
-done
-fail "the deploy finished, but ${site}/health does not report ${tag#v} after 2 minutes. It reports '$(live_version)'."
+else
+  say "WARNING this machine could not confirm useafterclass.com. The server runs ${tag}, so the deploy stands. Check the site from another network."
+fi

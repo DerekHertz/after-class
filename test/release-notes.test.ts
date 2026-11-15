@@ -2,17 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpDir } from "./tmp";
-import { baseOf, liveRelease, releaseNotes } from "../scripts/release-notes";
-
-describe("liveRelease", () => {
-  test("is the tag of the version the beta's /health reports", () => {
-    expect(liveRelease("0.1.4")).toBe("v0.1.4");
-  });
-
-  test("is null when /health named no version, or one that is not a release", () => {
-    for (const version of ["", "0.1.4-rc1", "v0.1.4", "01.1.4"]) expect(liveRelease(version)).toBeNull();
-  });
-});
+import { baseOf, releaseNotes } from "../scripts/release-notes";
 
 describe("baseOf", () => {
   const tags = ["v0.1.9", "v0.1.10", "v0.2.0", "v0.1.11", "latest", "v0.3.0-rc1"];
@@ -21,16 +11,12 @@ describe("baseOf", () => {
     expect(baseOf("v0.2.0", "v0.1.9", tags)).toBe("v0.1.9");
   });
 
-  test("is the release tag just below the tag, by version, when the beta named no release", () => {
-    expect(baseOf("v0.2.0", null, tags)).toBe("v0.1.11");
-  });
-
   test("is the release tag just below the tag when the live release is not older, as in a rollback", () => {
     expect(baseOf("v0.1.11", "v0.2.0", tags)).toBe("v0.1.10");
   });
 
   test("is null when no release is older than the tag", () => {
-    expect(baseOf("v0.1.9", null, tags)).toBeNull();
+    expect(baseOf("v0.1.9", "v0.1.9", tags)).toBeNull();
   });
 });
 
@@ -104,7 +90,7 @@ describe("releaseNotes", () => {
   });
 
   test("says so when no release is older, instead of listing all history", () => {
-    expect(releaseNotes({ tag: "v0.1.0", live: null, base: null, subjects: [], paths: [] })).toBe("First release. No older release to compare with.\n");
+    expect(releaseNotes({ tag: "v0.1.0", live: "v0.1.0", base: null, subjects: [], paths: [] })).toBe("First release. No older release to compare with.\n");
   });
 
   test("a rollback to the oldest release still warns that it runs on a newer release's database", () => {
@@ -113,11 +99,6 @@ describe("releaseNotes", () => {
       expect(notes).toContain("**Rollback.** The beta runs v0.1.2, which is newer than v0.1.0, the oldest release.");
       expect(notes).toContain("Any database migration from a newer release stays, and v0.1.0 runs on it.");
     }
-  });
-
-  test("says when the beta did not report its release, so the base is only assumed", () => {
-    const notes = releaseNotes({ ...range, tag: "v0.1.6", live: null, base: "v0.1.5" });
-    expect(notes).toStartWith("## Changes since v0.1.5\n\n**Check the base.** The beta did not say which release it runs, so this list assumes v0.1.5, the release before v0.1.6.");
   });
 
   test("calls a tag no newer than the live release a rollback", () => {
@@ -162,15 +143,20 @@ describe("bun scripts/release-notes.ts", () => {
     git("tag", "v0.1.2");
     const run = (live: string) => Bun.spawnSync(["bun", SCRIPT, "v0.1.2", git("rev-parse", "v0.1.2"), live], { cwd: repo }).stdout.toString();
 
-    const fromLive = run("0.1.0");
+    const fromLive = run("v0.1.0");
     expect(fromLive).toStartWith("## Changes since v0.1.0\n\nThe beta runs v0.1.0.\n");
     expect(fromLive).toContain("**Needs terraform.** This range changes `infra/beta`.");
     expect(fromLive).toContain("**Migrates the database.** This range changes `src/backend/migrations.ts`.");
     expect(fromLive).toContain("- Add a column (#2)");
     expect(fromLive).toContain("- Grow the disk (#3)");
 
-    const unknown = run("");
-    expect(unknown).toStartWith("## Changes since v0.1.1\n\n**Check the base.**");
-    expect(unknown).not.toContain("Migrates the database");
+  });
+
+  test("refuses to run without the live release, so the notes never start from an assumed base", () => {
+    for (const live of ["", "0.1.0", "latest"]) {
+      const result = Bun.spawnSync(["bun", SCRIPT, "v0.1.2", "c".repeat(40), live]);
+      expect(result.exitCode).toBe(2);
+      expect(result.stdout.toString()).toBe("");
+    }
   });
 });

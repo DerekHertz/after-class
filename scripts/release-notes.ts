@@ -1,7 +1,8 @@
 // A release's notes: one line per merged PR since the release the beta runs, grouped by the type and scope in its title,
 // with a warning when the range needs terraform or migrates the database. It reads PR titles from master's squash commits,
-// so it makes no model call. scripts/release.sh runs it after fetching master and the release tags.
-// Usage: bun scripts/release-notes.ts [--warnings] <tag> <commit> <live version, or "" when /health named none>
+// so it makes no model call. scripts/release.sh runs it after fetching master and the release tags, with the live release
+// it read from the server or the one you passed with --live.
+// Usage: bun scripts/release-notes.ts [--warnings] <tag> <commit> <live release tag>
 // --warnings prints only the base and the warnings.
 
 const RELEASE_TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -14,14 +15,9 @@ export function compareTags(a: string, b: string): number {
   return 0;
 }
 
-/** The release tag of the version the beta's /health reports, or null when it named none. */
-export function liveRelease(version: string): string | null {
-  return RELEASE_TAG.test(`v${version}`) ? `v${version}` : null;
-}
-
 /** Where the notes start: the live release when it is older than `tag`, otherwise the release tag just below `tag`. */
-export function baseOf(tag: string, live: string | null, tags: readonly string[]): string | null {
-  if (live !== null && compareTags(live, tag) < 0) return live;
+export function baseOf(tag: string, live: string, tags: readonly string[]): string | null {
+  if (compareTags(live, tag) < 0) return live;
   return tags.filter((t) => RELEASE_TAG.test(t) && compareTags(t, tag) < 0).sort(compareTags).at(-1) ?? null;
 }
 
@@ -70,8 +66,8 @@ function place(subject: string): { group: Group; line: string } | null {
 
 export interface ReleaseRange {
   readonly tag: string;
-  /** The release the beta reported running, or null when /health named none. */
-  readonly live: string | null;
+  /** The release the beta runs. */
+  readonly live: string;
   /** Where the range starts, from baseOf, or null when no release is older than `tag`. */
   readonly base: string | null;
   /** The subject of each first-parent commit in the range, newest first. On master each is a squash-merged PR's title. */
@@ -82,10 +78,7 @@ export interface ReleaseRange {
 
 const code = (items: Iterable<string>): string => [...items].map((item) => `\`${item}\``).join(", ");
 
-function baseLine(tag: string, base: string, live: string | null): string {
-  if (live === null) {
-    return `**Check the base.** The beta did not say which release it runs, so this list assumes ${base}, the release before ${tag}. If it runs an older one, this list and its warnings leave out that release's changes.`;
-  }
+function baseLine(tag: string, base: string, live: string): string {
   if (live !== base) {
     return `**Rollback.** The beta runs ${live}, which is not older than ${tag}. This list shows ${tag}'s changes since ${base}. Any database migration from a newer release stays, and ${tag} runs on it.`;
   }
@@ -95,7 +88,7 @@ function baseLine(tag: string, base: string, live: string | null): string {
 export function releaseNotes(range: ReleaseRange, opts: { warningsOnly?: boolean } = {}): string {
   const { tag, live, base } = range;
   if (base === null) {
-    if (live === null || compareTags(live, tag) <= 0) return "First release. No older release to compare with.\n";
+    if (compareTags(live, tag) <= 0) return "First release. No older release to compare with.\n";
     return `**Rollback.** The beta runs ${live}, which is newer than ${tag}, the oldest release. No older release lists its changes. Any database migration from a newer release stays, and ${tag} runs on it.\n`;
   }
 
@@ -133,12 +126,11 @@ function git(...args: string[]): string[] {
 if (import.meta.main) {
   const args = process.argv.slice(2);
   const warningsOnly = args[0] === "--warnings";
-  const [tag = "", commit = "", version = ""] = warningsOnly ? args.slice(1) : args;
-  if (!RELEASE_TAG.test(tag) || !/^[0-9a-f]{40}$/.test(commit)) {
-    console.error('usage: bun scripts/release-notes.ts [--warnings] <tag> <commit> <live version or "">');
+  const [tag = "", commit = "", live = ""] = warningsOnly ? args.slice(1) : args;
+  if (!RELEASE_TAG.test(tag) || !/^[0-9a-f]{40}$/.test(commit) || !RELEASE_TAG.test(live)) {
+    console.error("usage: bun scripts/release-notes.ts [--warnings] <tag> <commit> <live release tag>");
     process.exit(2);
   }
-  const live = liveRelease(version);
   const base = baseOf(tag, live, git("tag", "--list", "v*"));
   const subjects = base === null ? [] : git("log", "--first-parent", "--format=%s", `refs/tags/${base}..${commit}`);
   const paths = base === null ? [] : git("diff", "--name-only", `refs/tags/${base}`, commit);
