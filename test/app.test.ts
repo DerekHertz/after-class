@@ -4,12 +4,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { AppApi } from "../src/app/api";
 import { ApiError } from "../src/app/api";
 import { OptionsView, checkAgain } from "../src/app/capture";
-import { availableActions, captureStatusLabel, conversationLines, coveredLines, currentEvidenceIds, estimateText, formatClock, groupGaps, inspectBundle, lectureHeading, liveText, noteView, observationRow, optionsScreen, parseRoute, partialLines, reduceLive, routePath, softTargetPrompt, startLive, strandedEndTurn, toAct, unansweredLearnerTurn, usageRows } from "../src/app/core";
+import { availableActions, citedInWatchOrder, captureStatusLabel, conversationLines, coveredLines, currentEvidenceIds, estimateText, formatClock, groupGaps, inspectBundle, lectureHeading, liveText, noteView, observationRow, optionsScreen, sourceWatchOrder, parseRoute, partialLines, reduceLive, routePath, softTargetPrompt, startLive, strandedEndTurn, toAct, unansweredLearnerTurn, usageRows } from "../src/app/core";
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { UsageTable } from "../src/app/record";
 import { BundleInspector, EvidencePane } from "../src/app/ui";
 import type { ScopePreview, TurnEvent, UsageSummary } from "../src/shared/domain";
 import { stableId } from "../src/shared/ids";
+import { media } from "../src/shared/time";
 import { Material, interval } from "../src/shared/time";
 import { captureId, claimJson, clm, cpt, crv, ev1, ev2, findElements, learnerAnswer, parsedReview, reviewId, reviewJson, sentence, src, stored, thr, tid, turnJson, tutorAsk } from "./app-fixtures";
 
@@ -396,5 +397,36 @@ describe("captureStatusLabel", () => {
     expect(captureStatusLabel({ state: "paused", reason: "idle" })).toBe("Capture paused: nothing was playing for a while");
     expect(captureStatusLabel({ state: "stopped" })).toBe("Capture stopped");
     expect(captureStatusLabel({ state: "stopped", reason: "video_ended" })).toBe("Capture stopped: the video ended");
+  });
+});
+
+describe("citedInWatchOrder", () => {
+  const a = stableId("src", "a");
+  const b = stableId("src", "b");
+  const ev = (n: string) => stableId("ev", n);
+  const passage = (n: string, sourceId: typeof a, start: number) => ({ id: ev(n), sourceId, interval: { start: media(start), end: media(start + 4) } });
+  test("lists a note's evidence by lecture then time, with a frame among the passages and unloaded ids last", () => {
+    const details = { passages: [passage("p520", a, 520), passage("p534", a, 534), passage("p524", a, 524), passage("q3", b, 3)], frames: [{ id: ev("f512"), sourceId: a, mediaS: media(512) }] };
+    const ids = [ev("p520"), ev("p534"), ev("q3"), ev("p524"), ev("gone"), ev("f512")];
+    expect(citedInWatchOrder(ids, details, [a, b])).toEqual([ev("f512"), ev("p520"), ev("p524"), ev("p534"), ev("q3"), ev("gone")]);
+    expect(citedInWatchOrder(ids, null, [a, b])).toEqual(ids);
+  });
+
+  test("lectures follow the order they were watched, whatever order the cited ids arrive in", () => {
+    const details = { passages: [passage("pa", a, 90), passage("pb", b, 10)], frames: [] };
+    expect(citedInWatchOrder([ev("pb"), ev("pa")], details, [a, b])).toEqual([ev("pa"), ev("pb")]);
+    expect(citedInWatchOrder([ev("pa"), ev("pb")], details, [b, a])).toEqual([ev("pb"), ev("pa")]);
+  });
+
+  test("a lecture the watch order does not name follows the known ones, and an unloaded id comes last", () => {
+    const details = { passages: [passage("pa", a, 90), passage("pb", b, 10)], frames: [] };
+    expect(citedInWatchOrder([ev("gone"), ev("pb"), ev("pa")], details, [a])).toEqual([ev("pa"), ev("pb"), ev("gone")]);
+  });
+
+  test("the watch order is the capture that started first, each capture in the order it saw its videos", () => {
+    expect(sourceWatchOrder([{ sourceIds: [b], firstSeq: 2 }, { sourceIds: [a, b], firstSeq: 1 }])).toEqual([a, b]);
+    // A late upload puts A's capture first in the newest-first list, but A was still watched first.
+    expect(sourceWatchOrder([{ sourceIds: [a], firstSeq: 1 }, { sourceIds: [b], firstSeq: 2 }])).toEqual([a, b]);
+    expect(sourceWatchOrder(null)).toEqual([]);
   });
 });

@@ -29,7 +29,7 @@
  *   if (r.kind === "missing") await memo.run(boundaryTask, input, { signal });
  */
 import { canonicalJson, stableId } from "../../shared/ids";
-import type { CaptureId, IdPart, MemoKey } from "../../shared/ids";
+import type { CaptureId, IdPart, MemoKey, ReviewId } from "../../shared/ids";
 import type { BudgetHold, Cost, Provider, Purpose, Seq, UsageEvent, UsageOutcome } from "../../shared/domain";
 import { asSeq } from "../db";
 import type { UserDb } from "../db";
@@ -82,8 +82,11 @@ export type Admitted = { priced(cost: Cost): void };
 /** What an adapter needs to send paid requests: the abort signal, and `admit`, called immediately before each request is sent. */
 export type SendContext = {
   readonly signal: AbortSignal;
-  /** Throws `BudgetHeld` when the request must not be sent. */
-  admit(): Admitted;
+  /**
+   * Throws `BudgetHeld` when the request must not be sent. `estimateUsd`: what this request could cost, for a purpose whose size varies
+   * with the request. The budget reserves it in place of the purpose's flat estimate.
+   */
+  admit(estimateUsd?: number): Admitted;
 };
 
 /** A context with no budget, for scripts and tests that call an adapter directly. */
@@ -159,6 +162,8 @@ export type MemoRunOptions = {
   readonly onRetry?: () => void;
   /** The capture this call is for, stored on its usage events. Leave it out when the caller has none. */
   readonly captureId?: CaptureId;
+  /** The review this request is for, stored on its holds. The budget lets a review's wrap-up pass the caps only when the review has paid tutoring (budget.ts). */
+  readonly review?: ReviewId;
 };
 
 export type Memo = {
@@ -324,14 +329,14 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
     );
   }
 
-  async function attemptLoop<I, O>(task: Task<I, O>, input: I, key: MemoKey, signal: AbortSignal, streamTo: ((d: string) => void) | null, onRetry: (() => void) | null, captureId: CaptureId | null): Promise<RunResult<O>> {
+  async function attemptLoop<I, O>(task: Task<I, O>, input: I, key: MemoKey, signal: AbortSignal, streamTo: ((d: string) => void) | null, onRetry: (() => void) | null, captureId: CaptureId | null, review: ReviewId | null): Promise<RunResult<O>> {
     q.insertInput.run(userId, key, task.provider, task.purpose, task.version, task.model, canonicalJson(task.canonicalInput(input)), Math.round(now()));
     let failures = q.failure.get(userId, key)?.attempts ?? 0;
     while (true) {
       if (signal.aborted) return { kind: "missing", key };
       const tickets: Ticket[] = [];
-      const admit = (): Admitted => {
-        const admission = budget?.reserve(userId, task.purpose, key) ?? null;
+      const admit = (estimateUsd?: number): Admitted => {
+        const admission = budget?.reserve(userId, task.purpose, key, review ?? undefined, estimateUsd) ?? null;
         if (admission?.kind === "held") throw new BudgetHeld(admission.hold, null);
         const ticket: Ticket = { reservation: admission?.reservation ?? null, cost: null };
         tickets.push(ticket);
@@ -409,7 +414,7 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
     const done = settled(task as Task<unknown, O>, key);
     if (done.kind !== "missing") return Promise.resolve(done);
     if (mode === "replay") return Promise.reject(new ReplayMiss(task.purpose, key));
-    const p = attemptLoop(task, input, key, runOpts.signal ?? NEVER, runOpts.streamTo ?? null, runOpts.onRetry ?? null, runOpts.captureId ?? null).finally(() => inflight.delete(key));
+    const p = attemptLoop(task, input, key, runOpts.signal ?? NEVER, runOpts.streamTo ?? null, runOpts.onRetry ?? null, runOpts.captureId ?? null, runOpts.review ?? null).finally(() => inflight.delete(key));
     inflight.set(key, p);
     return p;
   }

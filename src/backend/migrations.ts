@@ -5,20 +5,19 @@
  * Never edit an applied one: the runner refuses a migration whose text changed after it ran. db.ts runs them and re-exports this module's names.
  */
 import { stableId } from "../shared/ids";
-import { BUDGET_HOLDS } from "./migrations-budget";
+import { BUDGET_HOLDS, BUDGET_HOLDS_REVIEW } from "./migrations-budget";
 import { DEVICES_MIGRATION } from "./devices";
+import { SIZE_COLUMNS } from "./migrations-frame-bytes";
 import { OBSERVATION_STATUSES, RECORD_USER_ID } from "./migrations-record";
 import { TUTOR_CACHE } from "./migrations-review";
 
 export const OWNERS = ["kernel", "providers", "evidence", "segmentation", "preparation", "review", "record"] as const;
 export type Owner = (typeof OWNERS)[number];
-
 export type Migration = { readonly id: string; readonly sql: string };
 
 const PURPOSES = `'boundary','frame_change','claim_check','interpretation','claim_revision','resource_search','tutor_turn','wrap_up'`;
 /** 003-diagram-purpose adds "diagram_summary"; 001 keeps the list it was applied with (its text is hashed). */
 const PURPOSES_WITH_DIAGRAM = `${PURPOSES},'diagram_summary'`;
-
 /** R16 holds: an unsaved review keeps its capture's raw evidence. Shared by the raw-evidence triggers. */
 const PENDING_SAVE_HOLDS = (captureCol: string) => `EXISTS (
     SELECT 1 FROM reviews r
@@ -325,7 +324,7 @@ DROP TABLE memo_save;
 DROP TABLE memo_inputs_save;
 DROP TABLE voice_usage_events_save;`,
     },
-    BUDGET_HOLDS,
+    BUDGET_HOLDS, BUDGET_HOLDS_REVIEW,
   ],
 
   evidence: [
@@ -552,6 +551,7 @@ SELECT capture_id, MIN(user_id), 0 FROM frames
 WHERE capture_id NOT IN (SELECT capture_id FROM capture_owners) GROUP BY capture_id;
 ${appendOnly("capture_owners")}`,
     },
+    ...SIZE_COLUMNS,
   ],
 
   segmentation: [

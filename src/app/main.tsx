@@ -49,14 +49,14 @@ function App({ services: { api, speaker, speech, unsent }, extensionId }: { read
   const route = parseRoute(usePathname());
   switch (route.page) {
     case "home":
-      return <HomeScreen api={api} />;
+      return <HomeScreen api={api} extensionId={extensionId} />;
     case "capture": {
       const id = parseId("cap", route.id);
-      return id ? <CaptureScreen api={api} captureId={id} /> : <HomeScreen api={api} />;
+      return id ? <CaptureScreen api={api} captureId={id} /> : <HomeScreen api={api} extensionId={extensionId} />;
     }
     case "review": {
       const id = parseId("rvw", route.id);
-      return id ? <ReviewScreen key={id} api={api} reviewId={id} speaker={speaker} speech={speech} unsent={unsent} /> : <HomeScreen api={api} />;
+      return id ? <ReviewScreen key={id} api={api} reviewId={id} speaker={speaker} speech={speech} unsent={unsent} /> : <HomeScreen api={api} extensionId={extensionId} />;
     }
     case "record":
       return <RecordScreen api={api} reviewId={route.reviewId === null ? null : parseId("rvw", route.reviewId)} />;

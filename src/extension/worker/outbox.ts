@@ -166,7 +166,7 @@ export function createIdbOutbox(factory: IDBFactory = indexedDB, name = "aftercl
 // ───────────────────────────── Batching ─────────────────────────────────────
 
 export const BATCH_MAX_FACTS = 500;
-export const BATCH_MAX_BYTES = 8 * 1024 * 1024;
+export const BATCH_MAX_BYTES = 4 * 1024 * 1024;
 
 function approxBytes(f: StoredFact): number {
   const b = f.body;
@@ -175,7 +175,7 @@ function approxBytes(f: StoredFact): number {
   return 512;
 }
 
-/** ≤ 500 facts and ≤ 8 MiB (frames counted by bytes); always at least one, so an oversized frame still goes alone. */
+/** ≤ 500 facts and ≤ 4 MiB (frames counted by bytes); always at least one, so an oversized frame still goes alone. */
 export function selectBatch(facts: readonly StoredFact[]): readonly StoredFact[] {
   const out: StoredFact[] = [];
   let bytes = 0;
@@ -196,7 +196,9 @@ export function nextBackoffMs(attempt: number): number {
 // ───────────────────────────── Transport contract ───────────────────────────
 
 /** `rejected`: the backend refused the batch's content (not its auth or availability), so some fact in it is the problem. */
-export type TransportResult = { readonly ok: true; readonly ack: IngestAck } | { readonly ok: false; readonly retryable: boolean; readonly error: string; readonly rejected?: boolean };
+export type TransportResult =
+  | { readonly ok: true; readonly ack: IngestAck }
+  | { readonly ok: false; readonly retryable: boolean; readonly error: string; readonly rejected?: boolean; readonly waitMs?: number };
 export type Transport = (captureId: CaptureId, facts: readonly WireFact[]) => Promise<TransportResult>;
 
 export function isIngestAck(v: unknown): v is IngestAck {
@@ -204,11 +206,41 @@ export function isIngestAck(v: unknown): v is IngestAck {
   return !!a && typeof a === "object" && Number.isInteger(a.ackedThroughSeq) && typeof a.invite === "object" && a.invite !== null && typeof a.capture === "object" && a.capture !== null;
 }
 
-/** Auth and validation failures need a human or a fix; outages and overload are retried. */
-export function classifyStatus(status: number): { readonly retryable: boolean; readonly error: string; readonly rejected?: boolean } {
+/** How long a 507 holds uploads. Freed space or a raised quota is rare, so one try per window is plenty. */
+export const QUOTA_RETRY_MS = 15 * 60_000;
+/** The longest a server's Retry-After may park uploads, so a bad header cannot silence a capture for good. */
+export const MAX_RETRY_AFTER_MS = 60 * 60_000;
+
+/** A Retry-After in whole seconds, as the backend sends it. Anything else (a date, junk) is no instruction. */
+export function parseRetryAfter(header: string | null | undefined): number | undefined {
+  if (header === null || header === undefined || !/^\d{1,7}$/.test(header.trim())) return undefined;
+  return Math.min(MAX_RETRY_AFTER_MS, Number(header.trim()) * 1000);
+}
+
+type Classified = { readonly retryable: boolean; readonly error: string; readonly rejected?: boolean; readonly waitMs?: number };
+
+/** Auth and validation failures need a human or a fix; outages and overload are retried. `waitMs` is how long every upload waits. */
+export function classifyStatus(status: number, retryAfter?: string | null): Classified {
   if (status === 401 || status === 403) return { retryable: false, error: `pairing token rejected (HTTP ${status}): check the token in After Class options` };
+  // The account is over its storage limit. Retrying cannot help, so the facts stay in the outbox and the popup says why.
+  if (status === 507) return { retryable: false, error: "storage limit reached on the server, so this capture is not being saved", waitMs: QUOTA_RETRY_MS };
+  if (status === 503) {
+    const waitMs = parseRetryAfter(retryAfter);
+    return { retryable: true, error: `backend error (HTTP ${status})`, ...(waitMs === undefined ? {} : { waitMs }) };
+  }
   if (status === 408 || status === 429 || status >= 500) return { retryable: true, error: `backend error (HTTP ${status})` };
   return { retryable: false, error: `backend rejected the batch (HTTP ${status})`, rejected: status === 400 || status === 413 || status === 422 };
+}
+
+/** Why a capture's uploads wait, and until when. Every flush trigger reads it, so a worker restart does not lose it. */
+export type Gate = { readonly untilMs: number; readonly error: string; readonly retryable: boolean };
+export interface GateStore {
+  read(captureId: CaptureId): Promise<Gate | null>;
+  write(captureId: CaptureId, gate: Gate | null): Promise<void>;
+}
+export function createMemoryGates(): GateStore {
+  const m = new Map<CaptureId, Gate>();
+  return { read: async (c) => m.get(c) ?? null, write: async (c, g) => void (g === null ? m.delete(c) : m.set(c, g)) };
 }
 
 // ───────────────────────────── Flush ────────────────────────────────────────
@@ -218,6 +250,8 @@ export type FlushOutcome = {
   readonly error: string | null;
   readonly retryable: boolean;
   readonly remaining: number;
+  /** Set when the backend asked every upload to wait this long (507, or 503 with Retry-After). */
+  readonly waitMs?: number;
 };
 
 /**
@@ -227,13 +261,13 @@ export type FlushOutcome = {
  */
 export async function flushCapture(store: OutboxStore, transport: Transport, captureId: CaptureId, opts: { readonly heartbeat?: boolean } = {}): Promise<FlushOutcome> {
   let ack: IngestAck | null = null;
-  type Failure = { readonly error: string; readonly retryable: boolean; readonly rejected: boolean };
-  const failed = async (f: Failure): Promise<FlushOutcome> => ({ ack, error: f.error, retryable: f.retryable, remaining: await store.backlog(captureId) });
+  type Failure = { readonly error: string; readonly retryable: boolean; readonly rejected: boolean; readonly waitMs?: number };
+  const failed = async (f: Failure): Promise<FlushOutcome> => ({ ack, error: f.error, retryable: f.retryable, remaining: await store.backlog(captureId), ...(f.waitMs === undefined ? {} : { waitMs: f.waitMs }) });
 
   /** Sends one batch and removes what the backend confirms. Null means delivered. */
   async function send(batch: readonly StoredFact[]): Promise<Failure | null> {
     const result = await transport(captureId, batch.map(toWire));
-    if (!result.ok) return { error: result.error, retryable: result.retryable, rejected: result.rejected === true };
+    if (!result.ok) return { error: result.error, retryable: result.retryable, rejected: result.rejected === true, ...(result.waitMs === undefined ? {} : { waitMs: result.waitMs }) };
     ack = result.ack;
     if (batch.length === 0) return null;
     // An ack past the batch would delete facts appended while it was in flight, so it counts only up to what was sent.
@@ -291,8 +325,10 @@ export async function flushCapture(store: OutboxStore, transport: Transport, cap
 }
 
 export type Flusher = {
-  /** Single-flight per capture: a call during a flush asks for one more pass and shares its result. */
+  /** Single-flight per capture: a call during a flush asks for one more pass and shares its result. While the capture's gate is shut it sends nothing and answers with the gate's error. */
   flush(captureId: CaptureId, opts?: { readonly heartbeat?: boolean }): Promise<FlushOutcome>;
+  /** Opens the capture's gate: the learner resumed the capture, so the next flush tries the backend. */
+  release(captureId: CaptureId): Promise<void>;
 };
 
 export function createFlusher(deps: {
@@ -300,7 +336,11 @@ export function createFlusher(deps: {
   readonly transport: Transport;
   readonly schedule: (fn: () => void, ms: number) => void;
   readonly onOutcome: (captureId: CaptureId, outcome: FlushOutcome) => void;
+  readonly gates?: GateStore;
+  readonly now?: () => number;
 }): Flusher {
+  const gates = deps.gates ?? createMemoryGates();
+  const now = deps.now ?? Date.now;
   const running = new Map<CaptureId, Promise<FlushOutcome>>();
   const again = new Set<CaptureId>();
   const failures = new Map<CaptureId, number>();
@@ -313,18 +353,31 @@ export function createFlusher(deps: {
       return current;
     }
     const run = (async () => {
+      const gate = await gates.read(captureId);
+      if (gate !== null && now() < gate.untilMs) {
+        const held: FlushOutcome = { ack: null, error: gate.error, retryable: gate.retryable, remaining: await deps.store.backlog(captureId) };
+        deps.onOutcome(captureId, held);
+        return held;
+      }
       let outcome = await flushCapture(deps.store, deps.transport, captureId, opts);
       while (outcome.error === null && again.delete(captureId)) outcome = await flushCapture(deps.store, deps.transport, captureId, opts);
       if (outcome.error === null) {
         failures.delete(captureId);
-      } else if (outcome.retryable && !retryQueued.has(captureId)) {
+        if (gate !== null) await gates.write(captureId, null);
+      } else {
         const attempt = failures.get(captureId) ?? 0;
-        failures.set(captureId, attempt + 1);
-        retryQueued.add(captureId);
-        deps.schedule(() => {
-          retryQueued.delete(captureId);
-          void flush(captureId);
-        }, nextBackoffMs(attempt));
+        const backoff = outcome.retryable ? nextBackoffMs(attempt) : 0;
+        const waitMs = Math.max(backoff, outcome.waitMs ?? 0);
+        // Only a wait the backend asked for shuts the gate. An outage's own backoff stays a timer, so a status poll can still see it end.
+        if (outcome.waitMs !== undefined) await gates.write(captureId, { untilMs: now() + waitMs, error: outcome.error, retryable: outcome.retryable });
+        if (outcome.retryable && !retryQueued.has(captureId)) {
+          failures.set(captureId, attempt + 1);
+          retryQueued.add(captureId);
+          deps.schedule(() => {
+            retryQueued.delete(captureId);
+            void flush(captureId);
+          }, waitMs);
+        }
       }
       deps.onOutcome(captureId, outcome);
       return outcome;
@@ -335,5 +388,5 @@ export function createFlusher(deps: {
     running.set(captureId, run);
     return run;
   }
-  return { flush };
+  return { flush, release: (captureId) => gates.write(captureId, null) };
 }
