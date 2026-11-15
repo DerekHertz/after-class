@@ -66,6 +66,8 @@ export type EvidenceStore = {
   activeCaptures(): readonly CaptureId[];
   /** Every capture of this user that has stored facts, most recently captured first. Read-only. */
   captures(): readonly CaptureId[];
+  /** The server sequence of the capture's first fact: a strict order of when captures began, which later uploads never move. */
+  captureFirstSeq(captureId: CaptureId): number | null;
   /** True when this user owns the capture id: it ingested into it first, and the claim outlives the facts. Every capture-scoped route other than ingest answers 404 unless this holds. */
   holdsCapture(captureId: CaptureId): boolean;
   /** True when another user owns this capture id, which they keep after its facts expire. The HTTP layer answers 404, as for an id that is not the caller's. */
@@ -559,6 +561,10 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
         captureId, status: p.status, sources: p.sources, currentSourceId: p.currentSourceId, transcript: p.transcript, health: p.health,
         watchedSeconds: Material.duration(p.watched),
       };
+    },
+
+    captureFirstSeq(captureId) {
+      return db.sql.query<{ seq: number | null }, [string, string]>("SELECT MIN(seq) AS seq FROM capture_facts WHERE user_id = ? AND capture_id = ?").get(userId, captureId)?.seq ?? null;
     },
 
     captures() {
