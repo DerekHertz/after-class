@@ -805,15 +805,21 @@ export function usageRows(summary: UsageSummary): UsageRow[] {
 
 const dollars = (usd: number): string => (usd > 0 && usd < 0.005 ? "<$0.01" : `$${usd.toFixed(2)}`);
 
-/** The month's allowance as the usage page states it. Null when no budget runs (replay mode). */
-export function allowanceView(a: Allowance | null): { readonly line: string; readonly held: string | null } | null {
+/**
+ * The month's allowance as the usage page states it. Null when no budget runs (replay mode). The headline figure is settled
+ * spend. `reserved` is the amount set aside for AI steps still running, which counts against the cap until they finish.
+ */
+export function allowanceView(a: Allowance | null): { readonly line: string; readonly reserved: string | null; readonly held: string | null } | null {
   if (a === null) return null;
+  // Subtract in whole micro-dollars, so starting a reservation never moves the rounded settled figure.
+  const settled = Math.max(0, Math.round(a.usedUsd * 1_000_000) - Math.round(a.reservedUsd * 1_000_000)) / 1_000_000;
   const line = a.uncapped
-    ? `Uncapped account: ${dollars(a.usedUsd)} counted this month, with no cap. It is not counted toward everyone's total.`
+    ? `Uncapped account: ${dollars(settled)} counted this month, with no cap. It is not counted toward everyone's total.`
     : a.limitUsd === null
-      ? `${dollars(a.usedUsd)} counted this month, with no monthly cap. The month resets on ${resetDay(a.resetsAtMs)}.`
-      : `${dollars(a.usedUsd)} of your ${dollars(a.limitUsd)} AI allowance used this month. It resets on ${resetDay(a.resetsAtMs)}.`;
-  return { line, held: a.held === null ? null : heldMessage(a.held) };
+      ? `${dollars(settled)} counted this month, with no monthly cap. The month resets on ${resetDay(a.resetsAtMs)}.`
+      : `${dollars(settled)} of your ${dollars(a.limitUsd)} AI allowance used this month. It resets on ${resetDay(a.resetsAtMs)}.`;
+  const reserved = a.reservedUsd > 0 ? `${dollars(a.reservedUsd)} more is set aside for AI steps still running. It counts against your allowance until they finish, and whatever they do not use is given back.` : null;
+  return { line, reserved, held: a.held === null ? null : heldMessage(a.held) };
 }
 
 // ───────────────────────────── Routing ──────────────────────────────────────

@@ -610,6 +610,7 @@ export function AllowanceNote({ allowance }: { readonly allowance: UsageSummary[
     <section className="record-section" aria-labelledby="allowance-heading">
       <h2 id="allowance-heading">This month</h2>
       <p>{view.line}</p>
+      {view.reserved !== null && <p>{view.reserved}</p>}
       {view.held !== null && <p className="note" role="status">{view.held}</p>}
       <p className="muted">A call whose cost was not reported counts at the amount set aside for it before it ran.</p>
     </section>
