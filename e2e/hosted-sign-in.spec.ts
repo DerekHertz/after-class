@@ -23,6 +23,8 @@ test("hosted sign-in: signed out shows the sign-in screen, signing in shows the 
   expect(html).not.toContain("afterclass-token");
 
   await page.goto(`${APP}/`);
+  await expect(page.getByRole("heading", { name: "Invite-only beta" })).toBeVisible();
+  await page.getByRole("link", { name: "Sign in" }).click();
   await expect(page).toHaveURL(`${APP}/app/`);
   await expect(page.getByRole("heading", { name: "Sign in to After Class" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign out" })).toHaveCount(0);

@@ -1,8 +1,8 @@
 # Brief: a live, gamified review room
 
-Draft, 2026-11-14. Settled with Derek in a design session. Untracked until Derek says to commit it. Nothing in `src/` has changed.
+Settled with the owner in a design session on 2026-11-14.
 
-## What Derek asked for
+## What the owner asked for
 
 > "i want to consider revamping the current interface so that it is properly 'gamified' and the rendering is not static images/constrained to whatever it is now."
 
@@ -10,45 +10,42 @@ Standing art direction: "i'd like to keep the art style and pixel resolution if 
 
 ## Decisions
 
-| Question | Decision | Derek |
+| Question | Decision | Owner's words |
 | --- | --- | --- |
-| Renderer | One hand-rolled Canvas 2D stage draws the room's pictures. HTML still draws every word and control on top. No new package. | "canvas 2D for now" |
-| PixiJS | Not now. Kept possible by keeping layout, rig and progression separate from drawing, so a later swap replaces only the drawing layer. | asked for the cost, chose Canvas 2D |
-| Companion | A livelier tutor that blinks, looks, nods and hops. Whole painted frames, each an image-to-image edit of the companion's painted master, swapped by the stage (no cut-out rig, no transforms of the painted art). | "yes a more lively tutor would be great" |
-| Progression | The room grows from saved reviews. | "this is a great idea!" |
-| Reactions | The room and companion react to the tutor's moves as they stream. | presented as part of the recommendation; not separately objected to. Confirm when the first PR is reviewed. |
-| Art | Keep the painted look of today's rooms and companions (the AI-painted "HD pixel" style at plate density). New art (animation frames, unlock objects) is made in that same style by image-to-image edits of the existing art. True pixel art was tried and set aside, see "Art: what was tried". | Earlier: "honestly i think making each asset individually as high def (REAL) pixel art will pay off". After the true-pixel pilot, side by side with the approved mockup: "It's still very different than the original", then, offered the painted look or true pixel art: "Sure ur suggestion for the original" (2026-11-14) |
+| Renderer | One hand-rolled Canvas 2D stage draws the room's pictures. HTML draws every word and control on top. No new package. | "canvas 2D for now" |
+| PixiJS | Not now. Drawing stays separate from layout, rig and progression, so a swap replaces only the drawing layer. | asked for the cost, chose Canvas 2D |
+| Companion | A livelier tutor that blinks, looks, nods and hops. The stage swaps whole painted frames, each an image-to-image edit of the companion's painted master. No cut-out rig and no transform of the painted art. | "yes a more lively tutor would be great" |
+| Progression | Saved reviews make the room grow. | "this is a great idea!" |
+| Reactions | The room and companion react to the tutor's moves as they stream. | Part of the recommendation, with no separate objection. Confirm at review of the first PR. |
+| Art | Keep the painted "HD pixel" look of today's rooms and companions at plate density. New art, such as animation frames and unlock objects, comes from image-to-image edits of the existing art. True pixel art was tried and set aside. | Earlier: "honestly i think making each asset individually as high def (REAL) pixel art will pay off". After the true-pixel pilot, side by side with the approved mockup: "It's still very different than the original". Then, offered the painted look or true pixel art: "Sure ur suggestion for the original" (2026-11-14) |
 
-PixiJS facts, for whenever it comes back: `pixi.js` 8.22.0 is the newest version older than 7 days (8.23.0 shipped 2026-11-11). A minimal room bundle measured about 176 KB gzipped for all chunks, roughly 140 to 150 KB for what a browser loads (one renderer), measured in a scratch folder with `bun build --minify`. What it would buy is shader effects: water shimmer, rain on glass, lamp lighting. Each also needs new art (masks, distortion maps).
+If PixiJS comes back, `pixi.js` 8.22.0 was the newest version older than 7 days, and a minimal room loaded about 140 to 150 KB gzipped. Its shader effects each need new masks or distortion maps.
 
 ## What is true today
 
-- Each room is about ten lossless WebP layers (background, nine-sliced board, desk and mat, extras) placed by CSS. All geometry is `calc()` in `src/app/front-row.css`, fed by custom properties from `roomStyle()` in `src/app/front-row.tsx`.
-- The companion is one sheet of three poses (idle, draw, read) in `src/app/assets/companions-v3/`. Reactions swap the pose for 1050 ms (`companion-reaction.ts`). Activity is shown by smooth CSS transforms that rotate and scale the pixels (`life.css`), which softens them.
-- Nothing moves between turns, and nothing in the room changes across reviews.
-- The masters are AI-painted pixel-look art: about 130k colours and pixel clusters of about 2.2 plate pixels, with no true pixel grid. Frames cannot be edited pixel by pixel, but image-to-image edits of a master keep a new frame consistent with it (tested 2026-11-14), so frames are generated rather than drawn.
+Each room is about ten lossless WebP layers placed by CSS `calc()`. The companion is one three-pose sheet in `src/app/assets/companions-v3/`, swapped for 1050 ms per reaction (`companion-reaction.ts`) and softened by CSS transforms in `life.css`. Nothing moves between turns or changes across reviews. The painted masters have about 130k colours and no true pixel grid, so new frames are image-to-image edits, which stay consistent with their master (tested 2026-11-14).
 
 ## The experience
 
-1. **A living room.** Light from the window drifts, dust turns in it, a petal crosses the rail classroom, chalk dust falls as the question is written. The room shifts slightly with the mouse (three depths: background, board, desk). Nothing is busy enough to pull attention from the question.
-2. **A tutor who is present.** The companion idles, blinks, looks toward the board when a question is asked and toward the mat while the learner types, nods when an answer is shared, and shows small emote balloons (`?`, `…`, `!`). Different moves get different gestures.
-3. **Reactions to what happened, never to whether it was right.** The tutor's move header streams before any words (`ask_main`, `quick_check`, `ask_followup`, `hint`, `explain`, `diagnose`, `close_thread`, `wrap_up` and the rest, `TurnEvent` in `src/shared/domain.ts`). Reactions use only that. Nothing is assessed during a review, so a "correct!" reaction would invent an assessment.
-4. **A room that grows.** Saved reviews add to the room: notebooks stack on the desk, the vine grows, lamps and small objects appear. The room is a record of the learner's own explanations.
+1. **A living room.** Window light drifts with dust in it, a petal crosses the rail classroom, and chalk dust falls as the board writes. The room shifts a little with the mouse at three depths (background, board, desk), never enough to pull attention from the question.
+2. **A tutor who is present.** The companion blinks, looks toward the board when the tutor asks and toward the mat while the learner types, nods at a shared answer and shows emote balloons (`?`, `…`, `!`).
+3. **Reactions to what happened, never to whether it was right.** The tutor's move header streams before any words. The moves are `ask_main`, `quick_check`, `ask_followup`, `hint`, `explain`, `diagnose`, `close_thread`, `wrap_up` and the rest of `TurnEvent` in `src/shared/domain.ts`. Reactions use only that header, since nothing assesses the learner during a review.
+4. **A room that grows.** Saved reviews stack notebooks on the desk, grow the vine, and add lamps and small objects.
 
 ## Rules the game layer must keep
 
-These are Derek's rules, quoted from `docs/flows/after-class.md`:
+These rules are quoted verbatim from `docs/flows/after-class.md`:
 
 - R12: "If the tutor helped before my answer, it can't count as independent."
 - R13: "A skipped or unanswered question is never counted as understood."
 - R14: "A disputed assessment is never counted as a learning gap unless I resolve it that way."
 - R18: "A quick check I pass only shows the topic looks fine; it's never recorded as understood the way a main question is."
 
-What this means for progression:
+For progression:
 
 - Only saved observations count. Live turns never award anything.
-- Only `independent` grows the room as understanding. `partial` and `after_help` can be shown as effort but are never counted as understood. `unresolved`, `not_assessed`, `looks_fine` and `disputed` award nothing toward understanding.
-- Progress is never lost. No streak that breaks, no decay, no "you missed a day". These are friends using it now and then.
+- Only `independent` grows the room as understanding. The room can show `partial` and `after_help` as effort but never counts them as understood. `unresolved`, `not_assessed`, `looks_fine` and `disputed` award nothing toward understanding.
+- Progress is never lost. No streak, no decay and no "you missed a day".
 - Every number shown is a real count from the record and says what it counts.
 
 ## Architecture
@@ -69,48 +66,39 @@ src/app/room/
   progress.ts    Pure. Saved record → counts and room unlocks. Unit-tested against R12, R13, R14, R18.
 ```
 
-- **HTML stays HTML.** The board text, the answer field, the buttons, the notebook and source objects as buttons, and the dialogs stay DOM, positioned from `layout.ts`. Screen readers, focus, text selection, IME and the draft-preserving single React tree (see `FrontRowScene`) all keep working.
-- **Resolution.** The stage draws the painted layers at plate density (one asset pixel per plate pixel, the room plate 1586x992 as today) and scales the composition to the window as the CSS does now (`u` in `front-row.tsx`), pixelated, so the HD pixel look is unchanged. HTML text and controls are laid over it at full resolution.
-- **Motion.** Moving things move in whole plate pixels on stepped timing (8 fps idle, 12 fps gestures). Nothing rotates the painted art. Companion poses are whole painted frames swapped in, not transforms.
-- **Speed.** The prototype draws the whole room in 1 to 3 ms per frame at 1440x900. The stage stops its loop when the tab is hidden and redraws only on change under reduced motion. Art keeps the lossless WebP pipeline (`bun run build:art`), the prefetch rules in `test/art-prefetch.test.ts` and its manifest.
-- **Reduced motion.** Respect `prefers-reduced-motion` and the existing "Reduce motion" preference: no ambient motion, no parallax, no camera moves; gestures become an instant pose change; progression is still shown.
-- **Phone.** Below 900x560 the room is recomposed today. The stage draws the phone composition from `layout.ts` too, with ambient effects off by default to save battery.
+- **HTML stays HTML.** Board text, the answer field, buttons, the notebook and source objects, and dialogs stay DOM, positioned from `layout.ts`. Screen readers, focus, IME and the single React tree that keeps the draft (`FrontRowScene`) keep working.
+- **Resolution.** Painted layers draw at plate density on the 1586x992 plate, scaled pixelated as `u` in `front-row.tsx` does now.
+- **Motion.** Things move in whole plate pixels at 8 fps for idle and 12 fps for gestures. Nothing rotates the painted art.
+- **Speed.** The prototype draws the room in 1 to 3 ms per frame at 1440x900. The loop stops in a hidden tab and, under reduced motion, redraws only on change. Art keeps `bun run build:art`, the rules in `test/art-prefetch.test.ts` and the manifest.
+- **Reduced motion.** `prefers-reduced-motion` and the "Reduce motion" preference turn off ambient motion, parallax and camera moves. Gestures become an instant pose change, and progression still shows.
+- **Phone.** Below 900x560 the stage draws the phone composition from `layout.ts`, with ambient effects off by default.
 
 ## Art pipeline: the painted look
 
-Today's rooms (`art/masters/front-row-v2/`) are already separate painted layers: background, board, desk, mat and extras. They stay. What is new is made in the same style:
+The painted layers in `art/masters/front-row-v2/` stay, and new art matches them:
 
-1. **Companion frames.** Each pose is an image-to-image edit of the companion's painted master with Meshy `nano-banana-pro` that changes one thing ("only the eyes, closed"). About 9 credits per frame. Frames share the master's canvas, so they line up; cells that change outside the intended area are put back from the idle frame. Cleanup is mechanical only, as in `docs/design/front-row/rooms-v2/provenance.md`: binary alpha, specks dropped, cropped to a shared box.
-2. **Unlock objects** for progression: generated image-to-image from a crop of the room they belong in, so they carry its light, palette and density, then cleaned the same way.
-3. **Light and motion** come from the stage's effects layer (sunbeam, dust, petals, rain, glints), drawn at plate density in each room's colours, never baked into new art.
-4. Derek judges each asset in the running app. Masters in `art/masters/`, shipped by `scripts/build-art.ts`, recorded in `art/manifest.json` with provenance (prompt, task id, credits).
+1. **Companion frames.** Each pose is a Meshy `nano-banana-pro` image-to-image edit of the painted master that changes one thing ("only the eyes, closed"), at about 9 credits a frame, on the master's canvas. Cells that change outside the intended area revert to the idle frame. Cleanup is mechanical only, as in `docs/design/front-row/rooms-v2/provenance.md`.
+2. **Unlock objects** are image-to-image edits of a crop of their room, with the same cleanup.
+3. **Light and motion** come from the effects layer in each room's colours, never baked into art. Evenly lit art avoids repeated baked sunbeams.
+4. The owner judges each asset in the running app. Masters live in `art/masters/`, `scripts/build-art.ts` ships them, and `art/manifest.json` records their prompt, task id and credits.
 
-## Art: what was tried (2026-11-14)
+Grid-snapped painted art, 3D-to-pixel renders and generated true pixel art were rejected on 2026-11-14. Of the 3D renders the owner said "Oh those look horrible hahaha, we lost a lot of detail. They're very flat".
 
-The experiment folders named below stay on the machine that made them (about 50 MB of renders) and are not in the repository.
+## Open questions for the owner
 
-- **Snapping the painted art onto a grid** (`mockup/snapped/`): the scale was right, but speckle, broken lines and blotchy gradients.
-- **3D-to-pixel** (`meshy-test/`): Meshy Pip and a Blender room rendered as pixel art. Derek: "Oh those look horrible hahaha, we lost a lot of detail. They're very flat".
-- **Generated true pixel art** (`gen-pixel/`, then the full `pilot/`): Meshy `nano-banana-pro` drew each piece as pixel art on a 640 grid, snapped and assembled, then lit by claude-pxl. Clean and consistent, but it lost the painted dimension and, assembled piece by piece, drifted from the approved composition. Derek: "It's still very different than the original". The pilot's side-by-side: `pilot/out/original-vs-pilot.png`.
-- What carries over: Meshy image-to-image edits keep a frame consistent with its source (a blink changed about 5% of cells, mostly the eyes), and evenly lit art plus a separate light layer avoids baked sunbeams repeating.
+None blocks the first PRs.
 
-## Open questions for Derek
+1. **What a room level costs.** Recommend an unlock for every few topics explained on your own, not one per review.
+2. **Can the learner place unlocked objects?** Recommend not in v1. Objects appear in fixed spots per room.
+3. **Does effort (`partial`, `after_help`) show at all?** Recommend yes, as a smaller thing that never claims understanding, such as a notebook per saved review.
+4. **Companion voice lines or sounds?** Not proposed. The tutor already has a voice.
 
-Recommendations first. None block the first PRs.
+## Other rooms and prototype
 
-1. **What a room level costs.** Recommend: a new unlock for every few topics explained on your own, not per review, so a short review is not worth less effort than gaming it.
-2. **Can the learner place unlocked objects?** Recommend: not in v1; they appear in fixed spots per room. Placement is a later feature.
-3. **Does effort (`partial`, `after_help`) show at all?** Recommend: yes, as a separate, smaller thing (for example, notebooks stack for every saved review) that never claims understanding.
-4. **Companion voice lines or sounds?** Not proposed. Voice already exists for the tutor.
+`mockup/harbor-room.png` (midday sun) and `mockup/canal-room.png` (rainy evening) are mockups for approval. Approved objects become painted layers in #226.
 
-## Other rooms
-
-`mockup/harbor-room.png` and `mockup/canal-room.png` bring the Harbor Study Terrace and the Lantern Canal Film Club up to the Rail mockup's level of life. Each keeps its own light, midday sun on the terrace and rainy evening at the canal. They are mockups for Derek's approval, not shipping art. Approved objects are made later as painted layers (#226).
-
-## Prototype
-
-`prototype/index.html` (throwaway; serve the folder, for example `python3 -m http.server 8765 --directory docs/design/live-room/prototype`). Rail-side Classroom only, with four modes: A today, B living room, C reactive tutor, D progression. Screenshots: `living.png`, `reactive.png`, `progress.png`. Its progression numbers and summary card are mock data and say so. Its unlock art is reused from other rooms as a placeholder.
+`prototype/index.html` is a throwaway Rail-side Classroom demo. Serve it with `python3 -m http.server 8765 --directory docs/design/live-room/prototype`. Its four modes are A today, B living room, C reactive tutor and D progression. Its progression numbers are labeled mock data, and its unlock art is a placeholder.
 
 ## Issues
 
-Filed 2026-11-14 as DerekHertz/after-class#218 to #226, updated the same day for the painted look: #219 draws the painted layers at plate density, #220 draws effects at plate density in each room's colours, #222 is companion animation from painted frames, #223 and #224 make those frames as Meshy edits of each painted master, and #226 makes unlock objects in each room's painted style.
+Issues DerekHertz/after-class#218 to #226 track this work. #219 draws painted layers and #220 effects at plate density, #222 animates the companion from painted frames, #223 and #224 make those frames as Meshy edits, and #226 makes unlock objects.
