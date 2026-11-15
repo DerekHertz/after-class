@@ -6,7 +6,7 @@ import type {
   AssessableClaim, CodeNotice, Correction, EvidenceBundle, Frame, FrozenScope, LearnerAct, Passage, Turn, TutorMove, TutorMoveKind,
 } from "../src/shared/domain";
 import { Material, interval } from "../src/shared/time";
-import { allowedMoves, nextThreadId, parseMoveHeader, reviewState, tutorPrompt, tutorRequest, tutorTask, validateMove, wrapUpTask } from "../src/backend/review/tutor";
+import { allowedMoves, nextThreadId, parseMoveHeader, reviewState, tutorPrompt, tutorRequest, tutorTask, validateMove, validateSay, wrapUpTask } from "../src/backend/review/tutor";
 import type { TutorInput, WrapUpOutput } from "../src/backend/review/tutor";
 import type { ClaudeCli, ClaudeRequest } from "../src/backend/providers/claude";
 import { createMemo } from "../src/backend/providers/memo";
@@ -359,6 +359,58 @@ describe("validateMove", () => {
 });
 
 /** A fake `claude -p` that replays scripted replies as stream deltas. No process, no network. */
+describe("validateSay: a mismatch asks before it tells (flow: one tentative, source-grounded diagnostic question)", () => {
+  test("accepts one question with abbreviations, decimals, quotes and non-Latin question marks", () => {
+    const d = { kind: "diagnose" } as Parameters<typeof validateSay>[0];
+    for (const q of [
+      "How does your answer fit with Dr. Lee's diagram?",
+      "How does it fit with the first diagram, e.g. the one on the board?",
+      "Is 2.5 the figure the lecturer gives?",
+      "How does your answer fit with the U.S. example in the lecture?",
+      "How does that fit with the U.K. case, or the Ph.D. student's one?",
+      "How does your answer fit with the diagram... especially the last arrow?",
+      'How does that fit with where he says "inputs?"',
+      "\u4F60\u8BF4\u7684\u548C\u8BB2\u5E08\u8BB2\u7684\u6709\u4EC0\u4E48\u5173\u7CFB\uFF1F",
+      "\u0643\u064A\u0641 \u064A\u062A\u0648\u0627\u0641\u0642 \u0647\u0630\u0627 \u0645\u0639 \u0645\u0627 \u0642\u0627\u0644\u0647 \u0627\u0644\u0645\u062D\u0627\u0636\u0631\u061F",
+    ]) expect(validateSay(d, q).ok, q).toBe(true);
+  });
+
+  test("rejects more than one question, or a reply that does not end in one", () => {
+    const d = { kind: "diagnose" } as Parameters<typeof validateSay>[0];
+    for (const q of ["How? Why?", "Is it the mitochondria? Or the cytoplasm?", "\u4F60\u600E\u4E48\u770B\uFF1F\u4E3A\u4EC0\u4E48\uFF1F", "How does that fit? Think about the ATP figures."])
+      expect(validateSay(d, q).ok, q).toBe(false);
+  });
+
+  test("accepts a single question that names people or terms with initials", () => {
+    const d = { kind: "diagnose" } as Parameters<typeof validateSay>[0];
+    for (const q of ["How does your answer fit with the diagram, e.g. NADH entering the chain?", "How does your answer fit with B. F. Skinner's experiment?", "\u201EWie passt deine Antwort zur Abbildung in der Vorlesung?\u201C", "\u03A0\u03CE\u03C2 \u03C4\u03B1\u03B9\u03C1\u03B9\u03AC\u03B6\u03B5\u03B9 \u03B7 \u03B1\u03C0\u03AC\u03BD\u03C4\u03B7\u03C3\u03AE \u03C3\u03BF\u03C5;", "\u00AB Comment votre r\u00E9ponse correspond-elle au sch\u00E9ma du cours ? \u00BB", "\u300C\u4F60\u8AAA\u7684\u548C\u8B1B\u5E2B\u8B1B\u7684\u6709\u4EC0\u9EBC\u95DC\u4FC2\uFF1F\u300D"])
+      expect(validateSay(d, q).ok, q).toBe(true);
+  });
+
+  const diagnose: TutorMove = { kind: "diagnose", threadId: thread(1), hypothesis: "h", evidence: [ev(1)] };
+
+  test("a pointer to the source and one question passes", () => {
+    expect(validateSay(diagnose, "How does what you said fit with where the lecturer talks about what happens after the cycle?").ok).toBe(true);
+    expect(validateSay(diagnose, "How does that fit with the part of the lecture on the electron transport chain?").ok).toBe(true);
+    expect(validateSay(diagnose, "  Where in the lecture does the speaker put that step, and how does it fit with your answer?\n").ok).toBe(true);
+  });
+
+  test("a long reply that states the lecture's answer before asking is rejected by its length", () => {
+    const recital = "The lecture puts it differently. The lecturer says NADH and FADH2 go to the electron transport chain. He says each NADH makes three ATP and each FADH2 makes two, at the inner membrane. How does that fit with what you said?";
+    expect(validateSay(diagnose, recital).ok).toBe(false);
+  });
+
+  test("a reply that is not one question is rejected", () => {
+    expect(validateSay(diagnose, "Not quite. Look at the passage again.").ok).toBe(false);
+    expect(validateSay(diagnose, "What do you think? And why?").ok).toBe(false);
+    expect(validateSay(diagnose, `${"The lecturer covers the chain at length ".repeat(8)}so how does that fit with what you said?`).ok).toBe(false);
+  });
+
+  test("other moves speak freely", () => {
+    expect(validateSay({ kind: "explain", threadId: thread(1), evidence: [ev(1)] }, "Here is what the lecture says. It has several parts. Then a long account follows.").ok).toBe(true);
+  });
+});
+
 function fakeClaude(replies: string[]) {
   const requests: ClaudeRequest[] = [];
   const cli: ClaudeCli = {
