@@ -20,6 +20,8 @@ interface Opts {
   /** The release's image-digest.txt, or null for a release without one. */
   readonly record?: string | null;
   readonly statuses?: string[];
+  /** The digest scripts/release.sh showed and passes as the second argument. */
+  readonly expected?: string;
 }
 
 interface Run {
@@ -90,7 +92,7 @@ esac
 exit 0`,
   );
   stub(host.bin, "sleep", "exit 0");
-  const result = Bun.spawnSync(["bash", SCRIPT, opts.tag ?? "v0.1.0"], {
+  const result = Bun.spawnSync(["bash", SCRIPT, opts.tag ?? "v0.1.0", ...(opts.expected === undefined ? [] : [opts.expected])], {
     env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` },
   });
   const raw = existsSync(calls) ? readFileSync(calls, "utf8") : "";
@@ -202,6 +204,20 @@ describe("scripts/deploy-beta.sh", () => {
       expect(calledWith(run, "aws")).toEqual([]);
     });
   }
+
+  test("deploys the digest it was given when the release still names it", () => {
+    const run = deploy({ expected: APPROVED });
+    expect(run.status).toBe(0);
+    expect(calledWith(run, "aws", "send-command")[0]!.join(" ")).toContain(`"digest":["${APPROVED}"]`);
+  });
+
+  test("refuses, and asks GHCR and AWS nothing, when the release now names another digest than the one it was given", () => {
+    const run = deploy({ expected: ATTACKER });
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain(`now names ${APPROVED}, not the ${ATTACKER} you tried. Nothing was deployed.`);
+    expect(calledWith(run, "curl")).toEqual([]);
+    expect(calledWith(run, "aws")).toEqual([]);
+  });
 
   test("refuses when GHCR has no public image for the digest, and sends nothing", () => {
     const run = deploy({ imageExists: false });
