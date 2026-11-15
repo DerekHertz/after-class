@@ -66,3 +66,12 @@ test("hosted, a learner's usage page shows the allowance and connected browsers,
   await expect(page.getByRole("heading", { name: "Connected browsers" })).toBeVisible();
   await keep(page, "usage-hosted", info.project.name);
 });
+
+test("an uncapped account's usage page labels it uncapped and shows no allowance or held note", async ({ page }, info) => {
+  await page.goto("/?scenario=usage-uncapped&clean=1");
+  await expect(page.getByText("Uncapped account: $11.62 counted this month, with no cap. It is not counted toward everyone's total.")).toBeVisible();
+  await expect(page.getByText("AI allowance used this month")).toHaveCount(0);
+  await expect(page.getByText(USED_UP)).toHaveCount(0);
+  await expect(page.getByText(NOT_ENOUGH_LEFT)).toHaveCount(0);
+  await keep(page, "uncapped", info.project.name);
+});

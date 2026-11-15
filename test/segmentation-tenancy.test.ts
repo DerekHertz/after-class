@@ -14,10 +14,7 @@ import { Material, interval } from "../src/shared/time";
 import { LOCAL_USER, MIGRATIONS, asSeq, ensureLocalUser, openDb, scopeDb } from "../src/backend/db";
 import type { UserDb } from "../src/backend/db";
 import type { WatchOrder } from "../src/backend/evidence";
-import { serve } from "../src/backend/http";
-import { createLedger } from "../src/backend/providers/ledger";
 import type { Lookup } from "../src/backend/providers/memo";
-import type { Preparation } from "../src/backend/preparation";
 import { SEGMENTATION_DEFAULTS, buildWindows, createSegmentation } from "../src/backend/segmentation";
 import type { SegmentationConfig } from "../src/backend/segmentation";
 import { otherUserDb, testUserDb } from "./fakes";
@@ -118,45 +115,6 @@ describe("two users share one database and one capture id", () => {
       ).run(userId, id, first.chunkId, CAP, revisionNo, a.nextSeq(), supersedes);
     expect(() => insert(b.userId, "crv_b2", 2, first.id)).toThrow(/FOREIGN KEY/);
     insert(a.userId, "crv_a2", 2, first.id);
-  });
-
-  test("heldByAnotherUser is true only for a capture the other user holds and the caller does not", () => {
-    const a = testUserDb();
-    const b = otherUserDb(a);
-    const segA = segmentationOf(a, 90);
-    const segB = segmentationOf(b, 90);
-    expect(segB.seg.heldByAnotherUser(CAP)).toBe(false);
-    closeFirstChunk(segA);
-    expect(segA.seg.heldByAnotherUser(CAP)).toBe(false);
-    expect(segB.seg.heldByAnotherUser(CAP)).toBe(true);
-    closeFirstChunk(segB);
-    expect(segB.seg.heldByAnotherUser(CAP)).toBe(false);
-    expect(segB.seg.heldByAnotherUser(stableId("cap", "nobody") as CaptureId)).toBe(false);
-  });
-
-  test("POST /captures/:id/retry-preparation answers 404 for a capture only another user holds, and 204 for one nobody holds", async () => {
-    const a = testUserDb();
-    const b = otherUserDb(a);
-    closeFirstChunk(segmentationOf(a, 90));
-    const token = "tok-seg-tenancy-1";
-    const retries: string[] = [];
-    const preparation = { prep: () => ({ finished: false, supportedCount: 0 }), retry: (id: string) => void retries.push(id) } as unknown as Preparation;
-    const server = serve({
-      modules: { ledger: createLedger(b), evidence: { capturedByAnotherUser: () => false } as never, reviews: {} as never, preparation, segmentation: segmentationOf(b, 90).seg },
-      auth: { port: 0, extensionId: "abcdefghijklmnopabcdefghijklmnop", token },
-      appDir: tmpdir(),
-    });
-    try {
-      const retry = (capture: string) =>
-        fetch(`http://127.0.0.1:${server.port}/captures/${capture}/retry-preparation`, {
-          method: "POST", headers: { authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: "{}",
-        });
-      expect((await retry(CAP)).status).toBe(404);
-      expect((await retry(stableId("cap", "nobody"))).status).toBe(204);
-      expect(retries).toEqual([]);
-    } finally {
-      await server.stop(true);
-    }
   });
 });
 

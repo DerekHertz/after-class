@@ -51,7 +51,9 @@ import { LOCAL_USER } from "./db";
 import { clientAddress } from "./devices";
 import type { Devices } from "./devices";
 import type { EvidenceStore, EvidenceStoreWithProbe } from "./evidence";
+import { IngestRefused } from "./evidence/ingest-limits";
 import type { Preparation } from "./preparation";
+import { ReviewLimitError } from "./review";
 import type { Reviews } from "./review";
 import type { LearningRecord } from "./record";
 import type { Segmentation } from "./segmentation";
@@ -157,12 +159,12 @@ type ServeCommon = {
 export const DEFAULT_PORT = 4317;
 
 /**
- * 16 MiB. The extension caps a batch at 8 MiB (`BATCH_MAX_BYTES`) but always sends at least one fact, and the wire
- * schema allows a single frame fact of 8 MiB of base64; 16 MiB holds either with 2x margin for JSON overhead. A full
- * 500-fact batch of small facts is well under 1 MiB. Bun's default (128 MiB) would let any local process make the
- * backend buffer a hundred megabytes before the token is even checked.
+ * 8 MiB. The extension caps a batch at 4 MiB (`BATCH_MAX_BYTES`) but always sends at least one fact, and the wire schema
+ * allows a single frame fact of 1.4 MiB of base64 (`MAX_FRAME_BYTES`); 8 MiB holds either with 2x margin for JSON overhead.
+ * A full 500-fact batch of small facts is well under 1 MiB. Bun's default (128 MiB) would let any local process make the
+ * backend buffer a hundred megabytes before the token is even checked. The Caddyfile's `request_body` repeats this number.
  */
-export const MAX_BODY_BYTES = 16 * 1024 * 1024;
+export const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 /** Path parameter name → id kind, so `matchRoute` (which does not validate) never hands a raw string to a module. */
 const PARAM_KIND = {
@@ -486,6 +488,15 @@ function ndjson(events: AsyncIterable<TurnEvent>, cors: Record<string, string>, 
   return new Response(body, { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", ...SECURITY_HEADERS, ...cors } });
 }
 
+/** The capture id a request names in its path or query, where `ROUTES[name].capture` says it is. A malformed query is left to the route to refuse with 400. */
+function captureIdOf(name: keyof typeof ROUTES, fromPath: CaptureId | undefined, req: Request): CaptureId | undefined {
+  const source = ROUTES[name].capture;
+  if (source === "path") return fromPath;
+  if (source !== "query") return undefined;
+  const parsed = ROUTES[name].query?.safeParse(Object.fromEntries(new URL(req.url).searchParams));
+  return parsed?.success && typeof parsed.data === "object" && parsed.data !== null && "captureId" in parsed.data ? (parsed.data.captureId as CaptureId) : undefined;
+}
+
 async function mounted(name: string, matched: { readonly params: Record<string, string> }, req: Request, modules: ServedModules, appOrigin: string, cors: Record<string, string>, guard: TurnGuard): Promise<Response | null> {
   const { evidence, reviews, record, preparation, segmentation, voice, diagrams } = modules;
   const captureId = matched.params.captureId as CaptureId | undefined;
@@ -494,8 +505,11 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
   const linkId = matched.params.linkId as LinkId | undefined;
   const observationId = matched.params.observationId as ObservationId | undefined;
   try {
-    // Another user's capture answers as one this caller cannot see. An id nobody has ingested keeps its empty view.
-    if (captureId !== undefined && evidence.capturedByAnotherUser(captureId)) return failure(404, "unknown capture", cors);
+    // The one ownership check for every route that takes a capture id from its path or query (`Route.capture`). A capture
+    // id the caller does not hold answers 404, whether nobody holds it or another user does. Ingest declares `body`: a
+    // device creates a capture by ingesting into a new id, so it decides for itself.
+    const scoped = captureIdOf(name as keyof typeof ROUTES, captureId, req);
+    if (scoped !== undefined && !evidence.holdsCapture(scoped)) return failure(404, "unknown capture", cors);
     switch (name) {
       case "ingest": {
         const raw = await readJson(req);
@@ -508,6 +522,8 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
         } catch (e) {
           // evidence checks every fact before it stores any, so this refusal leaves nothing behind.
           if (e instanceof RangeError) throw new BadRequest(e.message);
+          // 507 is the account's quota, which retrying does not clear. 503 is the volume's floor, which freed space does.
+          if (e instanceof IngestRefused) return e.reason === "quota" ? failure(507, e.message, cors) : failure(503, e.message, { ...cors, "Retry-After": "300" });
           throw e;
         }
         return reply(
@@ -529,7 +545,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
             const saved: ReviewSaveState = record ? record.saveState(rid) : "unsaved";
             return { reviewId: rid, startedMs, phase: v.state.phase, saved, mainQuestions: v.state.mainQuestions };
           });
-          return { captureId: id, sourceTitles: c.sources.map((s) => s.title), videos: c.sources.length, watchedSeconds: c.watchedSeconds, status: c.status, reviews: reviewList };
+          return { captureId: id, sourceTitles: c.sources.map((s) => s.title), sourceIds: c.sources.map((s) => s.id), firstSeq: evidence.captureFirstSeq(id) ?? 0, videos: c.sources.length, watchedSeconds: c.watchedSeconds, status: c.status, reviews: reviewList };
         });
         return reply("lectures", { lectures }, cors);
       }
@@ -546,7 +562,12 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
         if (reviews.heldByAnotherUser(body.reviewId)) return failure(404, "unknown review", cors);
         const existing = reviewOf(reviews, body.reviewId);
         if (existing && existing.captureId !== captureId) return failure(409, "that review belongs to another capture", cors);
-        return replyWire("startReview", wireStart(reviews.start(captureId!, body.choice, body.reviewId)), cors);
+        try {
+          return replyWire("startReview", wireStart(reviews.start(captureId!, body.choice, body.reviewId)), cors);
+        } catch (e) {
+          if (e instanceof ReviewLimitError) return failure(429, e.message, cors);
+          throw e;
+        }
       }
       case "sendTurn": {
         const { turnId, act } = parseTurnRequest(await readJson(req));
@@ -588,8 +609,6 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
       }
       case "retryPreparation": {
         if (!preparation || !segmentation) return null;
-        // Chunks are per user: a capture only another user holds answers as unknown. A capture nobody holds stays a no-op 204.
-        if (segmentation.heldByAnotherUser(captureId!)) return failure(404, "unknown capture", cors);
         const stuck = segmentation.current(captureId!).filter((rev) => {
           const prep = preparation.prep(rev.id);
           return !prep.finished || prep.supportedCount === 0;
@@ -639,7 +658,6 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
       }
       case "evidence": {
         const q = parseQuery("evidence", new URL(req.url)) as { material: Material } | { ids: EvidenceId[] } | { captureId: CaptureId };
-        if ("captureId" in q && evidence.capturedByAnotherUser(q.captureId)) return failure(404, "unknown capture", cors);
         const bundle =
           "material" in q ? evidence.bundle(q.material)
           : "ids" in q ? evidenceByIds(evidence, q.ids)

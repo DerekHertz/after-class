@@ -62,13 +62,22 @@ export type ClaudeRequest = {
   readonly webTools: boolean; // true only for resource search
   readonly timeoutMs: number;
   /**
-   * How long the Messages API keeps the system block cached; 5 minutes when absent. Asked once for each request, after the budget
-   * admits it and right before it is sent, so a held request never asks. `claude -p` has no such control and never asks.
+   * The cache lifetime the Messages API is asked for, decided once for each request right before the budget admits it. The request is
+   * reserved at that lifetime's write rate and sends the same lifetime. `record` is called only if the budget admits the request, so a
+   * held request is not a start. `claude -p` has no such control and never asks.
    */
-  readonly cacheTtl?: () => CacheTtl;
+  readonly cacheLifetime?: () => CacheLifetime;
+  /**
+   * The most output tokens, thinking included, the Messages API may spend on a streamed turn. STREAM_MAX_TOKENS when absent. The
+   * budget reserves for it, so a request that needs little sets it low. `claude -p` has no such control and ignores it.
+   */
+  readonly maxOutputTokens?: number;
 };
 
 export type CacheTtl = "5m" | "1h";
+
+/** `ttl`: the lifetime the request will ask for. `record`: note that a request with it was admitted. */
+export type CacheLifetime = { readonly ttl: CacheTtl; record(): void };
 
 /** The user turn the model reads: the cached head, then the rest. */
 export const promptOf = (req: ClaudeRequest): string => (req.cachedPrompt ?? "") + req.prompt;
@@ -356,6 +365,13 @@ export function createClaudeCli(opts: {
   readonly env?: Readonly<Record<string, string | undefined>>;
   /** How long a cancelled child gets to exit on SIGTERM before SIGKILL. */
   readonly killGraceMs?: number;
+  /**
+   * What a streamed request that sets `maxOutputTokens` (the tutor turn) reserves, in USD, instead of the purpose's flat figure; null or
+   * absent keeps the flat figure. It prices the request's own bytes and output limit. `claude -p` has no output limit and no control over
+   * context, so the CLI can spend more than this: the estimate decides only whether the call may start, and the settled cost, which can be
+   * higher, is what the budget then records. The overshoot is not bounded here. It is notional subscription cost, not dollars.
+   */
+  readonly estimate?: (req: ClaudeRequest) => number | null;
 }): ClaudeCli {
   const spawn = opts.spawn ?? bunSpawn;
   const limiter = createLimiter(opts.maxConcurrent);
@@ -368,7 +384,7 @@ export function createClaudeCli(opts: {
     return Object.fromEntries(Object.entries(merged).filter((e): e is [string, string] => e[1] !== undefined));
   };
 
-  async function execute(req: ClaudeRequest, output: "json" | "stream-json", jsonSchema: string | null, send: SendContext, onLine?: (line: string) => void): Promise<Outcome> {
+  async function execute(req: ClaudeRequest, output: "json" | "stream-json", jsonSchema: string | null, send: SendContext, onLine?: (line: string) => void, estimateUsd?: number | null): Promise<Outcome> {
     const signal = send.signal;
     const release = await limiter.acquire(signal);
     let staged: Awaited<ReturnType<typeof stageFiles>> | null = null;
@@ -376,7 +392,7 @@ export function createClaudeCli(opts: {
       signal.throwIfAborted();
       staged = await stageFiles(req, imageRoot);
       signal.throwIfAborted();
-      send.admit();
+      send.admit(estimateUsd ?? undefined);
       const proc = spawn([opts.bin, ...claudeArgs(req, output, jsonSchema, staged.imageDir, staged.systemFile)], { cwd: opts.cwd, env: childEnv() });
 
       let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -453,7 +469,7 @@ export function createClaudeCli(opts: {
         } catch {
           // a line that is not an event is not a delta
         }
-      });
+      }, req.maxOutputTokens === undefined ? undefined : opts.estimate?.(req));
       const { result, usage } = settle(req, run);
       const final = asString(result.result);
       return { text: final !== null && final !== "" ? final : deltas.text(), usage };

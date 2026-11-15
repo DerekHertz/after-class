@@ -1,6 +1,7 @@
 import { asSeq } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
 import { sourceIdOf } from "../src/backend/evidence/core";
+import type { IngestLimits } from "../src/backend/evidence/ingest-limits";
 import type { FrameChangeInput } from "../src/backend/providers/jev-tasks";
 import type { Lookup } from "../src/backend/providers/memo";
 import type { CaptureFact, CaptureFactBody, Verdict } from "../src/shared/domain";
@@ -9,6 +10,7 @@ import { randomId, stableId } from "../src/shared/ids";
 import { media } from "../src/shared/time";
 import { testUserDb } from "./fakes";
 import { tmpDir } from "./tmp";
+import { JPEG_BYTES } from "./jpeg-fixture";
 
 export const VIDEO = "aaaaaaaaaaa";
 
@@ -18,12 +20,12 @@ export const SRC = sourceIdOf(VIDEO);
 
 export const DAY = 86_400_000;
 
-export const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]).toString("base64");
+export const JPEG = Buffer.from(JPEG_BYTES).toString("base64");
 
 /** Scripted frame-change answers keyed by the `after` frame id. A frame with no entry is unjudged. */
 type Script = Map<EvidenceId, Lookup<Verdict>>;
 
-export function harness(opts: { clock?: { t: number } } = {}) {
+export function harness(opts: { clock?: { t: number }; limits?: IngestLimits; runFrameChange?: (input: FrameChangeInput) => Promise<unknown> } = {}) {
   const dir = tmpDir("afterclass-evidence-");
   const db = testUserDb();
   const script: Script = new Map();
@@ -31,11 +33,12 @@ export function harness(opts: { clock?: { t: number } } = {}) {
   const clock = opts.clock ?? { t: 1_000_000 };
   const evidence = createEvidence(db, dir, {
     lookupFrameChange: (input) => script.get(input.after.frame.id) ?? { kind: "missing", key: keyOf(input) },
-    runFrameChange: async () => undefined,
+    runFrameChange: async (input) => void (await opts.runFrameChange?.(input)),
     frameChangeKey: keyOf,
     onChange: () => void changes.n++,
     now: () => clock.t,
     monotonic: () => clock.t,
+    ...(opts.limits ? { limits: opts.limits } : {}),
   });
   return { db, dir, evidence, script, changes, clock };
 }

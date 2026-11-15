@@ -26,7 +26,7 @@ export const ids = {
   chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait"), ordering: id("cpt", "ordering"), earlierCapture: id("cap", "earlier-capture"),
   otherCapture: id("cap", "other-capture"), pendingReview: id("rvw", "pending-review"), unsavedReview: id("rvw", "unsaved-review"),
 };
-export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-processing", "capture-held", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "usage", "usage-held", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
+export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-processing", "capture-held", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "usage", "usage-held", "usage-uncapped", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
 export type Scenario = typeof scenarios[number];
 export const scenarioFrom = (search: string): Scenario => scenarios.find(s => s === new URLSearchParams(search).get("scenario")) ?? "review";
 
@@ -154,13 +154,13 @@ export function createFixture(scenario: Scenario): Fixture {
   // capturing, and the earlier lecture whose saved review the notebook holds. Notebook and Home read this one list.
   const at = (hour: number) => Date.UTC(2026, 10, 6, hour, 4);
   const lectureList = lecturesResponse.parse({ lectures: scenario === "home-empty" ? [] : [
-    { captureId: ids.capture, sourceTitles: ["Locks & deadlocks"], videos: 1, watchedSeconds: 760, status: { state: "stopped" }, reviews: [
+    { captureId: ids.capture, sourceTitles: ["Locks & deadlocks"], sourceIds: [ids.source], firstSeq: 2000, videos: 1, watchedSeconds: 760, status: { state: "stopped" }, reviews: [
       { reviewId: ids.review, startedMs: at(15), phase: view.state.phase, saved: view.saved, mainQuestions: view.state.mainQuestions },
       { reviewId: ids.pendingReview, startedMs: at(13), phase: "ended", saved: "save_pending", mainQuestions: 2 },
       { reviewId: ids.unsavedReview, startedMs: at(10), phase: "ended", saved: "unsaved", mainQuestions: 0 },
     ] },
-    { captureId: ids.otherCapture, sourceTitles: ["Semaphores - Operating Systems"], videos: 1, watchedSeconds: 240, status: { state: "capturing" }, reviews: [] },
-    { captureId: ids.earlierCapture, sourceTitles: ["Deadlock prevention"], videos: 1, watchedSeconds: 900, status: { state: "stopped" }, reviews: [
+    { captureId: ids.otherCapture, sourceTitles: ["Semaphores - Operating Systems"], sourceIds: [id("src", "semaphores")], firstSeq: 3000, videos: 1, watchedSeconds: 240, status: { state: "capturing" }, reviews: [] },
+    { captureId: ids.earlierCapture, sourceTitles: ["Deadlock prevention"], sourceIds: [id("src", "deadlock-prevention")], firstSeq: 1000, videos: 1, watchedSeconds: 900, status: { state: "stopped" }, reviews: [
       { reviewId: ids.earlierReview, startedMs: at(11), phase: "ended", saved: "saved", mainQuestions: earlierView?.state.mainQuestions ?? 1 },
     ] },
   ] });
@@ -263,6 +263,7 @@ export function createFixture(scenario: Scenario): Fixture {
     async deleteEvidence(evidenceIds) { log("evidence.delete"); record = { ...record, unavailableEvidence: evidenceIds.map(id => ({ kind: "deleted", id, deletedAtMs: 1000 })) }; },
     async usage() {
       const held = scenario === "usage-held" || scenario === "capture-held" || scenario === "held-turn";
+      if (scenario === "usage-uncapped") return usageSummaryz.parse({ byKind: { estimated: { calls: 22, usd: 11.62 } }, byPurpose: { tutor_turn: { calls: 22, errors: 0, unknownCost: 0 } }, allowance: { usedUsd: 11.62, limitUsd: null, uncapped: true, resetsAtMs: MONTH_END, held: null } });
       if (scenario === "held-turn-used-up") return usageSummaryz.parse({ byKind: {}, byPurpose: {}, allowance: { usedUsd: 5, limitUsd: 5, resetsAtMs: MONTH_END, held: { reason: "user_budget", resetsAtMs: MONTH_END, usedUp: true } } });
       return usageSummaryz.parse(held
         ? { byKind: { estimated: { calls: 14, usd: 4.31 }, unknown: { calls: 3, usd: null } }, byPurpose: { interpretation: { calls: 3, errors: 0, unknownCost: 0 }, tutor_turn: { calls: 11, errors: 0, unknownCost: 0 }, boundary: { calls: 3, errors: 0, unknownCost: 3 } }, allowance: { usedUsd: 4.79, limitUsd: 5, resetsAtMs: MONTH_END, held: { reason: "user_budget", resetsAtMs: MONTH_END, usedUp: false } } }

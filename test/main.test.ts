@@ -25,10 +25,11 @@ import { canonicalInterpretation, canonicalResourceSearch, canonicalRevision } f
 import type { InterpretationInput, InterpretationOutput } from "../src/backend/preparation/tasks";
 import { UNASKED_CACHE, deferred, fail, fakeTask, ok } from "./fakes";
 import type { FakeStep, FakeTask } from "./fakes";
+import { JPEG_BYTES } from "./jpeg-fixture";
 
 const CAP = stableId("cap", "main-test") as CaptureId;
 const VIDEO = "dQw4w9WgXcQ";
-const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+const JPEG = Buffer.from(JPEG_BYTES);
 
 const scratch: string[] = [];
 const running: Running[] = [];
@@ -968,4 +969,16 @@ describe("AFTERCLASS_CLAUDE_BACKEND", () => {
     const usage = await (await fetch(`${b.base}/usage`, { headers: authed(b.r.token) })).text();
     for (const text of [usage, b.logs.join("\n"), b.errors.join("\n")]) expect(text).not.toContain(MESSAGES_KEY);
   }, 30_000);
+});
+
+describe("disk watch", () => {
+  test("the app logs one disk reading at start, for the beta's free-space alarm", async () => {
+    const b = await boot({}, { AFTERCLASS_MIN_FREE_MB: "1" });
+    const readings = b.logs.filter((l) => l.startsWith('{"event":"disk"'));
+    expect(readings).toHaveLength(1);
+    const r = JSON.parse(readings[0]!);
+    expect(r.floorMib).toBe(1);
+    expect(r.freeMib).toBeGreaterThan(0);
+    expect(r.totalMib).toBeGreaterThanOrEqual(r.freeMib);
+  });
 });

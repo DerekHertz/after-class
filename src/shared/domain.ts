@@ -74,6 +74,15 @@ export type FrameTrigger = "change_settled" | "keyframe" | "first";
 /** Frame bounds the capture side enforces. Jev accepts 280–1568 px per side. */
 export const FRAME_BOUNDS = { maxLongSide: 1280, minShortSide: 280 } as const;
 
+/**
+ * The most bytes one frame's JPEG may have. The extension sends at most 1280 px on the long side at quality 0.85, and the audit's
+ * frames averaged 70 KB. Pure noise at 1280x720 and that quality, the worst a real lecture could encode, is 0.7 MB, so 1 MiB
+ * leaves headroom over it and 15x over the average.
+ */
+export const MAX_FRAME_BYTES = 1024 * 1024;
+/** The base64 text of `MAX_FRAME_BYTES`. */
+export const MAX_FRAME_BASE64_CHARS = Math.ceil(MAX_FRAME_BYTES / 3) * 4;
+
 // ───────────────────────────── Evidence (derivation over capture facts) ─────
 
 export type Source = {
@@ -678,8 +687,10 @@ export type BudgetHold =
 export type Allowance = {
   /** What this month's calls count against the budget: their recorded cost, or what was set aside for a call still running or of unknown cost. */
   readonly usedUsd: number;
-  /** Null when there is no per-user cap. */
+  /** Null when there is no per-user cap, which includes an uncapped account. */
   readonly limitUsd: number | null;
+  /** An admin account the operator listed: no cap applies, and its spend is left out of everyone's total. Only the stop switch holds it. */
+  readonly uncapped: boolean;
   readonly resetsAtMs: number;
   /** Set when a new model call would be refused now. */
   readonly held: BudgetHold | null;

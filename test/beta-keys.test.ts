@@ -88,6 +88,25 @@ describe("afterclass-fetch-keys", () => {
     expect(readdirSync(host.runtime)).toEqual([]);
   });
 
+  test("the uncapped users setting is optional: absent, the file has only the keys, and present, it reaches the app byte for byte", () => {
+    const absent = keysHost(both);
+    const run = fetchKeys(absent);
+    expect(run.status).toBe(0);
+    expect(readdirSync(absent.runtime)).toEqual(["keys.env"]);
+    expect(readKeys(join(absent.runtime, "keys.env"))).toEqual({ TYPESAFE_API_KEY: JEV, AFTERCLASS_ANTHROPIC_API_KEY: ANTHROPIC });
+    const present = keysHost({ ...both, [`${PREFIX}/AFTERCLASS_BUDGET_UNCAPPED_USERS`]: "user_2abc,user_2def" });
+    expect(fetchKeys(present).status).toBe(0);
+    expect(readKeys(join(present.runtime, "keys.env")).AFTERCLASS_BUDGET_UNCAPPED_USERS).toBe("user_2abc,user_2def");
+  });
+
+  test("an uncapped users parameter that is present but unusable fails closed, so a typo never silently caps the admin or hides a read error", () => {
+    const bad = keysHost({ ...both, [`${PREFIX}/AFTERCLASS_BUDGET_UNCAPPED_USERS`]: "user_a user_b" });
+    const run = fetchKeys(bad);
+    expect(run.status).toBe(1);
+    expect(run.output).toContain("AFTERCLASS_BUDGET_UNCAPPED_USERS is empty or not one line");
+    expect(existsSync(join(bad.runtime, "keys.env"))).toBe(false);
+  });
+
   test("an empty value fails closed rather than starting the app without a key", () => {
     const host = keysHost({ ...both, [`${PREFIX}/TYPESAFE_API_KEY`]: "" });
     expect(fetchKeys(host).status).toBe(1);

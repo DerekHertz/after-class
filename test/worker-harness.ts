@@ -95,10 +95,12 @@ export type Backend = {
   /** Answers 400 to any batch containing a fact this returns true for. */
   refuses: (f: WireFact) => boolean;
   lostAckOnce: boolean;
+  /** Answers every batch with this status, and `retryAfter` as its Retry-After header, before reading it. */
+  refuseWith: { readonly status: number; readonly retryAfter?: string } | null;
   calls: number;
   readonly stored: Map<string, Map<number, WireFact>>;
 };
-const newBackend = (): Backend => ({ down: false, refuses: () => false, lostAckOnce: false, calls: 0, stored: new Map() });
+const newBackend = (): Backend => ({ down: false, refuses: () => false, lostAckOnce: false, refuseWith: null, calls: 0, stored: new Map() });
 
 function ackFor(b: Backend, cap: string) {
   const m = b.stored.get(cap) ?? new Map();
@@ -116,6 +118,7 @@ function fakeFetch(b: Backend) {
   return async (_url: string, init: Any) => {
     b.calls++;
     if (b.down) throw new TypeError("fetch failed");
+    if (b.refuseWith) return new Response("", { status: b.refuseWith.status, headers: b.refuseWith.retryAfter === undefined ? {} : { "Retry-After": b.refuseWith.retryAfter } });
     const body = JSON.parse(init.body);
     let batch;
     try {
