@@ -34,6 +34,7 @@ const PUSHED = `sha256:${"1".repeat(64)}`;
 /** What a release tag resolves to when imagetools create wraps the single manifest in a new index, its default. */
 const WRAPPED = `sha256:${"9".repeat(64)}`;
 const ATTACKER = `sha256:${"2".repeat(64)}`;
+const NOTES = "## Changes since v0.0.9\n\n### Fixes\n- Keep drafts (#301)";
 
 interface StepRun {
   readonly status: number;
@@ -57,6 +58,7 @@ function runStep(job: string, match: (step: Step) => boolean, stubs: (host: Host
     "${{ github.ref_name }}": "v0.1.0",
     "${{ needs.check.outputs.commit }}": COMMIT,
     "${{ needs.image.outputs.digest }}": PUSHED,
+    "${{ needs.check.outputs.notes }}": NOTES,
     ...extra,
   };
   const env = Object.fromEntries(Object.entries(step!.env ?? {}).map(([key, expression]) => [key, expressions[expression] ?? ""]));
@@ -220,13 +222,39 @@ exit 0`,
     );
   }
 
-  test("a first run creates the release with image-digest.txt holding the commit and the pushed digest", () => {
+  test("a first run creates a draft release with image-digest.txt holding the commit and the pushed digest, and the summary as its notes", () => {
     const run = runRecordStep({ exists: false });
     expect(run.status).toBe(0);
     expect(run.files["image-digest.txt"]).toBe(`commit ${COMMIT}\ndigest ${PUSHED}\n`);
     const create = run.log.find((line) => line.startsWith("gh release create"));
-    expect(create).toContain("v0.1.0 --repo DerekHertz/after-class --verify-tag");
+    expect(create).toContain("v0.1.0 --repo DerekHertz/after-class --draft --verify-tag");
+    expect(create).not.toContain("--generate-notes");
+    const notesFile = /--notes-file \S*\/([^/\s]+) /.exec(create!)?.[1];
+    expect(run.files[notesFile!]).toBe(`${NOTES}\n`);
     expect(create).toEndWith("/image-digest.txt");
+  });
+
+  test("the check job writes the summary after the tag check passes, with a read-only token, as a multiline output", () => {
+    const steps = release.jobs.check!.steps;
+    const check = steps.findIndex((s) => s.run?.includes("scripts/check-release-tag.ts"));
+    const notes = steps.findIndex((s) => s.run?.includes("scripts/release-notes.ts"));
+    expect(notes).toBeGreaterThan(check);
+    expect(steps[notes]!.env?.GH_TOKEN).toBe("${{ github.token }}");
+    expect(release.jobs.check!.outputs?.notes).toBe(`\${{ steps.${steps[notes]!.id}.outputs.notes }}`);
+  });
+
+  test("the summary step passes the tag and the checked commit, and a title cannot end the output early", () => {
+    const run = runStep(
+      "check",
+      (s) => s.run?.includes("scripts/release-notes.ts") === true,
+      (host) => stub(host.bin, "bun", `echo "bun $*" >> ${host.log}\nprintf '%s\\n' '- Close EOF (#1)' 'EOF' 'notes=evil'`),
+      { "${{ steps.check.outputs.commit }}": COMMIT },
+    );
+    expect(run.status).toBe(0);
+    expect(run.log).toEqual([`bun scripts/release-notes.ts v0.1.0 ${COMMIT}`]);
+    const delimiter = /^notes<<(\S+)$/m.exec(run.output)?.[1];
+    expect(delimiter).toMatch(/^[0-9a-f]{32}$/);
+    expect(run.output).toBe(`notes<<${delimiter}\n- Close EOF (#1)\nEOF\nnotes=evil\n${delimiter}\n`);
   });
 
   test("a rerun replaces image-digest.txt on the existing release", () => {

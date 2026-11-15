@@ -1,11 +1,12 @@
 name: release
 
-# A pushed v<major>.<minor>.<patch> tag becomes an arm64 image on GHCR and then a GitHub Release whose image-digest.txt
-# names that image by digest. The tag must be on master and equal the version in package.json at the tagged commit. A tag
-# push runs this file and the check as the tag has them, so the tag ruleset (infra/github/tag-ruleset.json) decides who can
-# cut a release. GHCR tags are mutable, so scripts/deploy-beta.sh deploys the digest in the release, never a tag. The
-# release is written last, so it never names an image that was not pushed and checked. The image holds no keys, since the
-# server reads them from Parameter Store at start.
+# A pushed v<major>.<minor>.<patch> tag becomes an arm64 image on GHCR and then a draft GitHub Release whose
+# image-digest.txt names that image by digest and whose notes summarize the PRs since the live release. The tag must be on
+# master and equal the version in package.json at the tagged commit. A tag push runs this file and the check as the tag
+# has them, so the tag ruleset (infra/github/tag-ruleset.json) decides who can cut a release. GHCR tags are mutable, so
+# every deploy uses the digest in the release, never a tag. The release is written last, so it never names an image that
+# was not pushed and checked. Publishing the draft is the deploy approval: the beta server's afterclass-autodeploy deploys
+# the highest published release. The image holds no keys, since the server reads them from Parameter Store at start.
 on:
   push:
     tags: ["v*"]
@@ -21,6 +22,7 @@ jobs:
       contents: read
     outputs:
       commit: ${{ steps.check.outputs.commit }}
+      notes: ${{ steps.notes.outputs.notes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -37,6 +39,18 @@ jobs:
           set -euo pipefail
           commit=$(bun scripts/check-release-tag.ts "$TAG")
           echo "commit=${commit}" >> "$GITHUB_OUTPUT"
+      # PR titles reach the output, so a random delimiter keeps a title from ending it early.
+      - id: notes
+        name: Summarize the PRs since the live release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ steps.check.outputs.commit }}
+        run: |
+          set -euo pipefail
+          notes=$(bun scripts/release-notes.ts "$TAG" "$COMMIT")
+          delimiter=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+          printf 'notes<<%s\n%s\n%s\n' "$delimiter" "$notes" "$delimiter" >> "$GITHUB_OUTPUT"
 
   image:
     needs: check
@@ -89,12 +103,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Record the image digest in the GitHub Release
+      # A rerun replaces only image-digest.txt, so notes edited in the draft stay.
+      - name: Record the image digest in a draft GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           COMMIT: ${{ needs.check.outputs.commit }}
           DIGEST: ${{ needs.image.outputs.digest }}
+          NOTES: ${{ needs.check.outputs.notes }}
         run: |
           set -euo pipefail
           if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
@@ -106,5 +122,7 @@ jobs:
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null; then
             gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$record"
           else
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "$TAG" "$record"
+            notes="${RUNNER_TEMP}/notes.md"
+            printf '%s\n' "$NOTES" > "$notes"
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "$TAG" --notes-file "$notes" "$record"
           fi
