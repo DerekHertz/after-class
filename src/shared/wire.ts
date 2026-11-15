@@ -477,6 +477,7 @@ export const reviewViewResponse = z.object({
   state: reviewStatez,
   turns: z.array(turnz),
   owesMove: z.boolean(),
+  turnInFlight: z.boolean(),
   observations: z.array(observationz),
   saved: z.enum(["unsaved", "saved", "save_pending"]),
 }) satisfies z.ZodType<ReviewView>;

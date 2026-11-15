@@ -141,6 +141,7 @@ const reviewJson = {
     { id: trn, reviewId: rvw, seq: 2, atMs: 2000, threadId: thr, actor: "learner", act: { kind: "answer", text: "An ordering.", modality: "speech" } },
   ],
   owesMove: false,
+  turnInFlight: false,
   observations: [observationJson],
   saved: "unsaved",
 };

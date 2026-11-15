@@ -390,7 +390,7 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     if (!review) throw new Error(`unknown review ${reviewId}`);
     const turns = loadTurns(reviewId);
     const { state } = stateOf(reviewId, review, turns);
-    return { reviewId, captureId: review.captureId, topics: topicsOf(review), scope: review.scope, state, turns, owesMove: tutorOwesMove(turns, state.phase), observations: [], saved: "unsaved" };
+    return { reviewId, captureId: review.captureId, topics: topicsOf(review), scope: review.scope, state, turns, owesMove: tutorOwesMove(turns, state.phase), turnInFlight: false, observations: [], saved: "unsaved" };
   }
 
   function list(captureId: CaptureId) {
