@@ -2,6 +2,8 @@ import type { SceneId } from "../appearance";
 import type { RoomObject } from "../room-object";
 import { FRONT_ROW_ROOMS, ROOM_ART } from "./rooms";
 import type { Anchor, Edges, FrontRowRoom, NineSlice, Placement } from "./rooms";
+import type { UnlockId } from "./progress";
+import { UNLOCK_SLOTS } from "./unlocks";
 
 /** A size or a box in CSS pixels of the window. */
 export type Size = { readonly width: number; readonly height: number };
@@ -10,6 +12,8 @@ export type Rect = { readonly left: number; readonly top: number; readonly width
 /** A nine-slice layer on screen: its box, and how far its four cuts sit from its edges, in screen pixels. */
 export type NineSliceLayer = { readonly rect: Rect; readonly border: Edges };
 export type ExtraLayer = { readonly name: string; readonly rect: Rect; readonly z: number };
+/** Where an unlocked object stands, whether or not it is unlocked yet. */
+export type UnlockLayer = { readonly id: UnlockId; readonly rect: Rect; readonly z: number };
 
 /**
  * The room built from layers, as a window at least `FULL_ROOM_MIN` shows it. Every rectangle is in CSS pixels from the
@@ -25,11 +29,15 @@ export type FullRoomLayout = {
     readonly desk: NineSliceLayer;
     readonly mat: NineSliceLayer;
     readonly extras: readonly ExtraLayer[];
+    /** Every unlock slot of the room, in the order they open (room/unlocks.ts). */
+    readonly unlocks: readonly UnlockLayer[];
   };
   /** Where the board's and the mat's text may go: each plain area less its pad. */
   readonly text: { readonly board: Rect; readonly desk: Rect };
   readonly companion: { readonly box: Rect };
   readonly objects: Readonly<Record<RoomObject, Rect>>;
+  /** The desk's corner left of the mat, around the companion, where the progress panel opens. */
+  readonly progress: Rect;
 };
 
 /**
@@ -85,7 +93,7 @@ export function layoutRoom(scene: SceneId, window: Size, composition: Compositio
   const source = { left: history.left + (book.width - folioWidth) / 2, top: history.top - u * ROOM_ART.folio.gap - folioHeight, width: folioWidth, height: folioHeight };
   const buddy = u * ROOM_ART.companionSize;
 
-  const frames = { board, window: { left: 0, top: 0, width: W, height: H } };
+  const frames = { board, window: { left: 0, top: 0, width: W, height: H }, background };
   const along = (anchor: Anchor, start: number, length: number, size: number) =>
     start + length * anchor.share + u * anchor.offset - size * { start: 0, center: 0.5, end: 1 }[anchor.align];
   const place = ({ on, x, y }: Placement, width: number, height: number): Rect => {
@@ -101,6 +109,7 @@ export function layoutRoom(scene: SceneId, window: Size, composition: Compositio
       desk: { rect: { left: 0, top: deskTop, width: W, height: u * room.desk.art.size.height }, border: scaled(room.desk.art.slice, u) },
       mat: { rect: mat, border: scaled(room.mat.art.slice, u) },
       extras: room.extras.map((extra) => ({ name: extra.name, z: extra.z, rect: place(extra.place, u * extra.width, u * extra.height) })),
+      unlocks: UNLOCK_SLOTS[scene].map((slot) => ({ id: slot.id, z: slot.z, rect: place(slot.place, u * slot.width, u * slot.height) })),
     },
     text: {
       board: inset(board, room.board.art, { x: ROOM_ART.boardTextPad, y: ROOM_ART.boardTextPad }, u),
@@ -108,6 +117,7 @@ export function layoutRoom(scene: SceneId, window: Size, composition: Compositio
     },
     companion: { box: { left: side, top: H - u * room.companionBottom - buddy, width: buddy, height: buddy } },
     objects: { source, history },
+    progress: { left: side, top: matTop, width: mat.left - 2 * side, height: H - side - matTop },
   };
 }
 

@@ -48,8 +48,11 @@ export type RoomPalette = {
  */
 export type Anchor = { readonly share: number; readonly offset: number; readonly align: "start" | "center" | "end" };
 
-/** A picture placed on the board or on the window, one anchor per axis. */
-export type Placement = { readonly on: "board" | "window"; readonly x: Anchor; readonly y: Anchor };
+/**
+ * A picture placed on the board, on the window or on the room's background, one anchor per axis. On the background a share
+ * is a share of the plate, so a picture placed there stays on the same spot of the painted room at any window.
+ */
+export type Placement = { readonly on: "board" | "window" | "background"; readonly x: Anchor; readonly y: Anchor };
 
 /** A small image the room has besides the board, desk and mat. Sizes are in `u`, and front-row.css chooses the picture by `name`. */
 export type Extra = { readonly name: string; readonly width: number; readonly height: number; readonly z: number; readonly place: Placement };

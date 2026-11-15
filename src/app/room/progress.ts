@@ -99,3 +99,4 @@ export function deriveProgress(observations: readonly Observation[]): Progress {
       : { value: (open + 1) * TOPICS_PER_UNLOCK - understood, label: "more topics explained on your own for the next object" },
   };
 }
+

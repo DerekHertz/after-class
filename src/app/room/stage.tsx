@@ -6,9 +6,10 @@ import { buildScene } from "./scene";
 import type { CompanionDraw, Draw, DrawList, PictureDraw, Specks } from "./scene";
 import { restsFrom } from "./companion";
 import type { CompanionCue, Idle } from "./companion";
-import { pieces } from "./paint";
+import { pieces, readyDraws } from "./paint";
 import { ROOM_LAYER_ART } from "./art";
-import type { Scale } from "./paint";
+import type { PictureState, Scale } from "./paint";
+import type { UnlockId } from "./progress";
 
 /**
  * The canvas behind the room's text and controls. It paints the draw list of `scene` at the window's device pixels and
@@ -16,13 +17,15 @@ import type { Scale } from "./paint";
  * picture of a room has decoded it keeps the room it last finished, or stays empty so the page's backdrop shows through.
  * Its `data-stage` attribute says which, and front-row.css holds the room's words back only while it is `waiting`.
  * `companion` draws the companion in front of the room, animated only while `motion` is on (room/motion.ts). The frame it
- * last drew is the canvas's `data-companion` attribute.
+ * last drew is the canvas's `data-companion` attribute. `unlocked` are the room's open slots (room/progress.ts). Only their
+ * pictures are fetched, and each is drawn once it decodes, never holding the rest of the room.
  */
-export function RoomStage({ scene, composition, motion, companion }: {
+export function RoomStage({ scene, composition, motion, companion, unlocked }: {
   readonly scene: SceneId;
   readonly composition: Composition;
   readonly motion: boolean;
   readonly companion: CompanionCue | null;
+  readonly unlocked: readonly UnlockId[];
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<Stage | null>(null);
@@ -42,10 +45,11 @@ export function RoomStage({ scene, composition, motion, companion }: {
   const { id, activity } = companion ?? {};
   const gesture = companion?.gesture?.name;
   const at = companion?.gesture?.at;
+  const opened = unlocked.join(" ");
   useLayoutEffect(() => {
     const cue = id === undefined || activity === undefined ? null : { id, activity, gesture: gesture === undefined || at === undefined ? null : { name: gesture, at } };
-    stageRef.current?.show({ scene, composition, motion, companion: cue });
-  }, [scene, composition, motion, id, activity, gesture, at]);
+    stageRef.current?.show({ scene, composition, motion, companion: cue, unlocked: opened === "" ? [] : opened.split(" ") as UnlockId[] });
+  }, [scene, composition, motion, id, activity, gesture, at, opened]);
   return <canvas ref={canvasRef} className="front-row-canvas" aria-hidden="true" />;
 }
 
@@ -56,7 +60,10 @@ export function RoomStage({ scene, composition, motion, companion }: {
 type StageState = "waiting" | "painted" | "off";
 const setState = (canvas: HTMLCanvasElement, state: StageState) => { canvas.dataset.stage = state; };
 
-type Wanted = { readonly scene: SceneId; readonly composition: Composition; readonly motion: boolean; readonly companion: CompanionCue | null };
+type Wanted = {
+  readonly scene: SceneId; readonly composition: Composition; readonly motion: boolean; readonly companion: CompanionCue | null;
+  readonly unlocked: readonly UnlockId[];
+};
 /** The canvas's box: its size in CSS pixels and the device pixels of its backing store. */
 type Box = { readonly css: Size; readonly device: Size };
 
@@ -185,13 +192,19 @@ class Stage {
     }
     const now = wanted.motion ? performance.now() : null;
     const companion = wanted.companion === null ? null : { cue: wanted.companion, idle: this.idle, ratio: scaleOf(box).y };
-    const list = (scene: SceneId) => buildScene(scene, layoutRoom(scene, box.css, wanted.composition), now, companion);
+    // Unlocks are progress the learner made, so a room shown in their place while the wanted one decodes keeps them too.
+    const list = (scene: SceneId) => buildScene(scene, layoutRoom(scene, box.css, wanted.composition), now, companion, wanted.unlocked);
     let drawn: DrawList | null = list(wanted.scene);
-    if (this.decoded(drawn)) this.shown = wanted.scene;
-    else drawn = this.shown === null ? null : list(this.shown);
-    if (drawn !== null && !this.decoded(drawn)) drawn = null;
+    let ready = readyDraws(drawn.draws, this.state);
+    if (ready !== null) this.shown = wanted.scene;
+    else if (this.shown !== null) {
+      drawn = list(this.shown);
+      ready = readyDraws(drawn.draws, this.state);
+    }
+    if (ready === null) drawn = null;
     let companionFrame: string | undefined;
-    const painted = (drawn?.draws ?? []).flatMap((draw): Draw[] => {
+    // The bands are built from what is ready, so an unlock that decodes later changes its band's key and repaints it.
+    const painted = (ready ?? []).flatMap((draw): Draw[] => {
       if (draw.kind !== "companion") return [draw];
       const shown = this.companion(draw);
       companionFrame = shown?.frame;
@@ -271,22 +284,15 @@ class Stage {
     return null;
   }
 
-  /**
-   * Whether every picture `list` draws has settled, decoded or failed. Starts any that have not, and repaints when one
-   * settles. A picture that failed is left out of the room rather than holding the room back.
-   */
-  private decoded(list: DrawList): boolean {
-    let all = true;
-    for (const draw of list.draws) {
-      if (!isPicture(draw)) continue;
-      const entry = picture(draw.src);
-      if (entry.state !== "pending") continue;
+  /** How far `src` has got. Starts it if it has not started, and repaints when it settles. */
+  private readonly state = (src: string): PictureState => {
+    const entry = picture(src);
+    if (entry.state === "pending") {
       entry.waiting.add(this.paint);
       this.awaited.add(entry);
-      all = false;
     }
-    return all;
-  }
+    return entry.state;
+  };
 
   private release(): void {
     for (const entry of this.awaited) entry.waiting.delete(this.paint);
@@ -297,7 +303,7 @@ class Stage {
 /** Device pixels per CSS pixel on each axis, as the backing store was sized. */
 const scaleOf = ({ css, device }: Box) => ({ x: device.width / css.width, y: device.height / css.height });
 
-type Picture = { readonly image: HTMLImageElement; state: "pending" | "decoded" | "failed"; readonly waiting: Set<() => void> };
+type Picture = { readonly image: HTMLImageElement; state: PictureState; readonly waiting: Set<() => void> };
 /** Every picture the stage has asked for, decoded once per page and kept, so switching back to a room is instant. */
 const pictures = new Map<string, Picture>();
 

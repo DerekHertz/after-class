@@ -4,8 +4,10 @@ import { ROOM_LAYER_ART } from "./art";
 import { companionAt, companionDraw } from "./companion";
 import type { CompanionCue, Frame, Idle } from "./companion";
 import type { NineSliceLayer, Rect, RoomLayout } from "./layout";
+import type { UnlockId } from "./progress";
 import { FRONT_ROW_ROOMS } from "./rooms";
 import type { Edges } from "./rooms";
+import { UNLOCK_ART } from "./unlocks";
 
 /**
  * How a picture is resampled to its box. The room's layers are pixelated, as the HD pixel look needs. A phone's backdrop is
@@ -18,10 +20,11 @@ export type Sampling = "pixelated" | "smooth";
  * picture into `rect`. `nine-slice` cuts the picture `slice` asset pixels from each edge, keeps the corners at `border`
  * screen pixels, and stretches the edges and the middle, as CSS `border-image` with `fill` does. `companion` draws column
  * `column` of `columns` equal cells of its picture, pixelated, with the companion's drop shadow. It never holds the room
- * back: until its picture decodes the stage draws `standIn` in its place, or nothing.
+ * back: until its picture decodes the stage draws `standIn` in its place, or nothing. An `image` that names an `unlock` never
+ * holds the room back either: the stage leaves it out until its picture decodes.
  */
 export type PictureDraw =
-  | { readonly kind: "image"; readonly src: string; readonly rect: Rect; readonly sampling: Sampling }
+  | { readonly kind: "image"; readonly src: string; readonly rect: Rect; readonly sampling: Sampling; readonly unlock?: UnlockId }
   | { readonly kind: "nine-slice"; readonly src: string; readonly rect: Rect; readonly slice: Edges; readonly border: Edges };
 export type CompanionDraw = {
   readonly kind: "companion"; readonly frame: Frame; readonly src: string; readonly rect: Rect; readonly column: number; readonly columns: number;
@@ -53,15 +56,19 @@ const DEPTH = { background: 0, board: 2, desk: 5, mat: 6 } as const;
 /**
  * The draw list of `scene` laid out as `layout`. Layers of equal depth keep the order they are listed in, the mat last, and
  * the companion in front of them all. `now` is the `performance.now()` time of the frame, or null while the room is still
- * (see motion.ts): the room's ambient life is drawn only for a time.
+ * (see motion.ts): the room's ambient life is drawn only for a time. `unlocked` are the room's open slots (room/progress.ts).
+ * Each is drawn at its depth if `unlockArt` has its picture, and not at all if it has none.
  */
-export function buildScene(scene: SceneId, layout: RoomLayout, now: number | null = null, companion: CompanionScene | null = null): DrawList {
+export function buildScene(
+  scene: SceneId, layout: RoomLayout, now: number | null = null, companion: CompanionScene | null = null,
+  unlocked: readonly UnlockId[] = [], unlockArt: Readonly<Partial<Record<UnlockId, string>>> = UNLOCK_ART,
+): DrawList {
   const art = ROOM_LAYER_ART[scene];
   if (layout.composition === "compact") {
     return { draws: [{ kind: "image", src: art.background, rect: layout.layers.background, sampling: "smooth" }], next: null };
   }
   const room = FRONT_ROW_ROOMS[scene];
-  const { background, board, desk, mat, extras } = layout.layers;
+  const { background, board, desk, mat, extras, unlocks } = layout.layers;
   const extraArt: Readonly<Record<string, string>> = art.extras;
   const nineSlice = (src: string, layer: NineSliceLayer, slice: Edges): Draw => ({ kind: "nine-slice", src, rect: layer.rect, slice, border: layer.border });
   const layered: { readonly z: number; readonly draw: Draw }[] = [
@@ -69,6 +76,10 @@ export function buildScene(scene: SceneId, layout: RoomLayout, now: number | nul
     { z: DEPTH.board, draw: nineSlice(art.board, board, room.board.art.slice) },
     { z: DEPTH.desk, draw: nineSlice(art.desk, desk, room.desk.art.slice) },
     ...extras.map((extra) => ({ z: extra.z, draw: { kind: "image", src: extraArt[extra.name]!, rect: extra.rect, sampling: "pixelated" } as const })),
+    ...unlocks.flatMap(({ id, z, rect }) => {
+      const src = unlocked.includes(id) ? unlockArt[id] : undefined;
+      return src === undefined ? [] : [{ z, draw: { kind: "image", src, rect, sampling: "pixelated", unlock: id } as const }];
+    }),
     { z: DEPTH.mat, draw: nineSlice(art.mat, mat, room.mat.art.slice) },
   ];
   const ambient = now === null ? null : ambientDraws(scene, layout, now);

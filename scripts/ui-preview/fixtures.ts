@@ -26,7 +26,7 @@ export const ids = {
   chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait"), ordering: id("cpt", "ordering"), earlierCapture: id("cap", "earlier-capture"),
   otherCapture: id("cap", "other-capture"), pendingReview: id("rvw", "pending-review"), unsavedReview: id("rvw", "unsaved-review"),
 };
-export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "reload-unanswered", "reload-in-flight", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-split", "capture-processing", "capture-held", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "usage", "usage-held", "usage-reserved", "usage-uncapped", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
+export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "reload-unanswered", "reload-in-flight", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-split", "capture-processing", "capture-held", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "review-record-stale", "review-record-slow", "usage", "usage-held", "usage-reserved", "usage-uncapped", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
 export type Scenario = typeof scenarios[number];
 export const scenarioFrom = (search: string): Scenario => scenarios.find(s => s === new URLSearchParams(search).get("scenario")) ?? "review";
 
@@ -172,6 +172,10 @@ export function createFixture(scenario: Scenario): Fixture {
     ] },
   ] });
   let attempts = 0;
+  /** "review-record-stale": the two reads that follow a correction (the notebook's and the room's) fail, then reads work again. */
+  let failedReads = 0;
+  /** "review-record-slow": every read after a correction waits until the fixture is continued. */
+  let heldReads: Promise<void> | null = null;
   let evidenceAttempts = 0;
   let diagramAttempts = 0;
   let reviewAttempts = 0;
@@ -264,7 +268,7 @@ export function createFixture(scenario: Scenario): Fixture {
       const observations = reviewViewz.parse(reviewJson(ids.review, "record")).observations.filter(o => o.threadId === ids.thread);
       view = { ...view, saved: "saved", observations }; return saveResultz.parse({ kind: "saved", notes: 1, observations: observations.length, links: 0 });
     },
-    async record() { log("record.read"); if (scenario === "record-error" && attempts++ === 0) throw new ApiError("Fixture notebook could not load. Retry is available.", 503); return record; },
+    async record() { log("record.read"); if (heldReads !== null) await heldReads; if (failedReads > 0) { failedReads -= 1; throw new ApiError("Fixture record could not be read again. Retry is available.", 503); } if (scenario === "record-error" && attempts++ === 0) throw new ApiError("Fixture notebook could not load. Retry is available.", 503); return record; },
     async editNote(noteId, text) { log("note.edit"); record = { ...record, notes: record.notes.map(note => note.id === noteId ? { ...note, userEdit: text } : note) }; },
     async deleteNote(noteId) { log("note.delete"); record = { ...record, notes: record.notes.filter(note => note.id !== noteId) }; },
     async decideLink(linkId, decision) { log("link.decide"); record = {...record, links:record.links.map(link=>link.id===linkId?{...link,decision}:link)}; }, async resolveDispute(obsId, outcome) {
@@ -273,7 +277,7 @@ export function createFixture(scenario: Scenario): Fixture {
       const resolved = (proposed: ObservationStatus): ObservationStatus => outcome === "it_was_my_gap" && proposed !== "partial" && proposed !== "unresolved" ? "unresolved" : proposed;
       record = { ...record, observations: record.observations.map(obs => obs.id === obsId ? { ...obs, status: resolved(obs.proposed), dispute: { kind: "resolved_by_learner", outcome } } : obs) };
     },
-    async overrideObservation(obsId,status) { log(`observation.override ${obsId} ${status}`); record={...record,observations:record.observations.map(obs=>obs.id===obsId?{...obs,status}:obs)}; },
+    async overrideObservation(obsId,status) { log(`observation.override ${obsId} ${status}`); if (scenario === "review-record-stale") failedReads = 2; if (scenario === "review-record-slow") heldReads = gate().then(() => { heldReads = null; }); record={...record,observations:record.observations.map(obs=>obs.id===obsId?{...obs,status}:obs)}; },
     async deleteEvidence(evidenceIds) { log("evidence.delete"); record = { ...record, unavailableEvidence: evidenceIds.map(id => ({ kind: "deleted", id, deletedAtMs: 1000 })) }; },
     async usage() {
       const held = scenario === "usage-held" || scenario === "capture-held" || scenario === "held-turn";
