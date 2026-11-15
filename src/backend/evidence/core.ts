@@ -420,10 +420,20 @@ export function foldCapture(captureId: CaptureId, stored: readonly StoredFact[])
   }
   const frames = candidates.map((c) => built.get(c.frame.id)!);
 
+  // A channel is ok once its own data has arrived, because the extension reports a channel only when it fails or recovers.
+  // The latest of that evidence and the channel's own facts wins, in clientSeq order, so a later failure still shows.
   const health: ChannelHealth[] = (["transcript", "frames", "playback"] as const).map((channel) => {
-    let latest: Extract<CaptureFact, { kind: "channel" }> | null = null;
+    let latest: { health: ChannelHealth["health"]; detail: string } | null = null;
     for (const f of facts) {
-      if (f.kind === "channel" && f.channel === channel && (f.videoId === null || f.videoId === currentVideo)) latest = f;
+      if (f.kind === "channel") {
+        if (f.channel === channel && (f.videoId === null || f.videoId === currentVideo)) latest = { health: f.health, detail: f.detail };
+      } else if (channel === "transcript" && f.kind === "transcript" && f.videoId === currentVideo && f.segments.length > 0) {
+        latest = { health: "ok", detail: "captions received" };
+      } else if (channel === "frames" && f.kind === "frame" && f.videoId === currentVideo && jpegOf.get(f) === true) {
+        latest = { health: "ok", detail: "frames arriving" };
+      } else if (channel === "playback" && f.kind === "span" && f.videoId === currentVideo) {
+        latest = { health: "ok", detail: "watch time arriving" };
+      }
     }
     return { channel, health: latest?.health ?? "unknown", detail: latest?.detail ?? "" };
   });

@@ -712,6 +712,37 @@ export function noteView(note: Note): NoteView {
   };
 }
 
+/**
+ * Every source in the order the learner watched it: captures by the server sequence of their first fact, which a late upload never
+ * moves, and within a capture the order the capture first saw each video. The lecture list carries that order from the capture's own sources, so it is not guessed
+ * from evidence ids, which are hashes and sort at random.
+ */
+export function sourceWatchOrder(lectures: readonly { readonly sourceIds: readonly SourceId[]; readonly firstSeq: number }[] | null): readonly SourceId[] {
+  return [...new Set([...(lectures ?? [])].sort((a, b) => a.firstSeq - b.firstSeq).flatMap((l) => l.sourceIds))];
+}
+
+/**
+ * A note's cited evidence in watch order: by lecture in `watchOrder`, then by time in it. The ids alone carry no time,
+ * so the time is read where the ids meet the loaded passages and frames. An id with no details yet keeps its place
+ * after the rest. A lecture missing from `watchOrder` follows the known ones, in source id order.
+ */
+export function citedInWatchOrder(
+  ids: readonly EvidenceId[],
+  details: { readonly passages: readonly { readonly id: EvidenceId; readonly sourceId: SourceId; readonly interval: Interval }[]; readonly frames: readonly { readonly id: EvidenceId; readonly sourceId: SourceId; readonly mediaS: number }[] } | null,
+  watchOrder: readonly SourceId[],
+): readonly EvidenceId[] {
+  const at = new Map<EvidenceId, { readonly sourceId: SourceId; readonly s: number }>();
+  for (const p of details?.passages ?? []) at.set(p.id, { sourceId: p.sourceId, s: p.interval.start });
+  for (const f of details?.frames ?? []) at.set(f.id, { sourceId: f.sourceId, s: f.mediaS });
+  const rank = new Map(watchOrder.map((s, i) => [s, i] as const));
+  const key = (id: EvidenceId) => {
+    const a = at.get(id);
+    return a ? ([rank.get(a.sourceId) ?? rank.size, a.sourceId, a.s] as const) : ([rank.size + 1, "", 0] as const);
+  };
+  const cmp = (x: readonly [number, string, number], y: readonly [number, string, number]) => (x[0] - y[0]) || (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0) || x[2] - y[2];
+  return ids.map((id, i) => ({ id, i, k: key(id) })).sort((x, y) => cmp(x.k, y.k) || x.i - y.i).map((x) => x.id);
+}
+
 // ───────────────────────────── Evidence inspector ───────────────────────────
 
 export type BundleReport = {
