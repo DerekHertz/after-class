@@ -36,6 +36,20 @@ export function validate<T>(format: Format<T>, bytes: Uint8Array): Checked<T> {
   return { ok: true, value: format.fields(match) };
 }
 
+/** A full commit hash, as a command-line argument. */
+export const COMMIT: Format<string> = {
+  name: "the commit",
+  pattern: /^([0-9a-f]{40})$/,
+  fields: (m) => m[1]!,
+};
+
+/** An image digest, as a command-line argument. */
+export const DIGEST_ID: Format<string> = {
+  name: "the digest",
+  pattern: new RegExp(`^(${DIGEST})$`),
+  fields: (m) => m[1]!,
+};
+
 /** What the release workflow writes: `commit <sha>\ndigest <digest>\n`. */
 export const RECORD: Format<{ readonly commit: string; readonly digest: string }> = {
   name: "image-digest.txt",
@@ -68,6 +82,13 @@ export const INSTANCE_ID: Format<string> = {
 export const COMMAND_ID: Format<string> = {
   name: "the command id",
   pattern: /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n?$/,
+  fields: (m) => m[1]!,
+};
+
+/** What `aws ssm get-command-invocation --query Status --output text` prints: one status word. */
+export const COMMAND_STATUS: Format<string> = {
+  name: "the command status",
+  pattern: /^([A-Za-z]{1,32})\n?$/,
   fields: (m) => m[1]!,
 };
 

@@ -10,8 +10,6 @@ set -euo pipefail
 
 region=us-east-2
 repository=derekhertz/after-class
-instance_parameter=/afterclass-beta/instance_id
-document=afterclass-beta-deploy
 
 cd "$(dirname "$0")/.."
 tag="${1:-}"
@@ -47,10 +45,15 @@ if ! printf 'Authorization: Bearer %s\n' "$token" | curl -fsS --head --output /d
   exit 1
 fi
 
-instance_id=$(aws ssm get-parameter --region "$region" --name "$instance_parameter" --query Parameter.Value --output text)
-command_id=$(aws ssm send-command --region "$region" --instance-ids "$instance_id" --document-name "$document" \
-  --parameters "{\"tag\":[\"${commit}\"],\"digest\":[\"${digest}\"]}" --comment "deploy ${tag} ${commit}" \
-  --query Command.CommandId --output text)
+# aws's answers are read as bytes and checked by live-release.ts. The shell only ever holds an id that passed.
+if ! instance_id=$(bun scripts/live-release.ts instance); then
+  echo "deploy-beta: nothing was deployed." >&2
+  exit 1
+fi
+if ! command_id=$(bun scripts/live-release.ts send "$tag" "$instance_id" "$commit" "$digest"); then
+  echo "deploy-beta: the deploy may not have been sent. Check Systems Manager before you rerun it." >&2
+  exit 1
+fi
 echo "deploy-beta: command ${command_id} on ${instance_id} deploys ${tag} (${commit}, ${digest})"
 
 invocation() {
@@ -60,7 +63,10 @@ invocation() {
 # The server's deploy takes up to 10 minutes. The result is not there for the first few seconds after the send.
 for _ in $(seq 1 90); do
   sleep 10
-  status=$(invocation --query Status --output text 2>/dev/null || echo Pending)
+  if ! status=$(bun scripts/live-release.ts status "$instance_id" "$command_id"); then
+    echo "deploy-beta: could not read the status of command ${command_id}. Check it with aws ssm get-command-invocation." >&2
+    exit 1
+  fi
   case "$status" in
     Success)
       invocation --query StandardOutputContent --output text

@@ -3,6 +3,11 @@
 // Usage: bun scripts/live-release.ts server       prints "<tag> <digest>" for the release the server runs, or fails saying why.
 //        bun scripts/live-release.ts public       prints the tag the public /health reports from this machine, or fails saying why.
 //        bun scripts/live-release.ts record <tag> prints "<commit> <digest>" from the tag's image-digest.txt, or fails saying why.
+//        bun scripts/live-release.ts instance     prints the beta's instance id from Parameter Store, or fails saying why.
+//        bun scripts/live-release.ts status <instance id> <command id>
+//                                                 prints the command's status word, Pending while aws cannot answer yet, or fails.
+//        bun scripts/live-release.ts send <tag> <instance id> <commit> <digest>
+//                                                 sends the deploy document and prints the command id, or fails saying why.
 //
 // The server is read through Systems Manager, because a network filter between this machine and useafterclass.com can
 // block or rewrite the public /health. One command on the instance deploy-beta.sh deploys to prints the digest
@@ -12,11 +17,12 @@
 // image-digest.txt names the recorded digest.
 
 import { compareTags } from "./release-notes";
-import { COMMAND_ID, excerpt, INSTANCE_ID, parseHealth, parseProbe, PROBE, RECORD, validate } from "./release-input";
+import { COMMAND_ID, COMMAND_STATUS, COMMIT, DIGEST_ID, excerpt, INSTANCE_ID, parseHealth, parseProbe, PROBE, RECORD, validate } from "./release-input";
 import type { Checked, Health, ServerRead } from "./release-input";
 
 const REGION = "us-east-2";
 const INSTANCE_PARAMETER = "/afterclass-beta/instance_id";
+const DEPLOY_DOCUMENT = "afterclass-beta-deploy";
 const GITHUB_REPOSITORY = "DerekHertz/after-class";
 const SITE = "https://useafterclass.com";
 
@@ -69,7 +75,7 @@ function run(...command: string[]): Ran {
 }
 
 function aws(...args: string[]): Buffer {
-  const result = run("aws", ...args, "--region", REGION);
+  const result = run("aws", ...args.slice(0, 2), "--region", REGION, ...args.slice(2));
   if (result.code !== 0) throw new Error(`aws ${args.slice(0, 2).join(" ")} failed: ${result.err || `exit ${result.code}`}`);
   return result.out;
 }
@@ -79,9 +85,23 @@ function valueOf<T>(result: Checked<T>): T {
   return result.value;
 }
 
+function readInstance(): string {
+  return valueOf(validate(INSTANCE_ID, aws("ssm", "get-parameter", "--name", INSTANCE_PARAMETER, "--query", "Parameter.Value", "--output", "text")));
+}
+
+/** Sends the deploy document for a commit and digest the caller has already checked, and returns the validated command id. */
+function sendDeploy(tag: string, instance: string, commit: string, digest: string): string {
+  const parameters = JSON.stringify({ tag: [commit], digest: [digest] });
+  const send = aws(
+    "ssm", "send-command", "--instance-ids", instance, "--document-name", DEPLOY_DOCUMENT, "--parameters", parameters,
+    "--comment", `deploy ${tag} ${commit}`, "--query", "Command.CommandId", "--output", "text",
+  );
+  return valueOf(validate(COMMAND_ID, send));
+}
+
 /** Bounded by the deadline: the waiter polls every 5 seconds, 20 times, and the command itself times out after 30. */
 function readServer(): ServerRead {
-  const instance = valueOf(validate(INSTANCE_ID, aws("ssm", "get-parameter", "--name", INSTANCE_PARAMETER, "--query", "Parameter.Value", "--output", "text")));
+  const instance = readInstance();
   const parameters = JSON.stringify({ commands: PROBE, executionTimeout: ["30"] });
   const send = aws(
     "ssm", "send-command", "--instance-ids", instance, "--document-name", "AWS-RunShellScript",
@@ -159,8 +179,46 @@ if (import.meta.main) {
       process.exit(1);
     }
     console.log(`${record.value.commit} ${record.value.digest}`);
+  } else if (mode === "instance" && tag === undefined) {
+    try {
+      console.log(readInstance());
+    } catch (error) {
+      if (error instanceof DeadlineError) stopAtDeadline("the instance id", error);
+      console.error(`live-release: ${(error as Error).message}`);
+      process.exit(1);
+    }
+  } else if (mode === "status" && tag !== undefined && extra.length === 1) {
+    const [command] = extra as [string];
+    const given = [validate(INSTANCE_ID, Buffer.from(tag)), validate(COMMAND_ID, Buffer.from(command))].find((g) => !g.ok);
+    if (given !== undefined && !given.ok) {
+      console.error(`live-release: status was given a bad argument: ${given.why}`);
+      process.exit(2);
+    }
+    try {
+      const result = run("aws", "ssm", "get-command-invocation", "--region", REGION, "--command-id", command, "--instance-id", tag, "--query", "Status", "--output", "text");
+      console.log(result.code === 0 ? valueOf(validate(COMMAND_STATUS, result.out)) : "Pending");
+    } catch (error) {
+      if (error instanceof DeadlineError) stopAtDeadline("the command status", error);
+      console.error(`live-release: ${(error as Error).message}`);
+      process.exit(1);
+    }
+  } else if (mode === "send" && tag !== undefined && RELEASE_TAG.test(tag) && extra.length === 3) {
+    const [instance, commit, digest] = extra as [string, string, string];
+    const given = [validate(INSTANCE_ID, Buffer.from(instance)), validate(COMMIT, Buffer.from(commit)), validate(DIGEST_ID, Buffer.from(digest))];
+    const refused = given.find((g) => !g.ok);
+    if (refused !== undefined && !refused.ok) {
+      console.error(`live-release: send was given a bad argument: ${refused.why}`);
+      process.exit(2);
+    }
+    try {
+      console.log(sendDeploy(tag, instance, commit, digest));
+    } catch (error) {
+      if (error instanceof DeadlineError) stopAtDeadline("the deploy send", error);
+      console.error(`live-release: ${(error as Error).message}`);
+      process.exit(1);
+    }
   } else {
-    console.error("usage: bun scripts/live-release.ts server|public|record v<major>.<minor>.<patch>");
+    console.error("usage: bun scripts/live-release.ts server|public|instance|status <instance id> <command id>|record v<major>.<minor>.<patch>|send v<major>.<minor>.<patch> <instance id> <commit> <digest>");
     process.exit(2);
   }
 }

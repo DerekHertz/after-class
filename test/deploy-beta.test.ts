@@ -24,6 +24,10 @@ interface Opts {
   readonly expected?: string;
   /** The commit scripts/release.sh showed and passes as the third argument. */
   readonly expectedCommit?: string;
+  /** The exact bytes aws prints for the instance id, the command id and a status, in place of the well-formed ones. */
+  readonly instanceOut?: Buffer;
+  readonly commandOut?: Buffer;
+  readonly statusOut?: Buffer;
 }
 
 interface Run {
@@ -75,16 +79,21 @@ for arg; do
 done
 exit 2`,
   );
+  for (const [name, bytes] of [["instance-out", opts.instanceOut], ["command-out", opts.commandOut], ["status-out", opts.statusOut]] as const) {
+    if (bytes !== undefined) writeFileSync(join(host.root, name), bytes);
+  }
+  const answer = (name: string, fallback: string): string => (opts.instanceOut !== undefined && name === "instance-out") || (opts.commandOut !== undefined && name === "command-out") ? `cat ${host.root}/${name}` : fallback;
   stub(
     host.bin,
     "aws",
     `${record}
 case "$2" in
-  get-parameter) echo ${INSTANCE};;
-  send-command) echo ${COMMAND};;
+  get-parameter) ${answer("instance-out", `echo ${INSTANCE}`)};;
+  send-command) ${answer("command-out", `echo ${COMMAND}`)};;
   get-command-invocation)
     case "$*" in
       *"--query Status"*)
+        ${opts.statusOut === undefined ? "" : `cat ${host.root}/status-out; exit 0`}
         status=$(head -n 1 ${host.root}/statuses)
         [ "$(wc -l < ${host.root}/statuses)" -gt 1 ] && sed -i 1d ${host.root}/statuses
         echo "$status";;
@@ -243,6 +252,25 @@ describe("scripts/deploy-beta.sh", () => {
     expect(run.stderr).toContain(`ghcr.io/derekhertz/after-class@${APPROVED}`);
     expect(calledWith(run, "aws")).toEqual([]);
   });
+
+  const malformedIds: [string, Opts][] = [
+    ["an instance id with a NUL inside, which a shell capture would drop", { instanceOut: Buffer.from(`i-01234567\u000089abcdef0\n`) }],
+    ["an instance id that is not an id", { instanceOut: Buffer.from("not-an-instance-id\n") }],
+    ["a command id with a NUL inside, which a shell capture would drop", { commandOut: Buffer.from(`11111111-2222-3333-4444-55555555\u00005555\n`) }],
+    ["a command id that is not an id", { commandOut: Buffer.from("not-a-command-id\n") }],
+    ["a status with a NUL inside, which a shell capture would drop", { statusOut: Buffer.from("Succ\u0000ess\n") }],
+  ];
+  for (const [name, opts] of malformedIds) {
+    test(`refuses ${name}, and never uses it`, () => {
+      const run = deploy(opts);
+      expect(run.status).not.toBe(0);
+      expect(run.stderr).not.toContain("ignored null byte");
+      expect(run.stderr).toContain("is not in its format");
+      expect(run.stdout).not.toContain("is healthy");
+      expect(calledWith(run, "aws", "send-command").length).toBe(opts.instanceOut === undefined ? 1 : 0);
+      expect(calledWith(run, "aws", "get-command-invocation").length).toBe(opts.statusOut === undefined ? 0 : 1);
+    });
+  }
 
   test("a deploy the server reports as failed fails the script and shows the server's output", () => {
     const run = deploy({ statuses: ["InProgress", "Failed"] });
