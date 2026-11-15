@@ -42,9 +42,14 @@ test.describe("unlock slots keep clear of the room's controls", () => {
         await openRoom(page, scene);
         const layout = layoutRoom(scene, size, "full");
         if (layout.composition !== "full") throw new Error("a desktop window lays out the full room");
-        const zones = await controls(page);
-        const hits = layout.layers.unlocks.flatMap((slot) => Object.entries(zones).filter(([, zone]) => overlaps(slot.rect, zone)).map(([name]) => `${slot.id} on ${name}`));
-        expect(hits).toEqual([]);
+        const hits = async () => {
+          const zones = await controls(page);
+          return layout.layers.unlocks.flatMap((slot) => Object.entries(zones).filter(([, zone]) => overlaps(slot.rect, zone)).map(([name]) => `${slot.id} on ${name}`));
+        };
+        expect(await hits()).toEqual([]);
+        await page.getByRole("button", { name: "Your room" }).click();
+        await expect(page.locator(".room-progress-body")).toBeVisible();
+        expect({ open: await hits() }).toEqual({ open: [] });
       });
     }
   });
@@ -67,7 +72,7 @@ test.describe("the Your room panel", () => {
     ]);
   });
 
-  for (const size of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  for (const size of [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 2560, height: 1290 }, { width: 3440, height: 1440 }, { width: 3840, height: 2160 }]) {
     test.describe(`at ${size.width}x${size.height}`, () => {
       test.use({ viewport: size });
       test("opens and closes from the keyboard and, open, covers neither the board nor Your thinking", async ({ page }, info) => {

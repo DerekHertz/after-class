@@ -3,12 +3,12 @@ import type { SceneId } from "../appearance";
 import { layoutRoom } from "./layout";
 import type { Composition, Rect, Size } from "./layout";
 import { buildScene } from "./scene";
-import type { CompanionDraw, Draw, DrawList, PictureDraw, Specks } from "./scene";
+import type { CompanionDraw, Draw, DrawList, PictureDraw, Shade, Specks } from "./scene";
 import { restsFrom } from "./companion";
 import type { CompanionCue, Idle } from "./companion";
-import { pieces, readyDraws } from "./paint";
+import { pieces, readyDraws, shadeBoxes } from "./paint";
 import { ROOM_LAYER_ART } from "./art";
-import type { PictureState, Scale } from "./paint";
+import type { DeviceBox, PictureState, Scale } from "./paint";
 import type { UnlockId } from "./progress";
 
 /**
@@ -241,7 +241,7 @@ class Stage {
     const layers: (Band | LiveDraw)[] = [];
     for (const run of runs(draws)) {
       if ("kind" in run) {
-        live.push({ key: JSON.stringify(run), boxes: liveBoxes(run, scale) });
+        live.push({ key: JSON.stringify(run), boxes: liveBoxes(run, scale, box.device) });
         layers.push(run);
         continue;
       }
@@ -342,9 +342,6 @@ type Band = { readonly key: string; readonly canvas: HTMLCanvasElement };
 /** A draw that changes as the room moves. The stage paints it every time rather than keeping it in a band. */
 type LiveDraw = Exclude<Draw, PictureDraw>;
 
-/** Whole device pixels, from the stage's top left. */
-type DeviceBox = { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
-
 /** A live draw as last painted: `key` names it, and `boxes` hold every device pixel it touched. */
 type Live = { readonly key: string; readonly boxes: readonly DeviceBox[] };
 
@@ -366,9 +363,10 @@ function runs(draws: readonly Draw[]): readonly (LiveDraw | readonly PictureDraw
 }
 
 /** The device pixels `draw` touches. Each new kind of live draw names its own here. */
-function liveBoxes(draw: LiveDraw, scale: Scale): readonly DeviceBox[] {
+function liveBoxes(draw: LiveDraw, scale: Scale, device: Size): readonly DeviceBox[] {
   switch (draw.kind) {
     case "specks": return draw.rects.map((rect) => deviceBox(rect, scale));
+    case "shade": return shadeBoxes(draw, scale, device);
     case "companion": {
       const { image } = pictures.get(draw.src)!;
       const shadow = companionShadow(scale);
@@ -399,6 +397,7 @@ function paintBand(run: readonly PictureDraw[], box: Box, key: string, reuse?: H
 
 function paintDraw(context: CanvasRenderingContext2D, draw: Draw, scale: Scale): void {
   if (draw.kind === "specks") return paintSpecks(context, draw, scale);
+  if (draw.kind === "shade") return paintShade(context, draw, scale);
   const { image, state } = pictures.get(draw.src)!;
   if (state !== "decoded") return;
   const smooth = draw.kind === "image" && draw.sampling === "smooth";
@@ -419,5 +418,12 @@ function paintSpecks(context: CanvasRenderingContext2D, { color, alpha, rects }:
     const { x, y, width, height } = deviceBox(rect, scale);
     context.fillRect(x, y, width, height);
   }
+  context.globalAlpha = 1;
+}
+
+function paintShade(context: CanvasRenderingContext2D, shade: Shade, scale: Scale): void {
+  context.fillStyle = shade.color;
+  context.globalAlpha = shade.alpha;
+  for (const { x, y, width, height } of shadeBoxes(shade, scale, context.canvas)) context.fillRect(x, y, width, height);
   context.globalAlpha = 1;
 }

@@ -61,6 +61,19 @@ test.describe("a moving room's steps match a whole repaint", () => {
       });
     });
   }
+
+  test.describe("at 2560x1290 and 1.5x, with the backdrop and its shade beside the room", () => {
+    test.use({ viewport: { width: 2560, height: 1290 }, deviceScaleFactor: 1.5 });
+    test("in last-desk, through blinks, a hop and ambient life", async ({ page }) => {
+      test.setTimeout(120_000);
+      const steps = await runSteps(page, "last-desk", 1.5);
+      const bad = steps.flatMap((s, i) => (s.wrong + s.missed > 0 ? [`step ${i} (${s.frame}): ${s.wrong} wrong, ${s.missed} missed, first at ${s.at}`] : []));
+      expect(bad).toEqual([]);
+      expect(new Set(steps.map((s) => s.frame))).toContain("hop-crouch");
+      expect(steps.filter((s) => s.repainted > 0).length).toBeGreaterThan(50);
+      expect(Math.max(...steps.map((s) => s.repainted / s.total))).toBeLessThan(0.25);
+    });
+  });
 });
 
 /**
@@ -119,7 +132,7 @@ async function runSteps(page: Page, scene: SceneId, dpr: number, scenario = "rev
   await page.goto(`/?scenario=${scenario}&clean=1`);
   await expect(page.locator(".front-row-canvas[data-stage=painted][data-companion]")).toBeAttached();
   await page.clock.runFor(1000);
-  expect(await page.evaluate(() => (window as unknown as { startSteps: () => number }).startSteps())).toBe(Math.round(1440 * dpr));
+  expect(await page.evaluate(() => (window as unknown as { startSteps: () => number }).startSteps())).toBe(Math.round(page.viewportSize()!.width * dpr));
 
   const steps: Step[] = [];
   for (let i = 0; i < 72; i++) {

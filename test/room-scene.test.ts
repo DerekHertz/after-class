@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { SceneId } from "../src/app/appearance";
 import { layoutRoom } from "../src/app/room/layout";
 import type { Size } from "../src/app/room/layout";
-import { pieces } from "../src/app/room/paint";
+import { pieces, shadeBoxes } from "../src/app/room/paint";
 import { buildScene } from "../src/app/room/scene";
 import type { Draw, PictureDraw } from "../src/app/room/scene";
 import { ROOM_LAYER_ART } from "../src/app/room/art";
@@ -37,11 +37,10 @@ describe("the stage's draw list", () => {
     const layout = layoutRoom("last-desk", window, "full");
     if (layout.composition !== "full" || layout.layers.backdrop === null) throw new Error("a 3440x1440 window has bands");
     const { draws } = buildScene("last-desk", layout);
-    const [left, right, background] = draws;
+    const [backdrop, background] = draws;
     const shade = draws.at(-1);
-    const cover = { kind: "image", src: ROOM_LAYER_ART["last-desk"].background, rect: layout.layers.backdrop.cover, sampling: "pixelated" } as const;
-    expect([left, right]).toEqual(layout.layers.backdrop.bands.map((clip) => ({ ...cover, clip })));
-    expect(shade).toMatchObject({ kind: "specks", rects: layout.layers.backdrop.bands });
+    expect(backdrop).toEqual({ kind: "image", src: ROOM_LAYER_ART["last-desk"].background, rect: layout.layers.backdrop, beside: layout.layers.background, sampling: "pixelated" });
+    expect(shade).toMatchObject({ kind: "shade", beside: layout.layers.background });
     expect(background).toMatchObject({ kind: "image", rect: layout.layers.background });
     expect(buildScene("last-desk", layoutRoom("last-desk", { width: 1920, height: 1080 }, "full")).draws[0]).toMatchObject({ rect: { left: 0, top: expect.any(Number), width: 1920 } });
   });
@@ -112,14 +111,41 @@ describe("the stage snaps a box at the window's device pixel ratio, where a real
     { kind: "image", start: 10.34, size: 20.66, scale: 1.5, chrome: [16, 46] },
     { kind: "nine-slice", start: 10.01, size: 20.33, scale: 1.5, chrome: [15, 45] },
   ];
-  test("a clipped image draws only its part inside the clip, each pixel where the whole image puts it", () => {
+  test("an image drawn beside another draws only the columns either side of it, each pixel where the whole image puts it", () => {
     const rect = { left: -50, top: -20, width: 400, height: 200 };
     const whole: PictureDraw = { kind: "image", src: "", rect, sampling: "pixelated" };
     const [all] = pieces(whole, { width: 200, height: 100 }, { x: 1.5, y: 1.5 });
-    expect(pieces({ ...whole, clip: { left: 0, top: 0, width: 30, height: 120 } }, { width: 200, height: 100 }, { x: 1.5, y: 1.5 })).toEqual([{
-      dx: 0, dy: 0, dw: 45, dh: 180, sx: (0 - all!.dx) * 200 / all!.dw, sy: (0 - all!.dy) * 100 / all!.dh, sw: 45 * 200 / all!.dw, sh: 180 * 100 / all!.dh,
-    }]);
-    expect(pieces({ ...whole, clip: { left: 400, top: 0, width: 30, height: 30 } }, { width: 200, height: 100 }, { x: 1.5, y: 1.5 })).toEqual([]);
+    const at = (from: number, to: number) => ({ ...all!, sx: (from - all!.dx) * 200 / all!.dw, sw: (to - from) * 200 / all!.dw, dx: from, dw: to - from });
+    expect(pieces({ ...whole, beside: { left: 30, top: 0, width: 100, height: 10 } }, { width: 200, height: 100 }, { x: 1.5, y: 1.5 })).toEqual([at(-75, 45), at(195, 525)]);
+    expect(pieces({ ...whole, beside: { left: -60, top: 0, width: 500, height: 10 } }, { width: 200, height: 100 }, { x: 1.5, y: 1.5 })).toEqual([]);
+  });
+
+  test("on a window wider than the frame, every device column shows the room's background or the backdrop, never both, and the shade covers exactly the backdrop's", () => {
+    const windows = [
+      { width: 2560, height: 1290 }, { width: 2561, height: 1290 }, { width: 2560, height: 1291 }, { width: 2999, height: 1333 }, { width: 3440, height: 1440 },
+      { width: 3441, height: 1439 }, { width: 3840, height: 1601 }, { width: 5120, height: 1440 }, { width: 2401, height: 1103 },
+    ];
+    const plate = { width: 1586, height: 992 };
+    const columns = (draw: Draw | undefined, scale: { x: number; y: number }) =>
+      draw?.kind === "image" ? pieces(draw, plate, scale).map(({ dx, dw }) => [dx, dx + dw] as const) : [];
+    for (const scene of rooms) for (const window of windows) for (const dpr of [1, 1.5, 2]) {
+      const layout = layoutRoom(scene, window, "full");
+      const { draws } = buildScene(scene, layout);
+      const scale = { x: dpr, y: dpr };
+      const device = { width: Math.round(window.width * dpr), height: Math.round(window.height * dpr) };
+      const shade = draws.at(-1);
+      if (shade?.kind !== "shade") throw new Error(`${window.width}x${window.height} has bands`);
+      const room = columns(draws[1], scale);
+      const backdrop = columns(draws[0], scale);
+      const shaded = shadeBoxes(shade, scale, device).map(({ x, width }) => [x, x + width] as const);
+      const count = (spans: readonly (readonly [number, number])[], x: number) => spans.filter(([from, to]) => from <= x && x < to).length;
+      const bad: string[] = [];
+      for (let x = 0; x < device.width && bad.length < 3; x++) {
+        const [r, b, s] = [count(room, x), count(backdrop, x), count(shaded, x)];
+        if (r + b !== 1 || s !== b) bad.push(`column ${x}: room ${r}, backdrop ${b}, shade ${s}`);
+      }
+      expect({ scene, window, dpr, bad }).toEqual({ scene, window, dpr, bad: [] });
+    }
   });
 
   const none = { top: 0, right: 0, bottom: 0, left: 0 };

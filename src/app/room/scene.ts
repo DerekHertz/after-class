@@ -16,14 +16,16 @@ export type Sampling = "pixelated" | "smooth";
 
 /**
  * One thing the stage paints, in CSS pixels of the stage. `src` names the picture by its bundle URL. `image` draws the whole
- * picture into `rect`, or with `clip` only its part inside `clip`. `nine-slice` cuts the picture `slice` asset pixels from each edge, keeps the corners at `border`
- * screen pixels, and stretches the edges and the middle, as CSS `border-image` with `fill` does. `companion` draws column
+ * picture into `rect`, or with `beside` only the device columns left and right of those an image in `beside` covers, so it
+ * meets that image with no gap or overlap at any pixel ratio. `nine-slice` cuts the picture `slice` asset pixels from each
+ * edge, keeps the corners at `border` screen pixels, and stretches the edges and the middle, as CSS `border-image` with
+ * `fill` does. `companion` draws column
  * `column` of `columns` equal cells of its picture, pixelated, with the companion's drop shadow. It never holds the room
  * back: until its picture decodes the stage draws `standIn` in its place, or nothing. An `image` that names an `unlock` never
  * holds the room back either: the stage leaves it out until its picture decodes.
  */
 export type PictureDraw =
-  | { readonly kind: "image"; readonly src: string; readonly rect: Rect; readonly sampling: Sampling; readonly unlock?: UnlockId; readonly clip?: Rect }
+  | { readonly kind: "image"; readonly src: string; readonly rect: Rect; readonly sampling: Sampling; readonly unlock?: UnlockId; readonly beside?: Rect }
   | { readonly kind: "nine-slice"; readonly src: string; readonly rect: Rect; readonly slice: Edges; readonly border: Edges };
 export type CompanionDraw = {
   readonly kind: "companion"; readonly frame: Frame; readonly src: string; readonly rect: Rect; readonly column: number; readonly columns: number;
@@ -33,8 +35,11 @@ export type CompanionDraw = {
 /** Plain squares of one colour at one opacity, in CSS pixels of the stage: the ambient specks of room/ambient.ts. */
 export type Specks = { readonly kind: "specks"; readonly color: string; readonly alpha: number; readonly rects: readonly Rect[] };
 
+/** One colour at one opacity over every device column left and right of those an image in `beside` covers, the window's full height. */
+export type Shade = { readonly kind: "shade"; readonly color: string; readonly alpha: number; readonly beside: Rect };
+
 /** Pictures stay put until the room or the window changes. The companion and the specks change as the room moves. */
-export type Draw = PictureDraw | CompanionDraw | Specks;
+export type Draw = PictureDraw | CompanionDraw | Specks | Shade;
 
 /**
  * What the stage paints, back to front. `next` is the `performance.now()` time at which the list changes by itself, so the
@@ -54,7 +59,7 @@ const DEPTH = { backdrop: -1, background: 0, board: 2, desk: 5, mat: 6, shade: 9
 
 /**
  * The shade over the bands beside a wide window's frame, so they read as outside the room. It lies over every layer, so a
- * vine that hangs into a band is shaded too. Specks are live draws, and one under the room would split the pictures the
+ * vine that hangs into a band is shaded too. A shade is a live draw, and one under the room would split the pictures the
  * stage caches while the room moves into two window-sized canvases instead of one.
  */
 const BAND_SHADE = { color: "#0b0f1a", alpha: 0.62 } as const;
@@ -79,8 +84,8 @@ export function buildScene(
   const nineSlice = (src: string, layer: NineSliceLayer, slice: Edges): Draw => ({ kind: "nine-slice", src, rect: layer.rect, slice, border: layer.border });
   const layered: { readonly z: number; readonly draw: Draw }[] = [
     ...(backdrop === null ? [] : [
-      ...backdrop.bands.map((clip) => ({ z: DEPTH.backdrop, draw: { kind: "image", src: art.background, rect: backdrop.cover, clip, sampling: "pixelated" } as const })),
-      { z: DEPTH.shade, draw: { kind: "specks", color: BAND_SHADE.color, alpha: BAND_SHADE.alpha, rects: backdrop.bands } as const },
+      { z: DEPTH.backdrop, draw: { kind: "image", src: art.background, rect: backdrop, beside: background, sampling: "pixelated" } as const },
+      { z: DEPTH.shade, draw: { kind: "shade", ...BAND_SHADE, beside: background } as const },
     ]),
     { z: DEPTH.background, draw: { kind: "image", src: art.background, rect: background, sampling: "pixelated" } },
     { z: DEPTH.board, draw: nineSlice(art.board, board, room.board.art.slice) },

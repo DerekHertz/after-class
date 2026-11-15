@@ -45,8 +45,7 @@ describe("the room fits every desktop window", () => {
       const width = wide ? window.height * ROOM_ART.maxAspect : window.width;
       const centred = Math.abs(frame.left - (window.width - width) / 2) < EPS && Math.abs(frame.width - width) < EPS && frame.top === 0 && frame.height === window.height;
       const covers = backdrop === null ? !wide
-        : wide && backdrop.cover.left <= EPS && backdrop.cover.top <= EPS && right(backdrop.cover) >= window.width - EPS && bottom(backdrop.cover) >= window.height - EPS
-          && Math.abs(right(backdrop.bands[0]) - frame.left) < EPS && Math.abs(backdrop.bands[1].left - right(frame)) < EPS;
+        : wide && backdrop.left <= EPS && backdrop.top <= EPS && right(backdrop) >= window.width - EPS && bottom(backdrop) >= window.height - EPS;
       expect({ scene, window, centred, covers }).toEqual({ scene, window, centred: true, covers: true });
     }
   });

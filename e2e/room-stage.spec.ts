@@ -39,6 +39,34 @@ test.describe("the stage's backing store follows the device pixel ratio", () => 
   }
 });
 
+test.describe("a window wider than the room paints every device column, the room's or the backdrop's", () => {
+  for (const dpr of [1, 1.5, 2]) {
+    test.describe(`at ${dpr}x`, () => {
+      test.use({ deviceScaleFactor: dpr });
+      for (const scene of scenes) {
+        test(scene, async ({ page }, info) => {
+          test.skip(info.project.name === "narrow", "the narrow project would repeat the same windows");
+          for (const size of [{ width: 2560, height: 1290 }, { width: 3441, height: 1439 }, { width: 2401, height: 1103 }]) {
+            await page.setViewportSize(size);
+            await openRoom(page, scene);
+            await expect.poll(() => page.locator(".front-row-canvas").evaluate((canvas: HTMLCanvasElement) => canvas.width)).toBe(Math.round(size.width * dpr));
+            const gaps = await page.locator(".front-row-canvas").evaluate((canvas: HTMLCanvasElement) => {
+              const context = canvas.getContext("2d")!;
+              return [0, Math.floor(canvas.height * 0.4)].flatMap((y) => {
+                const row = context.getImageData(0, y, canvas.width, 1).data;
+                const empty: number[] = [];
+                for (let x = 0; x < canvas.width; x++) if (row[x * 4 + 3] !== 255) empty.push(x);
+                return empty.length === 0 ? [] : [`row ${y}: ${empty.length} unpainted from column ${empty[0]}`];
+              });
+            });
+            expect({ size, gaps }).toEqual({ size, gaps: [] });
+          }
+        });
+      }
+    });
+  }
+});
+
 test("a still room draws once, never while idle, and never while the tab is hidden", async ({ page }, info) => {
   await page.addInitScript(() => {
     const draw = CanvasRenderingContext2D.prototype.drawImage;

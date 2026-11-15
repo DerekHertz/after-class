@@ -1,5 +1,5 @@
-import type { Size } from "./layout";
-import type { CompanionDraw, Draw, PictureDraw } from "./scene";
+import type { Rect, Size } from "./layout";
+import type { CompanionDraw, Draw, PictureDraw, Shade } from "./scene";
 
 /** Where the stage is with a picture: still loading or decoding, ready to draw, or failed and left out. */
 export type PictureState = "pending" | "decoded" | "failed";
@@ -7,12 +7,13 @@ export type PictureState = "pending" | "decoded" | "failed";
 /**
  * What of `draws` to paint now, or null while the room waits. The room waits until every layer's picture has settled, and
  * a layer that failed is left out rather than holding it. An unlocked object never holds the room: it is left out until its
- * picture decodes. The companion passes through, as the stage picks its frame or stand-in itself, and so do the specks, which need no picture.
+ * picture decodes. The companion passes through, as the stage picks its frame or stand-in itself, and so do the specks and
+ * the shade, which need no picture.
  */
 export function readyDraws(draws: readonly Draw[], state: (src: string) => PictureState): readonly Draw[] | null {
   let waits = false;
   const ready = draws.filter((draw) => {
-    if (draw.kind === "companion" || draw.kind === "specks") return true;
+    if (draw.kind === "companion" || draw.kind === "specks" || draw.kind === "shade") return true;
     const settled = state(draw.src);
     if (draw.kind === "image" && draw.unlock !== undefined) return settled === "decoded";
     if (settled === "pending") waits = true;
@@ -38,12 +39,11 @@ export function pieces(draw: PictureDraw | CompanionDraw, natural: Size, scale: 
   const box = snap(draw, scale);
   const { width: w, height: h } = natural;
   if (draw.kind === "image") {
-    // A clipped picture keeps the whole picture's mapping from device pixels to its own, so each pixel lands where it would.
-    const part = draw.clip === undefined ? box : snap({ rect: draw.clip, kind: "image" }, scale);
-    const [left, right, top, bottom] = [Math.max(box.left, part.left), Math.min(box.right, part.right), Math.max(box.top, part.top), Math.min(box.bottom, part.bottom)];
-    if (right <= left || bottom <= top) return [];
-    const [kx, ky] = [w / (box.right - box.left), h / (box.bottom - box.top)];
-    return [{ sx: (left - box.left) * kx, sy: (top - box.top) * ky, sw: (right - left) * kx, sh: (bottom - top) * ky, dx: left, dy: top, dw: right - left, dh: bottom - top }];
+    const whole = { sx: 0, sy: 0, sw: w, sh: h, dx: box.left, dy: box.top, dw: box.right - box.left, dh: box.bottom - box.top };
+    if (draw.beside === undefined) return [whole];
+    // Each part keeps the whole picture's mapping from device pixels to its own, so each pixel lands where it would.
+    const k = w / whole.dw;
+    return beside(draw.beside, scale, box.left, box.right).map(([from, to]) => ({ ...whole, sx: (from - box.left) * k, sw: (to - from) * k, dx: from, dw: to - from }));
   }
   if (draw.kind === "companion") {
     const sw = w / draw.columns;
@@ -66,6 +66,23 @@ export function pieces(draw: PictureDraw | CompanionDraw, natural: Size, scale: 
   return out;
 }
 
+/** Whole device pixels, from the stage's top left. */
+export type DeviceBox = { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+
+/**
+ * The device columns from `from` to `to` that lie left and right of those an image laid in `rect` covers at `scale`, as
+ * [start, end) spans. A picture drawn in them and the image meet with no gap and no overlap, whatever the fractions.
+ */
+export function beside(rect: Rect, scale: Scale, from: number, to: number): readonly (readonly [number, number])[] {
+  const [left, right] = snapSpan(rect.left, rect.width, scale.x, true);
+  return ([[from, Math.min(left, to)], [Math.max(right, from), to]] as const).filter(([start, end]) => end > start);
+}
+
+/** The device pixels `shade` covers on a stage of `device` pixels. */
+export function shadeBoxes(shade: Shade, scale: Scale, device: Size): readonly DeviceBox[] {
+  return beside(shade.beside, scale, 0, device.width).map(([from, to]) => ({ x: from, y: 0, width: to - from, height: device.height }));
+}
+
 /**
  * Snaps a span of `start` and `size` CSS pixels to whole device pixels as Chrome snaps a box: each value truncates to
  * 1/64 pixel, the start rounds half up, and the size rounds together with the start's signed fraction. A background
@@ -81,7 +98,7 @@ function snapSpan(start: number, size: number, scale: number, image: boolean): r
   return [from, image ? Math.min(to, from + round(length)) : to];
 }
 
-function snap({ rect, kind }: Pick<PictureDraw | CompanionDraw, "rect" | "kind">, s: Scale) {
+function snap({ rect, kind }: PictureDraw | CompanionDraw, s: Scale) {
   const [left, right] = snapSpan(rect.left, rect.width, s.x, kind !== "nine-slice");
   const [top, bottom] = snapSpan(rect.top, rect.height, s.y, kind !== "nine-slice");
   return { left, right, top, bottom };

@@ -31,8 +31,11 @@ export type FullRoomLayout = {
   /** How much larger than at 1440x900 the room's text and controls are drawn, so they keep their share of the room. */
   readonly type: number;
   readonly layers: {
-    /** On a window wider than the frame: the background covering the whole window, and the two bands beside the frame it shows in, dimmed. */
-    readonly backdrop: { readonly cover: Rect; readonly bands: readonly [Rect, Rect] } | null;
+    /**
+     * On a window wider than the frame: the background again, scaled to cover the whole window. It shows, dimmed, in the bands
+     * beside the room's background, which the stage finds in device pixels (room/paint.ts `beside`).
+     */
+    readonly backdrop: Rect | null;
     readonly background: Rect;
     readonly board: NineSliceLayer;
     readonly desk: NineSliceLayer;
@@ -124,7 +127,7 @@ export function layoutRoom(scene: SceneId, window: Size, composition: Compositio
   return {
     composition, window, frame: { left: x0, top: 0, width: W, height: H }, u, type: Math.min(TYPE_MAX, Math.max(1, u / TYPE_REF)),
     layers: {
-      backdrop: x0 > 0 ? backdrop(window, x0) : null,
+      backdrop: x0 > 0 ? coverWindow(window) : null,
       background: at(background),
       board: { rect: at(board), border: scaled(room.board.art.slice, u) },
       desk: { rect: at({ left: 0, top: deskTop, width: W, height: u * room.desk.art.size.height }), border: scaled(room.desk.art.slice, u) },
@@ -142,13 +145,11 @@ export function layoutRoom(scene: SceneId, window: Size, composition: Compositio
   };
 }
 
-function backdrop({ width, height }: Size, band: number): NonNullable<FullRoomLayout["layers"]["backdrop"]> {
+/** The plate scaled to the window's width and centred on its height, which on a window wider than the frame covers it. */
+function coverWindow({ width, height }: Size): Rect {
   const { plate } = ROOM_ART;
-  const cover = width / plate.width;
-  return {
-    cover: { left: 0, top: (height - cover * plate.height) / 2, width, height: cover * plate.height },
-    bands: [{ left: 0, top: 0, width: band, height }, { left: width - band, top: 0, width: band, height }],
-  };
+  const scale = width / plate.width;
+  return { left: 0, top: (height - scale * plate.height) / 2, width, height: scale * plate.height };
 }
 
 const scaled = (edges: Edges, u: number): Edges => ({ top: u * edges.top, right: u * edges.right, bottom: u * edges.bottom, left: u * edges.left });
