@@ -383,7 +383,7 @@ describe("validateSay: a mismatch asks before it tells (flow: one tentative, sou
 
   test("accepts a single question that names people or terms with initials", () => {
     const d = { kind: "diagnose" } as Parameters<typeof validateSay>[0];
-    for (const q of ["How does your answer fit with the diagram, e.g. NADH entering the chain?", "How does your answer fit with B. F. Skinner's experiment?"])
+    for (const q of ["How does your answer fit with the diagram, e.g. NADH entering the chain?", "How does your answer fit with B. F. Skinner's experiment?", "\u00AB Comment votre r\u00E9ponse correspond-elle au sch\u00E9ma du cours ? \u00BB", "\u300C\u4F60\u8AAA\u7684\u548C\u8B1B\u5E2B\u8B1B\u7684\u6709\u4EC0\u9EBC\u95DC\u4FC2\uFF1F\u300D"])
       expect(validateSay(d, q).ok, q).toBe(true);
   });
 

@@ -519,7 +519,7 @@ export const DIAGNOSTIC_MAX_CHARS = 200;
 const QUESTION_MARKS = /[?\uFF1F\u061F]/g;
 export function validateSay(move: TutorMove, say: string): Verdict {
   if (move.kind !== "diagnose") return OK;
-  const text = say.trim().replace(/["'\u201D\u2019\u00BB)\]]+$/u, "");
+  const text = say.replace(/[\s"'\p{Pe}\p{Pf}]+$/u, "").trim();
   const marks = text.match(QUESTION_MARKS) ?? [];
   if (marks.length !== 1 || !/[?\uFF1F\u061F]$/.test(text)) return no("a diagnostic question is one question: it ends with a single question mark");
   if (text.length > DIAGNOSTIC_MAX_CHARS) return no(`a diagnostic question is at most ${DIAGNOSTIC_MAX_CHARS} characters. Do not say what the lecture says or give the answer`);
