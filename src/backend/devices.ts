@@ -41,6 +41,7 @@ CREATE TABLE connect_codes (
 export const CONNECT_CODE_TTL_MS = 2 * 60 * 1000;
 export const EXCHANGE_WINDOW_MS = 60 * 1000;
 export const EXCHANGE_MAX_FAILURES = 20;
+const PRUNE_AT = 1024;
 /** A device's last use is written at most this often, so an ingest every few seconds is not also a write every few seconds. */
 const LAST_USED_GRANULARITY_MS = 60 * 1000;
 
@@ -59,7 +60,8 @@ export type DeviceView = { readonly id: DeviceId; readonly label: string; readon
 
 export type Devices = {
   createCode(userId: UserId, label: string): { readonly code: string; readonly expiresMs: number };
-  exchange(code: string): Exchange;
+  /** `client` is the caller's network address (see `clientAddress`): wrong codes are counted per client, so one client's guesses cannot lock another out. */
+  exchange(code: string, client: string): Exchange;
   /** The user's devices that are not revoked, oldest first. */
   list(userId: UserId): DeviceView[];
   /** False when the user has no such device, revoked or not; revoking a revoked device is true and changes nothing. */
@@ -77,7 +79,7 @@ export function createDevices(db: Db, options: DevicesOptions = {}): Devices {
   const now = options.now ?? Date.now;
   const maxFailures = options.maxFailures ?? EXCHANGE_MAX_FAILURES;
   const windowMs = options.windowMs ?? EXCHANGE_WINDOW_MS;
-  let attempts = { startMs: Number.NEGATIVE_INFINITY, failures: 0 };
+  const attempts = new Map<string, { startMs: number; failures: number }>();
 
   const sweep = db.sql.query("DELETE FROM connect_codes WHERE expires_ms <= ?");
   const insertCode = db.sql.query("INSERT INTO connect_codes (code_hash, user_id, label, expires_ms) VALUES (?, ?, ?, ?)");
@@ -95,9 +97,15 @@ export function createDevices(db: Db, options: DevicesOptions = {}): Devices {
   );
   const touch = db.sql.query("UPDATE devices SET last_used_ms = ? WHERE id = ?");
 
-  function refuse(): Exchange {
-    attempts.failures += 1;
-    return { kind: "refused" };
+  /** The client's current window, opened fresh when the last one has ended. Ended windows of other clients are dropped once the table is large, so it stays bounded by the attempts of one window. */
+  function windowOf(client: string, at: number): { startMs: number; failures: number } {
+    if (attempts.size >= PRUNE_AT) for (const [other, w] of attempts) if (at - w.startMs >= windowMs) attempts.delete(other);
+    let w = attempts.get(client);
+    if (w === undefined || at - w.startMs >= windowMs) {
+      w = { startMs: at, failures: 0 };
+      attempts.set(client, w);
+    }
+    return w;
   }
 
   return {
@@ -112,10 +120,14 @@ export function createDevices(db: Db, options: DevicesOptions = {}): Devices {
       return { code, expiresMs };
     },
 
-    exchange(code) {
+    exchange(code, client) {
       const at = now();
-      if (at - attempts.startMs >= windowMs) attempts = { startMs: at, failures: 0 };
-      if (attempts.failures >= maxFailures) return { kind: "limited", retryAfterS: Math.max(1, Math.ceil((attempts.startMs + windowMs - at) / 1000)) };
+      const window = windowOf(client, at);
+      const refuse = (): Exchange => {
+        window.failures += 1;
+        return { kind: "refused" };
+      };
+      if (window.failures >= maxFailures) return { kind: "limited", retryAfterS: Math.max(1, Math.ceil((window.startMs + windowMs - at) / 1000)) };
       if (!CODE.test(code)) return refuse();
       // One statement both finds and spends the code, so two exchanges of one code cannot both see it unspent.
       return db.tx((): Exchange => {
@@ -149,4 +161,20 @@ export function createDevices(db: Db, options: DevicesOptions = {}): Devices {
       return device.user_id;
     },
   };
+}
+
+const PRIVATE_ADDRESS = /^(?:127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|::1$|f[cd][0-9a-f]{2}:)/i;
+
+/**
+ * The address a request came from. The server sits behind Caddy, which replaces any X-Forwarded-For the client sent
+ * with the one address it saw, and is reached only from loopback or the docker network. So the header is believed only
+ * when the peer is a private or loopback address, and then only its last entry, the one the nearest proxy added. From
+ * any other peer, or with no header, the peer itself is the client.
+ */
+export function clientAddress(peer: string | null, forwardedFor: string | null): string {
+  const direct = peer ?? "unknown";
+  const mapped = direct.replace(/^::ffff:/i, "");
+  if (!PRIVATE_ADDRESS.test(mapped)) return direct;
+  const last = forwardedFor?.split(",").at(-1)?.trim();
+  return last ? last : direct;
 }

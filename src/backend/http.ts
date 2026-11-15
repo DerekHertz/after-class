@@ -48,6 +48,7 @@ import {
 } from "../shared/wire";
 import type { Bearer, RouteName } from "../shared/wire";
 import { LOCAL_USER } from "./db";
+import { clientAddress } from "./devices";
 import type { Devices } from "./devices";
 import type { EvidenceStore, EvidenceStoreWithProbe } from "./evidence";
 import type { Preparation } from "./preparation";
@@ -679,10 +680,10 @@ const DEVICE_ROUTES: ReadonlySet<RouteName> = new Set(["createConnectCode", "exc
  * The connected-browser routes. `userId` is the signed-in caller, or null for the exchange, whose code names the user.
  * A device id the caller does not hold, another user's included, is 404 and changes nothing.
  */
-async function deviceRoute(name: RouteName, matched: { readonly params: Record<string, string> }, req: Request, devices: Devices, userId: UserId | null, cors: Record<string, string>): Promise<Response> {
+async function deviceRoute(name: RouteName, matched: { readonly params: Record<string, string> }, req: Request, peer: string | null, devices: Devices, userId: UserId | null, cors: Record<string, string>): Promise<Response> {
   try {
     if (name === "exchangeConnectCode") {
-      const result = devices.exchange(parseExchangeRequest(await readJson(req)).code);
+      const result = devices.exchange(parseExchangeRequest(await readJson(req)).code, clientAddress(peer, req.headers.get("x-forwarded-for")));
       if (result.kind === "limited") return failure(429, "too many connect attempts; try again shortly", { ...cors, "Retry-After": String(result.retryAfterS) });
       if (result.kind === "refused") return failure(401, "that connect code is not valid; press Connect again", cors);
       return reply("exchangeConnectCode", { token: result.token, userId: result.userId }, cors);
@@ -792,7 +793,7 @@ function hostedGate(hosted: HostedAuth, modulesFor: (userId: UserId) => ServedMo
   };
 }
 
-async function handle(req: Request, opts: ServeOptions, gate: Gate, guard: TurnGuard): Promise<Response> {
+async function handle(req: Request, peer: string | null, opts: ServeOptions, gate: Gate, guard: TurnGuard): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
 
@@ -826,7 +827,7 @@ async function handle(req: Request, opts: ServeOptions, gate: Gate, guard: TurnG
   }
 
   if (DEVICE_ROUTES.has(matched.name)) {
-    return gate.devices === null ? failure(501, "not implemented", cors) : deviceRoute(matched.name, matched, req, gate.devices, v.served?.userId ?? null, cors);
+    return gate.devices === null ? failure(501, "not implemented", cors) : deviceRoute(matched.name, matched, req, peer, gate.devices, v.served?.userId ?? null, cors);
   }
   if (v.served === null) return failure(401, "unauthorized", cors);
   if (matched.name === "usage") return json(200, v.served.modules.ledger.summary(), cors);
@@ -842,9 +843,9 @@ export function serve(opts: ServeOptions): Bun.Server<undefined> {
     // A tutor turn can be silent for a long while before its first word; Bun's default of 10 s would cut the stream.
     idleTimeout: 255,
     maxRequestBodySize: opts.maxBodyBytes ?? MAX_BODY_BYTES,
-    async fetch(req) {
+    async fetch(req, srv) {
       try {
-        return await handle(req, opts, gate!, guard);
+        return await handle(req, srv.requestIP(req)?.address ?? null, opts, gate!, guard);
       } catch {
         return failure(500, "internal error");
       }

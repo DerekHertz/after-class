@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { createClerkVerifier } from "../src/backend/clerk";
 import { userForIdentity } from "../src/backend/db";
 import type { Db } from "../src/backend/db";
-import { CONNECT_CODE_TTL_MS, createDevices, isDeviceToken } from "../src/backend/devices";
+import { CONNECT_CODE_TTL_MS, clientAddress, createDevices, isDeviceToken } from "../src/backend/devices";
 import type { Devices } from "../src/backend/devices";
 import { bearerAllowed, serve } from "../src/backend/http";
 import { clerkUsers, hostedCallers } from "../src/backend/main";
@@ -31,7 +31,7 @@ function clock(start = 1_800_000_000_000) {
 }
 
 function connected(devices: Devices, userId: UserId, label = "Chrome on Linux") {
-  const result = devices.exchange(devices.createCode(userId, label).code);
+  const result = devices.exchange(devices.createCode(userId, label).code, "c");
   if (result.kind !== "connected") throw new Error(`expected a connection, got ${result.kind}`);
   return result;
 }
@@ -42,9 +42,9 @@ describe("devices", () => {
     const [alice] = users(db);
     const devices = createDevices(db);
     const { code } = devices.createCode(alice, "Chrome on Linux");
-    const first = devices.exchange(code);
+    const first = devices.exchange(code, "c");
     expect(first.kind).toBe("connected");
-    expect(devices.exchange(code)).toEqual({ kind: "refused" });
+    expect(devices.exchange(code, "c")).toEqual({ kind: "refused" });
     expect(devices.list(alice)).toHaveLength(1);
   });
 
@@ -56,9 +56,9 @@ describe("devices", () => {
     const late = devices.createCode(alice, "Late").code;
     const onTime = devices.createCode(alice, "On time").code;
     c.ms += CONNECT_CODE_TTL_MS - 1;
-    expect(devices.exchange(onTime).kind).toBe("connected");
+    expect(devices.exchange(onTime, "c").kind).toBe("connected");
     c.ms += 1;
-    expect(devices.exchange(late)).toEqual({ kind: "refused" });
+    expect(devices.exchange(late, "c")).toEqual({ kind: "refused" });
     expect(devices.list(alice).map((d) => d.label)).toEqual(["On time"]);
   });
 
@@ -68,12 +68,31 @@ describe("devices", () => {
     const c = clock();
     const devices = createDevices(db, { now: c.now, maxFailures: 3, windowMs: 60_000 });
     const { code } = devices.createCode(alice, "Chrome on Linux");
-    for (const wrong of ["nope", `acc_${"A".repeat(43)}`, `acc_${"B".repeat(43)}`]) expect(devices.exchange(wrong)).toEqual({ kind: "refused" });
+    for (const wrong of ["nope", `acc_${"A".repeat(43)}`, `acc_${"B".repeat(43)}`]) expect(devices.exchange(wrong, "c")).toEqual({ kind: "refused" });
     c.ms += 10_000;
-    expect(devices.exchange(code)).toEqual({ kind: "limited", retryAfterS: 50 });
+    expect(devices.exchange(code, "c")).toEqual({ kind: "limited", retryAfterS: 50 });
     expect(devices.list(alice)).toEqual([]);
     c.ms += 50_000;
-    expect(devices.exchange(code).kind).toBe("connected");
+    expect(devices.exchange(code, "c").kind).toBe("connected");
+  });
+
+  test("one client's wrong codes do not limit another client, whose own code still connects", () => {
+    const db = testDb();
+    const [alice] = users(db);
+    const devices = createDevices(db, { now: clock().now, maxFailures: 2, windowMs: 60_000 });
+    const { code } = devices.createCode(alice, "Chrome on Linux");
+    for (const wrong of ["nope", "nope again", "and again"]) devices.exchange(wrong, "198.51.100.1");
+    expect(devices.exchange("nope", "198.51.100.1").kind).toBe("limited");
+    expect(devices.exchange(code, "203.0.113.9").kind).toBe("connected");
+  });
+
+  test("the address is the last forwarded entry when the peer is the proxy, and the peer itself otherwise", () => {
+    expect(clientAddress("172.18.0.2", "6.6.6.6, 203.0.113.9")).toBe("203.0.113.9");
+    expect(clientAddress("127.0.0.1", "203.0.113.9")).toBe("203.0.113.9");
+    expect(clientAddress("::ffff:10.0.0.5", "203.0.113.9")).toBe("203.0.113.9");
+    expect(clientAddress("172.18.0.2", null)).toBe("172.18.0.2");
+    expect(clientAddress("198.51.100.7", "203.0.113.9")).toBe("198.51.100.7");
+    expect(clientAddress(null, null)).toBe("unknown");
   });
 
   test("the database holds a hash of the token and of the code, never either one", () => {
@@ -82,7 +101,7 @@ describe("devices", () => {
     const devices = createDevices(db);
     const pending = devices.createCode(alice, "Pending").code;
     const { code } = devices.createCode(alice, "Chrome on Linux");
-    const { token } = devices.exchange(code) as { token: string };
+    const { token } = devices.exchange(code, "c") as { token: string };
     const everything = JSON.stringify([db.sql.query("SELECT * FROM devices").all(), db.sql.query("SELECT * FROM connect_codes").all()]);
     for (const secret of [token, code, pending]) expect(everything).not.toContain(secret.slice(4));
     expect(db.sql.query<{ token_hash: string }, []>("SELECT token_hash FROM devices").get()!.token_hash).toBe(sha256(token));
@@ -238,6 +257,8 @@ test("too many wrong codes over HTTP answer 429 with Retry-After, the right code
     const limited = await exchange(code);
     expect(limited.status).toBe(429);
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+    const other = await send(s.base, "POST", "/devices/exchange", { code }, { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.50", ...EXTENSION_ORIGIN });
+    expect(other.status).toBe(200);
   } finally {
     await s.server.stop(true);
   }
