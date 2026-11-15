@@ -516,11 +516,11 @@ export function validateMove(move: TutorMove, input: TutorInput): { readonly ok:
 export const DIAGNOSTIC_MAX_CHARS = 200;
 
 /**
- * Question marks across scripts: Latin "?", full width "？", Arabic "؟", Armenian "՞", and the Greek question mark, written as
+ * Question marks across scripts: Latin "?", full width "？", Arabic "؟", and the Greek question mark, written as
  * U+037E or as the ";" it looks like. A ";" is a question mark only at the end of a reply, since inside one it is a semicolon.
  */
-const QUESTION_MARKS = /[?\uFF1F\u061F\u055E\u037E]/gu;
-const ENDS_IN_QUESTION = /[?\uFF1F\u061F\u055E\u037E;]$/u;
+const QUESTION_MARKS = /[?\uFF1F\u061F\u037E]/gu;
+const ENDS_IN_QUESTION = /[?\uFF1F\u061F\u037E;]$/u;
 export function validateSay(move: TutorMove, say: string): Verdict {
   if (move.kind !== "diagnose") return OK;
   const text = say.replace(/[\s"'\p{Pe}\p{Pf}\p{Pi}]+$/u, "").trim();
