@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EMPTY_HOME, FIRST_CAPTURE_STEPS, HomeBody, OpenById, ResumeTopicLine, loadResumeTopic, resumable, reviewAction, reviewTarget } from "../src/app/home";
+import { EMPTY_HOME, FIRST_CAPTURE_STEPS, HOSTED_FIRST_CAPTURE_STEPS, HomeBody, OpenById, ResumeTopicLine, loadResumeTopic, resumable, reviewAction, reviewTarget } from "../src/app/home";
 import type { ResumeApi } from "../src/app/home";
 import { createFixture, ids } from "../scripts/ui-preview/fixtures";
 import { EndConfirm } from "../src/app/review";
@@ -152,6 +152,19 @@ describe("the home page", () => {
     expect(html).toContain("can&#x27;t tell whether the extension is connected");
     expect(html).toContain("Save and test");
     expect(html).not.toContain("Continue review");
+  });
+
+  test("the empty hosted home shows install and Connect steps and a link to the connect page, never the pairing token", () => {
+    const ext = "abcdefghijklmnopabcdefghijklmnop";
+    const html = renderToStaticMarkup(createElement(HomeBody, { api: noReads, data: { lectures: [] }, extensionId: ext }));
+    for (const step of HOSTED_FIRST_CAPTURE_STEPS) expect(html).toContain(step);
+    expect(html).toContain('href="/app/connect-extension"');
+    expect(html).toContain(`href="https://chromewebstore.google.com/detail/${ext}"`);
+    expect(html).not.toContain("pairing token");
+    expect(html).not.toContain("Save and test");
+    const unnamed = renderToStaticMarkup(createElement(HomeBody, { api: noReads, data: { lectures: [] }, extensionId: "" }));
+    expect(unnamed).toContain('href="/app/connect-extension"');
+    expect(unnamed).not.toContain("chromewebstore");
   });
 
   test("opening a capture by ID sits in a closed troubleshooting disclosure", () => {
