@@ -34,6 +34,8 @@ export type SegmentationConfig = {
   readonly windowNewS: number; // 30
   readonly contextS: number; // 120
   readonly timeCapS: number; // 480
+  /** The cap for a capture's first chunk, so the first review is ready sooner. Set it to timeCapS for one cap on every chunk. */
+  readonly firstTimeCapS: number;
   readonly maxFramesPerWindow: number; // 2
   /**
    * Off by default: a no/no right after a close usually means the NEW topic is
@@ -43,7 +45,7 @@ export type SegmentationConfig = {
   readonly reviseOnNextNoNo: boolean;
 };
 
-export const SEGMENTATION_DEFAULTS: SegmentationConfig = { windowNewS: 30, contextS: 120, timeCapS: 480, maxFramesPerWindow: 2, reviseOnNextNoNo: false };
+export const SEGMENTATION_DEFAULTS: SegmentationConfig = { windowNewS: 30, contextS: 120, timeCapS: 480, firstTimeCapS: 480, maxFramesPerWindow: 2, reviseOnNextNoNo: false };
 
 export type WindowTrace = { readonly window: BoundaryWindow; readonly judgment: BoundaryJudgment | "pending" | "failed"; readonly route: Route | null; readonly note: string };
 
@@ -104,6 +106,7 @@ export function createSegmentation(db: UserDb, deps: {
   const byCapture = db.sql.query<Row, [string, CaptureId]>(`SELECT ${COLUMNS} FROM chunk_revisions WHERE user_id = ? AND capture_id = ? ORDER BY ordinal, revision_no`);
   const byChunk = db.sql.query<Row, [string, ChunkId]>(`SELECT ${COLUMNS} FROM chunk_revisions WHERE user_id = ? AND chunk_id = ? ORDER BY revision_no`);
   const byId = db.sql.query<Row, [string, ChunkRevisionId]>(`SELECT ${COLUMNS} FROM chunk_revisions WHERE user_id = ? AND id = ?`);
+  const plainFirstCap = db.sql.query<{ n: number }, [string, CaptureId]>("SELECT count(*) AS n FROM plain_first_cap_captures WHERE user_id = ? AND capture_id = ?");
 
   const latestPerChunk = (captureId: CaptureId): ChunkRevision[] => {
     const latest = new Map<ChunkId, ChunkRevision>();
@@ -112,8 +115,9 @@ export function createSegmentation(db: UserDb, deps: {
   };
 
   function derive(captureId: CaptureId) {
+    const caps = plainFirstCap.get(userId, captureId)!.n > 0 ? { ...cfg, firstTimeCapS: cfg.timeCapS } : cfg;
     const order = deps.watchOrder(captureId);
-    const windows = buildWindows(captureId, order, cfg);
+    const windows = buildWindows(captureId, order, caps);
     const looked = windows.map((window) => {
       const input = deps.boundaryInput(window);
       return { window, input, lookup: deps.lookupBoundary(input) };
@@ -121,8 +125,7 @@ export function createSegmentation(db: UserDb, deps: {
     const judged = new Map<WindowId, BoundaryJudgment | "pending" | "failed">(
       looked.map(({ window, lookup }) => [window.id, !appliesBefore(lookup, null) ? "pending" : lookup.kind === "hit" ? lookup.value : "failed"]),
     );
-    const plan = planChunks(windows, (w) => judged.get(w.id)!, order.status.state === "stopped", cfg, routing);
-    return { looked, judged, plan };
+    return { looked, judged, plan: planChunks(windows, (w) => judged.get(w.id)!, order.status.state === "stopped", caps, routing) };
   }
 
   return {

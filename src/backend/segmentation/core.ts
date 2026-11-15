@@ -198,7 +198,7 @@ export function planChunks(
       note(w, r === "close" ? `${label}: nothing open to close, this window opens a chunk` : `${label}: continue`);
     }
 
-    while (open.length > 0 && Material.duration(unionMaterial(open.map((e) => e.w))) >= cfg.timeCapS) {
+    while (open.length > 0 && Material.duration(unionMaterial(open.map((e) => e.w))) >= (closed.length === 0 ? cfg.firstTimeCapS : cfg.timeCapS)) {
       const lastSoft = open.findLastIndex((e) => e.soft);
       const cut = lastSoft >= 0 ? lastSoft + 1 : open.length;
       const ordinal = close(open.slice(0, cut), "time");
