@@ -516,15 +516,19 @@ export const DIAGNOSTIC_MAX_CHARS = 200;
 
 /** Question marks in the scripts learners write in: Latin, CJK full width and Arabic. */
 const QUESTION_MARKS = /[?\uFF1F\u061F]/g;
-/** Words that end in a period inside a sentence, so the period is not a sentence end. */
-const ABBREVIATIONS = new Set(["dr", "mr", "mrs", "ms", "prof", "st", "vs", "etc", "e.g", "i.e", "cf", "fig", "no", "approx", "eq", "ch", "sec", "p", "pp"]);
+/** Titles that stand before a name, so "Dr. Lee" is one sentence even though a capital follows the period. */
+const TITLES = new Set(["dr", "mr", "mrs", "ms", "prof", "st"]);
 
+/**
+ * Sentence ends inside a reply: a CJK full stop or exclamation anywhere, or ".", "!" or "…" (or a line break) followed by a
+ * capital letter, unless the word before the period is a title. A period followed by lower case ("e.g. the", "U.S. example")
+ * is inside the sentence.
+ */
 function sentenceEnds(text: string): number {
   let ends = (text.match(/[\u3002\uFF01]/g) ?? []).length;
-  for (const m of text.matchAll(/(\S*?)([.!])(?=\s|$)/g)) {
+  for (const m of text.matchAll(/(\S*?)([.!\u2026]+["'\u201D\u2019)]*\s+|\s*\n\s*)(?=["'\u201C\u2018(]*\p{Lu})/gu)) {
     const word = m[1]!.replace(/^[^\p{L}]+/u, "").toLowerCase();
-    if (m[2] === "." && (ABBREVIATIONS.has(word) || /^\p{L}$/u.test(word))) continue;
-    if (m.index! + m[0].length >= text.length) continue;
+    if (m[2]!.startsWith(".") && !m[2]!.startsWith("..") && TITLES.has(word)) continue;
     ends++;
   }
   return ends;
