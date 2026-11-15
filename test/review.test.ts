@@ -289,7 +289,7 @@ describe("options", () => {
 
   test("nothing_to_review before anything is captured", () => {
     const r = rig();
-    expect(r.reviews.options(r.capture)).toEqual({ kind: "nothing_to_review", gaps: [], unverified: [], rewatch: [] });
+    expect(r.reviews.options(r.capture)).toEqual({ kind: "nothing_to_review", heldBack: [], gaps: [], unverified: [], rewatch: [] });
   });
 
   test("material an earlier review already covered is not offered again", () => {

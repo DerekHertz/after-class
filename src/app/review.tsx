@@ -51,6 +51,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
   useEffect(() => {
     void controller.load();
+    return () => controller.dispose();
   }, [controller]);
   // Flow D: the learner starts the review from the topic checklist; nothing begins by itself.
   const resume = useMemo(() => resumeOnce(controller), [controller]);
@@ -180,13 +181,16 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const actions = availableActions(view.state, soft !== null);
   const streaming = state.live?.status === "streaming";
   /** The controller's lock outlasts the stream: while it refreshes the view and saves, an act would be refused. */
-  const held = streaming || state.busy;
+  const held = streaming || state.busy || view.turnInFlight;
   const evidenceIds = selectedEvidenceIds(selection, automaticIds);
   const videos = sourceVideos(capture.data?.capture ?? null);
   const unanswered = unansweredLearnerTurn(view.turns);
   const heading = lectureHeading([...titles.values()]);
   const scopeSeconds = Material.sources(view.scope.material).reduce((sum, id) => sum + Material.get(view.scope.material, id).intervals().reduce((s, i) => s + (i.end - i.start), 0), 0);
-  const canRetry = !streaming && state.live?.status !== "held" && (state.unsent.length > 0 || unanswered !== null || owedLearnerTurn(view) !== null || strandedEndTurn(view) !== null || state.live?.status === "failed");
+  /** The backend is still running a turn this page did not start, so the reply is on its way and Retry would only replay it. */
+  const awaitingReply = view.turnInFlight && !streaming;
+  const waitingLine = showsWaitingLine(awaitingReply, handoff);
+  const canRetry = !streaming && !awaitingReply && state.live?.status !== "held" && (state.unsent.length > 0 || unanswered !== null || owedLearnerTurn(view) !== null || strandedEndTurn(view) !== null || state.live?.status === "failed");
 
   const questionMarker = view.state.mainQuestions > 0 ? `Question ${view.state.mainQuestions}` : null;
 
@@ -211,6 +215,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
       </section>
     )}
     {handoff !== "none" && <p ref={startStatus} className="note" role="status" tabIndex={-1}>{canRetry ? "Your review has started, but the tutor's first question has not arrived." : "Your review has started. Waiting for the tutor's first question."}</p>}
+    {waitingLine && <p className="note" role="status">The tutor is still replying. It will show up here when it is ready.</p>}
     {canRetry && (
       <UndeliveredNote
         unsent={state.unsent.length}
@@ -447,33 +452,65 @@ function ScopeBundle({ api, view, titles, onSource }: { readonly api: AppApi; re
   </>;
 }
 
-export function EndConfirm({ disabled, onConfirm, onCancel }: { readonly disabled: boolean; readonly onConfirm: () => void; readonly onCancel: () => void }) {
+export function EndConfirm({ id, disabled, onConfirm, onCancel }: { readonly id: string; readonly disabled: boolean; readonly onConfirm: () => void; readonly onCancel: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const keep = useRef<HTMLButtonElement>(null);
+  // showModal() puts the dialog in the top layer, makes the page behind it inert and contains focus.
+  useEffect(() => {
+    const el = dialog.current;
+    if (el === null || el.open) return;
+    el.showModal();
+    keep.current?.focus();
+  }, []);
+  // Escape and every other way the browser closes the dialog end up here, so the flow state follows the dialog.
   return (
-    <span className="actions end-confirm" role="alertdialog" aria-label="Finish and save this review?">
-      <span>{END_CONFIRM_TEXT}</span>
-      <button type="button" data-action="end-confirm" disabled={disabled} onClick={onConfirm}>{ACTION_LABEL.end}</button>
-      <button type="button" data-action="end-cancel" onClick={onCancel}>Keep reviewing</button>
-    </span>
+    <dialog
+      ref={dialog}
+      id={id}
+      className="end-confirm"
+      role="alertdialog"
+      aria-labelledby={`${id}-title`}
+      aria-describedby={`${id}-text`}
+      onClose={onCancel}
+      onClick={(e) => { if (e.target === e.currentTarget) dialog.current?.close(); }}
+    >
+      <div className="end-confirm-body">
+        <span id={`${id}-title`} className="visually-hidden">Finish and save this review?</span>
+        <span id={`${id}-text`}>{END_CONFIRM_TEXT}</span>
+        <div className="end-confirm-actions">
+          <button type="button" data-action="end-confirm" disabled={disabled} onClick={onConfirm}>{ACTION_LABEL.end}</button>
+          <button ref={keep} type="button" data-action="end-cancel" onClick={() => dialog.current?.close()}>Keep reviewing</button>
+        </div>
+      </div>
+    </dialog>
   );
 }
 
-/** Pause, Resume and Finish: held while a stream is live, while the controller's lock is held, and while an earlier turn is unsent. */
+/** The reply-is-coming line gives way to the start handoff's own status line, so the learner never sees two waiting lines at once. */
+export function showsWaitingLine(awaitingReply: boolean, handoff: StartHandoff): boolean {
+  return awaitingReply && handoff === "none";
+}
+
+/** Pause, Resume and Finish: held while a stream is live, while the controller's lock is held, while the backend runs a turn, and while an earlier turn is unsent. */
 export function HeaderActions({ ids, state, send }: { readonly ids: readonly ActionId[]; readonly state: SessionState; readonly send: (id: ActionId) => void }) {
-  return <Actions ids={ids} disabled={state.live?.status === "streaming" || state.busy || state.unsent.length > 0} send={send} />;
+  return <Actions ids={ids} disabled={state.live?.status === "streaming" || state.busy || state.view?.turnInFlight === true || state.unsent.length > 0} send={send} />;
 }
 
 function Actions({ ids, disabled, send }: { readonly ids: readonly ActionId[]; readonly disabled: boolean; readonly send: (id: ActionId) => void }) {
   const [endStep, setEndStep] = useState<EndStep>("idle");
+  const root = useRef<HTMLSpanElement>(null);
+  const panelId = useId();
   const step = (event: EndEvent) => {
     const next = endFlow(endStep, event);
     setEndStep(next.send ? "idle" : next.step);
     if (next.send) send("end");
   };
+  const finish = () => root.current?.querySelector<HTMLElement>('[data-action="end"]') ?? null;
+  const confirming = endStep === "confirming";
   return (
-    <span className="actions">
-      {ids.map((id) => id === "end" && endStep === "confirming"
-        ? <EndConfirm key={id} disabled={disabled} onConfirm={() => step("confirm")} onCancel={() => step("cancel")} />
-        : <button key={id} type="button" data-action={id} disabled={disabled} onClick={() => (id === "end" ? step("press_end") : send(id))}>{ACTION_LABEL[id]}</button>)}
+    <span ref={root} className="actions">
+      {ids.map((id) => <button key={id} type="button" data-action={id} disabled={disabled} {...(id === "end" ? { "aria-expanded": confirming, "aria-controls": panelId } : {})} onClick={() => (id === "end" ? step("press_end") : send(id))}>{ACTION_LABEL[id]}</button>)}
+      {confirming && <EndConfirm id={panelId} disabled={disabled} onConfirm={() => step("confirm")} onCancel={() => { step("cancel"); finish()?.focus(); }} />}
     </span>
   );
 }
