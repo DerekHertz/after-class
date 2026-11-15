@@ -447,13 +447,37 @@ function ScopeBundle({ api, view, titles, onSource }: { readonly api: AppApi; re
   </>;
 }
 
-export function EndConfirm({ disabled, onConfirm, onCancel }: { readonly disabled: boolean; readonly onConfirm: () => void; readonly onCancel: () => void }) {
+export function EndConfirm({ id, disabled, onConfirm, onCancel }: { readonly id: string; readonly disabled: boolean; readonly onConfirm: () => void; readonly onCancel: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const keep = useRef<HTMLButtonElement>(null);
+  // showModal() puts the dialog in the top layer, makes the page behind it inert and contains focus.
+  useEffect(() => {
+    const el = dialog.current;
+    if (el === null || el.open) return;
+    el.showModal();
+    keep.current?.focus();
+  }, []);
+  // Escape and every other way the browser closes the dialog end up here, so the flow state follows the dialog.
   return (
-    <span className="actions end-confirm" role="alertdialog" aria-label="Finish and save this review?">
-      <span>{END_CONFIRM_TEXT}</span>
-      <button type="button" data-action="end-confirm" disabled={disabled} onClick={onConfirm}>{ACTION_LABEL.end}</button>
-      <button type="button" data-action="end-cancel" onClick={onCancel}>Keep reviewing</button>
-    </span>
+    <dialog
+      ref={dialog}
+      id={id}
+      className="end-confirm"
+      role="alertdialog"
+      aria-labelledby={`${id}-title`}
+      aria-describedby={`${id}-text`}
+      onClose={onCancel}
+      onClick={(e) => { if (e.target === e.currentTarget) dialog.current?.close(); }}
+    >
+      <div className="end-confirm-body">
+        <span id={`${id}-title`} className="visually-hidden">Finish and save this review?</span>
+        <span id={`${id}-text`}>{END_CONFIRM_TEXT}</span>
+        <div className="end-confirm-actions">
+          <button type="button" data-action="end-confirm" disabled={disabled} onClick={onConfirm}>{ACTION_LABEL.end}</button>
+          <button ref={keep} type="button" data-action="end-cancel" onClick={() => dialog.current?.close()}>Keep reviewing</button>
+        </div>
+      </div>
+    </dialog>
   );
 }
 
@@ -464,16 +488,19 @@ export function HeaderActions({ ids, state, send }: { readonly ids: readonly Act
 
 function Actions({ ids, disabled, send }: { readonly ids: readonly ActionId[]; readonly disabled: boolean; readonly send: (id: ActionId) => void }) {
   const [endStep, setEndStep] = useState<EndStep>("idle");
+  const root = useRef<HTMLSpanElement>(null);
+  const panelId = useId();
   const step = (event: EndEvent) => {
     const next = endFlow(endStep, event);
     setEndStep(next.send ? "idle" : next.step);
     if (next.send) send("end");
   };
+  const finish = () => root.current?.querySelector<HTMLElement>('[data-action="end"]') ?? null;
+  const confirming = endStep === "confirming";
   return (
-    <span className="actions">
-      {ids.map((id) => id === "end" && endStep === "confirming"
-        ? <EndConfirm key={id} disabled={disabled} onConfirm={() => step("confirm")} onCancel={() => step("cancel")} />
-        : <button key={id} type="button" data-action={id} disabled={disabled} onClick={() => (id === "end" ? step("press_end") : send(id))}>{ACTION_LABEL[id]}</button>)}
+    <span ref={root} className="actions">
+      {ids.map((id) => <button key={id} type="button" data-action={id} disabled={disabled} {...(id === "end" ? { "aria-expanded": confirming, "aria-controls": panelId } : {})} onClick={() => (id === "end" ? step("press_end") : send(id))}>{ACTION_LABEL[id]}</button>)}
+      {confirming && <EndConfirm id={panelId} disabled={disabled} onConfirm={() => step("confirm")} onCancel={() => { step("cancel"); finish()?.focus(); }} />}
     </span>
   );
 }
