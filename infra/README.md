@@ -135,14 +135,21 @@ A release is a `v<major>.<minor>.<patch>` tag on a `master` commit whose `packag
 
    The `release` workflow checks the tag against `master` and the package version, builds the commit for `linux/arm64`, and pushes `ghcr.io/derekhertz/after-class:<commit>` and `:<tag>`. It then writes the GitHub Release with `image-digest.txt`, which reads `commit <commit>` and `digest sha256:<64 hex>`. Any registry error fails the run. A rerun builds and pushes a new digest.
 
-4. When the `release` run is green, deploy the tag.
+4. When the `release` run is green, run the release tool from the root of a clone on your machine.
 
    ```
-   aws login
-   scripts/deploy-beta.sh v0.1.0
+   scripts/release.sh
    ```
 
-   The script needs `git`, `bun`, `gh`, `curl` and the AWS CLI. It refuses a tag off `master` or with another `package.json` version, a release without a valid `image-digest.txt` for the tag's commit, and a digest that GHCR does not serve anonymously. It then runs the `afterclass-beta-deploy` document on the instance named in `/afterclass-beta/instance_id` and waits up to 15 minutes. Redeploying an older tag is a rollback.
+   It prints the version `/health` reports and the release tags after it, and picks the newest. Pass a tag, such as `scripts/release.sh v0.1.4`, to pick another. Passing an older tag is a rollback. With no newer tag, it prints the commands to cut the next version.
+
+   It then prints the tag's commit and image digest, and the notes. The notes list each merged PR since the live release and warn when the range changes `infra/`, which needs `terraform apply`, or a database migration. Before `/health` reports a version, the notes assume the base is the release before the tag and say so.
+
+   Next it runs that digest on `http://127.0.0.1:8790/app/` in replay mode, with no keys and a throwaway database. Set `AFTERCLASS_TRY_PORT` for another port. Release images are arm64 only, so on an x86 machine it rebuilds the release's `/app` and `/data` on the amd64 Bun base the Dockerfile pins, and prints a `WARNING`. Press Enter when you are done, and it stops the container.
+
+   It prints the warnings again and asks `Deploy v0.1.4 to useafterclass.com? [y/N]`. Only `y` deploys. It then checks for an AWS sign-in and, without one, waits for you to run `aws login` in another terminal. The deploy is `scripts/deploy-beta.sh <tag> <digest>`, with the digest read at the start. If the release names another digest by then, as after a workflow rerun, the try or the deploy refuses and nothing deploys. Last, it waits up to 2 minutes for `/health` to report the new version.
+
+   The tool needs `git`, `bun`, `gh`, `curl`, `docker` and the AWS CLI. Nothing on GitHub or the server starts a deploy. `scripts/deploy-beta.sh` also refuses a tag off `master` or with another `package.json` version, a release without a valid `image-digest.txt` for the tag's commit, and a digest that GHCR does not serve anonymously. It runs the `afterclass-beta-deploy` document on the instance named in `/afterclass-beta/instance_id` and waits up to 15 minutes.
 
 ## Turning on HTTPS
 
