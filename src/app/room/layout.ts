@@ -32,8 +32,11 @@ export type FullRoomLayout = {
   readonly objects: Readonly<Record<RoomObject, Rect>>;
 };
 
-/** A phone or short window recomposes the room: the page stacks flat surfaces over the background, so nothing is placed here. */
-export type CompactRoomLayout = { readonly composition: "compact" };
+/**
+ * A phone or short window recomposes the room: the page stacks flat surfaces over the background, so only the background is
+ * placed. It covers the window, top-aligned, and the room's `phoneArtX` says which part of its width shows.
+ */
+export type CompactRoomLayout = { readonly composition: "compact"; readonly window: Size; readonly layers: { readonly background: Rect } };
 
 export type RoomLayout = FullRoomLayout | CompactRoomLayout;
 export type Composition = RoomLayout["composition"];
@@ -44,10 +47,14 @@ export type Composition = RoomLayout["composition"];
  * is the smaller of `b` and `u0`, so a tall or very wide window does not magnify the desk and the objects.
  */
 export function layoutRoom(scene: SceneId, window: Size, composition: Composition): RoomLayout {
-  if (composition === "compact") return { composition };
   const room: FrontRowRoom = FRONT_ROW_ROOMS[scene];
   const { width: W, height: H } = window;
   const { plate } = ROOM_ART;
+  if (composition === "compact") {
+    const cover = Math.max(W / plate.width, H / plate.height);
+    const [width, height] = [cover * plate.width, cover * plate.height];
+    return { composition, window, layers: { background: { left: (W - width) * parseFloat(room.phoneArtX) / 100, top: 0, width, height } } };
+  }
   const u0 = Math.min(1.12 * H / plate.height, 1.25 * W / plate.width);
   const b = Math.max(W / plate.width, (H - u0 * ROOM_ART.deskCovers) / plate.height);
   const u = Math.min(b, u0);

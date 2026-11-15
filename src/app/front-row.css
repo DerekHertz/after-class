@@ -7,21 +7,11 @@
 :is(.scene-shell[data-scene="study-bench"], .front-row-scene[data-room="study-bench"]) { --fr-plate: url('./assets/front-row/study-bench.webp'); }
 :is(.scene-shell[data-scene="projection-booth"], .front-row-scene[data-room="projection-booth"]) { --fr-plate: url('./assets/front-row/projection-booth.webp'); }
 
-/* The review's layers, one set per room: the background, then the board, desk and mat as nine-slices, then the extras. The
-   plates above stay for the room picker and for every page that has no review scene. */
-.scene-shell[data-scene="last-desk"] { --fr-bg: url('./assets/front-row-v2/rail-background.webp'); --fr-board-art: url('./assets/front-row-v2/rail-board.webp'); --fr-desk-art: url('./assets/front-row-v2/rail-desk.webp'); --fr-mat-art: url('./assets/front-row-v2/rail-mat.webp'); }
-.scene-shell[data-scene="study-bench"] { --fr-bg: url('./assets/front-row-v2/harbor-background.webp'); --fr-board-art: url('./assets/front-row-v2/harbor-board.webp'); --fr-desk-art: url('./assets/front-row-v2/harbor-desk.webp'); --fr-mat-art: url('./assets/front-row-v2/harbor-mat.webp'); }
-.scene-shell[data-scene="projection-booth"] { --fr-bg: url('./assets/front-row-v2/canal-background.webp'); --fr-board-art: url('./assets/front-row-v2/canal-board.webp'); --fr-desk-art: url('./assets/front-row-v2/canal-desk.webp'); --fr-mat-art: url('./assets/front-row-v2/canal-mat.webp'); }
-/* The extras are drawn only by the full layout (below), so the compact one, which draws no layer but the background, does not fetch them. */
-@media (min-width: 900px) and (min-height: 560px) {
-  .front-row-art [data-extra="ledge-items"] { background-image: url('./assets/front-row-v2/rail-ledge-items.webp'); }
-  .front-row-art [data-extra="vine"] { background-image: url('./assets/front-row-v2/rail-vine.webp'); }
-  .front-row-art [data-extra="lamp"] { background-image: url('./assets/front-row-v2/harbor-lamp.webp'); }
-  .front-row-art [data-extra="awning"] { background-image: url('./assets/front-row-v2/harbor-awning.webp'); }
-  .front-row-art [data-extra="cushion"] { background-image: url('./assets/front-row-v2/harbor-cushion.webp'); }
-  .front-row-art [data-extra="pull-tab"] { background-image: url('./assets/front-row-v2/canal-pull-tab.webp'); }
-  .front-row-art [data-extra="projector"] { background-image: url('./assets/front-row-v2/canal-projector.webp'); }
-}
+/* The backdrop behind a review, one per room: its painted background, which the stage (room/stage.tsx) paints over once the
+   picture has decoded. The plates above stay for the room picker and for every page that has no review scene. */
+.scene-shell[data-scene="last-desk"] { --fr-bg: url('./assets/front-row-v2/rail-background.webp'); }
+.scene-shell[data-scene="study-bench"] { --fr-bg: url('./assets/front-row-v2/harbor-background.webp'); }
+.scene-shell[data-scene="projection-booth"] { --fr-bg: url('./assets/front-row-v2/canal-background.webp'); }
 
 /* On every page the selected room is the backdrop and the navigation sits over the art as small chips, each with its own
    backing for legibility. There is no bar behind them. */
@@ -34,6 +24,8 @@
    headless Chrome, against the doubled file this replaced, smooth drawing differs in 0 to 7.1 percent of pixels by more than 8 levels (at most 0.4 percent
    by more than 32) from 390x844 at 3x to 3840x2160 at 2x, and pixelated drawing in 2.3 to 17.6 percent. The room's stage, which draws the same file, is pixelated. */
 .scene-shell:has(:is(.front-row, .review-loading))::before { background: var(--fr-bg) var(--fr-phone-x) 0 / cover no-repeat; }
+/* Once the stage has painted the room it is the backdrop, so the page does not draw the same picture twice. */
+.scene-shell:has(.front-row-canvas[data-painted])::before { content: none; }
 .scene-shell .scene-masthead { height: auto; max-width: none; margin: 0; padding: 8px 12px; gap: 8px; background: none; border: 0; color: var(--fr-bar-ink); }
 .scene-shell :is(.scene-masthead > a, .appearance-picker > summary, .scene-masthead > .sign-out) { display: flex; align-items: center; min-height: 44px; padding: 0 12px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); color: var(--fr-bar-ink); box-shadow: 0 3px 0 #00000040; }
 .scene-shell .scene-masthead > a { gap: 8px; font: 600 1.3rem/1 'After Class Pixel', var(--font); }
@@ -278,12 +270,11 @@
 .scene-shell .review .room-object :is(code, pre, a) { overflow-wrap: anywhere; }
 .scene-shell .review .room-object a { color: var(--obj-link); }
 
-/* Full scene: the room is built from layers that fill the window, back to front. The background covers the window; the
-   board, the desk and the mat are nine-slices, so their corners keep their size and their plain middles stretch; the extras
-   sit on them. Every layer, text area, the companion and the objects are placed by room/layout.ts, which FrontRowScene
-   writes as each element's box, as --fr-bw (a nine-slice's border in screen pixels), --fr-board-text and --fr-desk-text
-   (each text area's inset) and --fr-u (the room's scale, which the board's type follows). The scene clips overflow rather
-   than hiding it, so it is never a scroll container that focus or a resize could offset; only the board and desk scroll. */
+/* Full scene: the stage's canvas fills the window behind everything and paints the room's layers (room/scene.ts). Every
+   text area, the companion and the objects are placed by room/layout.ts, which FrontRowScene writes as each element's box,
+   as --fr-board-text and --fr-desk-text (each text area's inset) and --fr-u (the room's scale, which the board's type
+   follows). The scene clips overflow rather than hiding it, so it is never a scroll container that focus or a resize could
+   offset; only the board and desk scroll. */
 @media (min-width: 900px) and (min-height: 560px) {
   .scene-shell:has(.front-row) .scene-masthead { position: absolute; inset: 0 0 auto; pointer-events: none; }
   .scene-shell:has(.front-row) .scene-masthead > * { pointer-events: auto; }
@@ -292,13 +283,7 @@
   .scene-shell .front-row .front-row-notices { position: absolute; z-index: 8; top: var(--fr-nav-reserve); left: 50%; translate: -50% 0; width: min(46rem, calc(100% - 32px)); max-height: calc(100dvh - var(--fr-nav-reserve) - 16px); overflow: auto; overscroll-behavior: contain; }
   .front-row-scene { height: 100dvh; overflow: clip; container-type: size; }
   .front-row-stage { position: absolute; inset: 0; }
-  .front-row-art { display: contents; }
-  .front-row-art > * { position: absolute; box-sizing: border-box; pointer-events: none; image-rendering: pixelated; background: no-repeat 0 0 / 100% 100%; }
-  .front-row-art > [data-layer="background"] { z-index: 0; background-image: var(--fr-bg); }
-  .front-row-art > :is([data-layer="board"], [data-layer="desk"], [data-layer="mat"]) { border-style: solid; border-width: var(--fr-bw); }
-  .front-row-art > [data-layer="board"] { z-index: 2; border-image: var(--fr-board-art) var(--fr-board-slice) fill / var(--fr-bw) / 0 stretch; }
-  .front-row-art > [data-layer="desk"] { z-index: 5; border-image: var(--fr-desk-art) var(--fr-desk-slice) fill / var(--fr-bw) / 0 stretch; }
-  .front-row-art > [data-layer="mat"] { z-index: 6; border-image: var(--fr-mat-art) var(--fr-mat-slice) fill / var(--fr-bw) / 0 stretch; }
+  .front-row-canvas { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; }
   .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { position: absolute; z-index: 4; inset: var(--fr-board-text); overflow: auto; overscroll-behavior: contain; }
   .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { position: absolute; z-index: 7; inset: var(--fr-desk-text); overflow: auto; overscroll-behavior: contain; }
   /* Board type follows the room scale, so the text keeps its share of the board when the window is wide or tall. */
@@ -346,6 +331,7 @@
   .scene-shell .front-row .front-row-notices { margin: 8px 8px 0; }
   .front-row-scene { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "board board board" "desk desk desk" "buddy source history"; gap: 8px; padding: 8px 8px 0; }
   .front-row-stage { display: contents; }
+  .front-row-canvas { position: fixed; z-index: -1; inset: 0; width: 100%; height: 100%; }
   .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { grid-area: board; padding: 12px 14px 14px; background: var(--fr-board-fill); border: 5px solid var(--fr-frame); box-shadow: inset 0 0 0 2px #00000033, 0 4px 0 #00000040; }
   .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { grid-area: desk; padding: 12px; background: var(--fr-mat-fill); border: 4px solid var(--fr-desk); box-shadow: 0 4px 0 #00000040; }
   .scene-shell .front-row-scene .current-exchange .line[data-question] p { font-size: 1.3rem; line-height: 1.3; }
