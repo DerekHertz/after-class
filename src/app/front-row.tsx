@@ -123,17 +123,18 @@ function stageStyle({ u, window, text }: FullRoomLayout): CSSProperties {
 }
 
 /**
- * Sizes the page's text and controls with the room, through the root font size every rem in front-row.css follows, and
- * keeps the masthead and the review's navigation over the frame on a window wider than it, through `--fr-band`.
+ * Sizes the room's words and controls with the room, through `--fr-rem`, which only the room's own rules in front-row.css
+ * use, so its dialogs and the next page keep their size. Keeps the masthead and the review's navigation over the frame on a
+ * window wider than it, through `--fr-band`.
  */
 function useRoomScale(full: FullRoomLayout | null): void {
   const type = full?.type ?? 1;
   const band = full?.frame.left ?? 0;
   useLayoutEffect(() => {
     const root = document.documentElement.style;
-    if (type !== 1) root.fontSize = `${type * 100}%`;
+    if (type !== 1) root.setProperty("--fr-rem", `${type}rem`);
     if (band > 0) root.setProperty("--fr-band", `${band}px`);
-    return () => { root.removeProperty("font-size"); root.removeProperty("--fr-band"); };
+    return () => { root.removeProperty("--fr-rem"); root.removeProperty("--fr-band"); };
   }, [type, band]);
 }
 

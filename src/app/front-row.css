@@ -3,6 +3,12 @@
    rules and one React tree. */
 @font-face { font-family: 'After Class Pixel'; src: url('./assets/fonts-v2/pixelify-sans.ttf') format('truetype'); font-weight: 400 700; font-display: block; }
 
+/* The room's rem. It is 1rem, and FrontRowScene sets it larger on a window larger than 1440x900 so the room's words and
+   controls keep their share of the room. Only the room's own rules size in it: its dialogs and every other page keep rem. */
+:root { --fr-rem: 1rem; }
+/* The heading label's size, taken where the heading's box resolves it (see .front-row-heading-box) and inherited as a length. */
+@property --fr-label { syntax: "<length>"; inherits: true; initial-value: 0px; }
+
 :is(.scene-shell[data-scene="last-desk"], .front-row-scene[data-room="last-desk"]) { --fr-plate: url('./assets/front-row/last-desk.webp'); }
 :is(.scene-shell[data-scene="study-bench"], .front-row-scene[data-room="study-bench"]) { --fr-plate: url('./assets/front-row/study-bench.webp'); }
 :is(.scene-shell[data-scene="projection-booth"], .front-row-scene[data-room="projection-booth"]) { --fr-plate: url('./assets/front-row/projection-booth.webp'); }
@@ -30,21 +36,21 @@
 .front-row-canvas { pointer-events: none; }
 .scene-shell .scene-masthead { height: auto; max-width: none; margin: 0; padding: 8px 12px; gap: 8px; background: none; border: 0; color: var(--fr-bar-ink); }
 .scene-shell :is(.scene-masthead > a, .appearance-picker > summary, .scene-masthead > .sign-out) { display: flex; align-items: center; min-height: 44px; padding: 0 12px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); color: var(--fr-bar-ink); box-shadow: 0 3px 0 #00000040; }
-.scene-shell .scene-masthead > a { gap: 8px; font: 600 1.3rem/1 'After Class Pixel', var(--font); }
+.scene-shell .scene-masthead > a { gap: 8px; font: 600 calc(1.3 * var(--fr-rem))/1 'After Class Pixel', var(--font); }
 .scene-shell .scene-masthead .bell-mark { width: 22px; height: 28px; }
-.scene-shell :is(.appearance-picker > summary, .scene-masthead > .sign-out) { font: 500 1.05rem/1 'After Class Pixel', var(--font); }
+.scene-shell :is(.appearance-picker > summary, .scene-masthead > .sign-out) { font: 500 calc(1.05 * var(--fr-rem))/1 'After Class Pixel', var(--font); }
 .scene-shell :is(.scene-masthead a, .appearance-picker > summary, .scene-masthead > .sign-out):focus-visible { outline: 3px solid var(--fr-bar-ink); outline-offset: 2px; }
 
 /* --fr-nav-reserve is measured by reserveNavSpace(); these values only cover the first paint. */
 .scene-shell .review.front-row { --fr-nav-reserve: 64px; position: relative; max-width: none; min-height: 0; margin: 0; padding: 0; border: 0; background: transparent; color: var(--fr-bar-ink); font-family: var(--font); }
 .scene-shell .front-row .front-row-bar { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; background: none; border: 0; color: var(--fr-bar-ink); font-family: 'After Class Pixel', var(--font); }
 .front-row .front-row-title { display: flex; flex-direction: column; justify-content: center; min-width: 0; max-width: 100%; min-height: 44px; padding: 3px 12px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); box-shadow: 0 3px 0 #00000040; }
-.scene-shell .front-row .front-row-bar h1 { min-width: 0; margin: 0; overflow: hidden; color: inherit; font: 600 1.15rem/1.2 'After Class Pixel', var(--font); white-space: nowrap; text-overflow: ellipsis; }
-.front-row .front-row-bar .review-scope-line { margin: 0; overflow: hidden; color: color-mix(in srgb, var(--fr-bar-ink) 85%, var(--fr-bar)); font-size: .85rem; line-height: 1.25; white-space: nowrap; text-overflow: ellipsis; }
+.scene-shell .front-row .front-row-bar h1 { min-width: 0; margin: 0; overflow: hidden; color: inherit; font: 600 calc(1.15 * var(--fr-rem))/1.2 'After Class Pixel', var(--font); white-space: nowrap; text-overflow: ellipsis; }
+.front-row .front-row-bar .review-scope-line { margin: 0; overflow: hidden; color: color-mix(in srgb, var(--fr-bar-ink) 85%, var(--fr-bar)); font-size: calc(.85 * var(--fr-rem)); line-height: 1.25; white-space: nowrap; text-overflow: ellipsis; }
 .front-row .front-row-bar .review-navigation { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin: 0; }
-.front-row .front-row-bar .review-phase { display: flex; align-items: center; min-height: 44px; padding: 0 10px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); color: inherit; font-size: .95rem; }
+.front-row .front-row-bar .review-phase { display: flex; align-items: center; min-height: 44px; padding: 0 10px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); color: inherit; font-size: calc(.95 * var(--fr-rem)); }
 .front-row .front-row-bar .actions { margin: 0; gap: 8px; }
-.scene-shell .front-row .front-row-bar button { min-height: 44px; padding: 6px 12px; border: 2px solid var(--fr-chip-line); border-radius: 0; background: var(--fr-chip); color: var(--fr-bar-ink); font: 500 1rem/1.1 'After Class Pixel', var(--font); box-shadow: 0 3px 0 #00000040; }
+.scene-shell .front-row .front-row-bar button { min-height: 44px; padding: 6px 12px; border: 2px solid var(--fr-chip-line); border-radius: 0; background: var(--fr-chip); color: var(--fr-bar-ink); font: 500 calc(1 * var(--fr-rem))/1.1 'After Class Pixel', var(--font); box-shadow: 0 3px 0 #00000040; }
 .scene-shell .front-row .front-row-bar button:hover:not(:disabled) { background: var(--fr-bar); }
 .scene-shell .front-row .front-row-bar button[aria-expanded="true"]:not([data-action="end"]) { background: var(--fr-bar-ink); color: var(--fr-bar); }
 .scene-shell .front-row .front-row-bar :is(button, a):focus-visible { outline: 3px solid var(--fr-bar-ink); outline-offset: 2px; }
@@ -56,12 +62,12 @@
 .front-row .front-row-bar .end-confirm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* Save state, errors and the finished-review summary, on paper. */
-.scene-shell .front-row .front-row-notices { --fg: #2c2620; --muted: #5e5446; --border: #c9b896; --accent: #244c9c; --danger: #a52f28; --note-bg: #fbf3e2; display: grid; gap: 8px; color: var(--fg); font: 400 1.05rem/1.45 var(--pixel); }
+.scene-shell .front-row .front-row-notices { --fg: #2c2620; --muted: #5e5446; --border: #c9b896; --accent: #244c9c; --danger: #a52f28; --note-bg: #fbf3e2; display: grid; gap: 8px; color: var(--fg); font: 400 calc(1.05 * var(--fr-rem))/1.45 var(--pixel); }
 .front-row .front-row-notices:empty { display: none; }
 .scene-shell .front-row .front-row-notices .note { margin: 0; border: 3px solid #2c2620; border-radius: 0; box-shadow: 4px 4px 0 #00000040; }
 /* A save that has not landed is a red-edged slip, never the notebook page a saved review is written on. */
 .scene-shell .front-row .front-row-notices .note-error { border-color: var(--danger); border-left-width: 12px; }
-.scene-shell .front-row .front-row-notices .note:not(.review-complete) button { min-height: 44px; margin: 4px 0 0; padding: 6px 14px; border: 2px solid var(--fg); border-radius: 0; background: var(--fr-bar); color: var(--fr-bar-ink); font: 600 1rem/1.15 var(--pixel); box-shadow: 0 3px 0 #0000004d; }
+.scene-shell .front-row .front-row-notices .note:not(.review-complete) button { min-height: 44px; margin: 4px 0 0; padding: 6px 14px; border: 2px solid var(--fg); border-radius: 0; background: var(--fr-bar); color: var(--fr-bar-ink); font: 600 calc(1 * var(--fr-rem))/1.15 var(--pixel); box-shadow: 0 3px 0 #0000004d; }
 .scene-shell .front-row .front-row-notices .note:not(.review-complete) button:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
 
 .front-row .front-row-layout { display: grid; grid-template-columns: minmax(0, 1fr); }
@@ -78,7 +84,7 @@
 
 /* Until the review loads there is no board to write on, so the wait notice is its own small board in the room's board
    colours. It never depends on a folio image that may not have arrived, and its ink is the board's ink. */
-.scene-shell .review-loading { --fg: var(--fr-board-ink); --muted: var(--fr-board-ink-soft); --accent: var(--fr-board-ink); --border: var(--fr-board-ink-soft); width: min(100% - 24px, 40rem); margin: 16px auto; padding: 12px 20px 16px; background: var(--fr-board-fill); border: 5px solid var(--fr-frame); box-shadow: inset 0 0 0 2px #00000033, 0 4px 0 #00000040; color: var(--fr-board-ink); font-family: 'After Class Pixel', var(--font); }
+.scene-shell .review-loading { --fg: var(--fr-board-ink); --muted: var(--fr-board-ink-soft); --accent: var(--fr-board-ink); --border: var(--fr-board-ink-soft); width: min(100% - 24px, calc(40 * var(--fr-rem))); margin: 16px auto; padding: 12px 20px 16px; background: var(--fr-board-fill); border: 5px solid var(--fr-frame); box-shadow: inset 0 0 0 2px #00000033, 0 4px 0 #00000040; color: var(--fr-board-ink); font-family: 'After Class Pixel', var(--font); }
 .scene-shell .review-loading h1 { color: var(--fr-board-ink); }
 .scene-shell .review-loading .muted { color: var(--fr-board-ink-soft); }
 .front-row-scene .current-exchange { margin: 0; padding: 0; background: none; border: 0; }
@@ -90,82 +96,83 @@
    and wraps, breaking a long word if it must, before it can reach the button. The left column holds an invisible copy of the
    button's text in the button's board font, padding and border, so both side columns reserve the same width. */
 .front-row-scene[data-board-align="center"] .front-row-heading { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(0, max-content) minmax(max-content, 1fr); align-items: center; min-height: 44px; }
-.front-row-scene[data-board-align="center"] .front-row-heading::before { content: "Show diagram"; grid-column: 1; grid-row: 1; visibility: hidden; white-space: nowrap; padding: 6px 12px; border: 2px solid transparent; font: 500 1rem/1.15 'After Class Pixel', var(--font); }
+.front-row-scene[data-board-align="center"] .front-row-heading::before { content: "Show diagram"; grid-column: 1; grid-row: 1; visibility: hidden; white-space: nowrap; padding: 6px 12px; border: 2px solid transparent; font: 500 calc(1 * var(--fr-rem))/1.15 'After Class Pixel', var(--font); }
 .front-row-scene[data-board-align="center"] .front-row-heading .front-row-eyebrow { grid-column: 2; grid-row: 1; min-width: 0; overflow-wrap: anywhere; text-align: center; }
 .front-row-scene[data-board-align="center"] .front-row-heading .show-diagram { grid-column: 3; grid-row: 1; justify-self: end; }
 /* A board too narrow for the label between two button-wide columns puts the label on its own centred line and Show diagram under it.
    Only the heading's box is the container, so the board's other text keeps sizing against the scene. The box takes the label's
-   size from the scene, where its own font-size resolves, and the label inherits it. */
-.front-row-scene .front-row-heading-box { container: heading / inline-size; font-size: clamp(.9rem, 1.25cqw, 1.2rem); }
-.front-row-scene .front-row-heading-box .front-row-eyebrow { font-size: 1em; }
-@container heading (max-width: 32rem) {
+   size from the scene, where its own properties resolve, and the label inherits it. The box's font is the room's rem, so the
+   query's em is that rem, which grows with the room. */
+.front-row-scene .front-row-heading-box { container: heading / inline-size; --fr-label: clamp(calc(.9 * var(--fr-rem)), 1.25cqw, calc(1.2 * var(--fr-rem))); font-size: var(--fr-rem); }
+.front-row-scene .front-row-heading-box .front-row-eyebrow { font-size: var(--fr-label); }
+@container heading (max-width: 32em) {
   .front-row-scene[data-board-align="center"] .front-row-heading { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 8px; }
   .front-row-scene[data-board-align="center"] .front-row-heading::before { display: none; }
   .front-row-scene[data-board-align="center"] .front-row-heading :is(.front-row-eyebrow, .show-diagram) { grid-column: 1; grid-row: auto; justify-self: center; }
 }
 /* A long label wraps, breaking a long word if it must, so it never pushes into Show diagram. */
-.front-row-scene .front-row-eyebrow { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; display: flex; align-items: center; gap: 14px; margin: 0; color: var(--fr-board-ink-soft); font: 600 clamp(.9rem, 1.25cqw, 1.2rem)/1.2 'After Class Pixel', var(--font); letter-spacing: .14em; text-transform: uppercase; }
+.front-row-scene .front-row-eyebrow { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; display: flex; align-items: center; gap: 14px; margin: 0; color: var(--fr-board-ink-soft); font: 600 clamp(calc(.9 * var(--fr-rem)), 1.25cqw, calc(1.2 * var(--fr-rem)))/1.2 'After Class Pixel', var(--font); letter-spacing: .14em; text-transform: uppercase; }
 .front-row-scene .front-row-eyebrow::after { content: ""; flex: 1 1 3em; max-width: 14em; height: 3px; background: currentColor; }
 .front-row-scene[data-board-align="center"] .front-row-eyebrow { justify-content: center; }
 .front-row-scene[data-board-align="center"] .front-row-eyebrow::before { content: ""; flex: 0 1 auto; width: 3em; height: 3px; background: currentColor; }
 .front-row-scene[data-board-align="center"] .front-row-eyebrow::after { flex: 0 1 auto; width: 3em; }
 .front-row-scene .current-exchange .lines { display: grid; gap: .5em; }
 .scene-shell .front-row-scene .current-exchange .line { margin: 0; padding: 0; border: 0; }
-.scene-shell .front-row-scene .current-exchange .line strong { display: block; color: var(--fr-board-ink-soft); font: 600 .85rem/1.3 'After Class Pixel', var(--font); letter-spacing: .12em; text-transform: uppercase; }
-.scene-shell .front-row-scene .current-exchange .line p { margin: 2px 0 0; color: var(--fr-board-ink); font: 500 clamp(1.05rem, 1.45cqw, 1.35rem)/1.4 'After Class Pixel', var(--font); }
+.scene-shell .front-row-scene .current-exchange .line strong { display: block; color: var(--fr-board-ink-soft); font: 600 calc(.85 * var(--fr-rem))/1.3 'After Class Pixel', var(--font); letter-spacing: .12em; text-transform: uppercase; }
+.scene-shell .front-row-scene .current-exchange .line p { margin: 2px 0 0; color: var(--fr-board-ink); font: 500 clamp(calc(1.05 * var(--fr-rem)), 1.45cqw, calc(1.35 * var(--fr-rem)))/1.4 'After Class Pixel', var(--font); }
 .scene-shell .front-row-scene .current-exchange .line.you p { color: var(--fr-board-ink-soft); }
 .scene-shell .front-row-scene .current-exchange .line[data-question] strong { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.scene-shell .front-row-scene .current-exchange .line[data-question] p { font: 600 clamp(1.4rem, 2.7cqw, 2.7rem)/1.28 'After Class Pixel', var(--font); letter-spacing: .01em; }
+.scene-shell .front-row-scene .current-exchange .line[data-question] p { font: 600 clamp(calc(1.4 * var(--fr-rem)), 2.7cqw, calc(2.7 * var(--fr-rem)))/1.28 'After Class Pixel', var(--font); letter-spacing: .01em; }
 .front-row-scene[data-board-align="center"] .current-exchange .line[data-question] { text-align: center; }
-.front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) .note { margin: .8em 0 0; padding: 8px 12px; background: color-mix(in srgb, var(--fr-board-fill) 82%, var(--fr-board-ink)); color: var(--fr-board-ink); border: 2px solid var(--fr-board-ink-soft); border-radius: 0; font-size: 1rem; }
+.front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) .note { margin: .8em 0 0; padding: 8px 12px; background: color-mix(in srgb, var(--fr-board-fill) 82%, var(--fr-board-ink)); color: var(--fr-board-ink); border: 2px solid var(--fr-board-ink-soft); border-radius: 0; font-size: calc(1 * var(--fr-rem)); }
 /* A note under the tutor's line (a held or failed turn) reads at note size, not at the size of the question it sits with. */
-.scene-shell .front-row-scene .current-exchange .lines .line p.note { margin: .8em 0 0; font: 500 1rem/1.35 'After Class Pixel', var(--font); letter-spacing: normal; }
+.scene-shell .front-row-scene .current-exchange .lines .line p.note { margin: .8em 0 0; font: 500 calc(1 * var(--fr-rem))/1.35 'After Class Pixel', var(--font); letter-spacing: normal; }
 .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) .note-error { color: var(--fr-board-ink); border-left-width: 10px; font-weight: 600; }
-.front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) :is(button, .citation) { min-height: 40px; padding: 6px 12px; border: 2px solid var(--fr-board-ink-soft); border-radius: 0; background: transparent; color: var(--fr-board-ink); font: 500 1rem/1.15 'After Class Pixel', var(--font); text-decoration: none; }
+.front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) :is(button, .citation) { min-height: 40px; padding: 6px 12px; border: 2px solid var(--fr-board-ink-soft); border-radius: 0; background: transparent; color: var(--fr-board-ink); font: 500 calc(1 * var(--fr-rem))/1.15 'After Class Pixel', var(--font); text-decoration: none; }
 .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) .citation::before { filter: var(--fr-board-icon-filter, none); }
 .front-row-scene[data-board-tone="dark"] { --fr-board-icon-filter: invert(1); }
 
 /* Setup: topic choices on the board, the note and Start on the desk. The form box itself does not render. */
 .front-row-scene .topic-checklist { display: contents; }
-.front-row-scene .setup-choices h2 { margin: 0 0 .3em; color: var(--fr-board-ink); font: 600 clamp(1.4rem, 2.2cqw, 2.2rem)/1.2 'After Class Pixel', var(--font); }
-.front-row-scene .setup-choices > p { margin: 0 0 .6em; color: var(--fr-board-ink-soft); font-size: clamp(1rem, 1.25cqw, 1.2rem); line-height: 1.4; }
+.front-row-scene .setup-choices h2 { margin: 0 0 .3em; color: var(--fr-board-ink); font: 600 clamp(calc(1.4 * var(--fr-rem)), 2.2cqw, calc(2.2 * var(--fr-rem)))/1.2 'After Class Pixel', var(--font); }
+.front-row-scene .setup-choices > p { margin: 0 0 .6em; color: var(--fr-board-ink-soft); font-size: clamp(calc(1 * var(--fr-rem)), 1.25cqw, calc(1.2 * var(--fr-rem))); line-height: 1.4; }
 .front-row-scene .setup-choices fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
-.front-row-scene .setup-choices legend { margin-bottom: .4em; padding: 0; color: var(--fr-board-ink); font-weight: 600; font-size: 1.05rem; }
+.front-row-scene .setup-choices legend { margin-bottom: .4em; padding: 0; color: var(--fr-board-ink); font-weight: 600; font-size: calc(1.05 * var(--fr-rem)); }
 .front-row-scene .setup-choices .topic-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.front-row-scene .setup-choices .topic-list label { display: block; padding: 4px 0; font-size: 1.05rem; line-height: 1.35; }
+.front-row-scene .setup-choices .topic-list label { display: block; padding: 4px 0; font-size: calc(1.05 * var(--fr-rem)); line-height: 1.35; }
 .front-row-scene .setup-choices .topic-list .muted { color: var(--fr-board-ink-soft); }
 .front-row-scene .setup-choices input[type="checkbox"] { width: 20px; height: 20px; margin: 0 8px 0 0; vertical-align: -3px; accent-color: var(--fr-board-ink); }
 .front-row-scene .setup-start { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label label" "field start"; gap: 8px 14px; align-items: end; }
-.front-row-scene .setup-start label { grid-area: label; color: var(--fr-mat-ink); font: 600 clamp(1rem, 1.4cqw, 1.3rem)/1.25 'After Class Pixel', var(--font); }
+.front-row-scene .setup-start label { grid-area: label; color: var(--fr-mat-ink); font: 600 clamp(calc(1 * var(--fr-rem)), 1.4cqw, calc(1.3 * var(--fr-rem)))/1.25 'After Class Pixel', var(--font); }
 .front-row-scene .setup-start textarea { grid-area: field; }
 .front-row-scene .setup-start .actions { grid-area: start; margin: 0; }
 
 /* Your thinking. */
 .front-row-scene .composer { display: grid; gap: 8px 12px; margin: 0; padding: 0; border: 0; }
 .front-row-scene[data-mat-actions="below"] .composer { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "status status status" "label short more" "field field field" "share assist speak"; }
-.front-row-scene[data-mat-actions="beside"] .composer { grid-template-columns: auto minmax(0, 1fr) minmax(13rem, 36%); grid-template-areas: "status status status" "label short more" "field field share" "field field assist" "speak speak speak"; }
+.front-row-scene[data-mat-actions="beside"] .composer { grid-template-columns: auto minmax(0, 1fr) minmax(calc(13 * var(--fr-rem)), 36%); grid-template-areas: "status status status" "label short more" "field field share" "field field assist" "speak speak speak"; }
 .front-row-scene .composer > .actions:not(.primary-actions):empty { display: none; }
 .front-row-scene .composer-status { grid-area: status; display: grid; gap: 6px; }
 .front-row-scene .composer-status:empty { display: none; }
-.front-row-scene .composer-status .note { margin: 0; padding: 6px 10px; border: 2px solid currentColor; border-radius: 0; font-size: 1rem; }
+.front-row-scene .composer-status .note { margin: 0; padding: 6px 10px; border: 2px solid currentColor; border-radius: 0; font-size: calc(1 * var(--fr-rem)); }
 .front-row-scene .composer-status .note-error { border-left-width: 10px; }
-.scene-shell .front-row-scene .composer > label { grid-area: label; display: block; margin: 0; color: var(--fr-mat-ink); font: 600 clamp(1.1rem, 1.7cqw, 1.6rem)/1.15 'After Class Pixel', var(--font); }
-.scene-shell .front-row-scene :is(.composer, .setup-start) textarea { grid-area: field; width: 100%; height: clamp(4.6rem, 7.6cqw, 7.5rem); min-height: 4.6rem; margin: 0; padding: 10px 14px; resize: none; border: 3px solid var(--fr-field-border); border-radius: 0; background: var(--fr-field); color: var(--fr-field-ink); caret-color: var(--fr-field-ink); box-shadow: inset 3px 3px 0 #0000001a; font: 500 max(1rem, min(1.25cqw, 1.2rem))/1.5 'After Class Pixel', var(--font); }
+.scene-shell .front-row-scene .composer > label { grid-area: label; display: block; margin: 0; color: var(--fr-mat-ink); font: 600 clamp(calc(1.1 * var(--fr-rem)), 1.7cqw, calc(1.6 * var(--fr-rem)))/1.15 'After Class Pixel', var(--font); }
+.scene-shell .front-row-scene :is(.composer, .setup-start) textarea { grid-area: field; width: 100%; height: clamp(calc(4.6 * var(--fr-rem)), 7.6cqw, calc(7.5 * var(--fr-rem))); min-height: calc(4.6 * var(--fr-rem)); margin: 0; padding: 10px 14px; resize: none; border: 3px solid var(--fr-field-border); border-radius: 0; background: var(--fr-field); color: var(--fr-field-ink); caret-color: var(--fr-field-ink); box-shadow: inset 3px 3px 0 #0000001a; font: 500 max(calc(1 * var(--fr-rem)), min(1.25cqw, calc(1.2 * var(--fr-rem))))/1.5 'After Class Pixel', var(--font); }
 .scene-shell .front-row-scene :is(.composer, .setup-start) textarea::placeholder { color: color-mix(in srgb, var(--fr-field-ink) 70%, var(--fr-field)); opacity: 1; }
 .scene-shell .front-row-scene :is(.composer, .setup-start) textarea:focus-visible { outline: 3px solid var(--fr-focus); outline-offset: 3px; }
 .front-row-scene .composer > .actions:not(.primary-actions) { grid-area: speak; justify-self: end; margin: 0; }
-.front-row-scene .composer > .actions:not(.primary-actions) .muted { color: var(--fr-mat-ink-soft); font-size: .9rem; }
+.front-row-scene .composer > .actions:not(.primary-actions) .muted { color: var(--fr-mat-ink-soft); font-size: calc(.9 * var(--fr-rem)); }
 .front-row-scene .composer .primary-actions { grid-area: share; margin: 0; }
 .front-row-scene .composer .assist-actions { grid-area: assist; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }
 .front-row-scene[data-mat-actions="beside"] .composer :is(.primary-actions, .assist-actions) { align-self: start; }
 .front-row-scene[data-mat-actions="beside"] .composer .primary-actions > * { flex: 1 1 auto; }
 .front-row-scene[data-mat-actions="beside"] .composer .assist-actions > * { flex: 1 1 0; }
-.front-row-scene .composer-shortcut { grid-area: short; align-self: center; justify-self: start; margin: 0; color: var(--fr-mat-ink-soft); font: 400 .9rem/1.3 'After Class Pixel', var(--font); }
+.front-row-scene .composer-shortcut { grid-area: short; align-self: center; justify-self: start; margin: 0; color: var(--fr-mat-ink-soft); font: 400 calc(.9 * var(--fr-rem))/1.3 'After Class Pixel', var(--font); }
 .front-row-scene .composer .review-help { grid-area: more; justify-self: end; margin: 0; border: 0; }
-.scene-shell .front-row-scene .composer .review-help summary { min-height: 32px; padding: 4px 0; color: var(--fr-mat-ink-soft); font: 400 .95rem/1.4 'After Class Pixel', var(--font); font-style: normal; text-decoration: underline; }
+.scene-shell .front-row-scene .composer .review-help summary { min-height: 32px; padding: 4px 0; color: var(--fr-mat-ink-soft); font: 400 calc(.95 * var(--fr-rem))/1.4 'After Class Pixel', var(--font); font-style: normal; text-decoration: underline; }
 .front-row-scene .composer .review-help[open] .actions { justify-content: flex-end; margin: 6px 0 0; }
-.scene-shell .front-row-scene :is(.composer, .setup-start) button { min-height: 44px; padding: 8px 16px; border: 3px solid var(--fr-mat-ink); border-radius: 0; background: var(--fr-quiet); color: var(--fr-quiet-ink); font: 600 max(1rem, min(1.3cqw, 1.25rem))/1.15 'After Class Pixel', var(--font); box-shadow: inset -3px -3px 0 #00000026, 0 3px 0 #00000059; }
-.scene-shell .front-row-scene :is(.composer, .setup-start) .primary-action { padding-inline: 22px; background: var(--fr-accent); color: var(--fr-accent-ink); border-color: color-mix(in srgb, var(--fr-accent) 55%, #000); font-size: max(1.05rem, min(1.55cqw, 1.45rem)); }
+.scene-shell .front-row-scene :is(.composer, .setup-start) button { min-height: 44px; padding: 8px 16px; border: 3px solid var(--fr-mat-ink); border-radius: 0; background: var(--fr-quiet); color: var(--fr-quiet-ink); font: 600 max(calc(1 * var(--fr-rem)), min(1.3cqw, calc(1.25 * var(--fr-rem))))/1.15 'After Class Pixel', var(--font); box-shadow: inset -3px -3px 0 #00000026, 0 3px 0 #00000059; }
+.scene-shell .front-row-scene :is(.composer, .setup-start) .primary-action { padding-inline: 22px; background: var(--fr-accent); color: var(--fr-accent-ink); border-color: color-mix(in srgb, var(--fr-accent) 55%, #000); font-size: max(calc(1.05 * var(--fr-rem)), min(1.55cqw, calc(1.45 * var(--fr-rem)))); }
 .scene-shell .front-row-scene :is(.composer, .setup-start) button:not(:disabled):active { translate: 0 2px; box-shadow: inset 2px 2px 0 #00000033, 0 1px 0 #00000059; }
 .scene-shell .front-row-scene :is(.composer, .setup-start) button:disabled { opacity: .55; }
 .scene-shell .front-row-scene .composer .turn-status { background: var(--fr-field); color: var(--fr-field-ink); border: 2px solid var(--fr-field-border); }
@@ -174,10 +181,11 @@
 .front-row-buddy { display: flex; align-items: flex-end; justify-content: center; pointer-events: none; }
 .front-row-buddy .study-companion { position: relative; display: flex; align-items: flex-end; justify-content: center; width: 100%; height: 100%; }
 .front-row-buddy .study-companion > .companion-raster { height: 100%; width: auto; flex: 0 0 auto; filter: drop-shadow(0 4px 0 #00000040); }
-.front-row-buddy .study-companion > div { position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); margin-bottom: 4px; padding: 3px 8px; background: var(--fr-bar); color: var(--fr-bar-ink); border: 2px solid var(--fr-bar-ink); font: 500 .9rem/1.2 'After Class Pixel', var(--font); white-space: nowrap; }
+.front-row-buddy .study-companion > div { position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); margin-bottom: 4px; padding: 3px 8px; background: var(--fr-bar); color: var(--fr-bar-ink); border: 2px solid var(--fr-bar-ink); font: 500 calc(.9 * var(--fr-rem))/1.2 'After Class Pixel', var(--font); white-space: nowrap; }
+.front-row-buddy :is(.companion-name, .companion-status) { font-size: calc(.75 * var(--fr-rem)); }
 .front-row-buddy .companion-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .front-row-buddy .study-companion[data-activity="idle"] > div { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); padding: 0; border: 0; }
-.front-row-buddy .quiet-status { align-self: flex-end; padding: 4px 8px; background: var(--fr-bar); color: var(--fr-bar-ink); font: 500 .95rem/1.2 'After Class Pixel', var(--font); }
+.front-row-buddy .quiet-status { align-self: flex-end; padding: 4px 8px; background: var(--fr-bar); color: var(--fr-bar-ink); font: 500 calc(.95 * var(--fr-rem))/1.2 'After Class Pixel', var(--font); }
 /* The folio and the notebook on the desk. The whole object is the button; it lifts when pointed at or focused. */
 .scene-shell .front-row-scene .front-row-object { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 44px; min-height: 44px; margin: 0; padding: 0 0 4px; border: 0; border-radius: 0; background: transparent; box-shadow: none; cursor: pointer; }
 /* smooth-ok: the closed folio and notebook are drawn smaller than their files, 0.2 to 0.94 times at common window sizes (1.4 at 3840x2160 at 2x). In
@@ -186,13 +194,13 @@
 .front-row-object .front-row-object-art { position: absolute; inset: 0; background: var(--fr-object-art) 50% 100% / contain no-repeat; filter: drop-shadow(0 4px 0 #00000052); transition: translate 120ms ease-out, filter 120ms ease-out; }
 .front-row-object[data-object="source"] { --fr-object-art: url('./assets/front-row-v2/closed-folio.webp'); }
 .front-row-object[data-object="history"] { --fr-object-art: url('./assets/front-row-v2/closed-notebook.webp'); }
-.front-row-object .front-row-object-tag { position: relative; padding: 3px 8px; background: var(--fr-bar); color: var(--fr-bar-ink); border: 2px solid var(--fr-bar-ink); font: 500 .95rem/1.2 'After Class Pixel', var(--font); white-space: nowrap; }
+.front-row-object .front-row-object-tag { position: relative; padding: 3px 8px; background: var(--fr-bar); color: var(--fr-bar-ink); border: 2px solid var(--fr-bar-ink); font: 500 calc(.95 * var(--fr-rem))/1.2 'After Class Pixel', var(--font); white-space: nowrap; }
 .front-row-object:is(:hover, :focus-visible) .front-row-object-art { translate: 0 -4px; filter: drop-shadow(0 8px 0 #00000052) brightness(1.08); }
 .front-row-object:is(:hover, :focus-visible) .front-row-object-tag { background: var(--fr-bar-ink); color: var(--fr-bar); }
 .scene-shell .front-row-scene .front-row-object:focus-visible { outline: 3px solid var(--fr-bar-ink); outline-offset: 2px; }
 /* Your room: the learner's counts from their saved reviews, behind one button. Nothing in it moves, so motion settings need
    no rule of their own. Effort sits apart and smaller, since it never counts as understanding. */
-.front-row-scene .room-progress { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; color: var(--fr-bar-ink); font: 500 .95rem/1.25 'After Class Pixel', var(--font); }
+.front-row-scene .room-progress { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; color: var(--fr-bar-ink); font: 500 calc(.95 * var(--fr-rem))/1.25 'After Class Pixel', var(--font); }
 .scene-shell .front-row-scene .room-progress > button { min-height: 44px; padding: 6px 12px; border: 2px solid var(--fr-chip-line); border-radius: 0; background: var(--fr-chip); color: var(--fr-bar-ink); font: inherit; box-shadow: 0 3px 0 #00000040; cursor: pointer; }
 .scene-shell .front-row-scene .room-progress > button:hover, .scene-shell .front-row-scene .room-progress > button[aria-expanded="true"] { background: var(--fr-bar-ink); color: var(--fr-bar); }
 .scene-shell .front-row-scene .room-progress > button:focus-visible { outline: 3px solid var(--fr-bar-ink); outline-offset: 2px; }
@@ -297,9 +305,9 @@
 @media (min-width: 900px) and (min-height: 560px) {
   .scene-shell:has(.front-row) .scene-masthead { position: absolute; inset: 0 var(--fr-band, 0px) auto; pointer-events: none; }
   .scene-shell:has(.front-row) .scene-masthead > * { pointer-events: auto; }
-  .scene-shell .front-row .front-row-bar { position: absolute; z-index: 9; top: 8px; left: calc(var(--fr-band, 0px) + 12px + 13rem); right: calc(var(--fr-band, 0px) + 12px + 14rem); pointer-events: none; }
+  .scene-shell .front-row .front-row-bar { position: absolute; z-index: 9; top: 8px; left: calc(var(--fr-band, 0px) + 12px + calc(13 * var(--fr-rem))); right: calc(var(--fr-band, 0px) + 12px + calc(14 * var(--fr-rem))); pointer-events: none; }
   .front-row .front-row-bar > * { pointer-events: auto; }
-  .scene-shell .front-row .front-row-notices { position: absolute; z-index: 8; top: var(--fr-nav-reserve); left: 50%; translate: -50% 0; width: min(46rem, calc(100% - 32px)); max-height: calc(100dvh - var(--fr-nav-reserve) - 16px); overflow: auto; overscroll-behavior: contain; }
+  .scene-shell .front-row .front-row-notices { position: absolute; z-index: 8; top: var(--fr-nav-reserve); left: 50%; translate: -50% 0; width: min(calc(46 * var(--fr-rem)), calc(100% - 32px)); max-height: calc(100dvh - var(--fr-nav-reserve) - 16px); overflow: auto; overscroll-behavior: contain; }
   .front-row-scene { height: 100dvh; overflow: clip; container-type: size; }
   .front-row-stage { position: absolute; inset: 0; }
   .front-row-canvas { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; }
@@ -311,15 +319,14 @@
   .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { position: absolute; z-index: 4; inset: var(--fr-board-text); overflow: auto; overscroll-behavior: contain; }
   .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { position: absolute; z-index: 7; inset: var(--fr-desk-text); overflow: auto; overscroll-behavior: contain; }
   /* Board type follows the room scale, so the text keeps its share of the board when the window is wide or tall. */
-  .front-row-scene .front-row-eyebrow { font-size: clamp(.9rem, calc(var(--fr-u) * 15), 1.2rem); }
-  .front-row-scene .front-row-heading-box { font-size: clamp(.9rem, calc(var(--fr-u) * 15), 1.2rem); }
-  .front-row-scene .front-row-heading-box .front-row-eyebrow { font-size: 1em; }
-  .scene-shell .front-row-scene .current-exchange .line p { font-size: clamp(1.05rem, calc(var(--fr-u) * 19), 1.35rem); }
-  .scene-shell .front-row-scene .current-exchange .line[data-question] p { font-size: clamp(1.4rem, calc(var(--fr-u) * 34), 2.7rem); }
+  .front-row-scene .front-row-eyebrow { font-size: clamp(calc(.9 * var(--fr-rem)), calc(var(--fr-u) * 15), calc(1.2 * var(--fr-rem))); }
+  .front-row-scene .front-row-heading-box { --fr-label: clamp(calc(.9 * var(--fr-rem)), calc(var(--fr-u) * 15), calc(1.2 * var(--fr-rem))); }
+  .scene-shell .front-row-scene .current-exchange .line p { font-size: clamp(calc(1.05 * var(--fr-rem)), calc(var(--fr-u) * 19), calc(1.35 * var(--fr-rem))); }
+  .scene-shell .front-row-scene .current-exchange .line[data-question] p { font-size: clamp(calc(1.4 * var(--fr-rem)), calc(var(--fr-u) * 34), calc(2.7 * var(--fr-rem))); }
   .front-row-scene[data-board-align="center"] .front-row-area[data-area="board"] { display: flex; flex-direction: column; justify-content: safe center; }
   /* The field takes the height the mat has left once the label and buttons are placed. */
   .front-row-scene .front-row-area[data-area="desk"] > .composer { height: 100%; }
-  .front-row-scene[data-mat-actions="below"] .composer { grid-template-rows: auto auto minmax(4.6rem, 1fr) auto; }
+  .front-row-scene[data-mat-actions="below"] .composer { grid-template-rows: auto auto minmax(calc(4.6 * var(--fr-rem)), 1fr) auto; }
   .front-row-scene[data-mat-actions="beside"] .composer { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
   .scene-shell .front-row-scene .composer textarea { height: 100%; }
   .front-row-scene[data-mat-actions="beside"] .composer .assist-actions > * { flex: 1 1 auto; white-space: nowrap; }
@@ -334,7 +341,7 @@
 
 /* Wide windows, signed in: the review's navigation also leaves room for Sign out beside the picker. */
 @media (min-width: 1360px) and (min-height: 560px) {
-  .scene-shell:has(.scene-masthead > .sign-out) .front-row .front-row-bar { right: calc(var(--fr-band, 0px) + 20px + 21rem); }
+  .scene-shell:has(.scene-masthead > .sign-out) .front-row .front-row-bar { right: calc(var(--fr-band, 0px) + 20px + calc(21 * var(--fr-rem))); }
 }
 
 /* Mid-width windows: the review's navigation takes a second row under the masthead chips. */
@@ -350,12 +357,12 @@
   /* Signed in, the three chips do not fit one phone row, so the picker and Sign out wrap to a second row at the right. */
   .scene-shell .scene-masthead:has(> .sign-out) { flex-wrap: wrap; row-gap: 6px; }
   .scene-shell :is(.scene-masthead > a, .appearance-picker > summary, .scene-masthead > .sign-out) { padding: 0 10px; }
-  .scene-shell .scene-masthead > a { font-size: 1.15rem; }
-  .scene-shell :is(.appearance-picker > summary, .scene-masthead > .sign-out) { font-size: .95rem; }
+  .scene-shell .scene-masthead > a { font-size: calc(1.15 * var(--fr-rem)); }
+  .scene-shell :is(.appearance-picker > summary, .scene-masthead > .sign-out) { font-size: calc(.95 * var(--fr-rem)); }
   .scene-shell .front-row .front-row-bar { padding: 0 8px; gap: 6px; }
   .front-row .front-row-title { flex: 1 1 100%; }
   .front-row .front-row-bar .review-navigation { justify-content: flex-start; gap: 6px; }
-  .scene-shell .front-row .front-row-bar button { padding: 6px 10px; font-size: .95rem; }
+  .scene-shell .front-row .front-row-bar button { padding: 6px 10px; font-size: calc(.95 * var(--fr-rem)); }
   .scene-shell .front-row .front-row-notices { margin: 8px 8px 0; }
   .front-row-scene { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "board board board" "desk desk desk" "buddy source history" "progress progress progress"; gap: 8px; padding: 8px 8px 0; }
   .front-row-scene .room-progress { grid-area: progress; margin-bottom: 8px; }
@@ -363,11 +370,11 @@
   .front-row-canvas { position: fixed; z-index: -1; inset: 0; width: 100%; height: 100%; }
   .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { grid-area: board; padding: 12px 14px 14px; background: var(--fr-board-fill); border: 5px solid var(--fr-frame); box-shadow: inset 0 0 0 2px #00000033, 0 4px 0 #00000040; }
   .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { grid-area: desk; padding: 12px; background: var(--fr-mat-fill); border: 4px solid var(--fr-desk); box-shadow: 0 4px 0 #00000040; }
-  .scene-shell .front-row-scene .current-exchange .line[data-question] p { font-size: 1.3rem; line-height: 1.3; }
-  .scene-shell .front-row-scene .current-exchange .line p { font-size: 1.05rem; }
+  .scene-shell .front-row-scene .current-exchange .line[data-question] p { font-size: calc(1.3 * var(--fr-rem)); line-height: 1.3; }
+  .scene-shell .front-row-scene .current-exchange .line p { font-size: calc(1.05 * var(--fr-rem)); }
   .front-row-scene .composer, .front-row-scene[data-mat-actions] .composer { grid-template-columns: minmax(0, 1fr); grid-template-areas: "status" "label" "field" "share" "assist" "more" "speak" "short"; }
   .front-row-scene .composer .review-help { justify-self: start; }
-  .scene-shell .front-row-scene :is(.composer, .setup-start) textarea { height: 5rem; min-height: 5rem; font-size: 1rem; }
+  .scene-shell .front-row-scene :is(.composer, .setup-start) textarea { height: calc(5 * var(--fr-rem)); min-height: calc(5 * var(--fr-rem)); font-size: calc(1 * var(--fr-rem)); }
   .front-row-scene .composer .primary-actions > * { flex: 1 1 100%; }
   .front-row-scene .composer .assist-actions > * { flex: 1 1 0; }
   .front-row-scene .composer > .actions:not(.primary-actions) { justify-self: start; }
@@ -382,7 +389,7 @@
   .front-row-scene .front-row-object[data-object="source"] { grid-area: source; }
   .front-row-scene .front-row-object[data-object="history"] { grid-area: history; }
   .front-row-object .front-row-object-art { bottom: 22px; }
-  .front-row-object .front-row-object-tag { padding: 1px 6px; font-size: .9rem; }
+  .front-row-object .front-row-object-tag { padding: 1px 6px; font-size: calc(.9 * var(--fr-rem)); }
   /* The object takes most of a phone's width and height with a margin of room around it. Its frame is drawn at a fixed
      scale, so the page keeps nearly all the width and the text keeps its size. */
   .scene-shell .review .room-object { --u: .22px; width: calc(100vw - 20px); height: calc(100dvh - 28px); max-width: calc((100dvh - 28px) * 1.6); }
