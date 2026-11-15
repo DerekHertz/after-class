@@ -38,6 +38,7 @@ import { stableId } from "../../shared/ids";
 import type { MemoKey, UserId } from "../../shared/ids";
 import type { Allowance, BudgetHold, Cost, Purpose } from "../../shared/domain";
 import type { Db } from "../db";
+import { BUDGET_HOLDS_REVIEW_ID } from "../migrations-budget";
 
 /**
  * What one request reserves, in USD. A settlement replaces it with the recorded cost, so for a priced call it only decides
@@ -84,6 +85,11 @@ const PROBE: Purpose = "tutor_turn";
 export const WRAP_UPS_PER_REVIEW = 6;
 
 /** SQL over `budget_holds h`: a hold that is tutoring the learner got, admitted by the caps (a hold exists only when they admitted it) and charged. */
+/*
+ * A review started before migration 006 has holds with no review id, so its paid tutoring cannot be seen. Such a review counts as
+ * tutored when it has a stored tutor turn. The set is closed at the upgrade, and each still passes the caps at most
+ * WRAP_UPS_PER_REVIEW times.
+ */
 export const PAID_TUTOR_HOLD = "h.purpose = 'tutor_turn' AND h.settled_micros > 0";
 
 export type BudgetLimits = {
@@ -159,7 +165,15 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
     totalUsed: db.sql.query<{ used: number }, [string]>(`SELECT ${spent} WHERE period = ?`),
     insert: db.sql.query(`INSERT INTO budget_holds (id, user_id, period, purpose, memo_key, reserved_micros, reserved_ms, review_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
     wrapUpsOf: db.sql.query<{ n: number }, [string, string]>(`SELECT COUNT(*) AS n FROM budget_holds WHERE user_id = ? AND review_id = ? AND purpose = 'wrap_up'`),
-    paidTutoringOf: db.sql.query<{ n: number }, [string, string]>(`SELECT 1 AS n FROM budget_holds h WHERE h.user_id = ? AND h.review_id = ? AND ${PAID_TUTOR_HOLD} LIMIT 1`),
+    paidTutoringOf: db.sql.query<{ n: number }, [string, string, string, string]>(
+      `SELECT 1 AS n FROM budget_holds h WHERE h.user_id = ? AND h.review_id = ? AND ${PAID_TUTOR_HOLD}
+       UNION ALL
+       SELECT 1 AS n FROM reviews r
+       WHERE r.user_id = ? AND r.id = ?
+         AND r.started_ms < (SELECT applied_ms FROM schema_migrations WHERE id = '${BUDGET_HOLDS_REVIEW_ID}')
+         AND EXISTS (SELECT 1 FROM review_turns t WHERE t.review_id = r.id AND t.actor = 'tutor')
+       LIMIT 1`,
+    ),
     price: db.sql.query(`UPDATE budget_holds SET priced_micros = ? WHERE id = ? AND settled_micros IS NULL`),
     settle: db.sql.query(`UPDATE budget_holds SET settled_micros = ?, settled_ms = ? WHERE id = ? AND settled_micros IS NULL`),
     interrupted: db.sql.query<{ user_id: string; memo_key: string; provider: string; model: string; purpose: string; started: number; next: number }, []>(
@@ -197,7 +211,7 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
       return db.sql.transaction((): Admission => {
         const at = now();
         const micros = costMicros(ESTIMATE_USD[purpose]);
-        const finishes = purpose === "wrap_up" && review !== undefined && q.paidTutoringOf.get(userId, review) !== null && q.wrapUpsOf.get(userId, review)!.n < WRAP_UPS_PER_REVIEW;
+        const finishes = purpose === "wrap_up" && review !== undefined && q.paidTutoringOf.get(userId, review, userId, review) !== null && q.wrapUpsOf.get(userId, review)!.n < WRAP_UPS_PER_REVIEW;
         const hold = holdFor(userId, at, purpose, micros, finishes);
         if (hold !== null) return { kind: "held", hold };
         const id = `hold_${crypto.randomUUID()}`;

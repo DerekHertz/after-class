@@ -42,8 +42,9 @@ BEGIN SELECT RAISE(ABORT, 'budget holds are never deleted'); END;`,
  * in it, and only a bounded number of times (budget.ts). Null for a request no review asked for. Written with the hold and never
  * changed after.
  */
+export const BUDGET_HOLDS_REVIEW_ID = "006-budget-holds-review";
 export const BUDGET_HOLDS_REVIEW: Migration = {
-  id: "006-budget-holds-review",
+  id: BUDGET_HOLDS_REVIEW_ID,
   sql: `
 ALTER TABLE budget_holds ADD COLUMN review_id TEXT;
 CREATE INDEX budget_holds_by_review ON budget_holds (user_id, review_id, purpose) WHERE review_id IS NOT NULL;
