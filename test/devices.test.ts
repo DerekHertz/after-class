@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { createClerkVerifier } from "../src/backend/clerk";
 import { userForIdentity } from "../src/backend/db";
 import type { Db } from "../src/backend/db";
-import { CONNECT_CODE_TTL_MS, EXCHANGE_MAX_CLIENTS, clientAddress, createDevices, isDeviceToken } from "../src/backend/devices";
+import { CONNECT_CODE_TTL_MS, DEVICE_IDLE_TTL_MS, EXCHANGE_MAX_CLIENTS, MAX_DEVICES_PER_USER, clientAddress, createDevices, isDeviceToken } from "../src/backend/devices";
 import type { Devices } from "../src/backend/devices";
 import { bearerAllowed, serve } from "../src/backend/http";
 import { clerkUsers, hostedCallers } from "../src/backend/main";
@@ -101,6 +101,89 @@ describe("devices", () => {
     expect(devices.trackedClients()).toBe(1);
     const { code } = devices.createCode(alice, "Chrome");
     expect(devices.exchange(code, "late-2").kind).toBe("connected");
+  });
+
+  test("a device token unused for 90 days is refused, counted from its last use or, never used, its creation", () => {
+    const db = testDb();
+    const [alice] = users(db);
+    const c = clock();
+    const devices = createDevices(db, { now: c.now });
+    const idle = connected(devices, alice, "Idle");
+    const used = connected(devices, alice, "Used");
+    expect(devices.userFor(used.token)).toBe(alice);
+    c.ms += DEVICE_IDLE_TTL_MS - 24 * 60 * 60 * 1000;
+    expect(devices.userFor(idle.token)).toBe(alice);
+    c.ms += 25 * 60 * 60 * 1000;
+    expect(devices.userFor(idle.token)).toBe(alice);
+    c.ms += DEVICE_IDLE_TTL_MS + 60_000;
+    expect(devices.userFor(idle.token)).toBeNull();
+    expect(devices.userFor(used.token)).toBeNull();
+    expect(devices.list(alice)).toEqual([]);
+  });
+
+  test("a token never used is refused 90 days after it was made", () => {
+    const db = testDb();
+    const [alice] = users(db);
+    const c = clock();
+    const devices = createDevices(db, { now: c.now });
+    const fresh = connected(devices, alice);
+    c.ms += DEVICE_IDLE_TTL_MS + 60_000;
+    expect(devices.userFor(fresh.token)).toBeNull();
+  });
+
+  test("a token used inside the window keeps working, even when its stored last use is up to a minute behind its real one", () => {
+    const db = testDb();
+    const [alice] = users(db);
+    const c = clock();
+    const devices = createDevices(db, { now: c.now });
+    const d = connected(devices, alice);
+    const day = 24 * 60 * 60 * 1000;
+    for (let i = 0; i < 4; i++) {
+      c.ms += 60 * day;
+      expect(devices.userFor(d.token)).toBe(alice);
+    }
+    // A use 30 seconds after the stored one is not written, so the stored use is 30 seconds behind.
+    c.ms += 30_000;
+    expect(devices.userFor(d.token)).toBe(alice);
+    c.ms += DEVICE_IDLE_TTL_MS - 1000;
+    expect(devices.userFor(d.token)).toBe(alice);
+  });
+
+  test("a Connect past the cap revokes the least recently used device and keeps the new one and the busy ones", () => {
+    const db = testDb();
+    const [alice, bob] = users(db);
+    const c = clock();
+    const devices = createDevices(db, { now: c.now });
+    const all = Array.from({ length: MAX_DEVICES_PER_USER }, (_, i) => {
+      c.ms += 1000;
+      return connected(devices, alice, `Browser ${i}`);
+    });
+    const other = connected(devices, bob, "Bob");
+    c.ms += 1000;
+    devices.userFor(all[0]!.token);
+    expect(devices.list(alice)).toHaveLength(MAX_DEVICES_PER_USER);
+    c.ms += 1000;
+    const added = connected(devices, alice, "One more");
+    expect(devices.list(alice)).toHaveLength(MAX_DEVICES_PER_USER);
+    expect(devices.userFor(all[1]!.token)).toBeNull();
+    expect(devices.userFor(all[0]!.token)).toBe(alice);
+    expect(devices.userFor(added.token)).toBe(alice);
+    expect(devices.userFor(other.token)).toBe(bob);
+    expect(devices.list(alice).map((d) => d.label)).not.toContain("Browser 1");
+  });
+
+  test("an expired or revoked device does not count against the cap, so a Connect revokes nobody live", () => {
+    const db = testDb();
+    const [alice] = users(db);
+    const c = clock();
+    const devices = createDevices(db, { now: c.now });
+    const old = Array.from({ length: MAX_DEVICES_PER_USER - 1 }, () => connected(devices, alice, "Old"));
+    c.ms += DEVICE_IDLE_TTL_MS + 60_000;
+    const live = connected(devices, alice, "Live");
+    const next = connected(devices, alice, "Next");
+    expect(devices.userFor(live.token)).toBe(alice);
+    expect(devices.userFor(next.token)).toBe(alice);
+    expect(old.every((d) => devices.userFor(d.token) === null)).toBe(true);
   });
 
   test("the address is the last forwarded entry when the peer is the proxy, and the peer itself otherwise", () => {

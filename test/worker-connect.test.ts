@@ -155,6 +155,25 @@ describe("connecting a hosted build", () => {
     expect(ingests(w.backend).at(-1)!.authorization).toBe("Bearer acd_usr_alice_2");
   });
 
+  test("a token the backend refuses as expired is not retried: the worker stops, keeps the facts and says to press Reconnect", async () => {
+    const w = await hostedWorker();
+    await w.connect("acc_alice");
+    const p = connectPort(w.c, 1);
+    await sendPopup(w.c, { type: "start", tabId: 1 });
+    feed(p, span(0, 5));
+    await wait(120);
+    w.backend.tokens.clear();
+    feed(p, span(5, 10));
+    await wait(120);
+    const refused = ingests(w.backend).length;
+    await wait(300);
+    expect(ingests(w.backend)).toHaveLength(refused);
+    const held = await w.status();
+    expect(held.lastError).toBe("disconnected from your account: press Reconnect in the After Class popup");
+    expect(held.uploadBacklog).toBeGreaterThan(0);
+    expect(await w.connection()).toEqual({ kind: "disconnected" });
+  });
+
   test("a 401 that answers a request sent before a reconnect does not empty the new token", async () => {
     const w = await hostedWorker();
     await w.connect("acc_alice");
