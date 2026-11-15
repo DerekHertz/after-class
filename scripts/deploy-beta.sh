@@ -1,7 +1,8 @@
 #!/bin/bash
-# Usage: scripts/deploy-beta.sh <release tag> [<digest>], for example scripts/deploy-beta.sh v0.1.0. The owner runs it under
-# their own AWS sign-in, usually through scripts/release.sh, and running it is the approval. With a digest, it refuses a
-# release whose image-digest.txt names another one, so the image deployed is the one that was shown and tried. check-release-tag.ts fetches master and the tag afresh and refuses a tag off
+# Usage: scripts/deploy-beta.sh <release tag> [<digest> [<commit>]], for example scripts/deploy-beta.sh v0.1.0. The owner
+# runs it under their own AWS sign-in, usually through scripts/release.sh, and running it is the approval. With a digest,
+# it refuses a release whose image-digest.txt names another one, and with a commit, a tag or record that names another
+# commit, so what deploys is what was shown and tried. check-release-tag.ts fetches master and the tag afresh and refuses a tag off
 # master or one whose package.json names another version. The image is the digest the release workflow recorded in the
 # tag's GitHub Release, in image-digest.txt, never the mutable commit tag on GHCR. The server pulls the image by that
 # digest, restarts the app, checks /health and rolls back on failure.
@@ -16,6 +17,7 @@ document=afterclass-beta-deploy
 cd "$(dirname "$0")/.."
 tag="${1:-}"
 expected="${2:-}"
+expected_commit="${3:-}"
 commit=$(bun scripts/check-release-tag.ts "$tag")
 
 if ! record=$(gh release download "$tag" --repo "$github_repository" --pattern image-digest.txt --output -); then
@@ -32,6 +34,10 @@ if [ "${BASH_REMATCH[1]}" != "$commit" ]; then
   exit 1
 fi
 digest="${BASH_REMATCH[2]}"
+if [ -n "$expected_commit" ] && [ "$commit" != "$expected_commit" ]; then
+  echo "deploy-beta: the ${tag} tag and its release now name commit ${commit}, not the ${expected_commit} you tried. Nothing was deployed." >&2
+  exit 1
+fi
 if [ -n "$expected" ] && [ "$digest" != "$expected" ]; then
   echo "deploy-beta: the ${tag} release now names ${digest}, not the ${expected} you tried. Nothing was deployed." >&2
   exit 1

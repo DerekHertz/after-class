@@ -88,7 +88,7 @@ say "this digest is the one tried and deployed. If the release names another one
 echo
 bun scripts/release-notes.ts "$tag" "$commit" "$live"
 
-scripts/try-release.sh "$tag" "$digest" || fail "the local try of ${tag} did not finish, so nothing was deployed"
+scripts/try-release.sh "$tag" "$digest" "$commit" || fail "the local try of ${tag} did not finish, so nothing was deployed"
 
 echo
 bun scripts/release-notes.ts --warnings "$tag" "$commit" "$live"
@@ -106,7 +106,7 @@ if ! signed_in; then
   signed_in || fail "still no AWS sign-in, so ${tag} was not deployed. Run \`aws login\`, then scripts/release.sh ${tag}."
 fi
 
-scripts/deploy-beta.sh "$tag" "$digest"
+scripts/deploy-beta.sh "$tag" "$digest" "$commit"
 
 for _ in $(seq 1 24); do
   if [ "$(live_version)" = "${tag#v}" ]; then

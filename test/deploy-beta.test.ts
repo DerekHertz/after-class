@@ -22,6 +22,8 @@ interface Opts {
   readonly statuses?: string[];
   /** The digest scripts/release.sh showed and passes as the second argument. */
   readonly expected?: string;
+  /** The commit scripts/release.sh showed and passes as the third argument. */
+  readonly expectedCommit?: string;
 }
 
 interface Run {
@@ -92,7 +94,7 @@ esac
 exit 0`,
   );
   stub(host.bin, "sleep", "exit 0");
-  const result = Bun.spawnSync(["bash", SCRIPT, opts.tag ?? "v0.1.0", ...(opts.expected === undefined ? [] : [opts.expected])], {
+  const result = Bun.spawnSync(["bash", SCRIPT, opts.tag ?? "v0.1.0", ...(opts.expected === undefined ? [] : [opts.expected]), ...(opts.expectedCommit === undefined ? [] : [opts.expectedCommit])], {
     env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` },
   });
   const raw = existsSync(calls) ? readFileSync(calls, "utf8") : "";
@@ -215,6 +217,21 @@ describe("scripts/deploy-beta.sh", () => {
     const run = deploy({ expected: ATTACKER });
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain(`now names ${APPROVED}, not the ${ATTACKER} you tried. Nothing was deployed.`);
+    expect(calledWith(run, "curl")).toEqual([]);
+    expect(calledWith(run, "aws")).toEqual([]);
+  });
+
+  test("deploys when the tag and the release still name the commit it was given", () => {
+    const run = deploy({ expected: APPROVED, expectedCommit: COMMIT });
+    expect(run.status).toBe(0);
+    expect(calledWith(run, "aws", "send-command")[0]!.join(" ")).toContain(COMMIT);
+  });
+
+  test("refuses, and asks GHCR and AWS nothing, when the tag and its record moved to another commit with the same digest", () => {
+    const shown = "e".repeat(40);
+    const run = deploy({ expected: APPROVED, expectedCommit: shown });
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain(`the v0.1.0 tag and its release now name commit ${COMMIT}, not the ${shown} you tried. Nothing was deployed.`);
     expect(calledWith(run, "curl")).toEqual([]);
     expect(calledWith(run, "aws")).toEqual([]);
   });

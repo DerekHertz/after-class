@@ -18,6 +18,8 @@ interface Opts {
   readonly runFails?: boolean;
   /** The digest scripts/release.sh showed and passes as the second argument. */
   readonly expected?: string;
+  /** The commit scripts/release.sh showed and passes as the third argument. */
+  readonly expectedCommit?: string;
 }
 
 const CONTAINER = "0123456789ab".repeat(4);
@@ -69,7 +71,7 @@ exit 0`,
   stub(host.bin, "curl", opts.healthy === false ? "exit 7" : "exit 0");
   stub(host.bin, "sleep", "exit 0");
   stub(host.bin, "aws", log);
-  const command = ["bash", SCRIPT, opts.tag ?? "v0.1.5", ...(opts.expected === undefined ? [] : [opts.expected])];
+  const command = ["bash", SCRIPT, opts.tag ?? "v0.1.5", ...(opts.expected === undefined ? [] : [opts.expected]), ...(opts.expectedCommit === undefined ? [] : [opts.expectedCommit])];
   const env = { ...process.env, PATH: `${host.bin}:${process.env.PATH}`, ANTHROPIC_API_KEY: KEY, TYPESAFE_API_KEY: KEY };
   const finish = (status: number, stdout: string, stderr: string): Run => ({
     status,
@@ -122,6 +124,14 @@ describe("scripts/try-release.sh", () => {
     const run = tryRelease({ arm64: true, expected: digestOf("a") });
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain(`now names ${DIGEST}, not the ${digestOf("a")} shown before`);
+    expect(of(run, "docker")).toEqual([]);
+  });
+
+  test("refuses, and pulls and runs nothing, when the release now records another commit with the same digest", () => {
+    const shown = "e".repeat(40);
+    const run = tryRelease({ arm64: true, expected: DIGEST, expectedCommit: shown });
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain(`the v0.1.5 release now records commit ${COMMIT}, not the ${shown} shown before. Nothing ran.`);
     expect(of(run, "docker")).toEqual([]);
   });
 

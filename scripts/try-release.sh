@@ -1,9 +1,9 @@
 #!/bin/bash
-# Usage: scripts/try-release.sh <release tag> [<digest>], for example scripts/try-release.sh v0.1.5. Runs the image the
+# Usage: scripts/try-release.sh <release tag> [<digest> [<commit>]], for example scripts/try-release.sh v0.1.5. Runs the image the
 # release's image-digest.txt names, by digest, on 127.0.0.1, and stops it when you press Enter. The app runs in replay
 # mode with no keys file and a database that lives and dies with the container, so it makes no Jev, Claude or AWS call
-# and never changes the beta server. With a digest, it refuses a release whose record names another one, so scripts/release.sh
-# tries the image it showed. Needs gh, docker and curl.
+# and never changes the beta server. With a digest and a commit, it refuses a release whose record names others, so
+# scripts/release.sh tries the release it showed. Needs gh, docker and curl.
 #
 # The release image is linux/arm64. On a machine that cannot run arm64 images, the script builds a local image from the
 # release image's own /app and /data on the amd64 build of the Bun base image that the release's Dockerfile pins, and
@@ -21,8 +21,9 @@ fail() {
 
 tag="${1:-}"
 expected="${2:-}"
+expected_commit="${3:-}"
 if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-  echo "usage: scripts/try-release.sh v<major>.<minor>.<patch> [sha256:<digest>]" >&2
+  echo "usage: scripts/try-release.sh v<major>.<minor>.<patch> [sha256:<digest> [<commit>]]" >&2
   exit 2
 fi
 [[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] || fail "AFTERCLASS_TRY_PORT '${port}' is not a port"
@@ -35,6 +36,9 @@ commit="${BASH_REMATCH[1]}"
 digest="${BASH_REMATCH[2]}"
 if [ -n "$expected" ] && [ "$digest" != "$expected" ]; then
   fail "the ${tag} release now names ${digest}, not the ${expected} shown before. Nothing ran."
+fi
+if [ -n "$expected_commit" ] && [ "$commit" != "$expected_commit" ]; then
+  fail "the ${tag} release now records commit ${commit}, not the ${expected_commit} shown before. Nothing ran."
 fi
 image="${repository}@${digest}"
 

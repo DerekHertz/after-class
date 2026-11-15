@@ -104,8 +104,8 @@ describe("scripts/release.sh", () => {
     expect(run.stdout).toContain("release: useafterclass.com runs v0.1.4.");
     expect(run.stdout).toContain("release: release tags after it: v0.1.5");
     expect(run.stdout).toContain(`release: its image is ghcr.io/derekhertz/after-class@${DIGEST}`);
-    expect(of(run, "try-release.sh")).toEqual([["try-release.sh", "v0.1.5", DIGEST]]);
-    expect(deploys(run)).toEqual([["deploy-beta.sh", "v0.1.5", DIGEST]]);
+    expect(of(run, "try-release.sh")).toEqual([["try-release.sh", "v0.1.5", DIGEST, COMMIT]]);
+    expect(deploys(run)).toEqual([["deploy-beta.sh", "v0.1.5", DIGEST, COMMIT]]);
     expect(run.stdout).toContain("release: useafterclass.com now runs v0.1.5.");
   });
 
@@ -149,7 +149,7 @@ describe("scripts/release.sh", () => {
   test("a sign-in made while it waits lets the deploy go on", () => {
     const run = release({ input: "\ny\n\n", signInAfter: 1 });
     expect(run.status).toBe(0);
-    expect(deploys(run)).toEqual([["deploy-beta.sh", "v0.1.5", DIGEST]]);
+    expect(deploys(run)).toEqual([["deploy-beta.sh", "v0.1.5", DIGEST, COMMIT]]);
   });
 
   test("a try that fails deploys nothing and asks nothing", () => {
@@ -175,13 +175,13 @@ describe("scripts/release.sh", () => {
   test("picks the newest tag by version, not by name", () => {
     const run = release({ tags: ["v0.1.4", "v0.1.9", "v0.1.10", "v0.1.11-rc1"], health: [health("0.1.4"), health("0.1.10")] });
     expect(run.stdout).toContain("release: release tags after it: v0.1.9 v0.1.10");
-    expect(deploys(run)).toEqual([["deploy-beta.sh", "v0.1.10", DIGEST]]);
+    expect(deploys(run)).toEqual([["deploy-beta.sh", "v0.1.10", DIGEST, COMMIT]]);
   });
 
   test("takes a tag argument, such as an older one to roll back to", () => {
     const run = release({ tag: "v0.1.3", health: [health("0.1.4"), health("0.1.3")] });
     expect(run.status).toBe(0);
-    expect(deploys(run)).toEqual([["deploy-beta.sh", "v0.1.3", DIGEST]]);
+    expect(deploys(run)).toEqual([["deploy-beta.sh", "v0.1.3", DIGEST, COMMIT]]);
   });
 
   test("lists every tag and passes no live version when /health names none", () => {
