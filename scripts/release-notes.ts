@@ -94,7 +94,10 @@ function baseLine(tag: string, base: string, live: string | null): string {
 
 export function releaseNotes(range: ReleaseRange, opts: { warningsOnly?: boolean } = {}): string {
   const { tag, live, base } = range;
-  if (base === null) return "First release. No older release to compare with.\n";
+  if (base === null) {
+    if (live === null || compareTags(live, tag) <= 0) return "First release. No older release to compare with.\n";
+    return `**Rollback.** The beta runs ${live}, which is newer than ${tag}, the oldest release. No older release lists its changes. Any database migration from a newer release stays, and ${tag} runs on it.\n`;
+  }
 
   const out = [`## Changes since ${base}`, "", baseLine(tag, base, live), ""];
   const stacks = new Set(range.paths.flatMap((p) => /^infra\/([^/]+)\//.exec(p)?.slice(1, 2).map((s) => `infra/${s}`) ?? []));

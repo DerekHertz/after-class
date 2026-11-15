@@ -107,6 +107,14 @@ describe("releaseNotes", () => {
     expect(releaseNotes({ tag: "v0.1.0", live: null, base: null, subjects: [], paths: [] })).toBe("First release. No older release to compare with.\n");
   });
 
+  test("a rollback to the oldest release still warns that it runs on a newer release's database", () => {
+    const rollback = { tag: "v0.1.0", live: "v0.1.2", base: null, subjects: [], paths: [] };
+    for (const notes of [releaseNotes(rollback), releaseNotes(rollback, { warningsOnly: true })]) {
+      expect(notes).toContain("**Rollback.** The beta runs v0.1.2, which is newer than v0.1.0, the oldest release.");
+      expect(notes).toContain("Any database migration from a newer release stays, and v0.1.0 runs on it.");
+    }
+  });
+
   test("says when the beta did not report its release, so the base is only assumed", () => {
     const notes = releaseNotes({ ...range, tag: "v0.1.6", live: null, base: "v0.1.5" });
     expect(notes).toStartWith("## Changes since v0.1.5\n\n**Check the base.** The beta did not say which release it runs, so this list assumes v0.1.5, the release before v0.1.6.");
