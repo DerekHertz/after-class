@@ -71,7 +71,9 @@ describe("the art the app ships is built from art/masters by scripts/build-art.t
     const css = files(join(REPO, "src/app")).filter((f) => f.endsWith(".css")).map((f) => ({ f, text: readFileSync(f, "utf8") }));
     const drawn = new Set<string>();
     for (const { f, text } of css) for (const m of text.matchAll(/url\(['"]?(\.\/assets\/[^'")]+)['"]?\)/g)) if (RASTER.test(m[1]!)) drawn.add(rel(ASSETS, join(f, "..", m[1]!)));
-    expect([...drawn].sort()).toEqual(manifest.map((e) => e.ship).sort());
+    // Pip's gesture frames are shipped ahead of the stage that draws them (#222), so they are the one thing the manifest may hold that no stylesheet names yet.
+    const unwired = (ship: string) => ship.startsWith("companion-frames/");
+    expect([...drawn].sort()).toEqual(manifest.map((e) => e.ship).filter((ship) => !unwired(ship)).sort());
     for (const entry of manifest) {
       expect({ ship: entry.ship, sha: sha256(join(ASSETS, entry.ship)) }).toEqual({ ship: entry.ship, sha: entry.shipSha256 });
       expect({ master: entry.master, sha: sha256(join(MASTERS, entry.master)) }).toEqual({ master: entry.master, sha: entry.masterSha256 });
