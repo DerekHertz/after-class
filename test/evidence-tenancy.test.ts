@@ -320,6 +320,14 @@ describe("the evidence routes with a second user", () => {
     return { raw, alice, bob, a: serveFor(alice), b: serveFor(bob) };
   }
 
+  test("an empty first ingest claims nothing, so the capture stays unknown until a fact lands", async () => {
+    const r = rig();
+    expect((await ingest(r.a, [])).status).toBe(200);
+    expect((await get(r.a, `/captures/${CAP}`)).status).toBe(404);
+    expect((await ingest(r.a, wireFacts(0, 2))).status).toBe(200);
+    expect((await get(r.a, `/captures/${CAP}`)).status).toBe(200);
+  });
+
   const get = (base: string, path: string) => fetch(`${base}${path}`, { headers: bearer });
   const frame = frameIdOf(CAP);
 
