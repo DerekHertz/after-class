@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { writeFileSync } from "node:fs";
 import { digestOf, makeHost, probeOutput, stub } from "./beta-host";
-import { COMMAND_ID, CURRENT_IMAGE, HEALTH, INSTANCE_ID, MAX_BYTES, parseHealth, parseProbe, PROBE, PROBE_OUTPUT, RECORD, validate } from "../scripts/release-input";
+import { COMMAND_ID, CURRENT_IMAGE, HEALTH, INSTANCE_ID, MAX_BYTES, MAX_CONFIG_BYTES, parseHealth, parseImageConfig, parseProbe, PROBE, PROBE_OUTPUT, RECORD, validate } from "../scripts/release-input";
 import type { Format } from "../scripts/release-input";
 
 const COMMIT = "c".repeat(40);
@@ -168,4 +168,68 @@ describe("parseProbe", () => {
     expect(parseProbe(onServer({ image: `${RUNNING}\n${"x".repeat(200)}`, health: '{"ok":true}' })).digest).toBeNull();
     expect(parseProbe(onServer({ image: `${RUNNING}\n`, health: `{"ok":true,"pad":"${"x".repeat(MAX_BYTES)}"}` })).health.kind).toBe("invalid");
   });
+});
+
+describe("parseImageConfig", () => {
+  const CONFIG = { User: "bun", Env: ["PATH=/usr/local/bin:/usr/bin", "AFTERCLASS_MODE=live", "AFTERCLASS_DATA=/data/db"], Cmd: ["bun", "run", "src/backend/main.ts"], WorkingDir: "/app", Entrypoint: null, Labels: null };
+  /** What docker image inspect --format '{{json .Config}}' prints: Go's compact JSON and one newline. */
+  const printed = (fields: Record<string, unknown> = {}): Buffer => bytes(`${JSON.stringify({ ...CONFIG, ...fields })}\n`);
+
+  test("yields the working directory, the user, the AFTERCLASS_ settings in order and the command", () => {
+    expect(parseImageConfig(printed())).toEqual({
+      ok: true,
+      value: { workdir: "/app", user: "bun", env: ["AFTERCLASS_MODE=live", "AFTERCLASS_DATA=/data/db"], cmd: ["bun", "run", "src/backend/main.ts"] },
+    });
+  });
+
+  test("keeps quotes, dollar signs, backslashes, spaces and non-ASCII letters as they are", () => {
+    const result = parseImageConfig(printed({ Env: ['AFTERCLASS_NOTE=a"b $HOME \\ c é'], Cmd: ["bun", "-e", "console.log('a b')"] }));
+    expect(result.ok && result.value.env).toEqual(['AFTERCLASS_NOTE=a"b $HOME \\ c é']);
+    expect(result.ok && result.value.cmd).toEqual(["bun", "-e", "console.log('a b')"]);
+  });
+
+  const refused: [string, Buffer][] = [
+    ["an Env value with a newline", printed({ Env: ["AFTERCLASS_NOTE=literal\nAFTERCLASS_BUILD_APP=1"] })],
+    ["a variable outside AFTERCLASS_ with a newline", printed({ Env: ["OTHER=literal\nAFTERCLASS_BUILD_APP=1"] })],
+    ["an Env value with a NUL", printed({ Env: ["AFTERCLASS_BUILD_APP=0\u0000"] })],
+    ["an Env value with a tab", printed({ Env: ["AFTERCLASS_NOTE=x\ty"] })],
+    ["an Env value with a C1 control", printed({ Env: ["AFTERCLASS_NOTE=x\u009b2J"] })],
+    ["an Env value with a lone surrogate", bytes(`${JSON.stringify(CONFIG).replace("AFTERCLASS_MODE=live", "AFTERCLASS_MODE=\\ud800")}\n`)],
+    ["an Env entry with no =", printed({ Env: ["AFTERCLASS_MODE"] })],
+    ["an Env entry that starts with a space or a #", printed({ Env: [" AFTERCLASS_MODE=live"] })],
+    ["a lower-case AFTERCLASS_ name", printed({ Env: ["AFTERCLASS_mode=live"] })],
+    ["an Env entry that is not a string", printed({ Env: [1] })],
+    ["an Env that is not a list", printed({ Env: "AFTERCLASS_MODE=live" })],
+    ["no Env", printed({ Env: null })],
+    ["an empty command", printed({ Cmd: [] })],
+    ["no command", printed({ Cmd: null })],
+    ["a command that is a string", printed({ Cmd: "bun run src/backend/main.ts" })],
+    ["an empty command argument", printed({ Cmd: ["bun", ""] })],
+    ["a command argument with a newline", printed({ Cmd: ["bun", "run", "src/backend/main.ts", "\n"] })],
+    ["a command argument with a NUL", printed({ Cmd: ["bun\u0000", "run"] })],
+    ["a working directory with a newline", printed({ WorkingDir: "/app\nRUN touch /pwned" })],
+    ["a relative working directory", printed({ WorkingDir: "app" })],
+    ["an empty user", printed({ User: "" })],
+    ["a user with a newline", printed({ User: "bun\n" })],
+    ["a numeric user and group", printed({ User: "0:0" })],
+    ["no newline after the object", bytes(JSON.stringify(CONFIG))],
+    ["two newlines after the object", bytes(`${JSON.stringify(CONFIG)}\n\n`)],
+    ["CRLF after the object", bytes(`${JSON.stringify(CONFIG)}\r\n`)],
+    ["a byte order mark before the object", Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), printed()])],
+    ["a space before the object", bytes(` ${JSON.stringify(CONFIG)}\n`)],
+    ["a second object", bytes(`${JSON.stringify(CONFIG)}\n${JSON.stringify(CONFIG)}\n`)],
+    ["invalid UTF-8", Buffer.concat([printed().subarray(0, 10), Buffer.from([0xff]), printed().subarray(10)])],
+    ["null", bytes("null\n")],
+    ["an array", bytes(`[${JSON.stringify(CONFIG)}]\n`)],
+    ["broken JSON", bytes('{"User":"bun",}\n')],
+    ["nothing", Buffer.alloc(0)],
+    ["oversize", printed({ Labels: { pad: "x".repeat(MAX_CONFIG_BYTES) } })],
+  ];
+  for (const [name, answer] of refused) {
+    test(`refuses ${name}, saying why in printable ASCII`, () => {
+      const result = parseImageConfig(answer);
+      expect(result.ok).toBe(false);
+      expect(!result.ok && result.why).toMatch(/^the release image's settings: [\x20-\x7e]*$/);
+    });
+  }
 });

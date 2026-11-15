@@ -204,4 +204,56 @@ describe("bun scripts/live-release.ts", () => {
     expect(run.stderr).toContain("the v0.1.9 release has no image-digest.txt");
   });
 
+  describe("image-config", () => {
+    /** The real CLI with docker stubbed to print these bytes for the inspect and exit with this code. */
+    function imageConfig(printed: string | Buffer, exit = 0, digest = RUNNING) {
+      const host = makeHost("afterclass-image-config-");
+      const calls = join(host.root, "calls");
+      writeFileSync(join(host.root, "printed"), printed);
+      stub(host.bin, "docker", `printf '%s\\0' "$@" > ${calls}\ncat ${host.root}/printed\nexit ${exit}`);
+      const folder = join(host.root, "out");
+      mkdirSync(folder);
+      const result = Bun.spawnSync(["bun", SCRIPT, "image-config", digest, folder], { env: offlineEnv(host.bin) });
+      const read = (name: string): Buffer | null => (existsSync(join(folder, name)) ? readFileSync(join(folder, name)) : null);
+      return {
+        status: result.exitCode,
+        stdout: result.stdout.toString(),
+        stderr: result.stderr.toString(),
+        call: existsSync(calls) ? readFileSync(calls, "utf8").split("\0").slice(0, -1) : [],
+        env: read("env"),
+        cmd: read("cmd"),
+      };
+    }
+    const CONFIG = { User: "bun", Env: ["PATH=/usr/bin", "AFTERCLASS_MODE=live", 'AFTERCLASS_NOTE=a"b $HOME \\ c'], Cmd: ["bun", "run", "src/backend/main.ts"], WorkingDir: "/app", Entrypoint: null };
+
+    test("inspects the pulled release image by digest and writes its AFTERCLASS_ settings and command byte for byte", () => {
+      const run = imageConfig(`${JSON.stringify(CONFIG)}\n`);
+      expect(run.status).toBe(0);
+      expect(run.call).toEqual(["image", "inspect", "--platform", "linux/arm64", "--format", "{{json .Config}}", `ghcr.io/derekhertz/after-class@${RUNNING}`]);
+      expect(run.stdout).toBe("/app bun\n");
+      expect(run.env).toEqual(Buffer.from('AFTERCLASS_MODE=live\nAFTERCLASS_NOTE=a"b $HOME \\ c\n'));
+      expect(run.cmd).toEqual(Buffer.from("bun\0run\0src/backend/main.ts\0"));
+    });
+
+    test("a failed inspection fails, saying so, and writes nothing", () => {
+      const run = imageConfig("", 42);
+      expect(run.status).toBe(1);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("docker image inspect exited 42");
+      expect([run.env, run.cmd]).toEqual([null, null]);
+    });
+
+    test("settings that fail their check fail, saying why, and write nothing", () => {
+      const run = imageConfig(`${JSON.stringify({ ...CONFIG, Env: ["AFTERCLASS_NOTE=literal\nAFTERCLASS_BUILD_APP=1"] })}\n`);
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain("an environment entry is not a plain NAME=VALUE");
+      expect([run.env, run.cmd]).toEqual([null, null]);
+    });
+
+    test("refuses a digest that is not sha256:<64 hex> before calling docker", () => {
+      const run = imageConfig(`${JSON.stringify(CONFIG)}\n`, 0, "latest");
+      expect(run.status).toBe(2);
+      expect(run.call).toEqual([]);
+    });
+  });
 });

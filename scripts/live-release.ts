@@ -8,6 +8,11 @@
 //                                                 prints the command's status word, Pending while aws cannot answer yet, or fails.
 //        bun scripts/live-release.ts send <tag> <instance id> <commit> <digest>
 //                                                 sends the deploy document and prints the command id, or fails saying why.
+//        bun scripts/live-release.ts image-config <digest> <folder>
+//                                                 reads the release image's settings for the x86 rebuild, writes <folder>/env,
+//                                                 an env-file of its AFTERCLASS_ settings, and <folder>/cmd, its command with
+//                                                 each argument NUL-terminated, and prints "<working directory> <user>", or
+//                                                 fails saying why and writes nothing.
 //
 // The server is read through Systems Manager, because a network filter between this machine and useafterclass.com can
 // block or rewrite the public /health. One command on the instance deploy-beta.sh deploys to prints the digest
@@ -16,14 +21,17 @@
 // A /health that names a version gives the tag. One that names none, as up to v0.1.4, gives the release whose
 // image-digest.txt names the recorded digest.
 
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { compareTags } from "./release-notes";
-import { COMMAND_ID, COMMAND_STATUS, COMMIT, DIGEST_ID, excerpt, INSTANCE_ID, parseHealth, parseProbe, PROBE, RECORD, validate } from "./release-input";
-import type { Checked, Health, ServerRead } from "./release-input";
+import { COMMAND_ID, COMMAND_STATUS, COMMIT, DIGEST_ID, excerpt, INSTANCE_ID, parseHealth, parseImageConfig, parseProbe, PROBE, RECORD, validate } from "./release-input";
+import type { Checked, Health, ImageConfig, ServerRead } from "./release-input";
 
 const REGION = "us-east-2";
 const INSTANCE_PARAMETER = "/afterclass-beta/instance_id";
 const DEPLOY_DOCUMENT = "afterclass-beta-deploy";
 const GITHUB_REPOSITORY = "DerekHertz/after-class";
+const IMAGE_REPOSITORY = "ghcr.io/derekhertz/after-class";
 const SITE = "https://useafterclass.com";
 
 const RELEASE_TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -128,6 +136,13 @@ export function readPublic(): Health {
   return parseHealth(result.out);
 }
 
+/** The settings of the pulled release image, as docker prints them, checked before any of them is used. */
+function readImageConfig(digest: string): Checked<ImageConfig> {
+  const result = run("docker", "image", "inspect", "--platform", "linux/arm64", "--format", "{{json .Config}}", `${IMAGE_REPOSITORY}@${digest}`);
+  if (result.code !== 0) return { ok: false, why: `docker image inspect exited ${result.code}${result.err ? `: ${result.err}` : ""}` };
+  return parseImageConfig(result.out);
+}
+
 function stopAtDeadline(what: string, error: unknown): never {
   if (!(error instanceof DeadlineError)) throw error;
   console.error(`live-release: ${what}: ${error.message} did not finish within the ${DEADLINE_SECONDS} s deadline`);
@@ -217,8 +232,29 @@ if (import.meta.main) {
       console.error(`live-release: ${(error as Error).message}`);
       process.exit(1);
     }
+  } else if (mode === "image-config" && tag !== undefined && extra.length === 1) {
+    const digest = validate(DIGEST_ID, Buffer.from(tag));
+    if (!digest.ok) {
+      console.error(`live-release: image-config was given a bad argument: ${digest.why}`);
+      process.exit(2);
+    }
+    let config: Checked<ImageConfig>;
+    try {
+      config = readImageConfig(digest.value);
+    } catch (error) {
+      stopAtDeadline("the release image's settings", error);
+    }
+    if (!config.ok) {
+      console.error(`live-release: ${config.why}`);
+      process.exit(1);
+    }
+    const [folder] = extra as [string];
+    const { env, cmd, workdir, user } = config.value;
+    writeFileSync(join(folder, "env"), env.map((e) => `${e}\n`).join(""), { flag: "wx" });
+    writeFileSync(join(folder, "cmd"), cmd.map((a) => `${a}\0`).join(""), { flag: "wx" });
+    console.log(`${workdir} ${user}`);
   } else {
-    console.error("usage: bun scripts/live-release.ts server|public|instance|status <instance id> <command id>|record v<major>.<minor>.<patch>|send v<major>.<minor>.<patch> <instance id> <commit> <digest>");
+    console.error("usage: bun scripts/live-release.ts server|public|instance|status <instance id> <command id>|record v<major>.<minor>.<patch>|send v<major>.<minor>.<patch> <instance id> <commit> <digest>|image-config <digest> <folder>");
     process.exit(2);
   }
 }

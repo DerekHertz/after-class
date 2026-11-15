@@ -66,26 +66,14 @@ else
     || fail "cannot read the Dockerfile at ${commit}"
   base=$(sed -n -E 's/^ARG BUN_IMAGE=(oven\/bun:[0-9A-Za-z._-]+@sha256:[0-9a-f]{64})$/\1/p' <<<"$dockerfile")
   [ -n "$base" ] || fail "the Dockerfile at ${commit} pins no oven/bun base image by digest"
-  inspect() { docker image inspect --platform linux/arm64 --format "$1" "$image"; }
   # The release image's own settings are data. None goes into the Dockerfile, which is the same four lines for every
-  # release. They reach the container as docker run arguments after a narrow format check, and anything else refuses.
-  rebuilt_workdir=$(inspect '{{.Config.WorkingDir}}')
-  rebuilt_user=$(inspect '{{.Config.User}}')
-  [[ "$rebuilt_workdir" =~ ^/[A-Za-z0-9._/-]*$ ]] || fail "refusing: the release image's working directory is not a plain path, so nothing ran"
-  [[ "$rebuilt_user" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || fail "refusing: the release image's user is not a plain user name, so nothing ran"
-  mapfile -d '' -t rebuilt_cmd < <(inspect '{{range .Config.Cmd}}{{.}}{{"\x00"}}{{end}}')
-  [ "${#rebuilt_cmd[@]}" -gt 0 ] || fail "refusing: the release image has no command, so nothing ran"
+  # release. live-release.ts reads and checks them, and they reach the container as docker run arguments from the files it
+  # writes. Anything it cannot check refuses.
   context=$(mktemp -d)
-  : >"${context}/env"
-  while IFS= read -r line; do
-    case "$line" in
-      AFTERCLASS_*=*)
-        [[ "${line%%=*}" =~ ^AFTERCLASS_[A-Z0-9_]+$ && "${line#*=}" != *[[:cntrl:]]* ]] \
-          || fail "refusing: the release image sets an AFTERCLASS_ variable that is not a plain name and value, so nothing ran"
-        printf '%s\n' "$line" >>"${context}/env"
-        ;;
-    esac
-  done <<<"$(inspect '{{range .Config.Env}}{{println .}}{{end}}')"
+  checked_config=$(bun "$(dirname "$0")/live-release.ts" image-config "$digest" "$context") \
+    || fail "refusing: the release image's settings did not pass their check, so nothing ran"
+  read -r rebuilt_workdir rebuilt_user <<<"$checked_config"
+  mapfile -d '' -t rebuilt_cmd <"${context}/cmd"
   rebuilt_env="${context}/env"
   mkdir "${context}/build"
   {

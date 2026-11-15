@@ -1,7 +1,8 @@
 // The one check for every outside answer the release tool acts on: a release's image-digest.txt, the server probe's
-// output with the recorded digest and the app's /health inside it, the public /health, and the ids aws prints. Each is
-// matched as raw bytes, whole, against its exact format, before anything converts, trims or splits it, and only the
-// fields the format names come out. Nothing here does I/O. scripts/live-release.ts reads the bytes and calls these.
+// output with the recorded digest and the app's /health inside it, the public /health, the ids aws prints, and the
+// release image's settings docker prints for the x86 rebuild. Each is checked as raw bytes, whole, before anything
+// converts, trims or splits it, and only the fields its format names come out. Nothing here does I/O.
+// scripts/live-release.ts reads the bytes and calls these.
 
 /** The most bytes any answer may have. Anything longer is rejected, never cut. */
 export const MAX_BYTES = 4096;
@@ -149,4 +150,67 @@ export function parseProbe(output: Uint8Array): ServerRead {
   if ("unreachable" in health) return { digest, health: { kind: "unreachable", detail: `curl exited ${health.unreachable}` } };
   const body = carried(health, HEALTH.name);
   return { digest, health: body.ok ? parseHealth(body.value) : { kind: "invalid", detail: body.why } };
+}
+
+/** The most bytes `docker image inspect --format '{{json .Config}}'` may print. Anything longer is rejected, never cut. */
+export const MAX_CONFIG_BYTES = 65536;
+
+/** The release image's own settings the x86 rebuild needs, each checked so that it reaches docker run unchanged. */
+export interface ImageConfig {
+  readonly workdir: string;
+  readonly user: string;
+  /** The image's AFTERCLASS_ settings as NAME=VALUE, in the image's order. */
+  readonly env: readonly string[];
+  /** The image's command, one argument each, never empty. */
+  readonly cmd: readonly string[];
+}
+
+const WORKDIR = /^\/[A-Za-z0-9._/-]*$/;
+const USER = /^[a-z_][a-z0-9_-]{0,31}$/;
+const ENV_ENTRY = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const OURS = /^AFTERCLASS_[A-Z0-9_]+=/;
+/**
+ * A control character (C0, DEL or C1) could split a line of the env-file or an argument, or drive the terminal. A lone
+ * surrogate would change bytes when written as UTF-8.
+ */
+const NOT_PLAIN = /[\p{Cc}\p{Cs}]/u;
+
+const plain = (value: unknown): value is string => typeof value === "string" && !NOT_PLAIN.test(value);
+
+/**
+ * What `docker image inspect --format '{{json .Config}}'` printed: one JSON object and the newline docker adds. The bytes
+ * must be UTF-8 with nothing before the object and nothing after that newline. Only the four settings come out.
+ */
+export function parseImageConfig(bytes: Uint8Array): Checked<ImageConfig> {
+  const refuse = (why: string): Checked<ImageConfig> => ({ ok: false, why: `the release image's settings: ${why}` });
+  if (bytes.length > MAX_CONFIG_BYTES) return refuse(`docker printed more than ${MAX_CONFIG_BYTES} bytes`);
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return refuse(`docker printed bytes that are not UTF-8: ${excerpt(bytes)}`);
+  }
+  if (!/^\{.*\}\n$/s.test(text)) return refuse(`docker printed something other than one JSON object and a newline: ${excerpt(bytes)}`);
+  let config: unknown;
+  try {
+    config = JSON.parse(text);
+  } catch {
+    return refuse(`docker printed something that is not JSON: ${excerpt(bytes)}`);
+  }
+  if (typeof config !== "object" || config === null || Array.isArray(config)) return refuse("they are not a JSON object");
+  const { WorkingDir, User, Env, Cmd } = config as Record<string, unknown>;
+  const shown = (value: unknown): string => excerpt(Buffer.from(String(value)));
+  if (typeof WorkingDir !== "string" || !WORKDIR.test(WorkingDir)) return refuse(`the working directory is not a plain path: ${shown(WorkingDir)}`);
+  if (typeof User !== "string" || !USER.test(User)) return refuse(`the user is not a plain user name: ${shown(User)}`);
+  if (!Array.isArray(Env)) return refuse("the environment is not a list");
+  for (const entry of Env as unknown[]) {
+    if (!plain(entry) || !ENV_ENTRY.test(entry)) return refuse(`an environment entry is not a plain NAME=VALUE: ${shown(entry)}`);
+    if (entry.startsWith("AFTERCLASS_") && !OURS.test(entry)) return refuse(`an AFTERCLASS_ name is not plain: ${shown(entry)}`);
+  }
+  if (!Array.isArray(Cmd) || Cmd.length === 0) return refuse("the command is not a non-empty list");
+  for (const arg of Cmd as unknown[]) {
+    if (typeof arg !== "string" || arg === "") return refuse(`a command argument is not a non-empty string: ${shown(arg)}`);
+    if (!plain(arg)) return refuse(`a command argument has a control character: ${shown(arg)}`);
+  }
+  return { ok: true, value: { workdir: WorkingDir, user: User, env: (Env as string[]).filter((e) => e.startsWith("AFTERCLASS_")), cmd: Cmd as string[] } };
 }
