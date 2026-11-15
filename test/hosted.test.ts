@@ -356,7 +356,7 @@ describe("mainHosted", () => {
         expect(await run(admin.memo, turns({ kind: "measured", usd: 49 }), [2])).toEqual(["hit"]);
         const bobTurns = turns();
         expect(await run(bob.memo, bobTurns, [1, 2, 3, 4, 5, 6])).toEqual(Array(6).fill("hit"));
-        expect(await bob.allowance()).toMatchObject({ usedUsd: 4.5, limitUsd: 5, uncapped: false });
+        expect(await bob.allowance()).toMatchObject({ usedUsd: expect.closeTo(6 * ESTIMATE_USD.tutor_turn, 9), limitUsd: 5, uncapped: false });
         expect(b.logs.join("\n")).toContain("2 uncapped accounts");
         expect(b.logs.join("\n")).not.toContain("user_admin");
         expect(b.providerCalls()).toBe(0);
