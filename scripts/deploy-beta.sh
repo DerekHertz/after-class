@@ -56,29 +56,47 @@ if ! command_id=$(bun scripts/live-release.ts send "$tag" "$instance_id" "$commi
 fi
 echo "deploy-beta: command ${command_id} on ${instance_id} deploys ${tag} (${commit}, ${digest})"
 
-invocation() {
-  aws ssm get-command-invocation --region "$region" --command-id "$command_id" --instance-id "$instance_id" "$@"
+# One clock bounds the whole wait: every status read, every sleep and the final output read. It is 15 minutes, 900 seconds,
+# from the send. AFTERCLASS_DEPLOY_WAIT_SECONDS shortens it for tests. The server's own deploy takes up to 10 minutes.
+wait_seconds="${AFTERCLASS_DEPLOY_WAIT_SECONDS:-900}"
+[[ "$wait_seconds" =~ ^[1-9][0-9]{0,3}$ ]] || { echo "deploy-beta: AFTERCLASS_DEPLOY_WAIT_SECONDS '${wait_seconds}' is not a number of seconds" >&2; exit 2; }
+started_at=$SECONDS
+remaining() { echo $((wait_seconds - (SECONDS - started_at))); }
+
+# Prints a finished command's output, on whatever time the wait has left, and says so when there is none.
+show_output() {
+  local left
+  left=$(remaining)
+  if [ "$left" -le 0 ] || ! timeout --kill-after=2 "$left" aws ssm get-command-invocation --region "$region" --command-id "$command_id" \
+    --instance-id "$instance_id" --query "$1" --output text; then
+    echo "deploy-beta: the server's output was not read within the ${wait_seconds} s wait. Read it with aws ssm get-command-invocation --command-id ${command_id}." >&2
+  fi
 }
 
-# The server's deploy takes up to 10 minutes. The result is not there for the first few seconds after the send.
-for _ in $(seq 1 90); do
-  sleep 10
-  if ! status=$(bun scripts/live-release.ts status "$instance_id" "$command_id"); then
+# The result is not there for the first few seconds after the send.
+while :; do
+  left=$(remaining)
+  if [ "$left" -le 0 ]; then
+    echo "deploy-beta: the deploy is still running after ${wait_seconds} seconds. Check command ${command_id} with aws ssm get-command-invocation." >&2
+    exit 1
+  fi
+  sleep $((left < 10 ? left : 10))
+  left=$(remaining)
+  [ "$left" -gt 0 ] || continue
+  if ! status=$(LIVE_RELEASE_DEADLINE_MS=$(((left < 120 ? left : 120) * 1000)) bun scripts/live-release.ts status "$instance_id" "$command_id"); then
     echo "deploy-beta: could not read the status of command ${command_id}. Check it with aws ssm get-command-invocation." >&2
     exit 1
   fi
   case "$status" in
     Success)
-      invocation --query StandardOutputContent --output text
+      show_output StandardOutputContent
       exit 0
       ;;
     Pending | InProgress | Delayed) ;;
     *)
       echo "deploy-beta: the deploy ended as ${status}" >&2
-      invocation --query '[StandardOutputContent,StandardErrorContent]' --output text >&2
+      show_output '[StandardOutputContent,StandardErrorContent]' >&2
       exit 1
       ;;
   esac
 done
-echo "deploy-beta: the deploy is still running after 15 minutes. Check command ${command_id} with aws ssm get-command-invocation." >&2
-exit 1

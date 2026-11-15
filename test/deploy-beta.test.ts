@@ -28,6 +28,10 @@ interface Opts {
   readonly instanceOut?: Buffer;
   readonly commandOut?: Buffer;
   readonly statusOut?: Buffer;
+  /** The seconds the whole wait may take, and the real seconds each status read and the final output read take. */
+  readonly waitSeconds?: number;
+  readonly statusDelay?: number;
+  readonly outputDelay?: number;
 }
 
 interface Run {
@@ -38,6 +42,7 @@ interface Run {
   readonly calls: string[][];
   /** What curl read on stdin when it asked GHCR for the manifest. */
   readonly manifestHeaders: string;
+  readonly elapsedMs: number;
 }
 
 /**
@@ -93,19 +98,25 @@ case "$2" in
   get-command-invocation)
     case "$*" in
       *"--query Status"*)
+        ${opts.statusDelay === undefined ? "" : `/usr/bin/sleep ${opts.statusDelay}`}
         ${opts.statusOut === undefined ? "" : `cat ${host.root}/status-out; exit 0`}
         status=$(head -n 1 ${host.root}/statuses)
         [ "$(wc -l < ${host.root}/statuses)" -gt 1 ] && sed -i 1d ${host.root}/statuses
         echo "$status";;
-      *) echo "afterclass-deploy: ${COMMIT} is healthy";;
+      *) ${opts.outputDelay === undefined ? "" : `/usr/bin/sleep ${opts.outputDelay}`}
+        echo "afterclass-deploy: ${COMMIT} is healthy";;
     esac;;
 esac
 exit 0`,
   );
   stub(host.bin, "sleep", "exit 0");
+  const began = Date.now();
   const result = Bun.spawnSync(["bash", SCRIPT, opts.tag ?? "v0.1.0", ...(opts.expected === undefined ? [] : [opts.expected]), ...(opts.expectedCommit === undefined ? [] : [opts.expectedCommit])], {
-    env: offlineEnv(host.bin),
+    env: offlineEnv(host.bin, opts.waitSeconds === undefined ? {} : { AFTERCLASS_DEPLOY_WAIT_SECONDS: String(opts.waitSeconds) }),
+    timeout: 40_000,
+    killSignal: "SIGKILL",
   });
+  const elapsedMs = Date.now() - began;
   const raw = existsSync(calls) ? readFileSync(calls, "utf8") : "";
   return {
     status: result.exitCode,
@@ -115,6 +126,7 @@ exit 0`,
       .split("\n")
       .filter(Boolean)
       .map((line) => line.split("\0").filter(Boolean)),
+    elapsedMs,
     manifestHeaders: existsSync(join(host.root, "manifest-headers")) ? readFileSync(join(host.root, "manifest-headers"), "utf8") : "",
   };
 }
@@ -279,11 +291,25 @@ describe("scripts/deploy-beta.sh", () => {
     expect(run.stdout + run.stderr).toContain(`afterclass-deploy: ${COMMIT} is healthy`);
   });
 
-  test("a deploy still running after 15 minutes fails the script", () => {
-    const run = deploy({ statuses: ["InProgress"] });
-    expect(run.status).not.toBe(0);
-    expect(run.stderr).toContain("still running");
+  test("a deploy still running when the wait ends fails the script and names the real bound", () => {
+    const run = deploy({ statuses: ["InProgress"], waitSeconds: 2 });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("still running after 2 seconds");
+    expect(run.elapsedMs).toBeLessThan(8000);
   });
+
+  test("slow status reads cannot stretch the wait past its one deadline", () => {
+    const run = deploy({ statuses: ["InProgress"], waitSeconds: 4, statusDelay: 3 });
+    expect(run.status).toBe(1);
+    expect(run.elapsedMs).toBeLessThan(10_000);
+  }, 60_000);
+
+  test("a final output read that hangs is cut at the same deadline, and the script says it did not read it", () => {
+    const run = deploy({ statuses: ["Success"], waitSeconds: 3, outputDelay: 30 });
+    expect(run.status).toBe(0);
+    expect(run.stderr).toContain("was not read within the 3 s wait");
+    expect(run.elapsedMs).toBeLessThan(10_000);
+  }, 60_000);
 });
 
 describe("the deploy document", () => {

@@ -67,29 +67,50 @@ else
   base=$(sed -n -E 's/^ARG BUN_IMAGE=(oven\/bun:[0-9A-Za-z._-]+@sha256:[0-9a-f]{64})$/\1/p' <<<"$dockerfile")
   [ -n "$base" ] || fail "the Dockerfile at ${commit} pins no oven/bun base image by digest"
   inspect() { docker image inspect --platform linux/arm64 --format "$1" "$image"; }
+  # The release image's own settings are data. None goes into the Dockerfile, which is the same four lines for every
+  # release. They reach the container as docker run arguments after a narrow format check, and anything else refuses.
+  rebuilt_workdir=$(inspect '{{.Config.WorkingDir}}')
+  rebuilt_user=$(inspect '{{.Config.User}}')
+  [[ "$rebuilt_workdir" =~ ^/[A-Za-z0-9._/-]*$ ]] || fail "refusing: the release image's working directory is not a plain path, so nothing ran"
+  [[ "$rebuilt_user" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || fail "refusing: the release image's user is not a plain user name, so nothing ran"
+  mapfile -d '' -t rebuilt_cmd < <(inspect '{{range .Config.Cmd}}{{.}}{{"\x00"}}{{end}}')
+  [ "${#rebuilt_cmd[@]}" -gt 0 ] || fail "refusing: the release image has no command, so nothing ran"
   context=$(mktemp -d)
+  : >"${context}/env"
+  while IFS= read -r line; do
+    case "$line" in
+      AFTERCLASS_*=*)
+        [[ "${line%%=*}" =~ ^AFTERCLASS_[A-Z0-9_]+$ && "${line#*=}" != *[[:cntrl:]]* ]] \
+          || fail "refusing: the release image sets an AFTERCLASS_ variable that is not a plain name and value, so nothing ran"
+        printf '%s\n' "$line" >>"${context}/env"
+        ;;
+    esac
+  done <<<"$(inspect '{{range .Config.Env}}{{println .}}{{end}}')"
+  rebuilt_env="${context}/env"
+  mkdir "${context}/build"
   {
     echo "FROM --platform=linux/arm64 ${image} AS release"
     echo "FROM ${base}"
     echo "COPY --from=release /app /app"
     echo "COPY --from=release /data /data"
-    while IFS= read -r line; do
-      case "$line" in AFTERCLASS_*=*) printf 'ENV %s="%s"\n' "${line%%=*}" "${line#*=}" ;; esac
-    done <<<"$(inspect '{{range .Config.Env}}{{println .}}{{end}}')"
-    echo "WORKDIR $(inspect '{{.Config.WorkingDir}}')"
-    echo "USER $(inspect '{{.Config.User}}')"
-    echo "CMD $(inspect '{{json .Config.Cmd}}')"
-  } >"${context}/Dockerfile"
+  } >"${context}/build/Dockerfile"
   run_image="afterclass-try:${tag}-${suffix}"
   echo "try-release: WARNING this machine cannot run arm64 images, so it builds ${run_image} from the release's /app and /data on ${base}" >&2
-  docker build --quiet --platform linux/amd64 --tag "$run_image" "$context" >/dev/null
+  docker build --quiet --platform linux/amd64 --tag "$run_image" "${context}/build" >/dev/null
   built="$run_image"
   how="the release's /app and /data on the amd64 build of ${base}. The app code is the release's, and only the Bun binary differs from the server's"
 fi
 
 # The app answers only a Host of 127.0.0.1:<its own port>, so it listens on the port the browser uses.
-started=$(docker run --rm --detach --name "$name" --env AFTERCLASS_MODE=replay --env "AFTERCLASS_PORT=${port}" \
-  --publish "127.0.0.1:${port}:${port}" --cap-drop ALL --security-opt no-new-privileges "$run_image")
+# The rebuilt image's own settings arrive here, because its Dockerfile carries none of them.
+rebuilt_args=()
+rebuilt_tail=()
+if [ -n "$built" ]; then
+  rebuilt_args=(--workdir="$rebuilt_workdir" --user="$rebuilt_user" --env-file "$rebuilt_env")
+  rebuilt_tail=("${rebuilt_cmd[@]}")
+fi
+started=$(docker run --rm --detach --name "$name" "${rebuilt_args[@]}" --env AFTERCLASS_MODE=replay --env "AFTERCLASS_PORT=${port}" \
+  --publish "127.0.0.1:${port}:${port}" --cap-drop ALL --security-opt no-new-privileges "$run_image" "${rebuilt_tail[@]}")
 
 healthy=""
 for _ in $(seq 1 60); do

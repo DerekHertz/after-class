@@ -20,6 +20,10 @@ interface Opts {
   readonly expected?: string;
   /** The commit scripts/release.sh showed and passes as the third argument. */
   readonly expectedCommit?: string;
+  /** What docker image inspect answers for the release image's Config.WorkingDir, Config.User and Config.Env lines. */
+  readonly workdir?: string;
+  readonly user?: string;
+  readonly env?: readonly string[];
 }
 
 const CONTAINER = "0123456789ab".repeat(4);
@@ -31,6 +35,8 @@ interface Run {
   /** Each docker, gh and aws call as its argument vector. */
   readonly calls: string[][];
   readonly built: string;
+  /** The --env-file the app container was given, read while docker run stood in for the container. */
+  readonly envFile: string;
 }
 
 /** A run of the real script with gh, docker, curl, sleep and aws stubbed. The release names DIGEST for COMMIT. */
@@ -39,6 +45,7 @@ function setUp(opts: Opts) {
   const calls = join(host.root, "calls");
   const log = `{ printf '%s\\0' "$(basename "$0")" "$@"; printf '\\n'; } >> ${calls}`;
   writeFileSync(join(host.root, "record"), opts.record ?? `commit ${COMMIT}\ndigest ${DIGEST}\n`);
+  writeFileSync(join(host.root, "inspect-env"), (opts.env ?? ["PATH=/usr/bin", "BUN_INSTALL=/x", "AFTERCLASS_MODE=replay", "AFTERCLASS_PORT=8080", "AFTERCLASS_DATA=/data/db"]).join("\n") + "\n");
   writeFileSync(join(host.root, "Dockerfile"), `# comment\nARG BUN_IMAGE=${BASE}\nFROM \${BUN_IMAGE}\n`);
   stub(
     host.bin,
@@ -56,13 +63,14 @@ esac`,
 case "$1" in
   run) case "$*" in
     *"--entrypoint true"*) exit ${opts.arm64 ? 0 : 1};;
-    *--detach*) ${opts.runFails ? 'echo "Conflict. The container name is already in use" >&2; exit 125' : `echo ${CONTAINER}`};;
+    *--detach*) for a in "$@"; do if [ "$prev" = --env-file ]; then cp "$a" ${host.root}/env-file; fi; prev=$a; done
+      ${opts.runFails ? 'echo "Conflict. The container name is already in use" >&2; exit 125' : `echo ${CONTAINER}`};;
   esac;;
   image) case "$*" in
-    *"{{range .Config.Env}}"*) printf '%s\\n' PATH=/usr/bin BUN_INSTALL=/x AFTERCLASS_MODE=replay AFTERCLASS_PORT=8080 AFTERCLASS_DATA=/data/db;;
-    *"{{.Config.WorkingDir}}"*) echo /app;;
-    *"{{.Config.User}}"*) echo bun;;
-    *"{{json .Config.Cmd}}"*) echo '["bun","run","src/backend/main.ts"]';;
+    *"{{range .Config.Env}}"*) cat ${host.root}/inspect-env;;
+    *"{{.Config.WorkingDir}}"*) printf '%s\\n' ${JSON.stringify(opts.workdir ?? "/app")};;
+    *"{{.Config.User}}"*) printf '%s\\n' ${JSON.stringify(opts.user ?? "bun")};;
+    *"{{range .Config.Cmd}}"*) printf 'bun\\0run\\0src/backend/main.ts\\0';;
   esac;;
   build) for last; do :; done; cp "$last/Dockerfile" ${host.root}/built;;
 esac
@@ -79,6 +87,7 @@ exit 0`,
     stderr,
     calls: readCalls(calls),
     built: existsSync(join(host.root, "built")) ? readFileSync(join(host.root, "built"), "utf8") : "",
+    envFile: existsSync(join(host.root, "env-file")) ? readFileSync(join(host.root, "env-file"), "utf8") : "",
   });
   return { command, env, calls, finish };
 }
@@ -191,18 +200,16 @@ describe("scripts/try-release.sh", () => {
         `FROM ${BASE}`,
         "COPY --from=release /app /app",
         "COPY --from=release /data /data",
-        'ENV AFTERCLASS_MODE="replay"',
-        'ENV AFTERCLASS_PORT="8080"',
-        'ENV AFTERCLASS_DATA="/data/db"',
-        "WORKDIR /app",
-        "USER bun",
-        'CMD ["bun","run","src/backend/main.ts"]',
         "",
       ].join("\n"),
     );
-    const image = appRun(run)!.at(-1)!;
+    const app = appRun(run)!;
+    const image = app.at(-4)!;
     expect(image).toMatch(/^afterclass-try:v0\.1\.5-[0-9a-f]{8}$/);
-    expect(appRun(run)).toContain("AFTERCLASS_MODE=replay");
+    expect(app).toContain("AFTERCLASS_MODE=replay");
+    expect(app).toContain("--workdir=/app");
+    expect(app).toContain("--user=bun");
+    expect(app.slice(-3)).toEqual(["bun", "run", "src/backend/main.ts"]);
     expect(run.stdout).toContain(`the release's /app and /data on the amd64 build of ${BASE}`);
     expect(run.stderr).toContain("WARNING this machine cannot run arm64 images");
     expect(of(run, "docker", "image").some((c) => c[2] === "rm" && c[3] === image)).toBe(true);
@@ -235,5 +242,36 @@ describe("scripts/try-release.sh", () => {
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain("did not answer /health");
     expect(of(run, "docker", "stop")).toHaveLength(1);
+  });
+
+  describe("release image metadata on an amd64 machine", () => {
+    const refusal = (run: Run): void => {
+      expect(run.status).not.toBe(0);
+      expect(run.stderr).toContain("refusing");
+      expect(run.stdout).not.toContain("only the Bun binary differs");
+      expect(run.built).toBe("");
+      expect(appRun(run)).toBeUndefined();
+    };
+
+    test("a working directory that carries a newline and a RUN instruction is refused, and nothing is built or run", () => {
+      refusal(tryRelease({ workdir: "/app\nRUN touch /pwned" }));
+    });
+
+    test("a user that carries a newline and a RUN instruction is refused, and nothing is built or run", () => {
+      refusal(tryRelease({ user: "bun\nRUN touch /pwned" }));
+    });
+
+    test("an AFTERCLASS_ value with a quote, a dollar sign and a backslash cannot add an ENV instruction, and its bytes reach the container unchanged", () => {
+      const run = tryRelease({ env: ["AFTERCLASS_MODE=replay", 'AFTERCLASS_NOTE=a"b $HOME \\ c'] });
+      expect(run.status).toBe(0);
+      expect(run.built).toBe(
+        [`FROM --platform=linux/arm64 ${REPOSITORY}@${DIGEST} AS release`, `FROM ${BASE}`, "COPY --from=release /app /app", "COPY --from=release /data /data", ""].join("\n"),
+      );
+      expect(run.envFile).toBe('AFTERCLASS_MODE=replay\nAFTERCLASS_NOTE=a"b $HOME \\ c\n');
+    });
+
+    test("an AFTERCLASS_ value with a control character is refused", () => {
+      refusal(tryRelease({ env: ["AFTERCLASS_NOTE=x\ty"] }));
+    });
   });
 });
