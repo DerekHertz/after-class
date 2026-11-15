@@ -11,6 +11,8 @@ import type { CaptureId } from "../../shared/ids";
 import { createAdProbe, createPlaybackTracker, findPlayer, readSourceMetadata, watchNavigation } from "./capture";
 import type { Emit, PlaybackTracker, RestSignal } from "./capture";
 import { createFrameSampler } from "./frames";
+import { createPausedSign } from "./paused-sign";
+import type { PausedSign } from "./paused-sign";
 import type { FrameSampler, FrameSamplerConfig } from "./frames";
 import { STREAM_ID_ATTR, pickVideoId } from "./stream-id";
 import { acquireTranscript, startCaptionListener } from "./transcript";
@@ -56,6 +58,7 @@ export type ContentDeps = {
   createTracker(found: Found, emit: Emit, videoId: () => string, sourceDurationS: () => number | null, signal: (s: RestSignal) => void): PlaybackTracker;
   createSampler(found: Found, emit: Emit, videoId: () => string, sourceDurationS: () => number | null): FrameSampler;
   watchNavigation: typeof watchNavigation;
+  pausedSign: PausedSign;
 };
 
 /**
@@ -84,6 +87,7 @@ export const browserDeps: ContentDeps = {
   createTracker: (found, emit, videoId, dur, signal) => createPlaybackTracker(found.video, found.player, emit, videoId, dur, undefined, signal),
   createSampler: createBrowserSampler,
   watchNavigation,
+  pausedSign: createPausedSign(() => document, () => findPlayer()?.player ?? null),
 };
 
 export function startContent(deps: ContentDeps): void {
@@ -93,6 +97,8 @@ export function startContent(deps: ContentDeps): void {
   let observing = false;
   let attached: { readonly video: HTMLVideoElement; readonly tracker: PlaybackTracker; readonly sampler: FrameSampler } | null = null;
   let captureId: CaptureId | null = null;
+  let paused = false;
+  let onWatch = false;
   const transcribed = new Set<string>();
   const durations = new Map<string, number>();
 
@@ -152,6 +158,19 @@ export function startContent(deps: ContentDeps): void {
     return true;
   }
 
+  /**
+   * The sign is on the page exactly while capture is paused and the tab is on a watch page. Leaving the page only
+   * takes it down; a Hide the learner pressed lasts until this pause ends, so only a capture that is not paused clears it.
+   */
+  function updateSign(): void {
+    if (!paused) deps.pausedSign.reset();
+    else if (!onWatch || captureId === null) deps.pausedSign.remove();
+    else {
+      const shownFor = captureId;
+      deps.pausedSign.show(() => send({ type: "resume", captureId: shownFor }));
+    }
+  }
+
   /** Closes the open span and stops observing; the worker re-sends observe if capture is still on. */
   function flushObservers(): void {
     observing = false;
@@ -171,7 +190,11 @@ export function startContent(deps: ContentDeps): void {
     }
     const wasObserving = observing;
     observing = m.on;
+    // A different capture is a different pause, whatever the Hide on the last one said.
+    if (m.captureId !== captureId) deps.pausedSign.reset();
     captureId = m.captureId;
+    paused = m.paused === true;
+    updateSign();
     if (observing && !ensureObservers()) {
       const poll = setInterval(() => {
         if (observing && ensureObservers()) {
@@ -191,10 +214,14 @@ export function startContent(deps: ContentDeps): void {
 
   deps.watchNavigation({
     onWatchPage(videoId) {
+      onWatch = true;
+      updateSign();
       send({ type: "returned_to_watch_page", videoId });
       if (observing) void beginVideo(videoId);
     },
     onLeftWatchPage() {
+      onWatch = false;
+      updateSign();
       flushObservers();
       send({ type: "left_watch_page" });
     },

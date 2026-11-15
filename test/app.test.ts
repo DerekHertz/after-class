@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { AppApi } from "../src/app/api";
 import { ApiError } from "../src/app/api";
 import { OptionsView, checkAgain } from "../src/app/capture";
-import { availableActions, citedInWatchOrder, captureStatusLabel, conversationLines, coveredLines, currentEvidenceIds, estimateText, formatClock, groupGaps, inspectBundle, lectureHeading, liveText, noteView, observationRow, optionsScreen, sourceWatchOrder, parseRoute, partialLines, reduceLive, routePath, softTargetPrompt, startLive, strandedEndTurn, toAct, unansweredLearnerTurn, usageRows } from "../src/app/core";
+import { availableActions, captureStatusLabel, citedInWatchOrder, conversationLines, coveredLines, currentEvidenceIds, estimateText, formatClock, groupGaps, inspectBundle, laterNote, lectureHeading, liveText, noteView, observationRow, optionsScreen, parseRoute, partialLines, reduceLive, routePath, softTargetPrompt, sourceWatchOrder, startLive, strandedEndTurn, toAct, unansweredLearnerTurn, usageRows } from "../src/app/core";
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { UsageTable } from "../src/app/record";
 import { BundleInspector, EvidencePane } from "../src/app/ui";
@@ -387,6 +387,15 @@ describe("routes and clocks", () => {
 
   test("formatClock", () => {
     expect([formatClock(0), formatClock(75), formatClock(3725), formatClock(-4)]).toEqual(["0:00", "1:15", "1:02:05", "0:00"]);
+  });
+});
+
+describe("laterNote", () => {
+  test("promises the next invitation only while capture can still bring one", () => {
+    expect(laterNote({ state: "capturing" })).toContain("invited again at the next boundary");
+    expect(laterNote({ state: "paused", reason: "idle" })).toContain("invited again at the next boundary");
+    expect(laterNote({ state: "stopped" })).toBe("Keeps preparing. Capture has stopped, so no new invitation will come.");
+    expect(laterNote({ state: "stopped", reason: "video_ended" })).not.toContain("invited again");
   });
 });
 

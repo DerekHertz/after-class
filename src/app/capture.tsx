@@ -5,7 +5,7 @@ import type { CaptureId, ReviewId } from "../shared/ids";
 import type { ReviewOptions, StartChoice, UsageSummary } from "../shared/domain";
 import type { AppApi } from "./api";
 import { usePrefetchReviewArt } from "./art-prefetch";
-import { captureStatusLabel, coveredLines, earlierReviewsNote, formatClock, inspectBundle, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
+import { captureStatusLabel, coveredLines, earlierReviewsNote, formatClock, inspectBundle, laterNote, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
 import type { OptionsScreen, ScopeSummary, SourceTitles, StartOffer } from "./core";
 import { ReviewRow } from "./home";
 import type { LectureReview } from "./home";
@@ -278,7 +278,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
       )}
       {shown?.kind === "ready" && (
         <p>
-          <button type="button" disabled={starting} onClick={() => answer("later")}>Later</button> <span className="muted">Keeps preparing; you will be invited again at the next boundary.</span>
+          <button type="button" disabled={starting} onClick={() => answer("later")}>Later</button> <span className="muted">{laterNote(capture.data?.capture.status ?? null)}</span>
         </p>
       )}
       {shown?.kind === "processing" && (
