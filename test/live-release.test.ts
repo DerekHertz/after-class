@@ -2,13 +2,21 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { digestOf, makeHost, stub } from "./beta-host";
-import { parseHealth, parseProbe, PROBE, resolveLive } from "../scripts/live-release";
+import { MAX_BYTES, parseHealth, parseProbe, PROBE, resolveLive } from "../scripts/live-release";
 import type { ServerRead } from "../scripts/live-release";
 
 const SCRIPT = resolve(import.meta.dir, "../scripts/live-release.ts");
 const COMMIT = "c".repeat(40);
 const RUNNING = digestOf("a");
 const COMMAND = "11111111-2222-3333-4444-555555555555";
+
+const b64 = (data: string | Buffer): string => Buffer.from(data).toString("base64");
+/** What the server's PROBE prints for a recorded digest file and a /health body, byte for byte. */
+const probeOutput = (image: string | Buffer | null, health: string | Buffer | { unreachable: number }): string => {
+  const file = image === null ? "image missing" : `image ${Buffer.from(image).length} ${b64(image)}`;
+  if (typeof health === "object" && !Buffer.isBuffer(health)) return `${file}\nunreachable curl exited ${health.unreachable}\n`;
+  return `${file}\nhealth ${Buffer.from(health as string | Buffer).length} ${b64(health as string | Buffer)}\n`;
+};
 
 describe("parseHealth", () => {
   test("is valid for the app's answer, with or without a version", () => {
@@ -38,38 +46,85 @@ describe("parseHealth", () => {
     const health = parseHealth("<html>\u001b[2J</html>");
     expect(health.kind === "invalid" && health.detail).toContain("\\u001b[2J");
   });
+
+  test("quotes an unexpected field's name too", () => {
+    const health = parseHealth('{"ok":true,"\\u001b[2J":1}');
+    expect(health.kind).toBe("invalid");
+    const detail = health.kind === "invalid" ? health.detail : "";
+    expect(detail).toContain("unexpected field");
+    expect(detail).toContain("\\u001b[2J");
+    expect([...detail].some((c) => c.charCodeAt(0) < 32)).toBe(false);
+  });
 });
 
 describe("parseProbe", () => {
   test("reads the recorded digest and the health body", () => {
-    expect(parseProbe(`image ${RUNNING}\nhealth {"ok":true,"version":"0.1.5"}`)).toEqual({
+    expect(parseProbe(probeOutput(`${RUNNING}\n`, '{"ok":true,"version":"0.1.5"}'))).toEqual({
       digest: RUNNING,
       health: { kind: "valid", version: "0.1.5" },
     });
   });
 
   test("tells an app that did not answer apart from one that answered something else", () => {
-    expect(parseProbe(`image ${RUNNING}\nunreachable curl exited 7`).health).toEqual({ kind: "unreachable", detail: "curl exited 7" });
-    expect(parseProbe(`image ${RUNNING}\nhealth <html>\nblocked</html>`).health.kind).toBe("invalid");
+    expect(parseProbe(probeOutput(RUNNING, { unreachable: 7 })).health).toEqual({ kind: "unreachable", detail: "curl exited 7" });
+    expect(parseProbe(probeOutput(RUNNING, "<html>\nblocked</html>")).health.kind).toBe("invalid");
   });
 
   test("has no digest when the file is missing or holds something else, and is invalid when the output is not the probe's", () => {
-    expect(parseProbe('image \nhealth {"ok":true}').digest).toBeNull();
-    expect(parseProbe('image ghcr.io/x:latest\nhealth {"ok":true}').digest).toBeNull();
+    expect(parseProbe(probeOutput(null, '{"ok":true}')).digest).toBeNull();
+    expect(parseProbe(probeOutput("", '{"ok":true}')).digest).toBeNull();
+    expect(parseProbe(probeOutput("ghcr.io/x:latest", '{"ok":true}')).digest).toBeNull();
     expect(parseProbe("something else").health.kind).toBe("invalid");
   });
 
-  test("the probe's own commands print what parseProbe reads, on a server's paths", () => {
+  test("rejects content that is not exactly what the server counted, instead of reading what is left", () => {
+    const body = b64('{"ok":true}');
+    expect(parseProbe(`image missing\nhealth 5 ${body}\n`).health.kind).toBe("invalid");
+    expect(parseProbe(`image missing\nhealth 11 ${body.slice(0, -4)}\n`).health.kind).toBe("invalid");
+    expect(parseProbe(`image missing\nhealth 11 ${body}!\n`).health.kind).toBe("invalid");
+    expect(parseProbe(`image 71 ${b64(RUNNING.slice(0, 40))}\nhealth 11 ${body}\n`).digest).toBeNull();
+  });
+
+  test("rejects a NUL or another control byte in the health body or the digest file", () => {
+    expect(parseProbe(probeOutput(RUNNING, Buffer.from('{"ok":tru\u0000e,"version":"0.1.0"}'))).health.kind).toBe("invalid");
+    expect(parseProbe(probeOutput(RUNNING, '{"ok":true}\u001b[2J')).health).toEqual({ kind: "invalid", detail: "the health answer holds a control byte" });
+    expect(parseProbe(probeOutput(RUNNING, Buffer.from('{"ok":tru\u0000e}'))).health).toEqual({ kind: "invalid", detail: "the health answer holds a control byte" });
+    expect(parseProbe(probeOutput(`${RUNNING}\u0000`, '{"ok":true}')).digest).toBeNull();
+    expect(parseProbe(probeOutput(`${RUNNING}\n${"x".repeat(200)}`, '{"ok":true}')).digest).toBeNull();
+  });
+
+  test("rejects a body or file over the size cap before parsing it", () => {
+    const big = `{"ok":true,"pad":"${"x".repeat(MAX_BYTES)}"}`;
+    expect(parseProbe(probeOutput(RUNNING, big)).health).toEqual({ kind: "invalid", detail: `the health answer is longer than ${MAX_BYTES} bytes` });
+    expect(parseProbe(probeOutput("a".repeat(MAX_BYTES + 1), '{"ok":true}')).digest).toBeNull();
+  });
+
+  /** The probe's own commands on a server's paths, with files and a curl body of exactly these bytes. */
+  function onServer(files: { image?: string | Buffer; health: string | Buffer | number }): string {
     const host = makeHost("afterclass-live-probe-");
-    writeFileSync(join(host.root, "data/afterclass/current-image"), `${RUNNING}\n`);
-    stub(host.bin, "curl", `case "$*" in *"http://127.0.0.1:8080/health"*) printf '{"ok":true,"version":"0.1.5"}';; *) exit 7;; esac`);
+    if (files.image !== undefined) writeFileSync(join(host.root, "data/afterclass/current-image"), files.image);
+    const body = join(host.root, "body");
+    if (typeof files.health !== "number") writeFileSync(body, files.health);
+    const answer = typeof files.health === "number" ? `exit ${files.health}` : `cat ${body} > "$out"`;
+    stub(host.bin, "curl", `out=; while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done\n${answer}`);
     const script = PROBE.join("\n")
       .replaceAll("/etc/afterclass/settings.env", join(host.root, "settings.env"))
       .replaceAll("/data/afterclass", join(host.root, "data/afterclass"));
-    const sh = (path: string) => Bun.spawnSync(["sh", "-c", script], { env: { ...process.env, PATH: path } }).stdout.toString();
-    expect(parseProbe(sh(`${host.bin}:${process.env.PATH}`))).toEqual({ digest: RUNNING, health: { kind: "valid", version: "0.1.5" } });
-    stub(host.bin, "curl", "exit 7");
-    expect(parseProbe(sh(`${host.bin}:${process.env.PATH}`)).health).toEqual({ kind: "unreachable", detail: "curl exited 7" });
+    return Bun.spawnSync(["sh", "-c", script], { env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` } }).stdout.toString();
+  }
+
+  test("the probe's own commands print what parseProbe reads, on a server's paths", () => {
+    expect(parseProbe(onServer({ image: `${RUNNING}\n`, health: '{"ok":true,"version":"0.1.5"}' }))).toEqual({ digest: RUNNING, health: { kind: "valid", version: "0.1.5" } });
+    expect(parseProbe(onServer({ image: `${RUNNING}\n`, health: 7 })).health).toEqual({ kind: "unreachable", detail: "curl exited 7" });
+    expect(parseProbe(onServer({ health: '{"ok":true}' })).digest).toBeNull();
+  });
+
+  test("the probe's own commands carry a NUL, trailing garbage and an oversize body to parseProbe intact", () => {
+    const nul = parseProbe(onServer({ image: `${RUNNING}\n`, health: Buffer.from('{"ok":tru\u0000e,"version":"0.1.0"}') }));
+    expect(nul.health.kind).toBe("invalid");
+    expect(parseProbe(onServer({ image: Buffer.from(`${RUNNING}\u0000`), health: '{"ok":true}' })).digest).toBeNull();
+    expect(parseProbe(onServer({ image: `${RUNNING}\n${"x".repeat(200)}`, health: '{"ok":true}' })).digest).toBeNull();
+    expect(parseProbe(onServer({ image: `${RUNNING}\n`, health: `{"ok":true,"pad":"${"x".repeat(MAX_BYTES)}"}` })).health.kind).toBe("invalid");
   });
 });
 
@@ -111,15 +166,19 @@ interface Run {
 }
 
 /** The real CLI with aws, gh, git and curl stubbed. The stubbed server answers `probe`, and every release names RUNNING. */
-function cli(mode: string, opts: { probe?: string; publicBody?: string; publicExit?: number } = {}): Run {
+function cli(
+  mode: string,
+  opts: { probe?: string; publicBody?: string; publicExit?: number; awsStall?: boolean; ghStall?: boolean; deadlineMs?: number } = {},
+): Run {
   const host = makeHost("afterclass-live-release-");
   const calls = join(host.root, "calls");
   const log = `{ printf '%s\\0' "$(basename "$0")" "$@"; printf '\\n'; } >> ${calls}`;
-  writeFileSync(join(host.root, "probe"), opts.probe ?? `image ${RUNNING}\nhealth {"ok":true}\n`);
+  writeFileSync(join(host.root, "probe"), opts.probe ?? probeOutput(`${RUNNING}\n`, '{"ok":true}'));
   stub(
     host.bin,
     "aws",
     `${log}
+${opts.awsStall ? "exec sleep 30" : ""}
 case "$1 $2" in
   "ssm get-parameter") echo i-0123456789abcdef0;;
   "ssm send-command") echo ${COMMAND};;
@@ -129,9 +188,10 @@ case "$1 $2" in
 esac`,
   );
   stub(host.bin, "git", `${log}\nprintf '%s\\n' v0.1.3 v0.1.4 latest`);
-  stub(host.bin, "gh", `${log}\ncase "$3" in v0.1.4) printf 'commit ${COMMIT}\\ndigest ${RUNNING}\\n';; *) printf 'commit ${COMMIT}\\ndigest ${digestOf("0")}\\n';; esac`);
+  stub(host.bin, "gh", `${log}\n${opts.ghStall ? "exec sleep 30" : ""}\ncase "$3" in v0.1.4) printf 'commit ${COMMIT}\\ndigest ${RUNNING}\\n';; *) printf 'commit ${COMMIT}\\ndigest ${digestOf("0")}\\n';; esac`);
   stub(host.bin, "curl", `${log}\nprintf '%s' '${opts.publicBody ?? '{"ok":true,"version":"0.1.4"}'}'\nexit ${opts.publicExit ?? 0}`);
-  const result = Bun.spawnSync(["bun", SCRIPT, mode], { env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` } });
+  const env = { ...process.env, PATH: `${host.bin}:${process.env.PATH}`, ...(opts.deadlineMs === undefined ? {} : { LIVE_RELEASE_DEADLINE_MS: String(opts.deadlineMs) }) };
+  const result = Bun.spawnSync(["bun", SCRIPT, mode], { env });
   const raw = existsSync(calls) ? readFileSync(calls, "utf8") : "";
   return {
     status: result.exitCode,
@@ -157,7 +217,7 @@ describe("bun scripts/live-release.ts", () => {
   });
 
   test("server fails, saying why, when the app on the server answers with something else", () => {
-    const run = cli("server", { probe: `image ${RUNNING}\nhealth <html>blocked</html>\n` });
+    const run = cli("server", { probe: probeOutput(`${RUNNING}\n`, "<html>blocked</html>") });
     expect(run.status).toBe(1);
     expect(run.stdout).toBe("");
     expect(run.stderr).toContain("cannot tell which release the server runs: the app on the server answered /health with something else");
@@ -178,5 +238,31 @@ describe("bun scripts/live-release.ts", () => {
     expect(page.status).toBe(1);
     expect(page.stdout).toBe("");
     expect(page.stderr).toContain("it answered with something other than the app (not JSON");
+  });
+
+  test("server stops with 'could not read the server' when aws stalls past the one deadline, which the output states", () => {
+    const start = Date.now();
+    const run = cli("server", { awsStall: true, deadlineMs: 1500 });
+    expect(Date.now() - start).toBeLessThan(15_000);
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("could not read the server");
+    expect(run.stderr).toContain("120 s deadline");
+  });
+
+  test("the same deadline covers the digest-to-tag lookup", () => {
+    const start = Date.now();
+    const run = cli("server", { probe: probeOutput(`${RUNNING}\n`, '{"ok":true}'), ghStall: true, deadlineMs: 1500 });
+    expect(Date.now() - start).toBeLessThan(15_000);
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("could not read the server");
+  });
+
+  test("server fails on a /health body with a NUL in it, which a shell would have dropped", () => {
+    const run = cli("server", { probe: probeOutput(`${RUNNING}\n`, Buffer.from('{"ok":tru\u0000e,"version":"0.1.4"}')) });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("answered /health with something else");
   });
 });
