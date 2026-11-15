@@ -471,9 +471,8 @@ function Actions({ ids, disabled, send }: { readonly ids: readonly ActionId[]; r
   };
   return (
     <span className="actions">
-      {ids.map((id) => id === "end" && endStep === "confirming"
-        ? <EndConfirm key={id} disabled={disabled} onConfirm={() => step("confirm")} onCancel={() => step("cancel")} />
-        : <button key={id} type="button" data-action={id} disabled={disabled} onClick={() => (id === "end" ? step("press_end") : send(id))}>{ACTION_LABEL[id]}</button>)}
+      {ids.map((id) => <button key={id} type="button" data-action={id} disabled={disabled} {...(id === "end" ? { "aria-expanded": endStep === "confirming" } : {})} onClick={() => (id === "end" ? step("press_end") : send(id))}>{ACTION_LABEL[id]}</button>)}
+      {endStep === "confirming" && <EndConfirm disabled={disabled} onConfirm={() => step("confirm")} onCancel={() => step("cancel")} />}
     </span>
   );
 }
