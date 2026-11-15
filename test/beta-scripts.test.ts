@@ -70,15 +70,15 @@ describe("afterclass-deploy", () => {
     expect(run.stdout).toContain(`${COMMIT} (${NEW}) is healthy`);
   });
 
-  test("a digest that never turns healthy is rolled back, and the run still fails", () => {
+  test("a digest that never turns healthy is rolled back, and the run exits 3", () => {
     const run = runDeploy({ previous: OLD, next: NEW, unhealthy: [NEW] });
-    expect(run.status).toBe(1);
+    expect(run.status).toBe(3);
     expect(run.image).toBe(OLD);
   });
 
   test("a failing systemctl restart is rolled back too, not left on the failed digest", () => {
     const run = runDeploy({ previous: OLD, next: NEW, restartFails: [NEW] });
-    expect(run.status).toBe(1);
+    expect(run.status).toBe(3);
     expect(run.image).toBe(OLD);
     expect(run.log.filter((line) => line === "systemctl restart afterclass-app.service")).toHaveLength(2);
     expect(run.stderr).toContain("rolled back to " + OLD);
@@ -86,7 +86,7 @@ describe("afterclass-deploy", () => {
 
   test("a rollback whose own restart fails still selects the previous digest and fails the run", () => {
     const run = runDeploy({ previous: OLD, next: NEW, restartFails: [NEW, OLD] });
-    expect(run.status).toBe(1);
+    expect(run.status).toBe(3);
     expect(run.image).toBe(OLD);
   });
 
@@ -131,9 +131,9 @@ describe("afterclass-deploy", () => {
     expect(run.log).toEqual([]);
   });
 
-  test("a pull that fails leaves the running digest selected and restarts nothing", () => {
+  test("a pull that fails leaves the running digest selected, restarts nothing and exits 1, not 3", () => {
     const run = runDeploy({ previous: OLD, next: NEW, pullFails: [NEW] });
-    expect(run.status).not.toBe(0);
+    expect(run.status).toBe(1);
     expect(run.image).toBe(OLD);
     expect(run.log).toEqual([`pull ${NEW}`]);
   });
@@ -158,7 +158,7 @@ describe("afterclass-deploy", () => {
 
   test("a failed save after a rollback is still reported, and the run still fails", () => {
     const run = runDeploy({ previous: OLD, next: NEW, unhealthy: [NEW], saveFails: true });
-    expect(run.status).toBe(1);
+    expect(run.status).toBe(3);
     expect(run.image).toBe(OLD);
     expect(run.stdout).toContain(`WARNING ${OLD} is not saved on /data`);
   });
@@ -537,7 +537,7 @@ describe("the approved digest", () => {
     expect(server.deploy(COMMIT, APPROVED).status).toBe(0);
     const NEXT = digestOf("3");
     stub(server.host.bin, "curl", `[ "$(cat ${join(server.host.root, "data/afterclass/current-image")})" = ${NEXT} ] && exit 22; exit 0`);
-    expect(server.deploy("e".repeat(40), NEXT).status).toBe(1);
+    expect(server.deploy("e".repeat(40), NEXT).status).toBe(3);
     expect(appRuns(server.host).at(-1)).toEndWith(` ${imageId(APPROVED)}`);
   });
 });

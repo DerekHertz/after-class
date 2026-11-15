@@ -22,6 +22,7 @@ api="https://api.github.com/repos/${repository}"
 dir=/data/afterclass
 handled="${dir}/autodeploy"
 etag_file="${dir}/autodeploy.etag"
+retry_file="${dir}/autodeploy.retry"
 
 events=()
 note() {
@@ -66,6 +67,7 @@ write() {
 
 # Appends "<tag> <digest>" to the list of handled releases, unless it is already the last line.
 handle() {
+  rm -f "$retry_file"
   [ "$(tail -n 1 "$handled" 2>/dev/null || true)" = "$1 $2" ] && return 0
   { cat "$handled" 2>/dev/null || true; printf '%s %s\n' "$1" "$2"; } > "${handled}.new"
   mv "${handled}.new" "$handled"
@@ -113,9 +115,28 @@ if [ -z "$target" ]; then
   exit 0
 fi
 
-if ! record=$(curl -fsSL --max-time 30 --max-filesize 4096 "https://github.com/${repository}/releases/download/${target}/image-digest.txt" 2>/dev/null); then
-  say "cannot read ${target}'s image-digest.txt, nothing done"
+# A failure before a rollout starts is not a decision, so the release is tried again, 2, 4 and 8 minutes later, then every
+# 16 and every 30. A newly published release is tried at once.
+now=$(date +%s)
+retry_count=0
+if read -r retry_tag count retry_at 2>/dev/null < "$retry_file" && [ "$retry_tag" = "$target" ] \
+  && [[ "$count" =~ ^[0-9]{1,6}$ ]] && [[ "$retry_at" =~ ^[0-9]{1,12}$ ]]; then
+  if [ "$now" -lt "$retry_at" ]; then
+    say "${target} is retried at ${retry_at}"
+    exit 0
+  fi
+  retry_count=$count
+fi
+retry_later() {
+  local delay=1800
+  if [ "$retry_count" -lt 4 ]; then delay=$((120 << retry_count)); fi
+  write "$retry_file" "${target} $((retry_count + 1)) $((now + delay))"
+  say "$1. ${target} is retried at $((now + delay))"
   exit 0
+}
+
+if ! record=$(curl -fsSL --max-time 30 --max-filesize 4096 "https://github.com/${repository}/releases/download/${target}/image-digest.txt" 2>/dev/null); then
+  retry_later "cannot read ${target}'s image-digest.txt, nothing done"
 fi
 pattern=$'^commit ([0-9a-f]{40})\ndigest (sha256:[0-9a-f]{64})$'
 if [[ ! "$record" =~ $pattern ]]; then
@@ -147,14 +168,12 @@ fi
 
 # The pull comes before the master check, so a GHCR outage costs no API request. Pulling runs nothing.
 if ! /usr/local/sbin/afterclass-pull "$digest" >/dev/null 2>&1; then
-  say "cannot pull ${digest} for ${target}, trying again at the next check"
-  exit 0
+  retry_later "cannot pull ${digest} for ${target}"
 fi
 
 if ! where=$(curl -fsS --max-time 20 -H 'Accept: application/vnd.github+json' "${api}/compare/master...${commit}?per_page=1" 2>/dev/null \
   | python3 -I -c 'import json, sys; print(json.load(sys.stdin)["status"])' 2>/dev/null); then
-  say "cannot ask GitHub whether ${commit} is on master, nothing done"
-  exit 0
+  retry_later "cannot ask GitHub whether ${commit} is on master, nothing done"
 fi
 if [ "$where" != identical ] && [ "$where" != behind ]; then
   say "refused ${target}: its commit ${commit} is ${where} master, not on it"
@@ -167,10 +186,17 @@ say "deploying ${target} (${commit}, ${digest}) over ${running:-nothing}"
 result=0
 output=$(/usr/local/sbin/afterclass-deploy "$commit" "$digest" 2>&1) || result=$?
 while IFS= read -r line; do note "$line"; done <<<"$output"
-handle "$target" "$digest"
-finish
-if [ "$result" -ne 0 ]; then
-  say "${target} failed and is not tried again. Publish a fixed release, or retry by hand with scripts/deploy-beta.sh ${target}."
-  exit 1
-fi
-say "${target} is live"
+case "$result" in
+  0)
+    handle "$target" "$digest"
+    finish
+    say "${target} is live"
+    ;;
+  3)
+    handle "$target" "$digest"
+    finish
+    say "${target} failed and is not tried again. Publish a fixed release, or retry by hand with scripts/deploy-beta.sh ${target}."
+    exit 1
+    ;;
+  *) retry_later "${target} did not start its rollout, afterclass-deploy exited ${result}" ;;
+esac

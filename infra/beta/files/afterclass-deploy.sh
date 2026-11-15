@@ -2,8 +2,9 @@
 # Usage: afterclass-deploy <commit hash> <image digest>. Run by the Systems Manager deploy document as root.
 # The digest names the image, and the commit only labels the output. Pulls the image first, so the running container keeps
 # serving during the download. Then it records the digest, restarts the app and waits for /health. A digest that never
-# turns healthy is rolled back to the previous one, and the run still fails. A healthy image is saved to the data volume,
-# so a replacement instance never depends on GHCR still holding the image.
+# turns healthy is rolled back to the previous one, and the run exits 3. Any other failure exits before the app is
+# restarted, so afterclass-autodeploy can tell a rollout that failed from one that never started. A healthy image is saved
+# to the data volume, so a replacement instance never depends on GHCR still holding the image.
 set -euo pipefail
 
 . /etc/afterclass/settings.env
@@ -21,7 +22,10 @@ fi
 
 # Two deploys at once would race on the state file and the restart.
 exec 9>/run/afterclass-deploy.lock
-flock -w 600 9
+if ! flock -w 600 9; then
+  echo "afterclass-deploy: another deploy held the lock for 10 minutes" >&2
+  exit 1
+fi
 
 if ! mountpoint -q /data; then
   echo "afterclass-deploy: /data is not mounted" >&2
@@ -87,4 +91,4 @@ journalctl -u afterclass-app.service -n 30 --no-pager >&2 || true
 if [ -n "$previous" ] && [ "$previous" != "$digest" ]; then
   rollback
 fi
-exit 1
+exit 3

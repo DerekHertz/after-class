@@ -39,8 +39,14 @@ class Server {
   private readonly state = join(this.host.root, "data/afterclass/current-image");
   private readonly aws = join(this.host.root, "aws-calls");
 
+  private readonly clock = join(this.host.root, "clock");
+  private readonly lockBusy = join(this.host.root, "deploy-lock-busy");
+
   constructor(opts: { running?: string; unhealthy?: string[]; pullFails?: boolean; mounted?: boolean } = {}) {
     const { host, gh, state } = this;
+    this.now = 1_000_000;
+    stub(host.bin, "date", `if [ "$*" = +%s ]; then cat ${this.clock}; else exec /usr/bin/date "$@"; fi`);
+    stub(host.bin, "flock", `if [ "$1" = -w ] && [ -e ${this.lockBusy} ]; then echo "flock -w $2 timed out" >> ${host.log}; exit 1; fi\nexec /usr/bin/flock "$@"`);
     mkdirSync(join(gh, "records"), { recursive: true });
     writeFileSync(join(host.root, "settings.env"), "APP_PORT=8080\nAWS_REGION=us-east-2\nLOG_GROUP=/afterclass-beta\n");
     if (opts.running) writeFileSync(state, `${opts.running}\n`);
@@ -90,6 +96,17 @@ esac`,
     stub(host.root, "afterclass-pull", `echo "pull $1" >> ${host.log}\n${opts.pullFails ? "exit 1" : "exit 0"}`);
     stub(host.root, "afterclass-save-image", `echo "save $*" >> ${host.log}`);
     chmodSync(installScript(host, "afterclass-deploy"), 0o755);
+  }
+
+  /** The time, in seconds since the epoch, that the scripts read from date +%s. */
+  set now(seconds: number) {
+    writeFileSync(this.clock, `${seconds}\n`);
+  }
+
+  /** Whether another deploy holds the deploy lock for longer than afterclass-deploy waits. */
+  set deployLockBusy(busy: boolean) {
+    if (busy) writeFileSync(this.lockBusy, "");
+    else Bun.spawnSync(["rm", "-f", this.lockBusy]);
   }
 
   /** Sets what GitHub serves from now on. Unset fields keep their defaults, not their earlier values. */
@@ -197,6 +214,7 @@ describe("afterclass-autodeploy", () => {
       expect(server.log).not.toContain("systemctl restart afterclass-app.service");
       expect(server.shipped().some(({ message }) => message.includes(reason))).toBe(true);
       server.github(v015);
+      server.now = 1_000_000 + 120;
       expect(server.run().status).toBe(0);
       expect(server.running).toBe(NEW);
     });
@@ -273,6 +291,50 @@ describe("afterclass-autodeploy", () => {
     expect(server.deploys()).toHaveLength(restarts);
   });
 
+  test("a deploy that times out on its lock is not handled, and the release deploys once the lock is free", () => {
+    const server = new Server({ running: OLD });
+    server.github(v015);
+    server.deployLockBusy = true;
+    const run = server.run();
+    expect(run.status).toBe(0);
+    expect(run.output).toContain("v0.1.5 did not start its rollout");
+    expect(server.running).toBe(OLD);
+    expect(server.log).not.toContain("systemctl restart afterclass-app.service");
+    server.deployLockBusy = false;
+    server.now = 1_000_000 + 121;
+    expect(server.run().status).toBe(0);
+    expect(server.running).toBe(NEW);
+  });
+
+  test("a release that keeps failing before its rollout is retried after 2, 4, 8 minutes, then at most every 30", () => {
+    const server = new Server({ running: OLD });
+    server.github(v015);
+    server.deployLockBusy = true;
+    const attempts = () => server.log.filter((line) => line.startsWith("flock -w")).length;
+    let t = 1_000_000;
+    server.run();
+    for (const [tried, wait] of [120, 240, 480, 960, 1800, 1800].entries()) {
+      server.now = t + wait - 1;
+      expect(server.run().output).toContain(`v0.1.5 is retried at ${t + wait}`);
+      expect(attempts()).toBe(tried + 1);
+      t += wait;
+      server.now = t;
+      expect(server.run().output).toContain("v0.1.5 did not start its rollout");
+    }
+  });
+
+  test("a newly published release is tried at once, even while an older one waits to be retried", () => {
+    const server = new Server({ running: OLD });
+    server.github(v015);
+    server.deployLockBusy = true;
+    server.run();
+    server.deployLockBusy = false;
+    const v016 = digestOf("6");
+    server.github({ releases: [...v015.releases, { tag_name: "v0.1.6" }], records: { ...v015.records, "v0.1.6": record(v016) } });
+    expect(server.run().status).toBe(0);
+    expect(server.running).toBe(v016);
+  });
+
   test("an unchanged list is asked for with its ETag, answers 304, and reads no record", () => {
     const server = new Server({ running: OLD });
     server.github({ ...v015, etag: '"v15"' });
@@ -318,13 +380,14 @@ describe("afterclass-autodeploy", () => {
     expect(server.deploys()).toEqual([]);
   });
 
-  test("a failed pull leaves the app alone, and the next check tries again", () => {
+  test("a failed pull leaves the app alone, is not handled, and is tried again after the wait", () => {
     const server = new Server({ running: OLD, pullFails: true });
     server.github(v015);
-    expect(server.run().output).toContain("trying again at the next check");
+    expect(server.run().output).toContain("v0.1.5 is retried at 1000120");
     expect(server.log).not.toContain("systemctl restart afterclass-app.service");
-    expect(server.log.filter((line) => line.startsWith("curl https://api.github.com/repos/DerekHertz/after-class/compare/"))).toEqual([]);
-    expect(server.run().output).toContain("trying again at the next check");
+    server.now = 1_000_000 + 120;
+    expect(server.run().output).toContain(`cannot pull ${NEW} for v0.1.5`);
+    expect(server.running).toBe(OLD);
   });
 
   test("an unmounted /data asks GitHub nothing", () => {
