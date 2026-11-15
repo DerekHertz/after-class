@@ -48,8 +48,19 @@ import { BUDGET_HOLDS_REVIEW_ID } from "../migrations-budget";
  *   other task on claude-opus-5-5). Experiment 8 measured, on Opus with the 1 hour cache, a first tutor turn at $0.5575, later turns
  *   at $0.02 to $0.04 and a wrap-up at $0.1688 (docs/experiments/08-api-tutor.md, estimates at list price). Of that first turn,
  *   $0.5540 was writing 69,251 tokens at 2 times the input price. A review's first turn now writes them at 1.25 times, but the turn
- *   after a long pause writes them at 2 times again (`tutorCache` in review/tutor.ts), so $0.75 still covers that turn on Opus, and
- *   on Sonnet ($0.2770 for the write) with room. Interpretation, revision and the diagram summary are not measured on the API.
+ *   after a long pause writes them at 2 times again (`tutorCache` in review/tutor.ts), so $0.75 covered that turn on Opus, and
+ *   on Sonnet ($0.2770 for the write) with room, before the tutor's own estimate below was set from the Sonnet audit. Interpretation, revision and the diagram summary are not measured on the API.
+ *   Tutor turn: reserved at $0.15. The tutor runs on Sonnet unless AFTERCLASS_TUTOR_MODEL=opus, and the Fable end-to-end audit of 2026-11-14
+ *   measured it (docs/trail/fable-e2e-2026-11-14-data.json, 12 turns of one review on Sonnet): a first turn of 31,241 input tokens with
+ *   149 output, later turns reading 29,604 from the cache with at most 505 output tokens, $0.0126 to $0.0241 each at list price. The
+ *   turn that decides a reservation is the one that writes the system block, because it is the dearest: the first turn of a review, or
+ *   the one after a long pause (`tutorCache`), which writes at the 1 hour rate. 31,241 tokens x $2 x 2 per million = $0.1250 plus 2,000
+ *   output tokens (four times the most a measured turn spent) x $10 per million = $0.02, $0.145, reserved as $0.15. The old $0.75 was
+ *   `worstCaseUsd` at 16,000 output tokens on 50,000 input, which no tutor turn comes near, and it refused a learner a turn costing
+ *   $0.02 once they had used $4.25 of $5. At $0.15 that is $4.85. A longer lecture can cost more: experiment 8's 69,251-token context
+ *   is $0.28 plus output on Sonnet, so its first turn settles about $0.15 above its reservation. That overrun is the one the header
+ *   allows, it happens once per review (or per long pause), and the settlement then counts it. On Opus the same turn settles at
+ *   twice these figures. Later turns cost a tenth of it, so the reservation is mostly slack on them, but only until it is settled.
  *   Priced as `worstCaseUsd` prices a call (all of max_tokens spent, every input token a 1 hour cache write), a structured call
  *   with 50,000 input tokens comes to $0.75 at max_tokens 16,000. Interpretation streams with max_tokens 32,000 (STREAM_MAX_TOKENS), so
  *   the same formula gives 32,000 x $20 per million (Opus) = $0.64 plus (50,000 + 4,096 allowance) x $8 per million (1 hour write) =
@@ -70,7 +81,7 @@ export const ESTIMATE_USD: Readonly<Record<Purpose, number>> = {
   interpretation: 1.08,
   claim_revision: 0.75,
   resource_search: 1,
-  tutor_turn: 0.75,
+  tutor_turn: 0.15,
   wrap_up: 0.5,
   diagram_summary: 0.75,
 };
