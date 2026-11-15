@@ -34,16 +34,19 @@ pattern=$'^commit ([0-9a-f]{40})\ndigest (sha256:[0-9a-f]{64})$'
 [[ "$record" =~ $pattern ]] || fail "the ${tag} release's image-digest.txt is not a commit line and a digest line"
 commit="${BASH_REMATCH[1]}"
 image="${repository}@${BASH_REMATCH[2]}"
-name="afterclass-try-${tag//./-}"
+# A run of the same tag elsewhere must not share a name, or its cleanup would stop this run's container.
+suffix=$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
+name="afterclass-try-${tag//./-}-${suffix}"
 
 echo "try-release: pulling ${image}" >&2
 docker pull --quiet --platform linux/arm64 "$image" >/dev/null
 
+# Each holds only what this run created, so cleanup never touches another run's container or image.
 started=""
 built=""
 context=""
 cleanup() {
-  if [ -n "$started" ]; then docker stop --time 5 "$name" >/dev/null 2>&1 || true; fi
+  if [ -n "$started" ]; then docker stop --time 5 "$started" >/dev/null 2>&1 || true; fi
   if [ -n "$built" ]; then docker image rm "$built" >/dev/null 2>&1 || true; fi
   if [ -n "$context" ]; then rm -rf "$context"; fi
 }
@@ -72,17 +75,16 @@ else
     echo "USER $(inspect '{{.Config.User}}')"
     echo "CMD $(inspect '{{json .Config.Cmd}}')"
   } >"${context}/Dockerfile"
-  built="afterclass-try:${tag}"
-  echo "try-release: this machine cannot run arm64 images, so it builds ${built} from the release's /app and /data on ${base}" >&2
-  docker build --quiet --platform linux/amd64 --tag "$built" "$context" >/dev/null
-  run_image="$built"
+  run_image="afterclass-try:${tag}-${suffix}"
+  echo "try-release: this machine cannot run arm64 images, so it builds ${run_image} from the release's /app and /data on ${base}" >&2
+  docker build --quiet --platform linux/amd64 --tag "$run_image" "$context" >/dev/null
+  built="$run_image"
   how="the release's /app and /data on the amd64 build of ${base}"
 fi
 
 # The app answers only a Host of 127.0.0.1:<its own port>, so it listens on the port the browser uses.
-started=1
-docker run --rm --detach --name "$name" --env AFTERCLASS_MODE=replay --env "AFTERCLASS_PORT=${port}" \
-  --publish "127.0.0.1:${port}:${port}" --cap-drop ALL --security-opt no-new-privileges "$run_image" >/dev/null
+started=$(docker run --rm --detach --name "$name" --env AFTERCLASS_MODE=replay --env "AFTERCLASS_PORT=${port}" \
+  --publish "127.0.0.1:${port}:${port}" --cap-drop ALL --security-opt no-new-privileges "$run_image")
 
 healthy=""
 for _ in $(seq 1 60); do
@@ -93,7 +95,7 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 if [ -z "$healthy" ]; then
-  docker logs "$name" >&2 || true
+  docker logs "$started" >&2 || true
   fail "${tag} did not answer /health within 60 seconds"
 fi
 
@@ -109,5 +111,5 @@ try-release: open http://127.0.0.1:${port}/app/ and press Ctrl-C here to stop it
 
 EOF
 # In the background, so a TERM or INT reaches the trap at once instead of after the log stream ends.
-docker logs --follow "$name" &
+docker logs --follow "$started" &
 wait $!

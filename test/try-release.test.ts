@@ -15,7 +15,11 @@ interface Opts {
   readonly record?: string;
   readonly arm64?: boolean;
   readonly healthy?: boolean;
+  /** docker run --detach fails, as it does when the container name is taken. */
+  readonly runFails?: boolean;
 }
+
+const CONTAINER = "0123456789ab".repeat(4);
 
 interface Run {
   readonly status: number;
@@ -49,7 +53,10 @@ esac`,
     "docker",
     `${log}
 case "$1" in
-  run) case "$*" in *"--entrypoint true"*) exit ${opts.arm64 ? 0 : 1};; esac;;
+  run) case "$*" in
+    *"--entrypoint true"*) exit ${opts.arm64 ? 0 : 1};;
+    *--detach*) ${opts.runFails ? 'echo "Conflict. The container name is already in use" >&2; exit 125' : `echo ${CONTAINER}`};;
+  esac;;
   image) case "$*" in
     *"{{range .Config.Env}}"*) printf '%s\\n' PATH=/usr/bin BUN_INSTALL=/x AFTERCLASS_MODE=replay AFTERCLASS_PORT=8080 AFTERCLASS_DATA=/data/db;;
     *"{{.Config.WorkingDir}}"*) echo /app;;
@@ -103,10 +110,26 @@ describe("scripts/try-release.sh", () => {
     for (const flag of ["--env-file", "--volume", "-v ", "--mount", "--network host"]) expect(app).not.toContain(flag);
   });
 
-  test("stops the container when it exits", () => {
+  test("stops the container it started, by the ID docker run printed, when it exits", () => {
     const run = tryRelease({ arm64: true });
-    expect(of(run, "docker", "stop")).toEqual([["docker", "stop", "--time", "5", "afterclass-try-v0-1-5"]]);
+    expect(of(run, "docker", "stop")).toEqual([["docker", "stop", "--time", "5", CONTAINER]]);
     expect(run.calls.findIndex((c) => c[1] === "stop")).toBeGreaterThan(run.calls.findIndex((c) => c[1] === "logs"));
+  });
+
+  test("names each run's container uniquely, so a second run of the same tag never collides with the first", () => {
+    const name = (run: Run) => appRun(run)![appRun(run)!.indexOf("--name") + 1]!;
+    const [first, second] = [name(tryRelease({ arm64: true })), name(tryRelease({ arm64: true }))];
+    expect(first).toMatch(/^afterclass-try-v0-1-5-[0-9a-f]{8}$/);
+    expect(second).not.toBe(first);
+  });
+
+  test("a docker run that fails stops no container and removes only the image this run built", () => {
+    const run = tryRelease({ arm64: false, runFails: true });
+    expect(run.status).not.toBe(0);
+    expect(of(run, "docker", "stop")).toEqual([]);
+    const built = of(run, "docker", "build")[0]!;
+    const tag = built[built.indexOf("--tag") + 1]!;
+    expect(of(run, "docker", "image").filter((c) => c[2] === "rm")).toEqual([["docker", "image", "rm", tag]]);
   });
 
   test("on a machine that cannot run arm64, runs the release's own files on the Bun base its Dockerfile pins, says so, and removes the image after", () => {
@@ -127,10 +150,11 @@ describe("scripts/try-release.sh", () => {
         "",
       ].join("\n"),
     );
-    expect(appRun(run)!.at(-1)).toBe("afterclass-try:v0.1.5");
+    const image = appRun(run)!.at(-1)!;
+    expect(image).toMatch(/^afterclass-try:v0\.1\.5-[0-9a-f]{8}$/);
     expect(appRun(run)).toContain("AFTERCLASS_MODE=replay");
     expect(run.stdout).toContain(`the release's /app and /data on the amd64 build of ${BASE}`);
-    expect(of(run, "docker", "image").some((c) => c[2] === "rm" && c[3] === "afterclass-try:v0.1.5")).toBe(true);
+    expect(of(run, "docker", "image").some((c) => c[2] === "rm" && c[3] === image)).toBe(true);
   });
 
   const records: [string, string][] = [
