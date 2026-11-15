@@ -45,6 +45,16 @@ const setHidden = (page: Page, hidden: boolean) => page.evaluate((hidden) => {
   document.dispatchEvent(new Event("visibilitychange"));
 }, hidden);
 
+/** Gives the stage's canvas no size, or its own again, as a layout that collapses its box would. */
+const setCanvasSize = (page: Page, shown: boolean) => page.evaluate((shown) => {
+  document.getElementById("no-size")?.remove();
+  if (shown) return;
+  const style = document.createElement("style");
+  style.id = "no-size";
+  style.textContent = ".front-row-canvas { width: 0 !important; height: 0 !important; }";
+  document.head.append(style);
+}, shown);
+
 test.describe("with motion on", () => {
   test.use({ reducedMotion: "no-preference" });
   // The narrow project's 320 px window is a phone composition, which stays still (see "on a phone").
@@ -137,6 +147,57 @@ test.describe("with motion on", () => {
     expect(await offscreen()).toBe(0);
     await setHidden(page, false);
     await expect.poll(offscreen).toBeGreaterThan(1440 * 900);
+  });
+
+  test("a stage with no size holds no offscreen pixels, and builds them again when it has one", async ({ page }) => {
+    await page.addInitScript(() => {
+      const made: HTMLCanvasElement[] = [];
+      const create = document.createElement.bind(document);
+      document.createElement = ((name: string, options?: ElementCreationOptions) => {
+        const element = create(name, options);
+        if (element instanceof HTMLCanvasElement) made.push(element);
+        return element;
+      }) as typeof document.createElement;
+      (window as unknown as { offscreen: () => number }).offscreen = () => made.filter((c) => !c.isConnected).reduce((sum, c) => sum + c.width * c.height, 0);
+    });
+    const offscreen = () => page.evaluate(() => (window as unknown as { offscreen: () => number }).offscreen());
+    await openRoom(page, "last-desk");
+    await expect.poll(offscreen).toBeGreaterThan(1440 * 900);
+    await setCanvasSize(page, false);
+    await expect.poll(() => page.locator(".front-row-canvas").evaluate((c: HTMLCanvasElement) => c.width)).toBe(0);
+    expect(await offscreen()).toBe(0);
+    await page.waitForTimeout(500);
+    expect(await offscreen()).toBe(0);
+    await setCanvasSize(page, true);
+    await expect.poll(offscreen).toBeGreaterThan(1440 * 900);
+  });
+
+  test("a stage that has no size and then its old size shows the whole room", async ({ page }) => {
+    await page.clock.install({ time: 0 });
+    await page.clock.pauseAt(1000);
+    await page.addInitScript(({ key, value }) => {
+      localStorage.setItem(key, JSON.stringify(value));
+      window.requestAnimationFrame = (callback) => window.setTimeout(() => callback(performance.now()), 0);
+      const canvas = () => document.querySelector<HTMLCanvasElement>(".front-row-canvas")!;
+      const pixels = () => { const c = canvas(); return new Uint32Array(c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data.buffer); };
+      (window as unknown as { differing: () => number }).differing = () => {
+        const stepped = pixels();
+        canvas().dispatchEvent(new Event("contextrestored"));
+        const whole = pixels();
+        let differing = 0;
+        for (let i = 0; i < whole.length; i++) if (stepped[i] !== whole[i]) differing++;
+        return differing;
+      };
+    }, { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene: "last-desk", motion: "system" } });
+    await page.goto("/?scenario=review&clean=1");
+    await expect(page.locator(".front-row-canvas[data-stage=painted]")).toBeAttached();
+    await page.clock.runFor(1000);
+    await setCanvasSize(page, false);
+    await expect(page.locator(".front-row-canvas")).toHaveJSProperty("width", 0);
+    await page.clock.runFor(10);
+    await setCanvasSize(page, true);
+    await expect(page.locator(".front-row-canvas")).toHaveJSProperty("width", 1440);
+    expect(await page.evaluate(() => (window as unknown as { differing: () => number }).differing())).toBe(0);
   });
 
   test("the app's Reduce motion setting keeps the room still", async ({ page }) => {

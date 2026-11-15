@@ -156,6 +156,8 @@ class Stage {
     if (this.canvas.width !== device.width || this.canvas.height !== device.height) {
       this.canvas.width = device.width;
       this.canvas.height = device.height;
+      // Resizing cleared the backing store, so what the bands and damage were measured against is gone.
+      this.forget();
     }
     this.paint();
   }
@@ -170,7 +172,12 @@ class Stage {
     this.cancelFrame();
     this.release();
     const { wanted, box } = this;
-    if (wanted === null || box === null || box.css.width === 0 || box.css.height === 0) return;
+    if (wanted === null || box === null) return;
+    if (box.css.width === 0 || box.css.height === 0) {
+      this.forget();
+      this.stale = true;
+      return;
+    }
     this.stale = document.hidden;
     if (this.stale) {
       this.forget();
