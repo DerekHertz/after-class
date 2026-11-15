@@ -30,6 +30,12 @@ ${domain} {
 		}
 	}
 
+	# The largest request the app reads is 8 MiB (MAX_BODY_BYTES in src/backend/http.ts). Refusing a larger one here means
+	# Caddy never forwards it, so a flood of oversized posts cannot make the app buffer them.
+	request_body {
+		max_size 8MiB
+	}
+
 	# The tutor turn streams NDJSON, so the proxy flushes every write instead of buffering.
 	reverse_proxy afterclass-app:${app_port} {
 		flush_interval -1

@@ -7,6 +7,7 @@ import type { UserDb } from "../src/backend/db";
 import type { DiagramSummaryInput, DiagramSummaryOutput } from "../src/backend/diagram";
 import { createDiagrams } from "../src/backend/diagram";
 import { createEvidence } from "../src/backend/evidence";
+import type { IngestLimits } from "../src/backend/evidence/ingest-limits";
 import { serve } from "../src/backend/http";
 import type { Preparation } from "../src/backend/preparation";
 import { createLedger } from "../src/backend/providers/ledger";
@@ -57,8 +58,9 @@ export function fixtureApp(): string {
   return dir;
 }
 
-function evidenceOn(db: UserDb) {
+function evidenceOn(db: UserDb, limits?: IngestLimits) {
   return createEvidence(db, scratchDir("afterclass-data-"), {
+    ...(limits ? { limits } : {}),
     lookupFrameChange: (input) => ({ kind: "missing", key: stableId("key", input.after.frame.id) }),
     runFrameChange: async () => undefined,
     frameChangeKey: (input) => stableId("key", input.after.frame.id),
@@ -67,9 +69,9 @@ function evidenceOn(db: UserDb) {
 }
 
 /** The real evidence module on an in-memory db; reviews is a fake whose invite state a test sets. */
-export function world() {
+export function world(limits?: IngestLimits) {
   const db = testUserDb();
-  const evidence = evidenceOn(db);
+  const evidence = evidenceOn(db, limits);
   const invite = { state: { state: "none" } as InviteState, answers: [] as InviteAnswer[] };
   const reviews = {
     invite: () => invite.state,
@@ -83,11 +85,12 @@ export function world() {
   return { db, evidence, reviews, invite, stored };
 }
 
-export function start(appDir = fixtureApp(), extra: { maxBodyBytes?: number; healthAnyHost?: boolean } = {}) {
-  const w = world();
+export function start(appDir = fixtureApp(), extra: { maxBodyBytes?: number; healthAnyHost?: boolean; limits?: IngestLimits } = {}) {
+  const { limits, ...serveExtra } = extra;
+  const w = world(limits);
   const server = serve({
     modules: { ledger: createLedger(w.db), evidence: w.evidence, reviews: w.reviews },
-    auth: { port: 0, extensionId: EXT_ID, token: TOKEN }, appDir, ...extra,
+    auth: { port: 0, extensionId: EXT_ID, token: TOKEN }, appDir, ...serveExtra,
   });
   servers.push(server);
   return { server, port: server.port as number, base: `http://127.0.0.1:${server.port}`, ...w };

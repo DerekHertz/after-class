@@ -32,7 +32,7 @@ import type {
   Connection, ConnectionRequest, ControlEvent, DeadLetterSummary, FromContent, OptionsRequest, PopupRequest, StoredConnection, TabCaptureState, ToContent,
 } from "./control";
 import { classifyStatus, createFlusher, createIdbOutbox, isIngestAck } from "./outbox";
-import type { FlushOutcome, Transport } from "./outbox";
+import type { FlushOutcome, Gate, GateStore, Transport } from "./outbox";
 
 export { transition } from "./control";
 export type { PopupRequest, TabCaptureState } from "./control";
@@ -42,6 +42,7 @@ const TOKEN_KEY = "pairingToken";
 const CONNECTION_KEY = "connection";
 const OWNERS_KEY = "captureOwners";
 const TABS_KEY = "tabs";
+const GATES_KEY = "uploadGates";
 const FLUSH_ALARM = "afterclass-flush";
 const HEARTBEAT_MIN_MS = 3000;
 
@@ -118,7 +119,7 @@ const forgetToken = (refused: string) =>
     if (c?.token === refused) await chrome.storage.local.set({ [CONNECTION_KEY]: { token: null, userId: c.userId } satisfies StoredConnection });
   });
 
-type Fetched = { readonly ok: true; readonly json: unknown } | { readonly ok: false; readonly retryable: boolean; readonly error: string; readonly rejected?: boolean };
+type Fetched = { readonly ok: true; readonly json: unknown } | { readonly ok: false; readonly retryable: boolean; readonly error: string; readonly rejected?: boolean; readonly waitMs?: number };
 
 /** The bearer this request carries, or why it has none. A hosted request for a capture also needs that capture's account to be the connected one. */
 async function credential(capture: CaptureId | undefined): Promise<{ readonly token: string } | { readonly error: string }> {
@@ -149,7 +150,7 @@ async function backendFetch(method: "GET" | "POST", path: string, body?: unknown
         await forgetToken(cred.token);
         return { ok: false, retryable: false, error: "disconnected from your account: press Reconnect in the After Class popup" };
       }
-      const c = classifyStatus(res.status);
+      const c = classifyStatus(res.status, res.headers.get("Retry-After"));
       // The backend says which fact it refused; keep that with the dead letter.
       const detail = c.rejected ? (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 200) : "";
       return { ok: false, ...c, error: detail === "" ? c.error : `${c.error}: ${detail}` };
@@ -166,9 +167,27 @@ const transport: Transport = async (captureId, facts) => {
   return isIngestAck(r.json) ? { ok: true, ack: r.json } : { ok: false, retryable: false, error: "backend sent an unexpected acknowledgement" };
 };
 
+/** The gates live in chrome.storage.local so a worker the browser stopped still holds them when an alarm wakes it. */
+let gateWrites: Promise<unknown> = Promise.resolve();
+const storedGates = async (): Promise<Record<string, Gate>> => ((await chrome.storage.local.get(GATES_KEY))[GATES_KEY] as Record<string, Gate> | undefined) ?? {};
+const gates: GateStore = {
+  read: async (captureId) => (await storedGates())[captureId] ?? null,
+  write: (captureId, gate) => {
+    const next = gateWrites.then(async () => {
+      const all = { ...(await storedGates()) };
+      if (gate === null) delete all[captureId];
+      else all[captureId] = gate;
+      await chrome.storage.local.set({ [GATES_KEY]: all });
+    });
+    gateWrites = next.catch(() => {});
+    return next;
+  },
+};
+
 const flusher = createFlusher({
   store,
   transport,
+  gates,
   schedule: (fn, ms) => void setTimeout(fn, ms),
   onOutcome: (captureId, outcome) => void serialized(() => applyOutcome(captureId, outcome)),
 });
@@ -394,6 +413,9 @@ async function handlePopup(req: PopupRequest): Promise<WorkerResponse> {
       if (req.type === "start" && !["local", "connected"].includes((await connection()).kind)) throw new Error("connect After Class to your account first: press Connect");
       await ensureWatchPage(req.tabId);
       await ensureContentScript(req.tabId);
+      // Resuming is the learner's word that they want this capture uploaded, so the wait ends before the event's own flush.
+      const held = await readState(req.tabId);
+      if (req.type === "resume" && held !== null) await flusher.release(held.captureId);
       return { state: await applyEvent(req.tabId, req.type === "start" ? { kind: "start", tabId: req.tabId } : { kind: "resume" }) };
     }
     case "pause":
