@@ -86,9 +86,9 @@ export const WRAP_UPS_PER_REVIEW = 6;
 
 /** SQL over `budget_holds h`: a hold that is tutoring the learner got, admitted by the caps (a hold exists only when they admitted it) and charged. */
 /*
- * A review started before migration 006 has holds with no review id, so its paid tutoring cannot be seen. Such a review counts as
- * tutored when it has a stored tutor turn. The set is closed at the upgrade, and each still passes the caps at most
- * WRAP_UPS_PER_REVIEW times.
+ * A review started before migration 006 has holds with no review id, so its paid tutoring cannot be tied to it. Such a review counts
+ * as tutored when it has a stored tutor turn and the user paid for a tutor request between its start and the upgrade. The set is
+ * closed at the upgrade, and each still passes the caps at most WRAP_UPS_PER_REVIEW times.
  */
 export const PAID_TUTOR_HOLD = "h.purpose = 'tutor_turn' AND h.settled_micros > 0";
 
@@ -172,6 +172,8 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
        WHERE r.user_id = ? AND r.id = ?
          AND r.started_ms < (SELECT applied_ms FROM schema_migrations WHERE id = '${BUDGET_HOLDS_REVIEW_ID}')
          AND EXISTS (SELECT 1 FROM review_turns t WHERE t.review_id = r.id AND t.actor = 'tutor')
+         AND EXISTS (SELECT 1 FROM budget_holds h WHERE h.user_id = r.user_id AND h.review_id IS NULL AND ${PAID_TUTOR_HOLD}
+                     AND h.reserved_ms >= r.started_ms AND h.reserved_ms < (SELECT applied_ms FROM schema_migrations WHERE id = '${BUDGET_HOLDS_REVIEW_ID}'))
        LIMIT 1`,
     ),
     price: db.sql.query(`UPDATE budget_holds SET priced_micros = ? WHERE id = ? AND settled_micros IS NULL`),

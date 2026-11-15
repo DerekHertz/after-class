@@ -136,8 +136,13 @@ db.close();`,
 type Rig = ReturnType<typeof rig>;
 
 /** A hosted-shaped stack: the budget, the memo, the review module and the record share one database, as in main.ts. */
-function rig(wrapFailures = 0, sharedDb: UserDb | null = null) {
+/** Holds written before 006 carry no review id, so the upgrade moment decides which reviews are judged by their stored turns. */
+const upgradedAt = (db: UserDb, ms: number) => db.sql.run("UPDATE schema_migrations SET applied_ms = ? WHERE id = '006-budget-holds-review'", [ms]);
+
+function rig(wrapFailures = 0, sharedDb: UserDb | null = null, legacyTutor = false) {
   const db = sharedDb ?? testUserDb();
+  // The test clock is fixed at NOW, before the real time migration 006 was applied, so mark the upgrade as already past.
+  upgradedAt(db, NOW - 1);
   const world = new World(db);
   const budget = createBudget(db, { limits: { userUsd: 5, totalUsd: 50 }, stopped: () => false, now: () => NOW });
   const memo = createMemo(db, "live", { budget, retryDelayMs: () => 0, now: () => NOW });
@@ -169,7 +174,7 @@ function rig(wrapFailures = 0, sharedDb: UserDb | null = null) {
     db,
     {
       ...world.deps,
-      runTutor: (i, streamTo, signal, onRetry) => memo.run(tutor as any, i, { streamTo, signal, onRetry, review: i.state.reviewId }) as any,
+      runTutor: (i, streamTo, signal, onRetry) => memo.run(tutor as any, i, { streamTo, signal, onRetry, ...(legacyTutor ? {} : { review: i.state.reviewId }) }) as any,
       clearFailures: memo.clearFailures,
       endedInTx: (id) => record.markEndedInTx(id),
     },
@@ -250,6 +255,28 @@ describe("a real review that passes the cap mid-review still finishes and saves"
     expect(r.wrap.calls).toHaveLength(6);
     expect((await r.record.save(r.id)).kind).toBe("saved");
     expect(r.wrap.calls).toHaveLength(6);
+  });
+});
+
+describe("a review started before migration 006", () => {
+  test("with a tutor turn paid before the upgrade, it still saves past the cap", async () => {
+    const r = rig(0, null, true);
+    upgradedAt(r.db, NOW + 1);
+    await r.turn(begin);
+    r.cap();
+    await r.turn(act("end"));
+    expect((await r.record.save(r.id)).kind).toBe("saved");
+    expect(r.wrap.calls).toHaveLength(1);
+  });
+
+  test("started after the upgrade, a tutor turn with no review id does not open the exemption", async () => {
+    const r = rig(0, null, true);
+    upgradedAt(r.db, NOW - 1);
+    await r.turn(begin);
+    r.cap();
+    await r.turn(act("end"));
+    expect((await r.record.save(r.id)).kind).not.toBe("saved");
+    expect(r.wrap.calls).toHaveLength(0);
   });
 });
 
