@@ -9,6 +9,7 @@ import { useAppearance, useSceneActivity } from "./appearance";
 import { FrontRowScene, reserveNavSpace } from "./front-row";
 import { react } from "./room/reaction-store";
 import { inputFromTurnEvent } from "./room/reactions";
+import { deriveProgress } from "./room/progress";
 import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
 import { ACTION_LABEL, END_CONFIRM_TEXT, composerActions, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow, softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, strandedEndTurn, selectedEvidenceIds, shouldSubmitAnswer, questionScrollTop, } from "./core";
@@ -83,6 +84,11 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   }, [inspecting, state.view?.turns.length]);
   const saved = state.savedSummary !== null;
   useEffect(() => { if (saved) react({ type: "review_saved" }); }, [saved]);
+  // The room's progress comes from the saved record only, read again once this review is saved.
+  const record = useAsync(useCallback(() => api.record({}), [api]));
+  const reloadRecord = record.reload;
+  useEffect(() => { if (saved) reloadRecord(); }, [saved, reloadRecord]);
+  const progress = useMemo(() => (record.data === null ? null : deriveProgress(record.data.observations)), [record.data]);
   useSceneActivity(state.saving ? "saving" : listening ? "listening" : state.view?.state.phase === "paused" ? "paused" : state.live?.status === "streaming" ? "waiting" : "idle");
 
   /** Picks up an object. Switching from one object to the other keeps the control that picked up the first. */
@@ -283,6 +289,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           scene={appearance.scene}
           appearance={appearance}
           activity={activity}
+          progress={progress}
           boardRef={board}
           layout={checklist ? { kind: "setup", form: setupForm } : { kind: "review", board: boardContent, desk: deskContent, objects: { cited: automaticIds.length, open: inspect } }}
         />

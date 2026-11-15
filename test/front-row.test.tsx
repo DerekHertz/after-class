@@ -136,7 +136,7 @@ describe("room geometry", () => {
 describe("switching room or companion keeps one tree", () => {
   const layout: FrontRowLayout = { kind: "review", board: "Two threads each hold a lock the other needs.", desk: <textarea aria-label="Your thinking" defaultValue="A draft in progress" />, objects: { cited: 0, open: () => {} } };
   const scene = (room: SceneId, companion: CompanionId, visible = true) => renderToStaticMarkup(
-    <FrontRowScene scene={room} layout={layout} appearance={{ companion, visible, motion: "system" }} activity="idle" />,
+    <FrontRowScene scene={room} layout={layout} appearance={{ companion, visible, motion: "system" }} activity="idle" progress={null} />,
   );
   // Every room paints its art on the one canvas ahead of the text areas, so the art never moves the response field.
   const skeleton = (html: string) => html.replace(/ (data-[a-z-]+|style|aria-label)="[^"]*"/g, "").replace(/>[^<]+</g, "><");
@@ -165,7 +165,7 @@ describe("switching room or companion keeps one tree", () => {
 
 describe("the folio and the notebook on the desk open the source and history", () => {
   const render = (layout: FrontRowLayout) => renderToStaticMarkup(
-    <FrontRowScene scene="last-desk" layout={layout} appearance={{ companion: "mote", visible: true, motion: "system" }} activity="idle" />,
+    <FrontRowScene scene="last-desk" layout={layout} appearance={{ companion: "mote", visible: true, motion: "system" }} activity="idle" progress={null} />,
   );
   const review = (cited: number): FrontRowLayout => ({ kind: "review", board: "Why?", desk: "Draft", objects: { cited, open: () => {} } });
 

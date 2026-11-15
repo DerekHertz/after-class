@@ -1,6 +1,26 @@
 import type { Size } from "./layout";
 import type { Draw } from "./scene";
 
+/** Where the stage is with a picture: still loading or decoding, ready to draw, or failed and left out. */
+export type PictureState = "pending" | "decoded" | "failed";
+
+/**
+ * What of `draws` to paint now, or null while the room waits. The room waits until every layer's picture has settled, and
+ * a layer that failed is left out rather than holding it. An unlocked object never holds the room: it is left out until its
+ * picture decodes. The companion passes through, as the stage picks its frame or stand-in itself.
+ */
+export function readyDraws(draws: readonly Draw[], state: (src: string) => PictureState): readonly Draw[] | null {
+  let waits = false;
+  const ready = draws.filter((draw) => {
+    if (draw.kind === "companion") return true;
+    const settled = state(draw.src);
+    if (draw.kind === "image" && draw.unlock !== undefined) return settled === "decoded";
+    if (settled === "pending") waits = true;
+    return true;
+  });
+  return waits ? null : ready;
+}
+
 /** Device pixels per CSS pixel on each axis. */
 export type Scale = { readonly x: number; readonly y: number };
 
