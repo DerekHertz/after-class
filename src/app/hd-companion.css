@@ -10,13 +10,15 @@
 .companion-sprite[data-companion="yun"] { --companion-sheet: url('./assets/companions-v3/yun-small.webp'); --companion-sheet-large: url('./assets/companions-v3/yun.webp'); }
 .companion-sprite[data-companion="mote-moonlit"] { --companion-sheet: url('./assets/companions-v3/mote-moonlit-small.webp'); --companion-sheet-large: url('./assets/companions-v3/mote-moonlit.webp'); }
 .companion-sprite[data-companion="mote-pagewing"] { --companion-sheet: url('./assets/companions-v3/mote-pagewing-small.webp'); --companion-sheet-large: url('./assets/companions-v3/mote-pagewing.webp'); }
-.companion-sprite[data-gesture="draw"] .companion-pose { animation: companion-draw 1050ms ease-in-out; }
-.companion-sprite[data-gesture="read"] .companion-pose { animation: companion-read 1050ms ease-in-out; }
+.companion-sprite[data-pose="draw"] .companion-pose { animation: companion-draw 1050ms ease-in-out; }
+.companion-sprite[data-pose="read"] .companion-pose { animation: companion-read 1050ms ease-in-out; }
 @keyframes companion-draw { 0%,100% { transform: translateY(0); } 30% { transform: translateY(-5px); } 68% { transform: translateY(-1px); } }
 @keyframes companion-read { 0%,100% { transform: rotate(0); } 28%,62% { transform: rotate(2deg); } }
-/* Reduced motion keeps the companion at rest: no pose change and no movement. */
-.scene-shell[data-motion="reduced"] .companion-pose { animation: none; background-position-x: 0%; }
-@media (prefers-reduced-motion: reduce) { .companion-pose { animation: none; background-position-x: 0%; } }
+/* Reduced motion: a reaction is an instant pose change with no movement. The selectors match the draw and read rules in
+   specificity and come after them, so the system preference and the app's Reduce motion setting both win. */
+.scene-shell[data-motion="reduced"] .companion-sprite .companion-pose,
+.companion-sprite[data-instant] .companion-pose { animation: none; }
+@media (prefers-reduced-motion: reduce) { .companion-sprite[data-pose] .companion-pose { animation: none; } }
 /* The review room draws the companion 220 plate pixels tall: 220 * u, where front-row.css derives u from the window, so that is 200 CSS px
    in a 1440x900 window and 266 in 1920x1080. The small sheet's cell is 362 px, so it is enough only while the drawn height times the
    device pixel ratio is 362 or less. A media query cannot compute u, so each band of pixel ratios uses what must hold when it is not:

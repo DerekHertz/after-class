@@ -20,7 +20,7 @@
  * them. An act the backend would reject is refused before it is stored.
  */
 import { z } from "zod";
-import type { LearnerAct, ReviewView } from "../shared/domain";
+import type { LearnerAct, ReviewView, TurnEvent } from "../shared/domain";
 import type { ReviewId, TurnId } from "../shared/ids";
 import { randomId } from "../shared/ids";
 import { learnerAct } from "../shared/wire";
@@ -80,6 +80,8 @@ export type ControllerDeps = {
   /** How often to re-read a review whose turn is still running on the backend. */
   readonly inFlightPollMs?: number;
   readonly timers?: PollTimers;
+  /** Called with each event of a streamed tutor turn as it arrives. */
+  readonly onTurnEvent?: (event: TurnEvent) => void;
 };
 
 export const IN_FLIGHT_POLL_MS = 1000;
@@ -217,20 +219,33 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
     }
   }
 
-  async function runTurn(turnId: TurnId, act: LearnerAct): Promise<void> {
-    const started = generation;
+  /** The room's observer is a side channel: it never stops the stream, and an old review's events never reach it. */
+  function observe(started: number, event: TurnEvent): void {
+    if (generation !== started) return;
+    try {
+      deps.onTurnEvent?.(event);
+    } catch {
+      // A throwing observer must not fail the turn.
+    }
+  }
+
+  /** `started` is the generation read before the caller's first await, so a dispose during storage awaits still marks this run stale. */
+  async function runTurn(turnId: TurnId, act: LearnerAct, started: number): Promise<void> {
+    // Disposed while storage was busy: the turn stays in the unsent store for a later session, and nothing is sent, spoken or observed.
+    if (generation !== started) return;
     speaker.beginTurn();
     lastRun = { turnId, act };
     set({ live: startLive(turnId) });
     let wrappedUp = false;
     try {
       for await (const event of api.sendTurn(reviewId, turnId, act)) {
+        observe(started, event);
         if (event.type === "move" && event.move.kind === "wrap_up") wrappedUp = true;
         if (event.type === "learner_turn_stored") {
           await unsent.remove(turnId);
           await refreshUnsent();
         } else if (event.type === "sentence") {
-          speaker.speak(event.text);
+          if (generation === started) speaker.speak(event.text);
         }
         set({ live: reduceLive(state.live ?? startLive(turnId), event) });
       }
@@ -240,7 +255,7 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
     }
     await refreshView(started);
     if (state.live?.status === "complete") set({ live: null });
-    await saveIfEnded(wrappedUp);
+    if (generation === started) await saveIfEnded(wrappedUp);
   }
 
   async function saveIfEnded(wrappedUp: boolean): Promise<void> {
@@ -279,6 +294,7 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
       await refreshView(started);
     },
     send: async (act) => {
+      const started = generation;
       const sent = await exclusive(async () => {
         const parsed = learnerAct.safeParse(act);
         if (!parsed.success) {
@@ -296,7 +312,7 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
         // Persist before any network call: a crash after this line resends the same id.
         await unsent.put({ turnId, reviewId, act, createdAtMs: now() });
         await refreshUnsent();
-        await runTurn(turnId, act);
+        await runTurn(turnId, act, started);
         return true;
       });
       if (sent !== undefined) return sent;
@@ -306,16 +322,17 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
     },
     retryTurn: () =>
       exclusive(async () => {
+        const started = generation;
         const [oldest] = await unsent.forReview(reviewId);
-        if (oldest) return runTurn(oldest.turnId, oldest.act);
+        if (oldest) return runTurn(oldest.turnId, oldest.act, started);
         const waiting = state.view ? unansweredLearnerTurn(state.view.turns) : null;
-        if (waiting) return runTurn(waiting.id, waiting.act);
+        if (waiting) return runTurn(waiting.id, waiting.act, started);
         const owed = state.view ? owedLearnerTurn(state.view) : null;
-        if (owed) return runTurn(owed.id, owed.act);
+        if (owed) return runTurn(owed.id, owed.act, started);
         const stranded = state.view ? strandedEndTurn(state.view) : null;
-        if (stranded) return runTurn(stranded.id, stranded.act);
+        if (stranded) return runTurn(stranded.id, stranded.act, started);
         // The stream failed after the backend stored the turn and the view refresh failed too: nothing above can see the turn.
-        if (lastRun && state.live?.status === "failed" && state.live.turnId === lastRun.turnId) return runTurn(lastRun.turnId, lastRun.act);
+        if (lastRun && state.live?.status === "failed" && state.live.turnId === lastRun.turnId) return runTurn(lastRun.turnId, lastRun.act, started);
       }),
     discardUnsent: async () => {
       await exclusive(async () => {

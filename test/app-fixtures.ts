@@ -192,6 +192,7 @@ export function setup(opts: {
   save?: () => ReturnType<Api["save"]>;
   /** Holds every `review` call until it settles, so a test can stop a turn between its stream and its refresh. */
   reviewGate?: Promise<void>;
+  onTurnEvent?: (event: TurnEvent) => void;
 }) {
   const unsent = createMemoryUnsent();
   const sends: SendCall[] = [];
@@ -216,7 +217,7 @@ export function setup(opts: {
     record: async () => { throw new Error("unused"); },
     usage: async () => { throw new Error("unused"); },
   };
-  const controller = createReviewController({ api, reviewId, speaker, unsent, nowMs: () => 1000, inFlightPollMs: 1 });
+  const controller = createReviewController({ api, reviewId, speaker, unsent, nowMs: () => 1000, inFlightPollMs: 1, ...(opts.onTurnEvent ? { onTurnEvent: opts.onTurnEvent } : {}) });
   return { controller, unsent, sends, spoken, stops: () => stops, saves: () => saves, reviews: () => reviews };
 }
 

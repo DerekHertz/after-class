@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode, Ref, RefObject } from "react";
 import type { Appearance, CompanionActivity, SceneId } from "./appearance";
 import { COMPANION_STATUS, Companion } from "./companion";
-import { clearCompanionReaction } from "./companion-reaction";
+import { clearReaction } from "./room/reaction-store";
 import { sourceButtonLabel } from "./room-object";
 import type { RoomObject } from "./room-object";
 
@@ -277,7 +277,7 @@ export function FrontRowScene({ scene, layout, appearance, activity, boardRef }:
   readonly boardRef?: Ref<HTMLElement>;
 }) {
   const room = FRONT_ROW_ROOMS[scene];
-  useEffect(() => { clearCompanionReaction(); }, [scene, appearance.companion, appearance.visible]);
+  useEffect(() => { clearReaction(); }, [scene, appearance.companion, appearance.visible]);
   return (
     <div className="front-row-scene" data-room={scene} data-board-tone={room.board.tone} data-mat-tone={room.mat.tone} data-mat-actions={room.mat.actions} data-board-align={room.board.align} data-phase={layout.kind}>
       {/* The window's layers, back to front, with every control placed on them by front-row.css. */}
