@@ -1,5 +1,5 @@
 import type { SceneId } from "../appearance";
-import { AMBIENT, ambientDraws } from "./ambient";
+import { ambientDraws } from "./ambient";
 import { ROOM_LAYER_ART } from "./art";
 import type { NineSliceLayer, Rect, RoomLayout } from "./layout";
 import { FRONT_ROW_ROOMS } from "./rooms";
@@ -59,7 +59,7 @@ export function buildScene(scene: SceneId, layout: RoomLayout, now: number | nul
     ...extras.map((extra) => ({ z: extra.z, draw: { kind: "image", src: extraArt[extra.name]!, rect: extra.rect, sampling: "pixelated" } as const })),
     { z: DEPTH.mat, draw: nineSlice(art.mat, mat, room.mat.art.slice) },
   ];
-  const ambient = now === null ? null : ambientDraws(AMBIENT[scene], layout, now);
+  const ambient = now === null ? null : ambientDraws(scene, layout, now);
   if (ambient !== null) layered.push(...ambient.draws);
   return { draws: layered.sort((a, b) => a.z - b.z).map(({ draw }) => draw), next: ambient?.next ?? null };
 }

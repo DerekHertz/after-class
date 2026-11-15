@@ -1,9 +1,9 @@
 import { useLayoutEffect, useRef } from "react";
 import type { SceneId } from "../appearance";
 import { layoutRoom } from "./layout";
-import type { Composition, Size } from "./layout";
+import type { Composition, Rect, Size } from "./layout";
 import { buildScene } from "./scene";
-import type { Draw, DrawList, Specks } from "./scene";
+import type { Draw, DrawList, PictureDraw, Specks } from "./scene";
 import { pieces } from "./paint";
 import { ROOM_LAYER_ART } from "./art";
 import type { Scale } from "./paint";
@@ -56,6 +56,8 @@ class Stage {
   private stale = false;
   /** The pictures this stage waits on, so it stops waiting on those of a room it no longer shows. */
   private readonly awaited = new Set<Picture>();
+  /** What the stage last painted of a room in motion, or null while the room is still or its pixels are gone. */
+  private moving: Moving | null = null;
   private readonly observer: ResizeObserver;
   /** Set where the observer sees only CSS pixels, as in Safari, to catch a change of pixel ratio that keeps the CSS size. */
   private ratio: MediaQueryList | null = null;
@@ -72,8 +74,13 @@ class Stage {
     }
     document.addEventListener("visibilitychange", this.onVisibility);
     // A browser may drop a hidden canvas's pixels to save memory. It restores the context empty, and nothing else would repaint it.
-    canvas.addEventListener("contextrestored", this.paint);
+    canvas.addEventListener("contextrestored", this.restore);
   }
+
+  private readonly restore = (): void => {
+    this.moving = null;
+    this.paint();
+  };
 
   show(scene: SceneId, composition: Composition, motion: boolean): void {
     this.wanted = { scene, composition, motion };
@@ -85,9 +92,10 @@ class Stage {
     this.ratio?.removeEventListener("change", this.onRatio);
     this.release();
     document.removeEventListener("visibilitychange", this.onVisibility);
-    this.canvas.removeEventListener("contextrestored", this.paint);
+    this.canvas.removeEventListener("contextrestored", this.restore);
     this.cancelFrame();
     this.wanted = null;
+    this.moving = null;
   }
 
   private watchRatio(): void {
@@ -128,7 +136,10 @@ class Stage {
     const { wanted, box } = this;
     if (wanted === null || box === null || box.css.width === 0 || box.css.height === 0) return;
     this.stale = document.hidden;
-    if (this.stale) return;
+    if (this.stale) {
+      this.moving = null;
+      return;
+    }
     const now = wanted.motion ? performance.now() : null;
     const list = (scene: SceneId) => buildScene(scene, layoutRoom(scene, box.css, wanted.composition), now);
     let drawn: DrawList | null = list(wanted.scene);
@@ -137,13 +148,60 @@ class Stage {
     if (drawn !== null && !this.decoded(drawn)) drawn = null;
     const { context } = this;
     context.setTransform(1, 0, 0, 1, 0, 0);
-    context.clearRect(0, 0, box.device.width, box.device.height);
-    if (drawn !== null) for (const draw of drawn.draws) paintDraw(context, draw, scaleOf(box));
+    if (drawn?.next == null) {
+      this.moving = null;
+      context.clearRect(0, 0, box.device.width, box.device.height);
+      if (drawn !== null) for (const draw of drawn.draws) paintDraw(context, draw, scaleOf(box));
+    } else this.paintMoving(drawn.draws, box);
     setState(this.canvas, drawn === null ? "waiting" : "painted");
     if (drawn?.next != null) {
-      this.timer = setTimeout(() => { this.timer = null; this.frame = requestAnimationFrame(this.paint); }, Math.max(0, drawn.next - performance.now()));
+      this.timer = setTimeout(() => { this.timer = null; this.frame = requestAnimationFrame(this.paint); }, Math.max(0, Math.ceil(drawn.next - performance.now())));
     }
   };
+
+  /**
+   * Paints a room that moves. Each run of pictures between two live draws comes from its band, painted again only when its
+   * pictures or the box change. A step then repaints only the device pixels a changed live draw covered or now covers, in
+   * the same order as a whole repaint, so those pixels come out as they would and every other pixel is already right.
+   */
+  private paintMoving(draws: readonly Draw[], box: Box): void {
+    const scale = scaleOf(box);
+    const before = this.moving;
+    let whole = false;
+    const bands: Band[] = [];
+    const live: Live[] = [];
+    const layers: (Band | LiveDraw)[] = [];
+    for (const run of runs(draws)) {
+      if ("kind" in run) {
+        live.push({ key: JSON.stringify(run), boxes: liveBoxes(run, scale) });
+        layers.push(run);
+        continue;
+      }
+      const key = JSON.stringify([box, run]);
+      const old = before?.bands[bands.length];
+      const band = old?.key === key ? old : paintBand(run, box, key, old?.canvas);
+      if (band !== old) whole = true;
+      bands.push(band);
+      layers.push(band);
+    }
+    if (before === null || before.bands.length !== bands.length || before.live.length !== live.length) whole = true;
+    this.moving = { bands, live };
+    const damage = whole || before === null ? null : live.flatMap((now, i) => (now.key === before.live[i]!.key ? [] : [...before.live[i]!.boxes, ...now.boxes]));
+    if (damage?.length === 0) return;
+    const { context } = this;
+    if (damage !== null) {
+      context.save();
+      context.beginPath();
+      for (const { x, y, width, height } of damage) context.rect(x, y, width, height);
+      context.clip();
+    }
+    context.clearRect(0, 0, box.device.width, box.device.height);
+    for (const layer of layers) {
+      if ("kind" in layer) paintDraw(context, layer, scale);
+      else context.drawImage(layer.canvas, 0, 0);
+    }
+    if (damage !== null) context.restore();
+  }
 
   /**
    * Whether every picture `list` draws has settled, decoded or failed. Starts any that have not, and repaints when one
@@ -152,7 +210,7 @@ class Stage {
   private decoded(list: DrawList): boolean {
     let all = true;
     for (const draw of list.draws) {
-      if (draw.kind === "specks") continue;
+      if (!isPicture(draw)) continue;
       const entry = picture(draw.src);
       if (entry.state !== "pending") continue;
       entry.waiting.add(this.paint);
@@ -201,6 +259,62 @@ if (typeof document !== "undefined") {
   }
 }
 
+/**
+ * A run of pictures painted once onto a canvas of its own, the size of the stage's, so each picture lands on the same device
+ * pixels with the same sampling as when the stage paints it directly. `key` names the run and the box it was painted for.
+ */
+type Band = { readonly key: string; readonly canvas: HTMLCanvasElement };
+
+/** A draw that changes as the room moves. The stage paints it every time rather than keeping it in a band. */
+type LiveDraw = Exclude<Draw, PictureDraw>;
+
+/** Whole device pixels, from the stage's top left. */
+type DeviceBox = { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+
+/** A live draw as last painted: `key` names it, and `boxes` hold every device pixel it touched. */
+type Live = { readonly key: string; readonly boxes: readonly DeviceBox[] };
+
+/** The bands and live draws of the last frame of a room in motion, back to front. */
+type Moving = { readonly bands: readonly Band[]; readonly live: readonly Live[] };
+
+const isPicture = (draw: Draw): draw is PictureDraw => draw.kind === "image" || draw.kind === "nine-slice";
+
+/** `draws` with each run of pictures gathered into an array, and each live draw on its own. */
+function runs(draws: readonly Draw[]): readonly (LiveDraw | readonly PictureDraw[])[] {
+  const out: (LiveDraw | PictureDraw[])[] = [];
+  for (const draw of draws) {
+    const last = out.at(-1);
+    if (!isPicture(draw)) out.push(draw);
+    else if (Array.isArray(last)) last.push(draw);
+    else out.push([draw]);
+  }
+  return out;
+}
+
+/** The device pixels `draw` touches. Each new kind of live draw names its own here. */
+function liveBoxes(draw: LiveDraw, scale: Scale): readonly DeviceBox[] {
+  switch (draw.kind) {
+    case "specks": return draw.rects.map((rect) => deviceBox(rect, scale));
+  }
+}
+
+/** A rect of the stage in whole device pixels, at least one each way, so a speck is never smeared across two. */
+function deviceBox({ left, top, width, height }: Rect, scale: Scale): DeviceBox {
+  const [x, y] = [Math.round(left * scale.x), Math.round(top * scale.y)];
+  return { x, y, width: Math.max(1, Math.round((left + width) * scale.x) - x), height: Math.max(1, Math.round((top + height) * scale.y) - y) };
+}
+
+/** Paints `run` onto `reuse` or a new canvas of the stage's size. */
+function paintBand(run: readonly PictureDraw[], box: Box, key: string, reuse?: HTMLCanvasElement): Band {
+  const { device } = box;
+  const canvas = reuse ?? document.createElement("canvas");
+  canvas.width = device.width;
+  canvas.height = device.height;
+  const context = canvas.getContext("2d");
+  if (context !== null) for (const draw of run) paintDraw(context, draw, scaleOf(box));
+  return { key, canvas };
+}
+
 function paintDraw(context: CanvasRenderingContext2D, draw: Draw, scale: Scale): void {
   if (draw.kind === "specks") return paintSpecks(context, draw, scale);
   const { image, state } = pictures.get(draw.src)!;
@@ -213,13 +327,13 @@ function paintDraw(context: CanvasRenderingContext2D, draw: Draw, scale: Scale):
   }
 }
 
-/** Fills each speck on whole device pixels, at least one, so a speck is never smeared across two. */
+/** Fills each speck on whole device pixels. */
 function paintSpecks(context: CanvasRenderingContext2D, { color, alpha, rects }: Specks, scale: Scale): void {
   context.fillStyle = color;
   context.globalAlpha = alpha;
-  for (const { left, top, width, height } of rects) {
-    const [x, y] = [Math.round(left * scale.x), Math.round(top * scale.y)];
-    context.fillRect(x, y, Math.max(1, Math.round((left + width) * scale.x) - x), Math.max(1, Math.round((top + height) * scale.y) - y));
+  for (const rect of rects) {
+    const { x, y, width, height } = deviceBox(rect, scale);
+    context.fillRect(x, y, width, height);
   }
   context.globalAlpha = 1;
 }

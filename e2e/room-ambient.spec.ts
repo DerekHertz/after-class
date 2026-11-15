@@ -2,18 +2,21 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { APPEARANCE_KEY, DEFAULT_APPEARANCE, SCENES } from "../src/app/appearance";
 import type { Appearance, SceneId } from "../src/app/appearance";
+import { AMBIENT_FPS } from "../src/app/room/ambient";
 
 const scenes = Object.keys(SCENES) as SceneId[];
-type Counts = { specks: number; drawImage: number; transforms: number; moved: number };
+type Counts = { specks: number; drawImage: number; clears: number; transforms: number; moved: number };
 
 /** Counts what the stage draws, and every call that could rotate, scale or shift what it draws next. */
 async function watchCanvas(page: Page) {
   await page.addInitScript(() => {
-    const counts = { specks: 0, drawImage: 0, transforms: 0, moved: 0 };
+    const counts = { specks: 0, drawImage: 0, clears: 0, transforms: 0, moved: 0 };
     (window as unknown as { counts: typeof counts }).counts = counts;
     const proto = CanvasRenderingContext2D.prototype;
     const fill = proto.fillRect;
     proto.fillRect = function (this: CanvasRenderingContext2D, ...a: Parameters<typeof fill>) { counts.specks++; return fill.apply(this, a); };
+    const clear = proto.clearRect;
+    proto.clearRect = function (this: CanvasRenderingContext2D, ...a: Parameters<typeof clear>) { counts.clears++; return clear.apply(this, a); };
     const draw = proto.drawImage;
     proto.drawImage = function (this: CanvasRenderingContext2D, ...a: Parameters<typeof draw>) { counts.drawImage++; return draw.apply(this, a as never); } as typeof draw;
     for (const name of ["rotate", "scale", "translate", "transform", "resetTransform"] as const) {
@@ -60,6 +63,41 @@ test.describe("with motion on", () => {
       expect(later.moved).toBe(0);
     });
   }
+
+  test("each step copies the room's still art in at most one picture per run between specks", async ({ page }) => {
+    await watchCanvas(page);
+    for (const scene of scenes) {
+      await openRoom(page, scene);
+      await page.waitForTimeout(300);
+      const first = await counts(page);
+      await page.waitForTimeout(1000);
+      const later = await counts(page);
+      const steps = later.clears - first.clears;
+      expect(steps).toBeGreaterThan(5);
+      // The rooms' painted layers fall into at most four runs between their depths of specks. Painted picture by picture,
+      // a step would make some thirty drawImage calls, nine for each nine-slice.
+      expect((later.drawImage - first.drawImage) / steps).toBeLessThanOrEqual(4);
+    }
+  });
+
+  test("the stage asks for one frame per step, even when a frame comes right after its timer", async ({ page }) => {
+    // A vsync can land just after the stage's timer fires. Running every frame callback at once makes that the rule, so a
+    // timer that fires before its step would paint the old step and ask for another frame.
+    await page.addInitScript(() => {
+      const frames: number[] = [];
+      (window as unknown as { frames: number[] }).frames = frames;
+      window.requestAnimationFrame = (callback) => {
+        frames.push(performance.now());
+        return window.setTimeout(() => callback(performance.now()), 0);
+      };
+    });
+    await openRoom(page, "last-desk");
+    await page.waitForTimeout(2000);
+    const steps = await page.evaluate((fps) => (window as unknown as { frames: number[] }).frames.map((at) => Math.floor((at / 1000) * fps)), AMBIENT_FPS);
+    const moving = steps.slice(2);
+    expect(moving.length).toBeGreaterThan(15);
+    expect(new Set(moving).size).toBe(moving.length);
+  });
 
   test("a hidden tab draws nothing, and shows the room moving again when it returns", async ({ page }) => {
     await watchCanvas(page);

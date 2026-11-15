@@ -92,22 +92,69 @@ export function speckPositions(layer: AmbientLayer, index: number, seconds: numb
   return out;
 }
 
+/**
+ * A shaft of window light: a band of `width` plate pixels whose top edge starts at `from` and whose bottom edge ends at `to`,
+ * drawn as plain rows `row` plate pixels tall, each moved sideways a whole plate pixel. Its alpha rises and falls between
+ * `alpha.low` and `alpha.high` over `alpha.period` seconds, in `alpha.steps` steps.
+ */
+export type LightShaft = {
+  readonly name: string;
+  readonly depth: AmbientLayer["depth"];
+  readonly from: { readonly x: number; readonly y: number };
+  readonly to: { readonly x: number; readonly y: number };
+  readonly width: number;
+  readonly row: number;
+  readonly color: Hex;
+  readonly alpha: { readonly low: number; readonly high: number; readonly period: number; readonly steps: number };
+};
+
+/**
+ * Each room's window light. Only the rail room has a sunlit window: the canal's is a rainy night and the harbor has no
+ * walls. The shaft falls from that window down to the left, over the board's edge and onto the wall.
+ */
+export const LIGHT: { readonly [S in SceneId]: readonly LightShaft[] } = {
+  "last-desk": [
+    { name: "window light", depth: "near", from: { x: 1262, y: 150 }, to: { x: 860, y: 740 }, width: 272, row: 6, color: "#fff4d6", alpha: { low: 0.08, high: 0.16, period: 9, steps: 4 } },
+  ],
+  "study-bench": [],
+  "projection-booth": [],
+};
+
+/** The rows of `shaft` in plate pixels, and its alpha `seconds` after the page loaded. */
+export function shaftRows(shaft: LightShaft, seconds: number): { readonly alpha: number; readonly rows: readonly PlateRegion[] } {
+  const { from, to, width, row, alpha } = shaft;
+  const rows: PlateRegion[] = [];
+  for (let y = from.y; y < to.y; y += row) {
+    const x = Math.round(from.x + ((to.x - from.x) * (y - from.y)) / (to.y - from.y));
+    rows.push({ x, y, width, height: Math.min(row, to.y - y) });
+  }
+  const wave = 0.5 - 0.5 * Math.cos((2 * Math.PI * seconds) / alpha.period);
+  const level = Math.min(alpha.steps - 1, Math.floor(wave * alpha.steps)) / Math.max(1, alpha.steps - 1);
+  return { alpha: alpha.low + (alpha.high - alpha.low) * level, rows };
+}
+
 const overlaps = (a: Rect, b: Rect) => a.left < b.left + b.width && a.left + a.width > b.left && a.top < b.top + b.height && a.top + a.height > b.top;
 
 /**
  * The specks of `scene` at `now` (milliseconds, `performance.now()`), as draws with their depth, and the time the next step
  * is due. Time is quantised to `AMBIENT_FPS`, so a frame drawn between two steps repeats the last one.
  */
-export function ambientDraws(layers: readonly AmbientLayer[], layout: FullRoomLayout, now: number): { readonly draws: readonly { readonly z: number; readonly draw: Draw }[]; readonly next: number } {
+export function ambientDraws(scene: SceneId, layout: FullRoomLayout, now: number): { readonly draws: readonly { readonly z: number; readonly draw: Draw }[]; readonly next: number } {
   const step = Math.floor((now / 1000) * AMBIENT_FPS);
   const seconds = step / AMBIENT_FPS;
   const { background, board } = layout.layers;
   const scale = background.width / ROOM_ART.plate.width;
-  const draws = layers.flatMap((layer, index) => {
-    const rects = speckPositions(layer, index, seconds)
-      .map(({ x, y }): Rect => ({ left: background.left + x * scale, top: background.top + y * scale, width: layer.size.width * scale, height: layer.size.height * scale }))
-      .filter((rect) => !(layer.clearOfBoard && overlaps(rect, board.rect)));
-    return rects.length === 0 ? [] : [{ z: DEPTH_Z[layer.depth], draw: { kind: "specks", color: layer.color, alpha: layer.alpha, rects } as const satisfies Specks }];
+  const onStage = ({ x, y, width, height }: PlateRegion): Rect => ({ left: background.left + x * scale, top: background.top + y * scale, width: width * scale, height: height * scale });
+  const specks = (z: number, color: string, alpha: number, rects: readonly Rect[]) => ({ z, draw: { kind: "specks", color, alpha, rects } as const satisfies Specks });
+  const light = LIGHT[scene].map((shaft) => {
+    const { alpha, rows } = shaftRows(shaft, seconds);
+    return specks(DEPTH_Z[shaft.depth], shaft.color, alpha, rows.map(onStage));
   });
-  return { draws, next: ((step + 1) / AMBIENT_FPS) * 1000 };
+  const motes = AMBIENT[scene].flatMap((layer, index) => {
+    const rects = speckPositions(layer, index, seconds)
+      .map(({ x, y }) => onStage({ x, y, ...layer.size }))
+      .filter((rect) => !(layer.clearOfBoard && overlaps(rect, board.rect)));
+    return rects.length === 0 ? [] : [specks(DEPTH_Z[layer.depth], layer.color, layer.alpha, rects)];
+  });
+  return { draws: [...light, ...motes], next: ((step + 1) / AMBIENT_FPS) * 1000 };
 }

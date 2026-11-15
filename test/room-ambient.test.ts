@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SceneId } from "../src/app/appearance";
-import { AMBIENT, AMBIENT_FPS, speckPositions } from "../src/app/room/ambient";
+import { AMBIENT, AMBIENT_FPS, LIGHT, shaftRows, speckPositions } from "../src/app/room/ambient";
 import { layoutRoom } from "../src/app/room/layout";
 import type { FullRoomLayout, Rect } from "../src/app/room/layout";
 import { motionOn } from "../src/app/room/motion";
@@ -117,5 +117,39 @@ describe("ambient life on the draw list", () => {
         }
       }
     }
+  });
+
+  test("window light is plain rows on whole plate pixels, edge to edge with no gap or overlap, from the window to the floor", () => {
+    const shaft = LIGHT["last-desk"][0]!;
+    const { rows } = shaftRows(shaft, 3);
+    expect(rows[0]).toMatchObject({ x: shaft.from.x, y: shaft.from.y, width: shaft.width });
+    expect(rows.at(-1)!.y + rows.at(-1)!.height).toBe(shaft.to.y);
+    for (const [i, row] of rows.entries()) {
+      expect([row.x, row.y, row.width, row.height].every(Number.isInteger)).toBe(true);
+      if (i > 0) expect(row.y).toBe(rows[i - 1]!.y + rows[i - 1]!.height);
+    }
+  });
+
+  test("window light's alpha moves between its low and high in a few steps, never more than one step at a time", () => {
+    const shaft = LIGHT["last-desk"][0]!;
+    const { low, high, steps } = shaft.alpha;
+    const levels = new Set<number>();
+    let previous: number | null = null;
+    for (let step = 0; step < 12 * 30; step++) {
+      const { alpha } = shaftRows(shaft, step / 12);
+      expect(alpha).toBeGreaterThanOrEqual(low - 1e-9);
+      expect(alpha).toBeLessThanOrEqual(high + 1e-9);
+      if (previous !== null) expect(Math.abs(alpha - previous)).toBeLessThanOrEqual((high - low) / (steps - 1) + 1e-9);
+      levels.add(Math.round(alpha * 1e6));
+      previous = alpha;
+    }
+    expect(levels.size).toBe(steps);
+  });
+
+  test("the rail room's window light is drawn while it moves and gone while it is still", () => {
+    const layout = fullLayout("last-desk");
+    const lit = (now: number | null) => specksOf(buildScene("last-desk", layout, now).draws).some((s) => s.color === LIGHT["last-desk"][0]!.color);
+    expect(lit(T)).toBe(true);
+    expect(lit(null)).toBe(false);
   });
 });
