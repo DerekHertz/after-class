@@ -107,3 +107,69 @@ test.describe("the Your room panel", () => {
     await page.close();
   });
 });
+
+test.describe("the Your room panel follows the saved record", () => {
+  async function correctFirstObservation(page: Page, settled: (dialog: Locator) => Locator = (dialog) => dialog.getByText("Status: After help").first()) {
+    await page.getByRole("button", { name: "Saved notes", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Saved notes" });
+    await expect(dialog.getByRole("heading", { name: "My notebook" })).toBeVisible();
+    const select = dialog.locator("li.record-observation").filter({ hasText: "Status: Independent" }).getByRole("combobox", { name: /Correct status for/ }).first();
+    await expect(select).toBeEnabled();
+    await select.selectOption({ label: "After help" });
+    await expect(settled(dialog)).toBeVisible();
+    await dialog.getByRole("button", { name: "Close notebook" }).click();
+  }
+  const understood = (page: Page) => page.locator('.room-progress-body [data-count="understood"] dd');
+
+  test("a correction in Saved notes changes the counts without leaving the review", async ({ page }, info) => {
+    test.skip(info.project.name !== "desktop", "the counts are the same at every size");
+    await openRoom(page, "last-desk");
+    await page.getByRole("button", { name: "Your room" }).click();
+    const before = Number(await understood(page).innerText());
+    expect(before).toBeGreaterThan(0);
+    await page.getByRole("button", { name: "Your room" }).click();
+    await correctFirstObservation(page);
+    await page.getByRole("button", { name: "Your room" }).click();
+    await expect(understood(page)).toHaveText(String(before - 1));
+  });
+
+  test("while a correction's read is out, the panel shows the last counts as updating, never as current", async ({ page }, info) => {
+    test.skip(info.project.name !== "desktop", "the copy is the same at every size");
+    await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene: "last-desk" } });
+    await page.goto("/?scenario=review-record-slow&clean=1");
+    await expect(page.locator(".front-row-canvas[data-stage=painted]")).toBeAttached();
+    const panel = page.getByRole("region", { name: "Your room" });
+    await page.getByRole("button", { name: "Your room" }).click();
+    const before = Number(await understood(page).innerText());
+    await page.getByRole("button", { name: "Your room" }).click();
+    await correctFirstObservation(page, (dialog) => dialog.getByRole("heading", { name: "My notebook" }));
+    await page.getByRole("button", { name: "Your room" }).click();
+    await expect(panel.getByRole("status")).toHaveText("Updating from your saved reviews. These counts were read before your latest change.");
+    await expect(panel).not.toContainText("Counted from your saved reviews.");
+    await expect(understood(page)).toHaveText(String(before));
+    await page.screenshot({ path: "test-results/226-panel-refreshing.png" });
+    await page.locator(".fixture-toolbar").getByRole("button", { name: "Finish pending fixture operation", includeHidden: true }).evaluate((button: HTMLButtonElement) => button.click());
+    await expect(panel).toContainText("Counted from your saved reviews.");
+    await expect(panel.getByRole("status")).toHaveCount(0);
+    await expect(understood(page)).toHaveText(String(before - 1));
+  });
+
+  test("a record that cannot be read again says its counts may be out of date and reads again on Retry", async ({ page }, info) => {
+    test.skip(info.project.name !== "desktop", "the copy is the same at every size");
+    await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene: "last-desk" } });
+    await page.goto("/?scenario=review-record-stale&clean=1");
+    await expect(page.locator(".front-row-canvas[data-stage=painted]")).toBeAttached();
+    await page.getByRole("button", { name: "Your room" }).click();
+    const before = Number(await understood(page).innerText());
+    await page.getByRole("button", { name: "Your room" }).click();
+    await correctFirstObservation(page, (dialog) => dialog.getByRole("alert").first());
+    const panel = page.getByRole("region", { name: "Your room" });
+    await page.getByRole("button", { name: "Your room" }).click();
+    await expect(panel.getByRole("alert")).toContainText("These counts may be out of date");
+    await expect(panel.getByRole("button", { name: "Retry" })).toBeVisible();
+    await page.screenshot({ path: "test-results/226-panel-stale.png" });
+    await panel.getByRole("button", { name: "Retry" }).click();
+    await expect(panel.getByRole("alert")).toHaveCount(0);
+    await expect(understood(page)).toHaveText(String(before - 1));
+  });
+});

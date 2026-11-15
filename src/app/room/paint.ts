@@ -1,5 +1,5 @@
 import type { Size } from "./layout";
-import type { Draw } from "./scene";
+import type { CompanionDraw, Draw, PictureDraw } from "./scene";
 
 /** Where the stage is with a picture: still loading or decoding, ready to draw, or failed and left out. */
 export type PictureState = "pending" | "decoded" | "failed";
@@ -7,12 +7,12 @@ export type PictureState = "pending" | "decoded" | "failed";
 /**
  * What of `draws` to paint now, or null while the room waits. The room waits until every layer's picture has settled, and
  * a layer that failed is left out rather than holding it. An unlocked object never holds the room: it is left out until its
- * picture decodes. The companion passes through, as the stage picks its frame or stand-in itself.
+ * picture decodes. The companion passes through, as the stage picks its frame or stand-in itself, and so do the specks, which need no picture.
  */
 export function readyDraws(draws: readonly Draw[], state: (src: string) => PictureState): readonly Draw[] | null {
   let waits = false;
   const ready = draws.filter((draw) => {
-    if (draw.kind === "companion") return true;
+    if (draw.kind === "companion" || draw.kind === "specks") return true;
     const settled = state(draw.src);
     if (draw.kind === "image" && draw.unlock !== undefined) return settled === "decoded";
     if (settled === "pending") waits = true;
@@ -34,7 +34,7 @@ export type Piece = {
  * The `drawImage` calls that paint `draw` from a picture of `natural` size at `scale`, on the device pixels Chrome painted
  * the same layer on when CSS drew it, so the canvas keeps the room's pixels.
  */
-export function pieces(draw: Draw, natural: Size, scale: Scale): readonly Piece[] {
+export function pieces(draw: PictureDraw | CompanionDraw, natural: Size, scale: Scale): readonly Piece[] {
   const box = snap(draw, scale);
   const { width: w, height: h } = natural;
   if (draw.kind === "image") return [{ sx: 0, sy: 0, sw: w, sh: h, dx: box.left, dy: box.top, dw: box.right - box.left, dh: box.bottom - box.top }];
@@ -74,7 +74,7 @@ function snapSpan(start: number, size: number, scale: number, image: boolean): r
   return [from, image ? Math.min(to, from + round(length)) : to];
 }
 
-function snap({ rect, kind }: Draw, s: Scale) {
+function snap({ rect, kind }: PictureDraw | CompanionDraw, s: Scale) {
   const [left, right] = snapSpan(rect.left, rect.width, s.x, kind !== "nine-slice");
   const [top, bottom] = snapSpan(rect.top, rect.height, s.y, kind !== "nine-slice");
   return { left, right, top, bottom };

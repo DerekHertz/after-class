@@ -9,7 +9,8 @@ import { useAppearance, useSceneActivity } from "./appearance";
 import { FrontRowScene, reserveNavSpace } from "./front-row";
 import { react } from "./room/reaction-store";
 import { inputFromTurnEvent } from "./room/reactions";
-import { deriveProgress } from "./room/progress";
+import { roomRecord } from "./room/room-record";
+import type { RoomRecord } from "./room/room-record";
 import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
 import { ACTION_LABEL, END_CONFIRM_TEXT, composerActions, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow, softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, strandedEndTurn, selectedEvidenceIds, shouldSubmitAnswer, questionScrollTop, } from "./core";
@@ -33,6 +34,16 @@ export type ReviewDeps = { readonly api: AppApi; readonly speaker: Speaker; read
 export function reactToTurnEvent(event: TurnEvent) {
   const input = inputFromTurnEvent(event);
   if (input !== null) react(input);
+}
+
+/** The Saved notes dialog over the room. It edits the record through `room`, so every change reads the room's counts again. */
+export function SavedNotes({ room, close }: { readonly room: RoomRecord; readonly close: () => void }) {
+  return (
+    <dialog className="room-object room-notebook-dialog" {...objectFrame("history")} aria-label="Saved notes" ref={node => { if (node && !node.open) node.showModal(); }} onClose={close}>
+      <div className="room-object-tools"><button type="button" onClick={close}>Close notebook</button></div>
+      <RecordScreen api={room.api} reviewId={null} />
+    </dialog>
+  );
 }
 
 export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewDeps & { readonly reviewId: ReviewId }) {
@@ -84,11 +95,12 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   }, [inspecting, state.view?.turns.length]);
   const saved = state.savedSummary !== null;
   useEffect(() => { if (saved) react({ type: "review_saved" }); }, [saved]);
-  // The room's progress comes from the saved record only, read again once this review is saved.
-  const record = useAsync(useCallback(() => api.record({}), [api]));
-  const reloadRecord = record.reload;
-  useEffect(() => { if (saved) reloadRecord(); }, [saved, reloadRecord]);
-  const progress = useMemo(() => (record.data === null ? null : deriveProgress(record.data.observations)), [record.data]);
+  // The room's progress comes from the saved record only, read on open, once this review is saved, and after every change
+  // made to it in Saved notes.
+  const room = useMemo(() => roomRecord(api), [api]);
+  const roomStanding = useSyncExternalStore(room.subscribe, room.getState);
+  useEffect(() => { room.read(); }, [room]);
+  useEffect(() => { if (saved) room.read(); }, [saved, room]);
   useSceneActivity(state.saving ? "saving" : listening ? "listening" : state.view?.state.phase === "paused" ? "paused" : state.live?.status === "streaming" ? "waiting" : "idle");
 
   /** Picks up an object. Switching from one object to the other keeps the control that picked up the first. */
@@ -265,10 +277,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
 
   return (
     <main className="review front-row">
-      {notebookOpen && <dialog className="room-object room-notebook-dialog" {...objectFrame("history")} aria-label="Saved notes" ref={node => { if (node && !node.open) node.showModal(); }} onClose={closeNotebook}>
-        <div className="room-object-tools"><button type="button" onClick={closeNotebook}>Close notebook</button></div>
-        <RecordScreen api={api} reviewId={null} />
-      </dialog>}
+      {notebookOpen && <SavedNotes room={room} close={closeNotebook} />}
       <header ref={reserveNavSpace} className="review-header front-row-bar">
         <div className="front-row-title">
           <h1>{heading.title}</h1>
@@ -289,7 +298,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           scene={appearance.scene}
           appearance={appearance}
           activity={activity}
-          progress={progress}
+          standing={roomStanding} retry={room.read}
           boardRef={board}
           layout={checklist ? { kind: "setup", form: setupForm } : { kind: "review", board: boardContent, desk: deskContent, objects: { cited: automaticIds.length, open: inspect } }}
         />

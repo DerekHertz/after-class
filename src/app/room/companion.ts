@@ -4,7 +4,7 @@ import type { PaintedFrame } from "./companion-art";
 import type { Rect } from "./layout";
 import type { Gesture } from "./reactions";
 import { ROOM_ART } from "./rooms";
-import type { Draw } from "./scene";
+import type { CompanionDraw } from "./scene";
 
 /**
  * One whole painted picture of the companion: a pose of its approved sheet, or a gesture frame. Every frame shares the
@@ -150,7 +150,7 @@ const sizeFor = (height: number, ratio: number) => (height * ratio > SMALL_CELL 
  * draw at that size, so the stage can decode them before the first gesture needs one. A lift moves the whole frame up in
  * whole plate pixels. Until a gesture frame has decoded, the stage draws the sheet's idle pose in its place.
  */
-export function companionDraw(id: CompanionId, shown: Shown, box: Rect, ratio: number): { readonly draw: Draw; readonly files: readonly string[] } {
+export function companionDraw(id: CompanionId, shown: Shown, box: Rect, ratio: number): { readonly draw: CompanionDraw; readonly files: readonly string[] } {
   const size = sizeFor(box.height, ratio);
   const { sheet, frames } = COMPANION_ART[id];
   const files = [sheet[size], ...Object.values(frames).map((f) => f[size])];

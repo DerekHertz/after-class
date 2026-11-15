@@ -205,6 +205,8 @@
 .room-progress-body dd { margin: 0; font-size: 1.3em; font-variant-numeric: tabular-nums; }
 .room-progress-body .room-progress-effort { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--fr-chip-line); font-size: .8em; }
 .room-progress-body .room-progress-effort dd { font-size: 1.1em; }
+.room-progress:not([data-freshness="current"]) dd { opacity: .6; }
+.room-progress-body .room-progress-notice { opacity: 1; font-weight: 700; }
 .scene-shell[data-motion="reduced"] .front-row-object .front-row-object-art, .scene-shell[data-motion="reduced"] .front-row-object:is(:hover, :focus-visible) .front-row-object-art { transition: none; translate: none; }
 @media (prefers-reduced-motion: reduce) { .front-row-object .front-row-object-art, .front-row-object:is(:hover, :focus-visible) .front-row-object-art { transition: none; translate: none; } }
 

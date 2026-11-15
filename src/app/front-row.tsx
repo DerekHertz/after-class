@@ -9,8 +9,9 @@ import type { RoomObject } from "./room-object";
 import { layoutRoom } from "./room/layout";
 import type { FullRoomLayout, Rect, Size } from "./room/layout";
 import { useMotion } from "./room/motion";
-import type { Progress } from "./room/progress";
 import { ProgressPanel } from "./room/progress-panel";
+import { drawnUnlocks } from "./room/room-record";
+import type { RoomStanding } from "./room/room-record";
 import { RoomStage } from "./room/stage";
 import { FRONT_ROW_ROOMS } from "./room/rooms";
 import type { FrontRowRoom } from "./room/rooms";
@@ -58,15 +59,16 @@ export type FrontRowLayout =
 /**
  * The review seen from the front-row desk. Every room renders this same tree; a room only changes data attributes, custom
  * properties and the positions room/layout.ts gives, so switching rooms or companions never remounts the response field and
- * its draft. `progress` is the learner's progress from their saved reviews, or null until it loads: it opens the room's
- * unlocked objects and fills the Your room panel.
+ * its draft. `standing` is the learner's progress from their saved reviews and how current it is, or null until it first
+ * loads: it opens the room's unlocked objects and fills the Your room panel. `retry` reads the record again.
  */
-export function FrontRowScene({ scene, layout, appearance, activity, progress, boardRef }: {
+export function FrontRowScene({ scene, layout, appearance, activity, standing, retry, boardRef }: {
   readonly scene: SceneId;
   readonly layout: FrontRowLayout;
   readonly appearance: Pick<Appearance, "companion" | "visible" | "motion">;
   readonly activity: CompanionActivity;
-  readonly progress: Progress | null;
+  readonly standing: RoomStanding;
+  readonly retry: () => void;
   readonly boardRef?: Ref<HTMLElement>;
 }) {
   const room = FRONT_ROW_ROOMS[scene];
@@ -85,7 +87,7 @@ export function FrontRowScene({ scene, layout, appearance, activity, progress, b
     <div ref={sceneRef} className="front-row-scene" data-room={scene} data-board-tone={room.board.tone} data-mat-tone={room.mat.tone} data-mat-actions={room.mat.actions} data-board-align={room.board.align} data-phase={layout.kind}>
       {/* The room's painted layers on one canvas, with every control placed over them from room/layout.ts. */}
       <div className="front-row-stage" style={full ? stageStyle(full) : undefined}>
-        <RoomStage scene={scene} composition={composition} motion={motion} companion={companion} unlocked={progress?.unlocks[scene] ?? NONE} />
+        <RoomStage scene={scene} composition={composition} motion={motion} companion={companion} unlocked={drawnUnlocks(standing, scene)} />
         {layout.kind === "setup" ? layout.form : <>
           <ScrollArea area="board" label={room.surfaceName} areaRef={boardRef}>{layout.board}</ScrollArea>
           <ScrollArea area="desk" label="Your desk">{layout.desk}</ScrollArea>
@@ -97,14 +99,13 @@ export function FrontRowScene({ scene, layout, appearance, activity, progress, b
           <DeskObject object="source" label={sourceButtonLabel(layout.objects.cited)} tag={layout.objects.cited === 0 ? "Source" : `Source · ${layout.objects.cited}`} open={layout.objects.open} rect={full?.objects.source} />
           <DeskObject object="history" label="Earlier in this review" tag="Earlier" open={layout.objects.open} rect={full?.objects.history} />
         </>}
-        {progress !== null && <ProgressPanel progress={progress} room={scene} rect={full?.progress} />}
+        {standing !== null && <ProgressPanel standing={standing} room={scene} rect={full?.progress} retry={retry} />}
       </div>
     </div>
   );
 }
 
 const box = ({ left, top, width, height }: Rect): CSSProperties => ({ left, top, width, height });
-const NONE = [] as const;
 
 /**
  * The scale the board's type follows, and the two text areas. The setup form draws its own text areas, so they are placed
