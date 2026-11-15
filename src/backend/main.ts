@@ -17,7 +17,7 @@
  *   data     $AFTERCLASS_DATA (default ./data): afterclass.sqlite, frames/
  *   mode     AFTERCLASS_MODE=live | replay. Unset: live when a keys file exists, replay otherwise.
  *   budget   Live mode only; replay never touches it. Every paid request reserves against this month's (UTC) per-user and total
- *            budgets as it is sent (providers/budget.ts), and boot settles what a previous process left. AFTERCLASS_BUDGET_USER_USD and AFTERCLASS_BUDGET_TOTAL_USD set them in dollars.
+ *            budgets as it is sent (providers/budget.ts), and boot settles what a previous process left. AFTERCLASS_BUDGET_USER_USD and AFTERCLASS_BUDGET_TOTAL_USD set them in dollars. AFTERCLASS_BUDGET_UNCAPPED_USERS lists Clerk user ids, comma separated, that skip the caps (env, or keys.env).
  *            Hosted (AFTERCLASS_AUTH=clerk, or AFTERCLASS_HOST not loopback) defaults to 5 and 50; local has no cap unless set.
  *            Stop switch: AFTERCLASS_STOP_PAID_CALLS=1, or a file named stop-paid-calls in the config dir, which is looked for
  *            before every request (create it to stop new paid requests, delete it to resume; requests already sent finish).
@@ -122,7 +122,7 @@ export type TaskSet = {
 export type Env = Readonly<Record<string, string | undefined>>;
 
 export type MainOptions = {
-  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_CLAUDE_BACKEND, AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_HOST, AFTERCLASS_HEALTH_ANY_HOST, AFTERCLASS_BUILD_APP, AFTERCLASS_CONFIG_DIR, AFTERCLASS_EXTENSION_ID, AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL, AFTERCLASS_TUTOR_MODEL, the budget settings AFTERCLASS_BUDGET_USER_USD, AFTERCLASS_BUDGET_TOTAL_USD, AFTERCLASS_STOP_PAID_CALLS, and the sign-in settings AFTERCLASS_AUTH (also hosted or not, for the budget), AFTERCLASS_CLERK_ISSUER, AFTERCLASS_CLERK_JWKS_URL, AFTERCLASS_CLERK_PUBLISHABLE_KEY, AFTERCLASS_PUBLIC_ORIGIN. */
+  /** Defaults to process.env. Read: AFTERCLASS_MODE, AFTERCLASS_CLAUDE_BACKEND, AFTERCLASS_DATA, AFTERCLASS_PORT, AFTERCLASS_HOST, AFTERCLASS_HEALTH_ANY_HOST, AFTERCLASS_BUILD_APP, AFTERCLASS_CONFIG_DIR, AFTERCLASS_EXTENSION_ID, AFTERCLASS_ELEVENLABS_VOICE_ID, AFTERCLASS_ELEVENLABS_MODEL, AFTERCLASS_TUTOR_MODEL, the budget settings AFTERCLASS_BUDGET_USER_USD, AFTERCLASS_BUDGET_TOTAL_USD, AFTERCLASS_BUDGET_UNCAPPED_USERS, AFTERCLASS_STOP_PAID_CALLS, and the sign-in settings AFTERCLASS_AUTH (also hosted or not, for the budget), AFTERCLASS_CLERK_ISSUER, AFTERCLASS_CLERK_JWKS_URL, AFTERCLASS_CLERK_PUBLISHABLE_KEY, AFTERCLASS_PUBLIC_ORIGIN. */
   readonly env?: Env;
   /** Holds keys.env and pairing-token. Defaults to AFTERCLASS_CONFIG_DIR, then ~/.config/afterclass. */
   readonly configDir?: string;
@@ -180,9 +180,15 @@ function assertPrivateFile(path: string, what: string): void {
 }
 
 /** The secrets the backend reads from keys.env. Anything else in the file is ignored, never forwarded. */
-export type Keys = { readonly TYPESAFE_API_KEY?: string; readonly ELEVENLABS_API_KEY?: string; readonly AFTERCLASS_ANTHROPIC_API_KEY?: string };
+export type Keys = {
+  readonly TYPESAFE_API_KEY?: string;
+  readonly ELEVENLABS_API_KEY?: string;
+  readonly AFTERCLASS_ANTHROPIC_API_KEY?: string;
+  /** Not a secret, but the beta keeps it in Parameter Store out of the public repo, so it arrives the way the keys do. See `resolveUncappedUsers`. */
+  readonly AFTERCLASS_BUDGET_UNCAPPED_USERS?: string;
+};
 
-const KEY_NAMES = ["TYPESAFE_API_KEY", "ELEVENLABS_API_KEY", "AFTERCLASS_ANTHROPIC_API_KEY"] as const;
+const KEY_NAMES = ["TYPESAFE_API_KEY", "ELEVENLABS_API_KEY", "AFTERCLASS_ANTHROPIC_API_KEY", "AFTERCLASS_BUDGET_UNCAPPED_USERS"] as const;
 
 export function readKeys(path: string): Keys {
   assertPrivateFile(path, "keys file");
@@ -298,6 +304,17 @@ export function resolveBudgetLimits(env: Env): BudgetLimits {
   const userUsd = usdSetting("AFTERCLASS_BUDGET_USER_USD", env.AFTERCLASS_BUDGET_USER_USD);
   const totalUsd = usdSetting("AFTERCLASS_BUDGET_TOTAL_USD", env.AFTERCLASS_BUDGET_TOTAL_USD);
   return hosted ? { userUsd: userUsd ?? HOSTED_LIMITS.userUsd, totalUsd: totalUsd ?? HOSTED_LIMITS.totalUsd } : { userUsd, totalUsd };
+}
+
+/**
+ * Derek, 2026-11-14: "yes build the admin account too". The Clerk user ids, comma separated, whose calls skip both caps (budget.ts).
+ * Ids, not emails: Clerk's session token carries the id, and the repo is public, so no id is in it. Spaces around an id and empty
+ * entries are dropped, so an empty or unset setting lists nobody. An id with a space inside is a typo, so boot refuses it.
+ */
+export function resolveUncappedUsers(text: string | undefined): readonly string[] {
+  const ids = (text ?? "").split(",").map((id) => id.trim()).filter((id) => id !== "");
+  for (const id of ids) if (/\s/.test(id)) throw new Error(`AFTERCLASS_BUDGET_UNCAPPED_USERS lists Clerk user ids separated by commas, and "${id}" has a space inside`);
+  return [...new Set(ids)];
 }
 
 /** Derek, 2026-11-13: "We could definitely use Sonnet for the tutor." Hosted defaults to it; local keeps Opus. */
@@ -449,6 +466,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     throw new Error(`AFTERCLASS_CLAUDE_BACKEND=api needs AFTERCLASS_ANTHROPIC_API_KEY in ${keysPath}; refusing to start`);
   }
   const budgetLimits = resolveBudgetLimits(env);
+  const uncappedUsers = resolveUncappedUsers(keys.AFTERCLASS_BUDGET_UNCAPPED_USERS ?? env.AFTERCLASS_BUDGET_UNCAPPED_USERS);
   const ingestLimits = resolveIngestLimits(env, resolve(env.AFTERCLASS_DATA ?? "data"));
   const tutorModel = resolveTutorModel(env);
   const paidCallsStopped = stopSwitch(env, configDir);
@@ -481,7 +499,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   // Injected tasks make no live call, so the memo may run them. Without them, replay never runs a task at all.
   const memoMode: MemoMode = mode === "replay" && !options.tasks ? "replay" : "live";
   // One budget for every user, on the raw db: the total cap sums all of them. Each user's memo reserves as its own user.
-  const budget = mode === "live" ? createBudget(rawDb, { limits: budgetLimits, stopped: paidCallsStopped }) : null;
+  const budget = mode === "live" ? createBudget(rawDb, { limits: budgetLimits, uncappedSubjects: uncappedUsers, stopped: paidCallsStopped }) : null;
   // Before any request: what a previous process left unsettled gets its usage event (R17) and counts at its price, or its reservation when unpriced.
   const interrupted = budget?.reconcileInterrupted() ?? 0;
 
@@ -877,7 +895,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   );
   const cap = (usd: number | null) => (usd === null ? "no cap" : `$${usd}`);
   if (mode === "live") log(`tutor and wrap-up model: ${tutorModel}`);
-  if (budget !== null) log(`budget per month (UTC): ${cap(budgetLimits.userUsd)} per user, ${cap(budgetLimits.totalUsd)} in total; stop switch: ${join(configDir, STOP_FILE)}${paidCallsStopped() ? " (on)" : ""}`);
+  if (budget !== null) log(`budget per month (UTC): ${cap(budgetLimits.userUsd)} per user, ${cap(budgetLimits.totalUsd)} in total${uncappedUsers.length === 0 ? "" : `, ${uncappedUsers.length} uncapped account${uncappedUsers.length === 1 ? "" : "s"}`}; stop switch: ${join(configDir, STOP_FILE)}${paidCallsStopped() ? " (on)" : ""}`);
   if (interrupted > 0) log(`budget: ${interrupted} call(s) a previous process left unfinished are recorded at unknown cost and count at their reservation`);
   log(
     voiceKey !== undefined

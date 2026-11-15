@@ -808,8 +808,9 @@ const dollars = (usd: number): string => (usd > 0 && usd < 0.005 ? "<$0.01" : `$
 /** The month's allowance as the usage page states it. Null when no budget runs (replay mode). */
 export function allowanceView(a: Allowance | null): { readonly line: string; readonly held: string | null } | null {
   if (a === null) return null;
-  const line =
-    a.limitUsd === null
+  const line = a.uncapped
+    ? `Uncapped account: ${dollars(a.usedUsd)} counted this month, with no cap. It is not counted toward everyone's total.`
+    : a.limitUsd === null
       ? `${dollars(a.usedUsd)} counted this month, with no monthly cap. The month resets on ${resetDay(a.resetsAtMs)}.`
       : `${dollars(a.usedUsd)} of your ${dollars(a.limitUsd)} AI allowance used this month. It resets on ${resetDay(a.resetsAtMs)}.`;
   return { line, held: a.held === null ? null : heldMessage(a.held) };

@@ -128,6 +128,15 @@ When sign-in lands and the domain exists, run `terraform apply` in `beta/` again
 
 The app runs live, with Claude through the Messages API and Clerk sign-in, so it needs `TYPESAFE_API_KEY` and `AFTERCLASS_ANTHROPIC_API_KEY`. ElevenLabs stays off in the beta, so there is no key for it. The keys are SecureString parameters under `/afterclass/beta/`, encrypted with the default `aws/ssm` key. No key is in Terraform, its state, `user_data`, the image or the data volume.
 
+An optional third parameter, `AFTERCLASS_BUDGET_UNCAPPED_USERS`, lists the Clerk user ids, comma separated, whose calls skip the $5 per user cap and are left out of the $50 total (an admin account, issue #246). It is not in the repo because the repo is public. If the parameter does not exist, `afterclass-fetch-keys` skips it and no account is uncapped. If it exists it is checked like a key, and the stop switch still halts a listed account. To set it, copy the user id (it starts with `user_`) from the Clerk dashboard, under Users, then the user. Do not use the email, because the session token carries only the id.
+
+```
+read -r ADMIN_IDS && printf '%s' "$ADMIN_IDS" | aws ssm put-parameter --region us-east-2 --type SecureString \
+  --overwrite --name /afterclass/beta/AFTERCLASS_BUDGET_UNCAPPED_USERS --value file:///dev/stdin && unset ADMIN_IDS
+```
+
+The app reads the parameters at each start, so restart the app unit (`systemctl restart afterclass-app` in a Session Manager shell) for it to take effect. The startup log then says how many uncapped accounts are listed, never their ids. To end the exemption, delete the parameter and restart.
+
 At every start of the app unit, `afterclass-fetch-keys` reads both parameters and writes `keys.env`, mode 0600 and owned by the container's user, into `/run/afterclass-app`. systemd creates that folder on tmpfs at each start and removes it at each stop. The script refuses a folder that is not on tmpfs, prints no value even under `bash -x`, and fails the start when a parameter is missing, unreadable, or not one line of printable characters without spaces or quotes. The app container mounts the folder read-only at `/data/config`, where the image's `AFTERCLASS_CONFIG_DIR` points. The failure is a line that starts with `afterclass-fetch-keys:` in `journalctl -u afterclass-app`, and systemd tries again every 5 seconds.
 
 To rotate a key, put the new value with the step 3 command and restart the app, through Session Manager: `systemctl restart afterclass-app`. A deploy restarts it too.

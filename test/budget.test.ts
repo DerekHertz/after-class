@@ -169,7 +169,7 @@ describe("caps", () => {
     const w = world({ userUsd: null, totalUsd: null });
     const t = claudeTask("tutor_turn", () => ok("x", { usage: usage({ kind: "measured", usd: 2 }) }));
     for (const n of [1, 2, 3]) expect((await w.memo.run(t, { n })).kind).toBe("hit");
-    expect(w.budget.allowance(w.db.userId)).toEqual({ usedUsd: 6, limitUsd: null, resetsAtMs: DEC_1, held: null });
+    expect(w.budget.allowance(w.db.userId)).toEqual({ usedUsd: 6, limitUsd: null, uncapped: false, resetsAtMs: DEC_1, held: null });
   });
 });
 
@@ -370,12 +370,12 @@ describe("what the learner sees", () => {
 
   test("the usage page states this month's use and allowance, and why calls are held", () => {
     expect(allowanceView(null)).toBeNull();
-    expect(allowanceView({ usedUsd: 0.75, limitUsd: 5, resetsAtMs: DEC_1, held: null })).toEqual({
+    expect(allowanceView({ usedUsd: 0.75, limitUsd: 5, uncapped: false, resetsAtMs: DEC_1, held: null })).toEqual({
       line: "$0.75 of your $5.00 AI allowance used this month. It resets on December 1.",
       held: null,
     });
-    expect(allowanceView({ usedUsd: 0.001, limitUsd: null, resetsAtMs: DEC_1, held: null })!.line).toBe("<$0.01 counted this month, with no monthly cap. The month resets on December 1.");
-    const html = renderToStaticMarkup(createElement(AllowanceNote, { allowance: { usedUsd: 5, limitUsd: 5, resetsAtMs: DEC_1, held: { reason: "user_budget", resetsAtMs: DEC_1, usedUp: true } } }));
+    expect(allowanceView({ usedUsd: 0.001, limitUsd: null, uncapped: false, resetsAtMs: DEC_1, held: null })!.line).toBe("<$0.01 counted this month, with no monthly cap. The month resets on December 1.");
+    const html = renderToStaticMarkup(createElement(AllowanceNote, { allowance: { usedUsd: 5, limitUsd: 5, uncapped: false, resetsAtMs: DEC_1, held: { reason: "user_budget", resetsAtMs: DEC_1, usedUp: true } } }));
     expect(html).toContain("$5.00 of your $5.00 AI allowance used this month.");
     expect(html).toContain("This month&#x27;s AI allowance is used up. It resets on December 1.");
   });
@@ -416,7 +416,7 @@ describe("what the learner sees", () => {
     const held = { type: "turn_held", hold: { reason: "user_budget", resetsAtMs: DEC_1, usedUp: false } } as const;
     expect(tutorStreamEvent.parse(held)).toEqual(held);
     expect(() => tutorStreamEvent.parse({ type: "turn_held", hold: { reason: "user_budget", resetsAtMs: DEC_1 } })).toThrow();
-    const allowance = { usedUsd: 1, limitUsd: 5, resetsAtMs: DEC_1, held: null };
+    const allowance = { usedUsd: 1, limitUsd: 5, uncapped: false, resetsAtMs: DEC_1, held: null };
     expect(usageResponse.parse({ byKind: {}, byPurpose: {}, allowance }).allowance).toEqual(allowance);
     expect(usageResponse.parse({ byKind: {}, byPurpose: {} }).allowance).toBeNull();
   });

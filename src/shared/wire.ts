@@ -556,6 +556,7 @@ const PURPOSES = ["boundary", "frame_change", "claim_check", "interpretation", "
 const allowancez = z.object({
   usedUsd: z.number(),
   limitUsd: z.number().nullable(),
+  uncapped: z.boolean().default(false),
   resetsAtMs: z.number(),
   held: budgetHoldz.nullable(),
 }) satisfies z.ZodType<Allowance>;

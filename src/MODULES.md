@@ -27,6 +27,7 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 - The scheduler reads one thing of a run's result: a `held` key is left alone for `heldRetryMs` (60 s) and one timer pumps every held key again then.
 - `BudgetHold` for a cap carries `usedUp`: spend had reached that cap. `heldMessage` says "used up" only then, and otherwise "Not enough of this month's AI allowance is left for another AI step", for the per-user cap and the total alike.
 - Hosted mode ignores `ELEVENLABS_API_KEY` and logs that it does, because voice is not budgeted. Local mode is unchanged.
+- An uncapped account (issue #246) is a property of the user row: `createBudget` takes the Clerk user ids from `AFTERCLASS_BUDGET_UNCAPPED_USERS` (`keys.env` or env) and matches them to `users.auth_subject`. Such a user passes both caps, their holds are left out of the monthly total sum, and the stop switch still holds them. `Allowance.uncapped` carries it to the usage page.
 - A held tutor turn streams `turn_held` with its `BudgetHold` and ends; the learner's turn stays stored, so a resend continues it. `GET /usage` carries the user's `allowance` (null in replay mode). `src/shared/allowance.ts` holds the words a learner reads. Hosted, the usage page shows only the allowance; the tables by cost kind and purpose are local only.
 - `ProviderError` takes an optional `billing`. A `not_billed` failure with no usage is recorded as an estimated $0 (basis "rejected before any model ran") and settles its hold at $0.
 
