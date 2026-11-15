@@ -4,7 +4,7 @@ Terraform for the hosted backend, planned in `docs/architecture/plan.md`. The re
 
 Run every command with `AWS_PROFILE=afterclass`. `bootstrap/` and the ECR repository in `shared/` are applied. Nothing in `beta/` or `main/` exists yet.
 
-A service control policy on this AWS account denies IAM OIDC providers, so GitHub Actions cannot assume an AWS role. The release workflow pushes the image to GHCR with `GITHUB_TOKEN`, and you deploy from your own machine with `scripts/deploy-beta.sh`. GitHub holds no AWS credential.
+A service control policy on this AWS account denies IAM OIDC providers, so GitHub Actions cannot assume an AWS role. The release workflow pushes the image to GHCR with `GITHUB_TOKEN` and creates a draft release. Publishing the draft deploys it, because the beta server polls GitHub's public API and pulls the image without a sign-in. GitHub holds no AWS credential.
 
 ## Stacks
 
@@ -79,14 +79,9 @@ Any change to `user_data` replaces the instance with a few minutes of downtime. 
 
    The status must be `Success`, and the output must end with `afterclass-bootstrap: done`. Caddy then answers 502 until the first deploy. Run the format only on a brand-new data volume, never on a replacement instance or a restored volume.
 
-4. Cut the first release, `v0.1.0`, as in "Releases" below. GHCR creates the package as private, and the server pulls without a sign-in, so make it public once. On GitHub, open the profile's **Packages** tab, then `after-class`, then **Package settings**. Under **Danger Zone**, choose **Change visibility**, then **Public**. The image holds no keys.
+4. Cut the first release, `v0.1.0`, as in "Releasing" below. GHCR creates the package as private, and the server pulls without a sign-in, so make it public once. On GitHub, open the profile's **Packages** tab, then `after-class`, then **Package settings**. Under **Danger Zone**, choose **Change visibility**, then **Public**. The image holds no keys.
 
-5. Deploy the release from the root of a clone. The app makes live calls, so the flow document's conditions for the first hosted live call apply. Running the script is the deploy approval.
-
-   ```
-   aws login
-   scripts/deploy-beta.sh v0.1.0
-   ```
+5. Publish the `v0.1.0` draft. The app makes live calls, so the flow document's conditions for the first hosted live call apply. Publishing is the deploy approval, and the server deploys the release within a few minutes.
 
    From an allowed address, `curl <public_url>/health` returns `{"ok":true}`.
 
@@ -107,9 +102,9 @@ read -r ADMIN_IDS && printf '%s' "$ADMIN_IDS" | aws ssm put-parameter --region u
   --overwrite --name /afterclass/beta/AFTERCLASS_BUDGET_UNCAPPED_USERS --value file:///dev/stdin && unset ADMIN_IDS
 ```
 
-## Releases
+## Releasing
 
-A release is a `v<major>.<minor>.<patch>` tag on a `master` commit whose `package.json` has the same version. A deploy uses the image digest that the release workflow records in the tag's GitHub Release, never a GHCR tag, because GHCR tags are mutable.
+A release is a `v<major>.<minor>.<patch>` tag on a `master` commit whose `package.json` has the same version. Every deploy uses the image digest that the release workflow records in the tag's GitHub Release, never a GHCR tag, because GHCR tags are mutable. Publishing the draft release is the deploy approval.
 
 1. Before the first release, restrict who can publish.
 
@@ -124,25 +119,49 @@ A release is a `v<major>.<minor>.<patch>` tag on a `master` commit whose `packag
 
    This leaves every repository writer and every workflow with `contents: write` trusted, because either can replace a release's `image-digest.txt`. The admin bypasses the ruleset, so never move a pushed release tag.
 
-2. In a pull request, set `version` in `package.json` to the new version, and merge it.
+2. In a pull request, set `version` in `package.json` to the new version, and merge it. A workflow cannot do this step or the next, because `master` takes changes only through a pull request and only the admin can create a `v*` tag.
 3. Tag the merge commit and push the tag.
 
    ```
    git switch master && git pull
-   git tag -a v0.1.0 -m v0.1.0
-   git push origin v0.1.0
+   git tag -a v0.1.5 -m v0.1.5
+   git push origin v0.1.5
    ```
 
-   The `release` workflow checks the tag against `master` and the package version, builds the commit for `linux/arm64`, and pushes `ghcr.io/derekhertz/after-class:<commit>` and `:<tag>`. It then writes the GitHub Release with `image-digest.txt`, which reads `commit <commit>` and `digest sha256:<64 hex>`. Any registry error fails the run. A rerun builds and pushes a new digest.
+   The `release` workflow checks the tag against `master` and the package version, builds the commit for `linux/arm64`, and pushes `ghcr.io/derekhertz/after-class:<commit>` and `:<tag>`. It then creates a draft GitHub Release with `image-digest.txt`, which reads `commit <commit>` and `digest sha256:<64 hex>`. The draft's notes list each PR merged since the live release, from its title. A **Needs the operator** line means the range changes `infra/`, so plan and apply that stack before you publish. A **Migrates the database** line names the migrations. Edit the notes in the draft freely. A rerun replaces only `image-digest.txt`, with a new digest. Never rerun it for a published release, because the server deploys the new digest.
 
-4. When the `release` run is green, deploy the tag.
+4. Try the draft's image on your machine.
 
    ```
-   aws login
-   scripts/deploy-beta.sh v0.1.0
+   scripts/try-release.sh v0.1.5
    ```
 
-   The script needs `git`, `bun`, `gh`, `curl` and the AWS CLI. It refuses a tag off `master` or with another `package.json` version, a release without a valid `image-digest.txt` for the tag's commit, and a digest that GHCR does not serve anonymously. It then runs the `afterclass-beta-deploy` document on the instance named in `/afterclass-beta/instance_id` and waits up to 15 minutes. Redeploying an older tag is a rollback.
+   It prints the notes and serves the release's review app at `http://127.0.0.1:8790/app/` in replay mode, with no keys and a database that goes away with the container. `AFTERCLASS_TRY_PORT` picks another port, and Ctrl-C stops it. It needs `gh` and Docker and calls no AWS API. On a machine that cannot run arm64 images, it runs the release image's own `/app` and `/data` on the amd64 build of the pinned Bun base image, and says so. It runs the local app, not the hosted Clerk sign-in.
+
+5. Publish the draft on GitHub. Within 75 seconds, `afterclass-autodeploy` on the server starts to deploy it through `afterclass-deploy`, which checks `/health` and rolls back on failure. To watch it, run this.
+
+   ```
+   aws logs tail /afterclass-beta --log-stream-names autodeploy --follow
+   ```
+
+   `afterclass-autodeploy: v0.1.5 is live` ends a good deploy.
+
+How the server picks a release:
+
+- It deploys the highest published version. Drafts and pre-releases never count, and publishing an older version deploys nothing.
+- It acts once per release. A release that fails its health check is rolled back and not tried again. Publish a fixed release, or retry by hand.
+- To roll back, mark the newest release as a pre-release on GitHub, or delete it. The server deploys the next highest published version.
+- It asks the GitHub API without a sign-in every 75 seconds, about 48 requests an hour against GitHub's limit of 60. GitHub counts an unchanged list's 304 answer too. A GitHub error, a rate limit, a malformed `image-digest.txt` or a commit off `master` deploys nothing and logs why.
+- The release it last acted on is in `/data/afterclass/autodeploy`. `systemctl status afterclass-autodeploy` shows the last check.
+
+To deploy by hand, for example while GitHub is down, run this from the root of a clone.
+
+```
+aws login
+scripts/deploy-beta.sh v0.1.5
+```
+
+The script needs `git`, `bun`, `gh`, `curl` and the AWS CLI. It refuses a tag off `master` or with another `package.json` version, a release without a valid `image-digest.txt` for the tag's commit, and a digest that GHCR does not serve anonymously. It then runs the `afterclass-beta-deploy` document on the instance named in `/afterclass-beta/instance_id` and waits up to 15 minutes. A manual deploy stays until a different release becomes the highest published one.
 
 ## Turning on HTTPS
 
@@ -176,7 +195,7 @@ Caddy passes the client's `Host` header unchanged and replaces any `X-Forwarded-
 - Cloud-init runs `afterclass-bootstrap` once per instance, and a rerun by hand changes nothing that is already right. It never formats. If the mount fails, it exits with an error naming `afterclass-format-data` before it starts either unit.
 - `afterclass-format-data` refuses unless its argument is this server's data volume id and the disk shows no filesystem signature. A disk with data and no signature passes those checks, so the real safeguard is to run it only on a brand-new volume.
 - On replacement, the new instance waits up to 5 minutes for the data volume. It reads the running image's digest from `/data/afterclass/current-image`, so the app comes back without a deploy.
-- A deploy that is not healthy within 90 seconds rolls back to the previous digest, and `scripts/deploy-beta.sh` fails.
+- A deploy that is not healthy within 90 seconds rolls back to the previous digest. `afterclass-autodeploy` logs it and does not retry, and `scripts/deploy-beta.sh` fails.
 - After each healthy deploy or rollback, the server saves the running image to `/data/afterclass/images/` and keeps it and the one before. A replacement instance starts from that copy when GHCR no longer has the image. The save never fails a deploy. When less than the image size plus 2 GiB would stay free, it skips and prints a `WARNING` line that the deploy script shows. Nothing deletes GHCR versions automatically.
 - Snapshots are crash-consistent. SQLite recovers from that, but a snapshot taken during a write is not a clean backup.
 
