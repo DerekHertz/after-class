@@ -1,0 +1,90 @@
+{
+ "companion": "mote-pagewing",
+ "master": "art/masters/companions-v3/mote-pagewing.png",
+ "cell": 724,
+ "model": "nano-banana-pro",
+ "groundRow": 623,
+ "frames": {
+  "blink": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: close both eyes, drawn as two short gently curved dark lines, as in a blink. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddba-2c5c-7389-9898-8b4ec9f6dca4",
+   "credits": 9,
+   "changed_vs_idle": 0.012,
+   "shiftY": 0,
+   "airborne": false,
+   "bodyBottomRow": 623
+  },
+  "look-board": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: turn the eyes up and to the right, as if reading a chalkboard above and to the right, with a small curious open mouth. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddba-2c70-74c3-abc6-ce4cc01dd42d",
+   "credits": 9,
+   "changed_vs_idle": 0.011,
+   "shiftY": 0,
+   "airborne": false,
+   "bodyBottomRow": 623
+  },
+  "look-mat": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: move both eye dots to the lower right, glancing down and to the right at the desk, attentive. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddba-2ccd-7001-be73-c48f8ac9f036",
+   "credits": 9,
+   "changed_vs_idle": 0.011,
+   "shiftY": 0,
+   "airborne": false,
+   "bodyBottomRow": 623
+  },
+  "nod": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: a happy nod: the whole character tips forward slightly, eyes closed in two upward-curved smiling arcs, small smile. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddba-2c5d-72c4-a184-a2cf5effa62e",
+   "credits": 9,
+   "changed_vs_idle": 0.013,
+   "shiftY": 0,
+   "airborne": false,
+   "bodyBottomRow": 623
+  },
+  "hop-crouch": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: squash down a little as if about to hop: slightly shorter and wider, eyes squeezed shut happily. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddba-a3d2-76d4-9ce2-ffed932b28e7",
+   "credits": 9,
+   "changed_vs_idle": 0.167,
+   "shiftY": -24,
+   "airborne": false,
+   "bodyBottomRow": 623
+  },
+  "hop-air": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: stretched a little taller and narrower as at the top of a happy hop, with a joyful open smile; keep it standing in the same place. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddba-a412-7467-9c55-b0d94f6df0f5",
+   "credits": 9,
+   "changed_vs_idle": 0.226,
+   "shiftY": 0,
+   "airborne": true,
+   "bodyBottomRow": 684
+  },
+  "think": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: move both eye dots up and to the left, make the mouth a small flat line, and add one tiny sweat drop beside the head. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddba-e0b4-72a5-8067-404385ca08ad",
+   "credits": 9,
+   "changed_vs_idle": 0.011,
+   "shiftY": 0,
+   "airborne": false,
+   "bodyBottomRow": 623
+  },
+  "cheer": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: cheering: both wings lifted and spread a little higher, a big open happy smile and light blush marks, still sitting. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddba-e109-7365-8e2a-192bf944ff15",
+   "credits": 9,
+   "changed_vs_idle": 0.176,
+   "shiftY": 0,
+   "airborne": false,
+   "bodyBottomRow": 623
+  },
+  "talk": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: talking: the same pose with a small open rounded mouth, as if saying something. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddbb-31c1-77fa-975c-2ea02d762d72",
+   "credits": 9,
+   "changed_vs_idle": 0.011,
+   "shiftY": 0,
+   "airborne": false,
+   "bodyBottomRow": 623
+  }
+ }
+}

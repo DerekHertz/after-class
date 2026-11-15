@@ -23,7 +23,7 @@ export function readPng(url: URL): Png {
   return decodePng(readFileSync(url), url.pathname);
 }
 
-function decodePng(file: Buffer, name: string): Png {
+export function decodePng(file: Buffer, name: string): Png {
   if (file.subarray(1, 4).toString() !== "PNG") throw new Error(`${name} is not a PNG`);
   let offset = 8;
   let width = 0, height = 0, colorType = 0;
