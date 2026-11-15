@@ -24,8 +24,10 @@
    headless Chrome, against the doubled file this replaced, smooth drawing differs in 0 to 7.1 percent of pixels by more than 8 levels (at most 0.4 percent
    by more than 32) from 390x844 at 3x to 3840x2160 at 2x, and pixelated drawing in 2.3 to 17.6 percent. The room's stage, which draws the same file, is pixelated. */
 .scene-shell:has(:is(.front-row, .review-loading))::before { background: var(--fr-bg) var(--fr-phone-x) 0 / cover no-repeat; }
-/* Once the stage has painted the room it is the backdrop, so the page does not draw the same picture twice. */
+/* Once the stage has painted the room it is the backdrop, so the page does not draw the same picture twice. It is only
+   ever a picture, so pointers pass through it to whatever lies under it. */
 .scene-shell:has(.front-row-canvas[data-painted])::before { content: none; }
+.front-row-canvas { pointer-events: none; }
 .scene-shell .scene-masthead { height: auto; max-width: none; margin: 0; padding: 8px 12px; gap: 8px; background: none; border: 0; color: var(--fr-bar-ink); }
 .scene-shell :is(.scene-masthead > a, .appearance-picker > summary, .scene-masthead > .sign-out) { display: flex; align-items: center; min-height: 44px; padding: 0 12px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); color: var(--fr-bar-ink); box-shadow: 0 3px 0 #00000040; }
 .scene-shell .scene-masthead > a { gap: 8px; font: 600 1.3rem/1 'After Class Pixel', var(--font); }

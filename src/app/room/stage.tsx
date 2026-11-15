@@ -1,9 +1,11 @@
 import { useLayoutEffect, useRef } from "react";
 import type { SceneId } from "../appearance";
 import { layoutRoom } from "./layout";
-import type { Composition, Rect, Size } from "./layout";
+import type { Composition, Size } from "./layout";
 import { buildScene } from "./scene";
 import type { Draw, DrawList } from "./scene";
+import { pieces } from "./paint";
+import type { Scale } from "./paint";
 
 /**
  * The canvas behind the room's text and controls. It paints the draw list of `scene` at the window's device pixels and
@@ -34,8 +36,10 @@ class Stage {
   private shown: SceneId | null = null;
   private box: Box | null = null;
   private frame: number | null = null;
+  /** Set when a change arrived while the tab was hidden, so the stage paints it once the tab shows again. */
+  private stale = false;
   private readonly observer: ResizeObserver | null;
-  private readonly onVisibility = () => this.paint();
+  private readonly onVisibility = () => { if (!document.hidden && this.stale) this.paint(); };
 
   constructor(private readonly canvas: HTMLCanvasElement, private readonly context: CanvasRenderingContext2D) {
     this.observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(([entry]) => entry && this.resize(entry));
@@ -45,6 +49,8 @@ class Stage {
       this.observer?.observe(canvas);
     }
     document.addEventListener("visibilitychange", this.onVisibility);
+    // A browser may drop a hidden canvas's pixels to save memory. It restores the context empty, and nothing else would repaint it.
+    canvas.addEventListener("contextrestored", this.paint);
   }
 
   show(scene: SceneId, composition: Composition): void {
@@ -55,6 +61,7 @@ class Stage {
   stop(): void {
     this.observer?.disconnect();
     document.removeEventListener("visibilitychange", this.onVisibility);
+    this.canvas.removeEventListener("contextrestored", this.paint);
     if (this.frame !== null) cancelAnimationFrame(this.frame);
     this.wanted = null;
   }
@@ -62,10 +69,13 @@ class Stage {
   /** Runs before the browser paints the resized frame, so a cleared backing store is never seen. */
   private resize(entry: ResizeObserverEntry): void {
     const css = { width: entry.contentRect.width, height: entry.contentRect.height };
+    const near = { width: Math.round(css.width * devicePixelRatio), height: Math.round(css.height * devicePixelRatio) };
+    // The exact device box can differ from the rounded product by a pixel of snapping. Chrome's device emulation reports it
+    // at one pixel per CSS pixel whatever the emulated ratio, so a box that far off is not taken.
     const exact = entry.devicePixelContentBoxSize?.[0];
-    const device = exact
+    const device = exact && Math.abs(exact.inlineSize - near.width) <= 1 && Math.abs(exact.blockSize - near.height) <= 1
       ? { width: exact.inlineSize, height: exact.blockSize }
-      : { width: Math.round(css.width * devicePixelRatio), height: Math.round(css.height * devicePixelRatio) };
+      : near;
     this.box = { css, device };
     if (this.canvas.width !== device.width || this.canvas.height !== device.height) {
       this.canvas.width = device.width;
@@ -79,6 +89,8 @@ class Stage {
     this.frame = null;
     const { wanted, box } = this;
     if (wanted === null || box === null || box.css.width === 0 || box.css.height === 0) return;
+    this.stale = document.hidden;
+    if (this.stale) return;
     const list = (scene: SceneId) => buildScene(scene, layoutRoom(scene, box.css, wanted.composition));
     let drawn: DrawList | null = list(wanted.scene);
     if (decoded(drawn, this.paint)) this.shown = wanted.scene;
@@ -89,7 +101,7 @@ class Stage {
     context.clearRect(0, 0, box.device.width, box.device.height);
     if (drawn !== null) for (const draw of drawn.draws) paintDraw(context, draw, scaleOf(box));
     this.canvas.toggleAttribute("data-painted", drawn !== null);
-    if (drawn?.next != null && !document.hidden) this.frame = requestAnimationFrame(this.paint);
+    if (drawn?.next != null) this.frame = requestAnimationFrame(this.paint);
   };
 }
 
@@ -126,36 +138,12 @@ function picture(src: string, onReady: () => void): HTMLImageElement | null {
   return null;
 }
 
-type Scale = { readonly x: number; readonly y: number };
-
-/** Edges in device pixels, rounded the way a browser snaps a box to whole pixels. */
-const snap = (rect: Rect, s: Scale) => ({
-  left: Math.round(rect.left * s.x), right: Math.round((rect.left + rect.width) * s.x),
-  top: Math.round(rect.top * s.y), bottom: Math.round((rect.top + rect.height) * s.y),
-});
-
-function paintDraw(context: CanvasRenderingContext2D, draw: Draw, s: Scale): void {
-  const image = pictures.get(draw.src)!.image;
-  const { naturalWidth: w, naturalHeight: h } = image;
-  const box = snap(draw.rect, s);
-  if (draw.kind === "image") {
-    context.imageSmoothingEnabled = draw.sampling === "smooth";
-    if (draw.sampling === "smooth") context.imageSmoothingQuality = "medium";
-    context.drawImage(image, 0, 0, w, h, box.left, box.top, box.right - box.left, box.bottom - box.top);
-    return;
-  }
-  context.imageSmoothingEnabled = false;
-  const { slice, border } = draw;
-  // As Chrome paints border-image: each border width rounds to whole device pixels from the snapped box's own edges, and
-  // widths that would overlap all shrink by one factor.
-  const widths = { left: Math.round(border.left * s.x), right: Math.round(border.right * s.x), top: Math.round(border.top * s.y), bottom: Math.round(border.bottom * s.y) };
-  const fit = Math.min(1, (box.right - box.left) / Math.max(1, widths.left + widths.right), (box.bottom - box.top) / Math.max(1, widths.top + widths.bottom));
-  const xs = [box.left, box.left + Math.floor(widths.left * fit), box.right - Math.floor(widths.right * fit), box.right];
-  const ys = [box.top, box.top + Math.floor(widths.top * fit), box.bottom - Math.floor(widths.bottom * fit), box.bottom];
-  const us = [0, slice.left, w - slice.right, w];
-  const vs = [0, slice.top, h - slice.bottom, h];
-  for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) {
-    const [sw, sh, dw, dh] = [us[col + 1]! - us[col]!, vs[row + 1]! - vs[row]!, xs[col + 1]! - xs[col]!, ys[row + 1]! - ys[row]!];
-    if (sw > 0 && sh > 0 && dw > 0 && dh > 0) context.drawImage(image, us[col]!, vs[row]!, sw, sh, xs[col]!, ys[row]!, dw, dh);
+function paintDraw(context: CanvasRenderingContext2D, draw: Draw, scale: Scale): void {
+  const { image } = pictures.get(draw.src)!;
+  const smooth = draw.kind === "image" && draw.sampling === "smooth";
+  context.imageSmoothingEnabled = smooth;
+  if (smooth) context.imageSmoothingQuality = "medium";
+  for (const { sx, sy, sw, sh, dx, dy, dw, dh } of pieces(draw, { width: image.naturalWidth, height: image.naturalHeight }, scale)) {
+    context.drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh);
   }
 }
