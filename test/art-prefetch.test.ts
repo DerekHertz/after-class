@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { prefetchReviewArt, readRoomArt } from "../src/app/art-prefetch";
 import type { HintDocument } from "../src/app/art-prefetch";
 import { COMPANIONS } from "../src/app/appearance";
-import { ROOM_ART } from "../src/app/front-row";
+import { layoutRoom } from "../src/app/room/layout";
 import { COMPANION_CELL, MAX_DEVICE_PIXEL_RATIO } from "../scripts/build-art";
 import { COMPACT_ROOM_LAYERS, FULL_ROOM_MIN, FULL_ROOM_QUERY } from "../src/shared/room-art";
 import type { RoomArtTable } from "../src/shared/room-art";
@@ -109,12 +109,12 @@ describe("the layout switch and the companion's sheet follow the size the art is
     return list.split(/,\s*/).some((q) => group(q.trim()));
   }
 
-  /** CSS px tall that the review room draws the companion, from front-row.css's --fr-u0, --fr-b and --fr-u, and ROOM_ART.companionSize. Below the full layout it is 72. */
+  /** CSS px tall that the review room draws the companion, as room/layout.ts places it. Below the full layout it is 72. */
   function drawnHeight(width: number, height: number): number {
     if (width < FULL_ROOM_MIN.width || height < FULL_ROOM_MIN.height) return 72;
-    const u0 = Math.min((1.12 * height) / 992, (1.25 * width) / 1586);
-    const b = Math.max(width / 1586, (height - u0 * 170) / 992);
-    return ROOM_ART.companionSize * Math.min(b, u0);
+    const layout = layoutRoom("last-desk", { width, height }, "full");
+    if (layout.composition !== "full") throw new Error("a full window lays out the full room");
+    return layout.companion.box.height;
   }
 
   const query = companion.match(/@media\s+([^{]*?)\s*\{\s*\.front-row-buddy \.companion-sprite \{ --companion-sheet: var\(--companion-sheet-large\); \}/)?.[1];
@@ -122,12 +122,7 @@ describe("the layout switch and the companion's sheet follow the size the art is
   const heights = [500, 559, 560, 600, 720, 768, 800, 900, 1000, 1080, 1200, 1300, 1440, 1600, 2160];
   const ratios = [1, 1.1, 1.25, 1.33, 1.5, 1.75, 2, 2.25, 2.5, 2.625, 2.75, 3];
 
-  test("the stylesheet's formulas are the ones the test draws the companion with", () => {
-    expect(frontRow).toContain("--fr-u0: min(calc(1.12 * 100cqh / 992), calc(1.25 * 100cqw / 1586));");
-    expect(frontRow).toContain("--fr-b: max(calc(100cqw / 1586), calc((100cqh - var(--fr-u0) * 170) / 992));");
-    expect(frontRow).toContain("--fr-u: min(var(--fr-b), var(--fr-u0));");
-    expect(ROOM_ART.plate).toEqual({ width: 1586, height: 992 });
-    expect(ROOM_ART.deskCovers).toBe(170);
+  test("hd-companion.css names the query that switches to the large sheet", () => {
     expect(query).toBeDefined();
   });
 
