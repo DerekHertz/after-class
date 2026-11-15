@@ -25,7 +25,7 @@ import type { CaptureFactBody, InviteAnswer, InviteState } from "../../shared/do
 import type { ConnectReply, IngestAck } from "../../shared/wire";
 import { backend } from "./backend";
 import {
-  FLUSH_TIMEOUT_MS, acceptsConnectSender, acceptsFact, badgeFor, closingSpanGap, connectionOf, isConnectMessage, isStoredConnection, isWatchUrl, mayUpload,
+  FLUSH_TIMEOUT_MS, acceptsConnectSender, acceptsFact, badgeFor, closingSpanGap, connectionOf, isConnectMessage, isStaleRest, isStoredConnection, isWatchUrl, mayUpload,
   playbackRecovered, safeReviewUrl, transition,
 } from "./control";
 import type {
@@ -259,8 +259,10 @@ function applyEvent(tabId: number, event: ControlEvent): Promise<TabCaptureState
  */
 async function applyEventNow(tabId: number, event: ControlEvent): Promise<TabCaptureState | null> {
   let gap: string | null = null;
-  if (event.kind === "pause" || event.kind === "stop" || event.kind === "left_watch_page" || event.kind === "tab_closed") {
-    if ((await readState(tabId))?.state === "capturing") gap = event.kind === "tab_closed" ? "the tab was closed" : await requestFlush(tabId);
+  const before = await readState(tabId);
+  if (isStaleRest(before, event)) return null;
+  if (event.kind === "pause" || event.kind === "stop" || event.kind === "left_watch_page" || event.kind === "tab_closed" || event.kind === "idle" || event.kind === "video_ended") {
+    if (before?.state === "capturing") gap = event.kind === "tab_closed" ? "the tab was closed" : await requestFlush(tabId);
   }
   return serialized(async () => {
     const tabs = await loadTabs();
@@ -314,7 +316,7 @@ async function onContentMessage(tabId: number, msg: FromContent): Promise<void> 
       for (const wake of Array.from(flushWaiters.get(tabId) ?? [])) wake();
       return;
     }
-    await applyEvent(tabId, { kind: msg.type });
+    await applyEvent(tabId, msg.type === "idle" || msg.type === "video_ended" ? { kind: msg.type, captureId: msg.captureId } : { kind: msg.type });
     return;
   }
   await serialized(async () => {

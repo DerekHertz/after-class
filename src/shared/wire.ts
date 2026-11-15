@@ -34,13 +34,15 @@ const mediaS = z.number().nonnegative().transform(media);
 const videoId = z.string().regex(/^[\w-]{11}$/);
 const framePx = z.number().int().min(FRAME_BOUNDS.minShortSide).max(FRAME_BOUNDS.maxLongSide);
 
+const controlReason = z.enum(["user", "left_watch_page", "returned_to_watch_page", "tab_closed", "idle", "video_ended"]);
+
 const factBase = z.object({ clientSeq: z.number().int().nonnegative(), wallMs: z.number() });
 
 const wireFact = z.discriminatedUnion("kind", [
   factBase.extend({
     kind: z.literal("control"),
     action: z.enum(["start", "pause", "resume", "stop"]),
-    reason: z.enum(["user", "left_watch_page", "returned_to_watch_page", "tab_closed"]),
+    reason: controlReason,
   }),
   factBase.extend({
     kind: z.literal("source"), videoId, title: z.string().max(1000), channelName: z.string().max(1000),
@@ -277,8 +279,8 @@ const captureViewz = z.object({
   captureId: idOf("cap"),
   status: z.discriminatedUnion("state", [
     z.object({ state: z.literal("capturing") }),
-    z.object({ state: z.literal("paused"), reason: z.enum(["user", "left_watch_page", "returned_to_watch_page", "tab_closed"]) }),
-    z.object({ state: z.literal("stopped") }),
+    z.object({ state: z.literal("paused"), reason: controlReason }),
+    z.object({ state: z.literal("stopped"), reason: z.literal("video_ended").optional() }),
   ]),
   sources: z.array(
     z.object({ id: idOf("src"), videoId: z.string(), title: z.string(), url: z.string(), channelName: z.string(), durationS: z.number().nullable() }),

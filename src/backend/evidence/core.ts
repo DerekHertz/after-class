@@ -344,7 +344,7 @@ export function foldCapture(captureId: CaptureId, stored: readonly StoredFact[])
     if (f.kind === "source") sourceFacts.set(f.videoId, f);
     if (f.kind === "control") {
       status =
-        f.action === "pause" ? { state: "paused", reason: f.reason } : f.action === "stop" ? { state: "stopped" } : { state: "capturing" };
+        f.action === "pause" ? { state: "paused", reason: f.reason } : f.action === "stop" ? (f.reason === "video_ended" ? { state: "stopped", reason: "video_ended" } : { state: "stopped" }) : { state: "capturing" };
       if (f.action === "stop" && stoppedAtSeq === null) stoppedAtSeq = seqOf.get(f) ?? null;
     }
   }

@@ -122,7 +122,16 @@ export function mayUpload(owner: string | undefined, stored: StoredConnection): 
 
 export type ControlEvent =
   | { readonly kind: "start"; readonly tabId: number }
-  | { readonly kind: "pause" | "resume" | "stop" | "left_watch_page" | "returned_to_watch_page" | "tab_closed" };
+  | { readonly kind: "pause" | "resume" | "stop" | "left_watch_page" | "returned_to_watch_page" | "tab_closed" }
+  | RestEvent;
+
+/** The page saw the player at rest during `captureId`. It means nothing for any other capture. */
+export type RestEvent = { readonly kind: "idle" | "video_ended"; readonly captureId: CaptureId };
+
+/** True for a rest event aimed at a capture the tab is no longer in, whether it ended, restarted or never was. */
+export function isStaleRest(current: TabCaptureState | null, event: ControlEvent): boolean {
+  return (event.kind === "idle" || event.kind === "video_ended") && current?.captureId !== event.captureId;
+}
 
 /**
  * Pure control transition. One table, unit-tested; the only place auto-pause policy lives.
@@ -131,6 +140,8 @@ export type ControlEvent =
  *   resume : paused → capturing
  *   left_watch_page : capturing → paused("left_watch_page")
  *   returned_to_watch_page : no-op; capture waits for Derek to resume (SYNTHESIS open question 1)
+ *   idle   : capturing → paused("idle"); the page saw nothing play for IDLE_PAUSE_MS. Resume stays the learner's.
+ *   video_ended : capturing|paused → stopped("video_ended"); the page saw the video end and nothing start for VIDEO_END_GRACE_MS.
  *   stop / tab_closed : capturing|paused → stopped
  * Returns the control fact to emit, or null if the request is a no-op.
  * `mintCaptureId` is injectable so tests stay deterministic.
@@ -155,14 +166,17 @@ export function transition(
       return current?.state === "capturing" ? { next: to("paused", "user"), fact: control("pause", "user") } : noop;
     case "left_watch_page":
       return current?.state === "capturing" ? { next: to("paused", "left_watch_page"), fact: control("pause", "left_watch_page") } : noop;
+    case "idle":
+      return isStaleRest(current, event) ? noop : current?.state === "capturing" ? { next: to("paused", "idle"), fact: control("pause", "idle") } : noop;
     case "resume":
       return current?.state === "paused" ? { next: to("capturing", null), fact: control("resume", "user") } : noop;
     case "returned_to_watch_page":
       return noop;
     case "stop":
     case "tab_closed":
-      return current !== null && current.state !== "stopped"
-        ? { next: to("stopped", null), fact: control("stop", event.kind === "stop" ? "user" : "tab_closed") }
+    case "video_ended":
+      return current !== null && current.state !== "stopped" && !isStaleRest(current, event)
+        ? { next: to("stopped", event.kind === "video_ended" ? "video_ended" : null), fact: control("stop", event.kind === "stop" ? "user" : event.kind) }
         : noop;
   }
 }

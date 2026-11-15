@@ -3,7 +3,7 @@ import type { LecturesResponse } from "../shared/wire";
 import { parseId } from "../shared/ids";
 import type { ReviewId } from "../shared/ids";
 import type { AppApi } from "./api";
-import { formatDuration, lectureHeading } from "./core";
+import { captureStatusLabel, formatDuration, lectureHeading } from "./core";
 import type { Route } from "./core";
 import { currentQuestionTopic, isQuestion } from "./diagram-view";
 import { objectFrame } from "./room-object";
@@ -21,7 +21,6 @@ export const FIRST_CAPTURE_STEPS = [
   "Watch the part you want to review. When material is ready, the extension offers a review, or choose Open the review page.",
 ] as const;
 
-const CAPTURE_LABEL = (s: Lecture["status"]): string => (s.state === "capturing" ? "Capturing" : s.state === "paused" ? "Capture paused" : "Capture stopped");
 
 /** Where a review in the list leads: open it while it can continue, the record once saved, the review screen's Retry save when the save failed, nowhere when ended unsaved. */
 export function reviewTarget(r: Pick<LectureReview, "reviewId" | "phase" | "saved">): Route | null {
@@ -133,7 +132,7 @@ export function HomeBody({ api, data }: { readonly api: ResumeApi; readonly data
               <li key={l.captureId}>
                 <Link to={{ page: "capture", id: l.captureId }}>{h.title}</Link>{" "}
                 <span className="muted">
-                  {[h.detail ?? (l.videos === 1 ? "1 video" : `${l.videos} videos`), `${formatDuration(l.watchedSeconds)} watched`, CAPTURE_LABEL(l.status)].join(" · ")}
+                  {[h.detail ?? (l.videos === 1 ? "1 video" : `${l.videos} videos`), `${formatDuration(l.watchedSeconds)} watched`, captureStatusLabel(l.status)].join(" · ")}
                 </span>
                 {l.reviews.length > 0 && <ul>{l.reviews.map((r) => <ReviewRow key={r.reviewId} review={r} />)}</ul>}
               </li>

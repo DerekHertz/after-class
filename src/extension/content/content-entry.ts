@@ -7,8 +7,9 @@
  * without a browser; `browserDeps` is the production set.
  */
 import type { CaptureFactBody } from "../../shared/domain";
+import type { CaptureId } from "../../shared/ids";
 import { createAdProbe, createPlaybackTracker, findPlayer, readSourceMetadata, watchNavigation } from "./capture";
-import type { Emit, PlaybackTracker } from "./capture";
+import type { Emit, PlaybackTracker, RestSignal } from "./capture";
 import { createFrameSampler } from "./frames";
 import type { FrameSampler, FrameSamplerConfig } from "./frames";
 import { STREAM_ID_ATTR, pickVideoId } from "./stream-id";
@@ -52,7 +53,7 @@ export type ContentDeps = {
   findPlayer(): Found | null;
   readSourceMetadata(videoId: string): Promise<SourceFact>;
   acquireTranscript(videoId: string, durationS: number | null): Promise<TranscriptResult>;
-  createTracker(found: Found, emit: Emit, videoId: () => string, sourceDurationS: () => number | null): PlaybackTracker;
+  createTracker(found: Found, emit: Emit, videoId: () => string, sourceDurationS: () => number | null, signal: (s: RestSignal) => void): PlaybackTracker;
   createSampler(found: Found, emit: Emit, videoId: () => string, sourceDurationS: () => number | null): FrameSampler;
   watchNavigation: typeof watchNavigation;
 };
@@ -80,7 +81,7 @@ export const browserDeps: ContentDeps = {
   findPlayer,
   readSourceMetadata,
   acquireTranscript,
-  createTracker: (found, emit, videoId, dur) => createPlaybackTracker(found.video, found.player, emit, videoId, dur),
+  createTracker: (found, emit, videoId, dur, signal) => createPlaybackTracker(found.video, found.player, emit, videoId, dur, undefined, signal),
   createSampler: createBrowserSampler,
   watchNavigation,
 };
@@ -91,7 +92,7 @@ export function startContent(deps: ContentDeps): void {
   let port: ContentPort | null = null;
   let observing = false;
   let attached: { readonly video: HTMLVideoElement; readonly tracker: PlaybackTracker; readonly sampler: FrameSampler } | null = null;
-  let captureId: string | null = null;
+  let captureId: CaptureId | null = null;
   const transcribed = new Set<string>();
   const durations = new Map<string, number>();
 
@@ -118,6 +119,11 @@ export function startContent(deps: ContentDeps): void {
     }
   }
 
+  /** Stamps the rest with the capture this page is observing for; with none, there is nothing to pause or stop. */
+  function sendRest(rest: RestSignal): void {
+    if (captureId !== null) send({ ...rest, captureId });
+  }
+
   async function readTranscript(force: boolean, videoId = currentVideoId()): Promise<void> {
     // Keyed by capture: a Stop then Start on the same video is a new capture and needs its own transcript fact.
     const key = `${captureId ?? ""}:${videoId}`;
@@ -142,7 +148,7 @@ export function startContent(deps: ContentDeps): void {
     attached?.tracker.dispose();
     attached?.sampler.dispose();
     const dur = () => durations.get(currentVideoId()) ?? null;
-    attached = { video: found.video, tracker: deps.createTracker(found, send, currentVideoId, dur), sampler: deps.createSampler(found, send, currentVideoId, dur) };
+    attached = { video: found.video, tracker: deps.createTracker(found, send, currentVideoId, dur, sendRest), sampler: deps.createSampler(found, send, currentVideoId, dur) };
     return true;
   }
 

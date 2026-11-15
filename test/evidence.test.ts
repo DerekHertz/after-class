@@ -495,6 +495,12 @@ describe("capture view", () => {
 
     expect(h.evidence.captureView(live.captureId).status).toEqual({ state: "paused", reason: "left_watch_page" });
     expect(h.evidence.captureView(done.captureId).status).toEqual({ state: "stopped" });
+    const ended = stream();
+    ended.control("start");
+    ended.control("stop", "video_ended");
+    h.evidence.ingest({ captureId: ended.captureId, facts: ended.facts });
+    expect(h.evidence.captureView(ended.captureId).status).toEqual({ state: "stopped", reason: "video_ended" });
+    expect(h.evidence.watchOrder(ended.captureId).stoppedAtSeq).not.toBeNull();
     expect(h.evidence.activeCaptures()).toEqual([live.captureId]);
     expect(h.evidence.watchOrder(done.captureId).stoppedAtSeq).not.toBeNull();
     expect(h.evidence.watchOrder(live.captureId).stoppedAtSeq).toBeNull();

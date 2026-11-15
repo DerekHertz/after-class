@@ -4,8 +4,8 @@
  */
 import { describe, expect, test } from "bun:test";
 import type { CaptureFactBody } from "../src/shared/domain";
-import { createAdProbe, createPlaybackTracker, isAdShowing, parseWatchUrl, readAdSignals } from "../src/extension/content/capture";
-import type { PlaybackEnv } from "../src/extension/content/capture";
+import { createAdProbe, createPlaybackTracker, IDLE_PAUSE_MS, stepRest, VIDEO_END_GRACE_MS, isAdShowing, parseWatchUrl, readAdSignals } from "../src/extension/content/capture";
+import type { PlaybackEnv, RestSignal } from "../src/extension/content/capture";
 
 type Span = Extract<CaptureFactBody, { kind: "span" }>;
 type Ad = Extract<CaptureFactBody, { kind: "ad" }>;
@@ -28,6 +28,7 @@ type SimVideo = EventTarget & {
 
 function rig() {
   const facts: CaptureFactBody[] = [];
+  const signals: RestSignal[] = [];
   let wall = 1000;
   let hidden = false;
   let currentId = VID;
@@ -57,11 +58,13 @@ function rig() {
       return () => visibility.delete(fn);
     },
   };
-  const tracker = createPlaybackTracker(video as unknown as HTMLVideoElement, player, (f) => facts.push(f), () => currentId, () => CONTENT_S, env);
+  const tracker = createPlaybackTracker(video as unknown as HTMLVideoElement, player, (f) => facts.push(f), () => currentId, () => CONTENT_S, env, (s) => signals.push(s));
 
   const fire = (name: string) => video.dispatchEvent(new Event(name));
   const sim = {
     facts,
+    signals,
+    fire,
     video,
     tracker,
     classes,
@@ -76,6 +79,10 @@ function rig() {
         fire("timeupdate");
         if (i % 4 === 3) for (const fn of Array.from(intervals)) fn();
       }
+    },
+    /** Wall time passes with no timer callback and no event, as in a throttled background tab. */
+    elapse(seconds: number) {
+      wall += seconds * 1000;
     },
     /** Wall time passes while the player buffers: currentTime does not move. */
     stall(seconds: number) {
@@ -574,3 +581,121 @@ function coveredByUnion(parts: readonly (readonly [number, number])[], s: number
   }
   return cursor >= e - 1e-6;
 }
+
+describe("a capture the learner leaves running (flow B amendment, 2026-11-14)", () => {
+  const grace = VIDEO_END_GRACE_MS / 1000;
+  const idle = IDLE_PAUSE_MS / 1000;
+
+  function watching() {
+    const r = rig();
+    r.tracker.setObserving(true);
+    r.start();
+    r.play(5);
+    return r;
+  }
+  function finish(r: ReturnType<typeof rig>) {
+    r.video.ended = true;
+    r.video.paused = true;
+    r.video.currentTime = CONTENT_S;
+    r.fire("ended");
+  }
+
+  test("a video that ends and stays ended stops the capture once the grace has passed, and not before", () => {
+    const r = watching();
+    finish(r);
+    r.stall(grace - 2);
+    expect(r.signals).toEqual([]);
+    r.stall(3);
+    expect(r.signals).toEqual([{ type: "video_ended" }]);
+  });
+
+  test("the next video starting inside the grace cancels it, so a playlist or autoplay capture goes on", () => {
+    const r = watching();
+    finish(r);
+    r.stall(grace - 10);
+    r.setVideoId(VID2);
+    r.video.ended = false;
+    r.video.paused = false;
+    r.video.currentTime = 0;
+    r.fire("loadstart");
+    r.fire("playing");
+    r.play(120);
+    expect(r.signals).toEqual([]);
+    finish(r);
+    r.stall(grace + 1);
+    expect(r.signals).toEqual([{ type: "video_ended" }]);
+  });
+
+  test("an ad before the next video counts as playing", () => {
+    const r = watching();
+    finish(r);
+    r.stall(grace - 10);
+    r.video.ended = false;
+    r.video.paused = false;
+    r.startAd(true);
+    r.stall(grace * 2);
+    expect(r.signals).toEqual([]);
+  });
+
+  test("a pause shorter than the threshold never signals, and playing again starts the count over", () => {
+    const r = watching();
+    r.pause();
+    r.stall(idle - 5);
+    r.start();
+    r.play(5);
+    r.pause();
+    r.stall(idle - 5);
+    expect(r.signals).toEqual([]);
+  });
+
+  test("a pause past the threshold asks to pause the capture", () => {
+    const r = watching();
+    r.pause();
+    r.stall(idle - 2);
+    expect(r.signals).toEqual([]);
+    r.stall(3);
+    expect(r.signals).toEqual([{ type: "idle" }]);
+  });
+
+  test("a signal that was lost is sent again after another threshold", () => {
+    const r = watching();
+    r.pause();
+    r.stall(idle + 1);
+    r.stall(idle);
+    expect(r.signals).toEqual([{ type: "idle" }, { type: "idle" }]);
+  });
+
+  test("nothing signals while capture is off", () => {
+    const r = watching();
+    r.tracker.setObserving(false);
+    r.pause();
+    r.stall(idle * 2);
+    expect(r.signals).toEqual([]);
+  });
+
+  test("closing the observation never decides to stop, even when the end timer is overdue", () => {
+    const r = watching();
+    finish(r);
+    r.elapse(grace + 1);
+    r.tracker.setObserving(false);
+    expect(r.signals).toEqual([]);
+  });
+
+  test("closing the observation still folds in the time watched since the last tick", () => {
+    const r = watching();
+    const before = r.spans().length;
+    r.video.currentTime += 3;
+    r.elapse(3);
+    r.tracker.setObserving(false);
+    const last = r.spans().at(-1)!;
+    expect(r.spans().length).toBeGreaterThan(before);
+    expect(last.end).toBeGreaterThanOrEqual(108 - 1e-6);
+  });
+
+  test("stepRest: a video that ended after a pause counts its grace from the end", () => {
+    const paused = stepRest(null, { wallMs: 0, paused: true, ended: false });
+    const ended = stepRest(paused.state, { wallMs: idle * 1000 - 1, paused: true, ended: true });
+    expect(ended.signal).toBeNull();
+    expect(stepRest(ended.state, { wallMs: idle * 1000 - 1 + VIDEO_END_GRACE_MS, paused: true, ended: true }).signal).toEqual({ type: "video_ended" });
+  });
+});

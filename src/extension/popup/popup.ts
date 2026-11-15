@@ -90,12 +90,13 @@ export function describePopup(
     [headline, tone, actions, hint] = ["Capturing", "ok", ["pause", "stop"], null];
   } else if (state?.state === "paused") {
     const left = state.pauseReason === "left_watch_page";
-    headline = left ? "Paused: you left the video page" : "Paused";
+    const idle = state.pauseReason === "idle";
+    headline = left ? "Paused: you left the video page" : idle ? "Paused: nothing was playing for a while" : "Paused";
     tone = "warn";
     actions = onWatch ? ["resume", "stop"] : ["stop"];
-    hint = left && !onWatch ? "Capture stays paused until you come back and press Resume." : null;
+    hint = left && !onWatch ? "Capture stays paused until you come back and press Resume." : idle ? "Press Resume when you start watching again." : null;
   } else if (state?.state === "stopped") {
-    headline = "Stopped";
+    headline = state.pauseReason === "video_ended" ? "Stopped: the video ended" : "Stopped";
   }
 
   const health = (capture?.health ?? []).map((h) => ({
