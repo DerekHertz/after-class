@@ -1,0 +1,85 @@
+{
+ "room": "projection-booth",
+ "model": "nano-banana-pro",
+ "frames": {
+  "1": {
+   "object": "a cup of tea on a saucer, with no steam",
+   "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a cup of tea on a saucer, with no steam, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 38% and its right edge 62% across the picture from the left, its top 37% and its bottom 63% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (dim blue rainy evening light with a warm glow from the lanterns outside), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+   "meshy_task_id": "01a1e0b5-ec0e-708a-bb6e-d81a10716556",
+   "credits": 9,
+   "crop": "docs/design/live-room/unlocks/crops/projection-booth-1.png",
+   "room_outside_moved": 0.214,
+   "rejected_takes": [
+    {
+     "meshy_task_id": "01a1e0b3-9b4d-72fb-bda9-22f753d7265e",
+     "credits": 9
+    }
+   ]
+  },
+  "2": {
+   "object": "a small unlit red paper lantern on a short cord, with no glow around it",
+   "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a small unlit red paper lantern on a short cord, with no glow around it, hanging from the top of the window frame, off the top of the picture. Put it in this exact place: its left edge 41% and its right edge 59% across the picture from the left, its top 36% and its bottom 64% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (dim blue rainy evening light with a warm glow from the lanterns outside), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters. Keep the window and the view behind the lantern exactly as they are.",
+   "meshy_task_id": "01a1e0b5-ec0e-778f-8da5-e432c0fe99c5",
+   "credits": 9,
+   "crop": "docs/design/live-room/unlocks/crops/projection-booth-2.png",
+   "room_outside_moved": 0.0,
+   "rejected_takes": [
+    {
+     "meshy_task_id": "01a1e0b3-a4f4-72a8-a518-298812275219",
+     "credits": 9
+    }
+   ]
+  },
+  "3": {
+   "object": "a low stack of two round metal film canisters lying flat",
+   "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a low stack of two round metal film canisters lying flat, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 36% and its right edge 64% across the picture from the left, its top 42% and its bottom 58% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (dim blue rainy evening light with a warm glow from the lanterns outside), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters. The canisters rest flat on the desk's top edge.",
+   "meshy_task_id": "01a1e0b6-6d5a-7021-90bc-73ec874125c6",
+   "credits": 9,
+   "crop": "docs/design/live-room/unlocks/crops/projection-booth-3.png",
+   "room_outside_moved": 0.0,
+   "rejected_takes": [
+    {
+     "meshy_task_id": "01a1e0b3-f4c6-7067-ab0b-b14489dcf8f5",
+     "credits": 9
+    }
+   ]
+  },
+  "4": {
+   "object": "a small glass wind chime with a long white paper strip hanging below it",
+   "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a small glass wind chime with a long white paper strip hanging below it, hanging from the top of the window frame, off the top of the picture. Put it in this exact place: its left edge 40% and its right edge 55% across the picture from the left, its top 35% and its bottom 65% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (dim blue rainy evening light with a warm glow from the lanterns outside), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+   "meshy_task_id": "01a1e0b6-6e5a-7356-a4b6-16c747a699a2",
+   "credits": 9,
+   "crop": "docs/design/live-room/unlocks/crops/projection-booth-4.png",
+   "room_outside_moved": 0.0,
+   "rejected_takes": [
+    {
+     "meshy_task_id": "01a1e0b4-2b30-7525-8a85-a031d33a688b",
+     "credits": 9
+    }
+   ]
+  },
+  "5": {
+   "object": "a small brass desk lamp, switched off, with no glow",
+   "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a small brass desk lamp, switched off, with no glow, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 39% and its right edge 61% across the picture from the left, its top 37% and its bottom 63% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (dim blue rainy evening light with a warm glow from the lanterns outside), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters. Keep the wall behind the lamp exactly as it is, unlit.",
+   "meshy_task_id": "01a1e0b6-6eb9-73a8-ae71-9fbf49167e4a",
+   "credits": 9,
+   "crop": "docs/design/live-room/unlocks/crops/projection-booth-5.png",
+   "room_outside_moved": 0.033,
+   "rejected_takes": [
+    {
+     "meshy_task_id": "01a1e0b4-575e-742c-8311-892b7b041fbd",
+     "credits": 9
+    }
+   ]
+  },
+  "6": {
+   "object": "a small glass jar filled with colourful paper ticket stubs",
+   "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a small glass jar filled with colourful paper ticket stubs, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 39% and its right edge 61% across the picture from the left, its top 37% and its bottom 63% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (dim blue rainy evening light with a warm glow from the lanterns outside), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+   "meshy_task_id": "01a1e0b4-71e0-77c8-a098-f4798d4f7a8e",
+   "credits": 9,
+   "crop": "docs/design/live-room/unlocks/crops/projection-booth-6.png",
+   "room_outside_moved": 0.0,
+   "rejected_takes": []
+  }
+ }
+}

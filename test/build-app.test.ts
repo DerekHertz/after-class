@@ -139,7 +139,7 @@ describe("the review app bundle", () => {
   test("the shipped notices credit Meshy for the companion frames under CC BY 4.0, beside the font, icon and bundled package licenses", () => {
     const { out } = built();
     const notices = readFileSync(join(out, "asset-notices.txt"), "utf8");
-    for (const name of ["Feather icons", "Young Serif", "DM Sans", "Pixelify Sans", "Companion animation frames", "react", "react-dom", "scheduler", "zod"]) expect(notices).toContain(`${name}\n\n`);
+    for (const name of ["Feather icons", "Young Serif", "DM Sans", "Pixelify Sans", "Companion animation frames and room unlock objects", "react", "react-dom", "scheduler", "zod"]) expect(notices).toContain(`${name}\n\n`);
     expect(notices).toContain("Credit: Meshy (https://www.meshy.ai)");
     expect(notices).toContain("https://creativecommons.org/licenses/by/4.0/");
   });

@@ -12,5 +12,5 @@ Third-party material keeps its own license:
 - Pixelify Sans: SIL Open Font License 1.1, src/app/assets/fonts-v2/OFL-PixelifySans.txt
 - React, React DOM, Scheduler and Zod, bundled into the app: MIT, in each
   package's own LICENSE file. The build copies them into asset-notices.txt.
-- Companion animation frames generated with Meshy: Creative Commons
-  Attribution 4.0, src/app/assets/meshy-CC-BY-4.0.txt
+- Companion animation frames and room unlock objects generated with Meshy:
+  Creative Commons Attribution 4.0, src/app/assets/meshy-CC-BY-4.0.txt

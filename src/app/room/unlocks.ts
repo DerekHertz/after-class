@@ -68,10 +68,3 @@ export const UNLOCK_SLOTS: { readonly [R in RoomId]: readonly UnlockSlot[] } = {
     { id: "projection-booth/6", object: "a ticket stub jar on the desk", width: 48, height: 58, z: 5, place: behindMat(-150) },
   ],
 };
-
-/**
- * The painted picture of each unlocked object, as a bundle URL, once the art step has made it (#226; Meshy spend waits on
- * Derek's OK). A slot with no picture here draws nothing, however far the learner has come, so the room never shows a
- * broken or placeholder image. Each entry is added with its master in art/masters and its line in art/manifest.json.
- */
-export const UNLOCK_ART: Readonly<Partial<Record<UnlockId, string>>> = {};

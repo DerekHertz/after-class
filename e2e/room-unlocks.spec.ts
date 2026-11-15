@@ -60,6 +60,8 @@ test.describe("the Your room panel", () => {
     const say = (label: string) => label[0]!.toUpperCase() + label.slice(1);
     expect(lines).toEqual([
       [say(progress.understood.label), String(progress.understood.value)],
+      // Every slot has its picture, so the count toward the next object shows until the room is full.
+      ...(progress.toNextUnlock === null ? [] : [[say(progress.toNextUnlock.label), String(progress.toNextUnlock.value)]]),
       [say(progress.reviews.label), String(progress.reviews.value)],
       [say(progress.effort.label), String(progress.effort.value)],
     ]);

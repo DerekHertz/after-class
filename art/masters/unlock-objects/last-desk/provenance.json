@@ -1,0 +1,70 @@
+{
+ "room": "last-desk",
+ "model": "nano-banana-pro",
+ "frames": {
+  "1": {
+   "object": "a pencil cup holding a few pencils",
+   "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a pencil cup holding a few pencils, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 41% and its right edge 60% across the picture from the left, its top 37% and its bottom 64% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (warm afternoon daylight from the window on the right), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+   "meshy_task_id": "01a1e0b0-0a68-72f1-9dad-105cfdf6e96a",
+   "credits": 9,
+   "crop": "docs/design/live-room/unlocks/crops/last-desk-1.png",
+   "room_outside_moved": 0.0,
+   "rejected_takes": [
+    {
+     "meshy_task_id": "01a1e0ae-7f45-7723-b148-7838e6a606af",
+     "credits": 9
+    }
+   ]
+  },
+  "2": {
+   "object": "a small potted plant in a terracotta pot",
+   "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a small potted plant in a terracotta pot, standing with its base resting on the green window sill. Put it in this exact place: its left edge 39% and its right edge 61% across the picture from the left, its top 37% and its bottom 63% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (warm afternoon daylight from the window on the right), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+   "meshy_task_id": "01a1e0b1-c917-7033-966b-e60ea9a7522f",
+   "credits": 9,
+   "crop": "docs/design/live-room/unlocks/crops/last-desk-2.png",
+   "room_outside_moved": 0.0,
+   "rejected_takes": []
+  },
+  "3": {
+   "object": "a low, wide stack of two closed hardback books lying flat",
+   "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a low, wide stack of two closed hardback books lying flat, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 36% and its right edge 64% across the picture from the left, its top 43% and its bottom 57% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (warm afternoon daylight from the window on the right), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters. The books rest flat on the desk's top edge, not in front of it, and do not overlap the white paper mat.",
+   "meshy_task_id": "01a1e0b5-ebe4-70e9-b440-92e19dd4b5a0",
+   "credits": 9,
+   "crop": "docs/design/live-room/unlocks/crops/last-desk-3.png",
+   "room_outside_moved": 0.0,
+   "rejected_takes": [
+    {
+     "meshy_task_id": "01a1e0b1-c928-7528-a2e8-0771ed8ed030",
+     "credits": 9
+    }
+   ]
+  },
+  "4": {
+   "object": "a red apple",
+   "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a red apple, standing with its base resting on the wooden chalk ledge under the chalkboard. Put it in this exact place: its left edge 38% and its right edge 62% across the picture from the left, its top 38% and its bottom 62% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (warm afternoon daylight from the window on the right), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+   "meshy_task_id": "01a1e0b1-c928-76a5-85d3-a464c0c6d781",
+   "credits": 9,
+   "crop": "docs/design/live-room/unlocks/crops/last-desk-4.png",
+   "room_outside_moved": 0.0,
+   "rejected_takes": []
+  },
+  "5": {
+   "object": "two closed hardback books standing and leaning on each other",
+   "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: two closed hardback books standing and leaning on each other, standing with its base resting on the green window sill. Put it in this exact place: its left edge 53% and its right edge 85% across the picture from the left, its top 32% and its bottom 68% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (warm afternoon daylight from the window on the right), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+   "meshy_task_id": "01a1e0b1-c92b-72e3-8206-f22ca2d97fd1",
+   "credits": 9,
+   "crop": "docs/design/live-room/unlocks/crops/last-desk-5.png",
+   "room_outside_moved": 0.0,
+   "rejected_takes": []
+  },
+  "6": {
+   "object": "a small desk globe on a wooden stand",
+   "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a small desk globe on a wooden stand, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 39% and its right edge 61% across the picture from the left, its top 37% and its bottom 63% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (warm afternoon daylight from the window on the right), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+   "meshy_task_id": "01a1e0b2-4f9c-7129-a3c4-141a73b5be9f",
+   "credits": 9,
+   "crop": "docs/design/live-room/unlocks/crops/last-desk-6.png",
+   "room_outside_moved": 0.0,
+   "rejected_takes": []
+  }
+ }
+}

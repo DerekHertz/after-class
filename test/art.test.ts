@@ -5,7 +5,7 @@ import { join, relative } from "node:path";
 import { MAX_DEVICE_PIXEL_RATIO } from "../scripts/build-art";
 import type { ArtEntry } from "../scripts/build-art";
 import { COMPANION_ART } from "../src/app/room/companion-art";
-import { ROOM_LAYER_ART } from "../src/app/room/art";
+import { ROOM_LAYER_ART, UNLOCK_ART } from "../src/app/room/art";
 import { readImage } from "./png";
 import type { Png } from "./png";
 
@@ -20,6 +20,7 @@ const rel = (root: string, path: string) => relative(root, path).split("\\").joi
 /** The room layers and companion frames the review's canvas stage draws (src/app/room/stage.tsx), which import their files instead of naming them in a stylesheet. */
 const STAGE_DRAWN = new Set([
   ...Object.values(ROOM_LAYER_ART).flatMap(({ extras, ...layers }) => [...Object.values(layers), ...Object.values(extras)]),
+  ...Object.values(UNLOCK_ART),
   ...Object.values(COMPANION_ART).flatMap(({ sheet, frames }) => [sheet, ...Object.values(frames)].flatMap((sized) => [sized.large, sized.small])),
 ].map((file: string) => rel(ASSETS, file)));
 
