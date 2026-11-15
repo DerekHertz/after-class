@@ -461,21 +461,13 @@ describe("main, the pump an upload triggers", () => {
 // ───────────────────────────── M7b: the record, preparation and segmentation reach the server ─────────────────────────────
 
 describe("main, the live backend serves save, retry-preparation, the record and evidence", () => {
-  const wrapUpScript = (failFirst: number) => {
-    let calls = 0;
-    return scripted<unknown, { observations: never[]; notes: never[] }>("wrap_up", "claude", () => `wrap-${Math.min(calls, 1)}`, () => {
-      calls += 1;
-      return calls <= failFirst ? fail("claude timed out") : ok({ observations: [], notes: [] });
-    });
-  };
-
   const json = async (r: Response) => ({ status: r.status, body: (await r.json()) as Record<string, any> });
   const get = (b: Boot, path: string) => fetch(`${b.base}${path}`, { headers: authed(b.r.token) }).then(json);
   const post = (b: Boot, path: string, body: unknown = {}) => fetch(`${b.base}${path}`, { method: "POST", headers: authed(b.r.token), body: JSON.stringify(body) }).then(json);
 
   test("save and retry-preparation answer instead of 501; a failed save reads save_pending across a restart, and retrying it twice saves one record (R15)", async () => {
     const fakes = fakeTasks();
-    const wrapUp = wrapUpScript(1);
+    const wrapUp = stableWrapUp(["fail", "ok"]);
     const tutor = scripted("tutor_turn", "claude", () => "tutor", () => ok({ move: { kind: "wrap_up" }, say: "That is the end of this review." }));
     const tasks = { ...fakes.tasks, wrapUp, tutor } as unknown as TaskSet;
     const configDir = dir("afterclass-config-");

@@ -265,7 +265,7 @@ class World {
       ads: [],
     }),
     watchedSeconds: (_input: CaptureId) => this.chunks.reduce((s, c) => s + Material.duration(c.material), 0),
-    runWrapUp: () => Promise.reject(new Error("the record owns wrap-up in these tests")),
+    startWrapUp: () => {},
     nextSeq: (): Seq => this.db.nextSeq(),
   };
 }

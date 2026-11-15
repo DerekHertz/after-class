@@ -730,6 +730,17 @@ export function tutorTask(claude: ClaudeCli, cache: TutorCache, model: TutorMode
 }
 
 export type WrapUpInput = { readonly turns: readonly Turn[]; readonly claims: readonly AssessableClaim[]; readonly threads: readonly ThreadId[] };
+
+/**
+ * The summary reads the turns without the tutor's closing `wrap_up` line, so it can start before that line is written and run
+ * while it streams (#234). The save builds the same input once the line is stored, so the memo key matches and the save joins the call.
+ */
+export function wrapUpInput(turns: readonly Turn[], claims: readonly AssessableClaim[]): WrapUpInput {
+  const last = turns.at(-1);
+  const read = last?.actor === "tutor" && last.move.kind === "wrap_up" ? turns.slice(0, -1) : turns;
+  const threads = [...new Set(read.flatMap((t) => (t.actor === "tutor" && (t.move.kind === "ask_main" || t.move.kind === "quick_check") ? [t.move.threadId] : [])))];
+  return { turns: read, claims, threads };
+}
 export type WrapUpOutput = {
   readonly observations: readonly { readonly threadId: ThreadId; readonly proposed: Observation["proposed"]; readonly rationale: string }[];
   readonly notes: readonly { readonly conceptId: AssessableClaim["conceptId"]; readonly tutorSummary: string; readonly evidence: readonly string[] }[];
@@ -773,7 +784,7 @@ export function wrapUpTask(claude: ClaudeCli, model: TutorModel = "opus"): Task<
     provider: "claude",
     purpose: "wrap_up",
     model,
-    version: "wrap-up-1",
+    version: "wrap-up-2",
     maxAttempts: 3,
     canonicalInput: (input) => ({ system: WRAP_UP_SYSTEM, prompt: wrapUpPrompt(input), effort: WRAP_UP_REQUEST.effort }),
     async attempt(input, ctx) {

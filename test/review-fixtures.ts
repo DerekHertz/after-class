@@ -121,7 +121,7 @@ export class World {
       ads: [],
     }),
     watchedSeconds: (_input: CaptureId) => this.chunks.reduce((s, c) => s + Material.duration(c.material), 0),
-    runWrapUp: () => Promise.reject(new Error("wrap-up is not under test")),
+    startWrapUp: () => {},
     nextSeq: () => this.db.nextSeq(),
   };
 }
