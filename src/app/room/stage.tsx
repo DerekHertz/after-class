@@ -78,7 +78,19 @@ class Stage {
   private readonly observer: ResizeObserver;
   /** Set where the observer sees only CSS pixels, as in Safari, to catch a change of pixel ratio that keeps the CSS size. */
   private ratio: MediaQueryList | null = null;
-  private readonly onVisibility = () => { if (!document.hidden && this.stale) this.paint(); };
+  /**
+   * A hidden tab runs no animation frames, so a step queued before it hid would never come to drop the bands. The stage
+   * drops them here, stops stepping, and paints the room afresh once the tab shows again.
+   */
+  private readonly onVisibility = () => {
+    if (!document.hidden) {
+      if (this.stale) this.paint();
+      return;
+    }
+    this.cancelFrame();
+    this.forget();
+    this.stale = this.wanted !== null;
+  };
 
   constructor(private readonly canvas: HTMLCanvasElement, private readonly context: CanvasRenderingContext2D) {
     setState(canvas, "waiting");
@@ -95,7 +107,7 @@ class Stage {
   }
 
   private readonly restore = (): void => {
-    this.moving = null;
+    this.forget();
     this.paint();
   };
 
@@ -113,6 +125,12 @@ class Stage {
     this.canvas.removeEventListener("contextrestored", this.restore);
     this.cancelFrame();
     this.wanted = null;
+    this.forget();
+  }
+
+  /** Frees the bands' backing stores at once rather than whenever the collector gets to them. */
+  private forget(): void {
+    for (const { canvas } of this.moving?.bands ?? []) canvas.width = canvas.height = 0;
     this.moving = null;
   }
 
@@ -155,7 +173,7 @@ class Stage {
     if (wanted === null || box === null || box.css.width === 0 || box.css.height === 0) return;
     this.stale = document.hidden;
     if (this.stale) {
-      this.moving = null;
+      this.forget();
       return;
     }
     const now = wanted.motion ? performance.now() : null;
@@ -175,7 +193,7 @@ class Stage {
     const { context } = this;
     context.setTransform(1, 0, 0, 1, 0, 0);
     if (drawn?.next == null) {
-      this.moving = null;
+      this.forget();
       context.clearRect(0, 0, box.device.width, box.device.height);
       for (const draw of painted) paintDraw(context, draw, scaleOf(box));
     } else this.paintMoving(painted, box);

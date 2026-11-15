@@ -112,6 +112,33 @@ test.describe("with motion on", () => {
     await expect.poll(async () => (await counts(page)).specks).toBeGreaterThan(hidden.specks);
   });
 
+  test("a hidden tab holds no offscreen pixels, and builds them again when it returns", async ({ page }) => {
+    await page.addInitScript(() => {
+      const made: HTMLCanvasElement[] = [];
+      const create = document.createElement.bind(document);
+      document.createElement = ((name: string, options?: ElementCreationOptions) => {
+        const element = create(name, options);
+        if (element instanceof HTMLCanvasElement) made.push(element);
+        return element;
+      }) as typeof document.createElement;
+      (window as unknown as { offscreen: () => number }).offscreen = () => made.filter((c) => !c.isConnected).reduce((sum, c) => sum + c.width * c.height, 0);
+      // A hidden tab runs no animation frames until it shows again, as browsers do.
+      const held: FrameRequestCallback[] = [];
+      const frame = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = (callback) => (document.hidden ? held.push(callback) : frame(callback));
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) for (const callback of held.splice(0)) frame(callback); });
+    });
+    const offscreen = () => page.evaluate(() => (window as unknown as { offscreen: () => number }).offscreen());
+    await openRoom(page, "last-desk");
+    await expect.poll(offscreen).toBeGreaterThan(1440 * 900);
+    await setHidden(page, true);
+    expect(await offscreen()).toBe(0);
+    await page.waitForTimeout(500);
+    expect(await offscreen()).toBe(0);
+    await setHidden(page, false);
+    await expect.poll(offscreen).toBeGreaterThan(1440 * 900);
+  });
+
   test("the app's Reduce motion setting keeps the room still", async ({ page }) => {
     await watchCanvas(page);
     await openRoom(page, "projection-booth", { motion: "reduced" });
