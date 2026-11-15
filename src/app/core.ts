@@ -712,6 +712,29 @@ export function noteView(note: Note): NoteView {
   };
 }
 
+/**
+ * A note's cited evidence in watch order: by lecture, then by time in it. The ids alone carry no time, so the order
+ * is made where the ids meet the loaded passages and frames. An id with no details yet keeps its place after the rest.
+ */
+export function citedInWatchOrder(
+  ids: readonly EvidenceId[],
+  details: { readonly passages: readonly { readonly id: EvidenceId; readonly sourceId: SourceId; readonly interval: Interval }[]; readonly frames: readonly { readonly id: EvidenceId; readonly sourceId: SourceId; readonly mediaS: number }[] } | null,
+): readonly EvidenceId[] {
+  const at = new Map<EvidenceId, { readonly sourceId: SourceId; readonly s: number }>();
+  for (const p of details?.passages ?? []) at.set(p.id, { sourceId: p.sourceId, s: p.interval.start });
+  for (const f of details?.frames ?? []) at.set(f.id, { sourceId: f.sourceId, s: f.mediaS });
+  const lecture = new Map<SourceId, number>();
+  for (const id of ids) {
+    const a = at.get(id);
+    if (a && !lecture.has(a.sourceId)) lecture.set(a.sourceId, lecture.size);
+  }
+  const key = (id: EvidenceId) => {
+    const a = at.get(id);
+    return a ? ([lecture.get(a.sourceId)!, a.s] as const) : ([Infinity, 0] as const);
+  };
+  return ids.map((id, i) => ({ id, i, k: key(id) })).sort((x, y) => x.k[0] - y.k[0] || x.k[1] - y.k[1] || x.i - y.i).map((x) => x.id);
+}
+
 // ───────────────────────────── Evidence inspector ───────────────────────────
 
 export type BundleReport = {

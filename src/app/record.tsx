@@ -4,7 +4,7 @@ import type { ConceptId, EvidenceId, NoteId, ReviewId } from "../shared/ids";
 import type { DiagramFrame, EvidenceBundle, LinkDecision, LinkType, Note, Observation, ObservationStatus, RecordView, TopicDiagram, UsageSummary } from "../shared/domain";
 import type { LecturesResponse } from "../shared/wire";
 import type { AppApi } from "./api";
-import { allowanceView, formatClock, formatInterval, noteView, observationRow, STATUS_LABEL, usageRows } from "./core";
+import { allowanceView, citedInWatchOrder, formatClock, formatInterval, noteView, observationRow, STATUS_LABEL, usageRows } from "./core";
 import type { SourceTitles } from "./core";
 import { canChangeObservation, changeObservation, DISPUTE_CHOICES, loadReviewContext, observationContext } from "./observation-view";
 import type { DisputeChoice, ObservationContext, ReviewContext } from "./observation-view";
@@ -358,7 +358,7 @@ function TopicSource({ api, notes, name, diagram, deleted, citations, run }: {
 }) {
   const [open, setOpen] = useState<OpenSource | null>(null);
   const lecture = notes.flatMap((n) => noteView(n).segments.filter((s) => s.author === "source"));
-  const cited = [...new Set(notes.flatMap((n) => [...n.evidence, ...n.generated.flatMap((s) => s.evidence)]))];
+  const cited = citedInWatchOrder([...new Set(notes.flatMap((n) => [...n.evidence, ...n.generated.flatMap((s) => s.evidence)]))], citations.data);
   const missingDetails = cited.some((id) => !deleted.has(id) && !citations.data?.frames.some((frame) => frame.id === id) && !citations.data?.passages.some((passage) => passage.id === id));
   if (lecture.length === 0 && cited.length === 0 && diagram.kind === "none") return null;
 
