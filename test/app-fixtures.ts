@@ -39,13 +39,13 @@ export const claimJson = (status: string) => ({
   originalCheck: null, revision: null, revisionCheck: null, status,
 });
 
-export const READY = { kind: "ready", scope: { chunkRevisions: [crv], supportedClaims: 4, topics: [], material: [[src, [[0, 120]]]], partial: [] } };
+export const READY = { kind: "ready", heldBack: [], scope: { chunkRevisions: [crv], supportedClaims: 4, topics: [], material: [[src, [[0, 120]]]], partial: [] } };
 
 export function turnJson(n: number, actor: "learner" | "tutor" | "code", rest: Record<string, unknown>) {
   return { id: actor === "learner" ? stableId("turn", `l${n}`) : stableId("turn", `${actor}${n}`), reviewId, seq: n, atMs: n * 1000, threadId: actor === "code" ? null : thr, actor, ...rest };
 }
 
-export function reviewJson(overrides: { turns?: unknown[]; phase?: string; saved?: string; detour?: unknown; observations?: unknown[]; owesMove?: boolean } = {}) {
+export function reviewJson(overrides: { turns?: unknown[]; phase?: string; saved?: string; detour?: unknown; observations?: unknown[]; owesMove?: boolean; turnInFlight?: boolean } = {}) {
   return {
     reviewId, captureId,
     topics: [{ id: cpt, label: "Logical clocks", summary: "Order events without a shared clock." }, { id: stableId("cpt", "concept-2"), label: "Vector clocks", summary: "" }],
@@ -57,6 +57,7 @@ export function reviewJson(overrides: { turns?: unknown[]; phase?: string; saved
     },
     turns: overrides.turns ?? [],
     owesMove: overrides.owesMove ?? false,
+    turnInFlight: overrides.turnInFlight ?? false,
     observations: overrides.observations ?? [],
     saved: overrides.saved ?? "unsaved",
   };
@@ -215,7 +216,7 @@ export function setup(opts: {
     record: async () => { throw new Error("unused"); },
     usage: async () => { throw new Error("unused"); },
   };
-  const controller = createReviewController({ api, reviewId, speaker, unsent, nowMs: () => 1000 });
+  const controller = createReviewController({ api, reviewId, speaker, unsent, nowMs: () => 1000, inFlightPollMs: 1 });
   return { controller, unsent, sends, spoken, stops: () => stops, saves: () => saves, reviews: () => reviews };
 }
 

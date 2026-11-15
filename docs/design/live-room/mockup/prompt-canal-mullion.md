@@ -1,0 +1,7 @@
+Use your built-in image generation tool (not code, not SVG, not a script) to edit the attached image `canal-room.png` and generate ONE image of the same size, 1586x992. Save the generated PNG unchanged as `fixed.png` in the current folder. Do not draw or edit anything with code. In your final message give the saved path, the original path of the generated file, and the image's pixel size.
+
+Edit: fix ONLY the vertical bar (mullion) of the wooden window on the left. Today it sits far left of centre, so the left column of panes is about half as wide as the right column.
+
+Move the vertical bar to the exact horizontal centre of the window's glass, so the left and right columns of panes are exactly the same width. It stays straight and upright, runs from the top of the frame to the sill, keeps the same thickness and warm brown painted wood, and meets the two level horizontal bars with square joints. Fill the place where the bar used to be with the view that belongs behind it (the rainy canal town, roofs, lanterns, sky, ivy).
+
+Keep everything else exactly the same: the outer frame, the two level horizontal bars and three equal rows, the view through the glass, the ivy at the top, the projector, its light beam and the popcorn box in front of the window, the posters, the wall, the screen, the desk, the companion and every other object, in the same positions, the same soft painted HD pixel-art style, palette and resolution. No text.

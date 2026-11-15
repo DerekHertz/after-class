@@ -12,6 +12,9 @@
  * (its refresh failed), the failed live turn is resent from the controller's
  * own record of it.
  *
+ * A page that loads while the backend still runs a turn (`turnInFlight`) does not resend it: it re-reads the review until
+ * the backend says the turn is over, so the reply shows up without a click.
+ *
  * While an unsent turn exists, `send` is refused: the oldest unsent turn must
  * be resent first, so turns reach the backend in the order the learner made
  * them. An act the backend would reject is refused before it is stored.
@@ -23,6 +26,8 @@ import { randomId } from "../shared/ids";
 import { learnerAct } from "../shared/wire";
 import { ApiError } from "./api";
 import type { Api } from "./api";
+import { MAX_FAILURES, startPolling } from "./poll";
+import type { PollTimers } from "./poll";
 import { owedLearnerTurn, reduceLive, startLive, strandedEndTurn, unansweredLearnerTurn } from "./core";
 import type { Live } from "./core";
 import type { Speaker } from "./speech";
@@ -61,6 +66,8 @@ export type ReviewController = {
   save(): Promise<void>;
   /** The learner started speaking: the tutor goes quiet. */
   learnerSpeaking(): void;
+  /** Stop re-reading a review whose turn was still running when the page loaded. */
+  dispose(): void;
 };
 
 export type ControllerDeps = {
@@ -70,7 +77,12 @@ export type ControllerDeps = {
   readonly unsent: UnsentStore;
   readonly mintTurnId?: () => TurnId;
   readonly nowMs?: () => number;
+  /** How often to re-read a review whose turn is still running on the backend. */
+  readonly inFlightPollMs?: number;
+  readonly timers?: PollTimers;
 };
+
+export const IN_FLIGHT_POLL_MS = 1000;
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -88,7 +100,7 @@ export function needsChecklist(state: SessionState): boolean {
  * with nothing unsent and nothing streaming.
  */
 export function needsResume(state: SessionState): boolean {
-  return state.view !== null && owedLearnerTurn(state.view) !== null && state.unsent.length === 0 && state.live === null;
+  return state.view !== null && !state.view.turnInFlight && owedLearnerTurn(state.view) !== null && state.unsent.length === 0 && state.live === null;
 }
 
 /** Resends the learner turn the tutor still owes a move for, at most once per call of this factory. A second failure leaves the Retry button. */
@@ -116,13 +128,73 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
     for (const l of listeners) l();
   };
 
-  async function refreshView(): Promise<void> {
+  /** Bumped by `dispose`, so a read that started before it never starts a watcher after it. */
+  let generation = 0;
+
+  /** Every read of the review goes through here: whatever it learns about a turn still running on the backend is handled in one place. */
+  async function refreshView(started = generation): Promise<void> {
     try {
       const view = await api.review(reviewId);
       set({ view, loadError: null, ...(view.saved === "saved" ? { saveError: null } : {}) });
+      settleLive(view);
+      await reconcileUnsent(view);
+      if (generation === started && view.turnInFlight && state.live?.status !== "streaming") watchRunningTurn();
     } catch (e) {
       set({ loadError: message(e) });
     }
+  }
+
+  /**
+   * A failed live turn whose reply the backend went on to store is finished: the stored view shows a tutor turn after the learner
+   * turn (a code turn such as a correction is not a reply), nothing still running and no move still owed, so the partial text, the error and Retry go.
+   */
+  function settleLive(view: ReviewView): void {
+    const live = state.live;
+    if (live?.status !== "failed" || view.turnInFlight || view.owesMove) return;
+    const at = view.turns.findIndex((t) => t.id === live.turnId);
+    if (at !== -1 && view.turns.slice(at + 1).some((t) => t.actor === "tutor")) set({ live: null });
+  }
+
+  /** A turn the backend already stored is no longer unsent, whether or not this page saw the acknowledgment. */
+  async function reconcileUnsent(view: ReviewView): Promise<void> {
+    const stored = new Set<string>(view.turns.map((t) => t.id));
+    const rows = await unsent.forReview(reviewId);
+    const settled = rows.filter((r) => stored.has(r.turnId));
+    if (settled.length === 0) return;
+    for (const r of settled) await unsent.remove(r.turnId);
+    await refreshUnsent();
+  }
+
+  let stopWatching: (() => void) | null = null;
+
+  /** The backend is still running a turn this page did not start (a reload mid-turn): read the review until it is done. */
+  function watchRunningTurn(): void {
+    if (stopWatching) return;
+    let failures = 0;
+    const stop = startPolling({
+      read: () => api.review(reviewId),
+      pending: (view) => view.turnInFlight,
+      onResult: (view) => {
+        failures = 0;
+        set({ view, loadError: null });
+        settleLive(view);
+        void reconcileUnsent(view);
+        if (!view.turnInFlight) {
+          stopWatching = null;
+          void saveIfEnded(false);
+        }
+      },
+      // A review that cannot be read cannot say whether the turn is over, so after repeated failures the Retry button comes back.
+      onError: () => {
+        if (++failures >= MAX_FAILURES && state.view) {
+          stopWatching = null;
+          set({ view: { ...state.view, turnInFlight: false } });
+        }
+      },
+      intervalMs: deps.inFlightPollMs ?? IN_FLIGHT_POLL_MS,
+      ...(deps.timers ? { timers: deps.timers } : {}),
+    });
+    stopWatching = stop;
   }
 
   async function refreshUnsent(): Promise<void> {
@@ -133,6 +205,8 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
   /** One turn at a time, claimed before the first await so a double click cannot start two. */
   async function exclusive<T>(run: () => Promise<T>): Promise<T | undefined> {
     if (streaming) return undefined;
+    // The backend allows one turn at a time and would answer 409: hold every act that sends a turn until the running one is over.
+    if (state.view?.turnInFlight) return undefined;
     streaming = true;
     set({ busy: true });
     try {
@@ -144,6 +218,7 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
   }
 
   async function runTurn(turnId: TurnId, act: LearnerAct): Promise<void> {
+    const started = generation;
     speaker.beginTurn();
     lastRun = { turnId, act };
     set({ live: startLive(turnId) });
@@ -163,7 +238,7 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
       const retryable = e instanceof ApiError ? e.retryable : false;
       set({ live: reduceLive(state.live ?? startLive(turnId), { type: "turn_failed", error: message(e), retryable }) });
     }
-    await refreshView();
+    await refreshView(started);
     if (state.live?.status === "complete") set({ live: null });
     await saveIfEnded(wrappedUp);
   }
@@ -199,8 +274,9 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
     },
     async load() {
       // Unsent turns first, so a loaded view never shows before the unsent store is known (the review opens by checking both).
+      const started = generation;
       await refreshUnsent();
-      await refreshView();
+      await refreshView(started);
     },
     send: async (act) => {
       const sent = await exclusive(async () => {
@@ -250,5 +326,10 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
     },
     save,
     learnerSpeaking: () => speaker.stop(),
+    dispose: () => {
+      generation++;
+      stopWatching?.();
+      stopWatching = null;
+    },
   };
 }

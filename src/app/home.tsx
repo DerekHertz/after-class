@@ -11,7 +11,7 @@ import { storeListing } from "./connect";
 import { ErrorNote, Link, navigate, useAsync } from "./ui";
 
 type Lecture = LecturesResponse["lectures"][number];
-type LectureReview = Lecture["reviews"][number];
+export type LectureReview = Lecture["reviews"][number];
 
 export const EMPTY_HOME = "No lectures captured yet. Start capture from the extension while watching a lecture.";
 
@@ -95,13 +95,14 @@ function ContinueCard({ api, lecture, review }: { readonly api: ResumeApi; reado
   );
 }
 
-function ReviewRow({ review }: { readonly review: LectureReview }) {
+/** One review of a lecture. `covered` is what it froze, when the page knows (the lecture page does, the home list does not). */
+export function ReviewRow({ review, covered = [] }: { readonly review: LectureReview; readonly covered?: readonly string[] }) {
   const { label, target } = reviewAction(review);
   const status = review.phase === "paused" ? "Paused · " : review.phase === "active" ? "In progress · " : "";
   return (
     <li>
       {target ? <Link to={target}>{label}</Link> : label}{" "}
-      <span className="muted">{status}{questions(review.mainQuestions)} · started {startedAt(review.startedMs)}</span>
+      <span className="muted">{status}{questions(review.mainQuestions)} · started {startedAt(review.startedMs)}{covered.length > 0 && ` · covers ${covered.join("; ")}`}</span>
     </li>
   );
 }

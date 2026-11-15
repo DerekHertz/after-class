@@ -507,6 +507,29 @@ export function validateMove(move: TutorMove, input: TutorInput): { readonly ok:
   }
 }
 
+/**
+ * Flow D: "Mismatch → one tentative, source-grounded diagnostic question." The learner finds the answer, so the spoken
+ * reply is a question that points at the source and never recites it. Code cannot judge what a sentence means, and three review
+ * rounds showed it cannot reliably find sentence ends either ("B. F. Skinner" against "option B. Why?"), so it bounds only what it
+ * can: one question mark, at the end, in a short reply. The prompt is what keeps a recital out.
+ */
+export const DIAGNOSTIC_MAX_CHARS = 200;
+
+/**
+ * Question marks across scripts: Latin "?", full width "？", Arabic "؟", and the Greek question mark, written as
+ * U+037E or as the ";" it looks like. A ";" is a question mark only at the end of a reply, since inside one it is a semicolon.
+ */
+const QUESTION_MARKS = /[?\uFF1F\u061F\u037E]/gu;
+const ENDS_IN_QUESTION = /[?\uFF1F\u061F\u037E;]$/u;
+export function validateSay(move: TutorMove, say: string): Verdict {
+  if (move.kind !== "diagnose") return OK;
+  const text = say.replace(/[\s"'\p{Pe}\p{Pf}\p{Pi}]+$/u, "").trim();
+  const marks = text.match(QUESTION_MARKS) ?? [];
+  if (!ENDS_IN_QUESTION.test(text) || marks.length + (text.endsWith(";") ? 1 : 0) !== 1) return no("a diagnostic question is one question: it ends with a single question mark");
+  if (text.length > DIAGNOSTIC_MAX_CHARS) return no(`a diagnostic question is at most ${DIAGNOSTIC_MAX_CHARS} characters. Do not say what the lecture says or give the answer`);
+  return OK;
+}
+
 export const TUTOR_SYSTEM = `You are the tutor in After Class, a review of a lecture the learner just watched. You run a short Socratic review grounded in the lecture's own evidence. Code decides which moves are allowed each turn and checks every move you pick; you decide what to say.
 
 How to tutor:
@@ -514,7 +537,7 @@ How to tutor:
 - Ask at most 3 main questions in a review, each about the usable claims you are given. Ask follow-ups inside a thread as needed, one question at a time.
 - The learner may have marked topics they feel fuzzy on, and may have left a note. Main questions go to the marked topics first. If a marked topic has no usable claim, say so in one short sentence and carry on as you otherwise would.
 - After the marked topics, a quick check is one short recall question on one unmarked topic, at most 3 per review. It is not a main question and not a follow-up thread. When the learner has answered it: if the answer is clear, close the thread and move on; if it is shaky, ask a main question on that same topic, but only if main questions remain. Never tell the learner a quick check shows they understood.
-- When an answer does not match the lecture, ask one tentative diagnostic question grounded in a passage or frame you cite, for example "The lecture puts it as ... How does that fit with what you said?" It is a question, not a verdict. At most one per thread.
+- When an answer does not match the lecture, ask one tentative diagnostic question grounded in a passage or frame you cite in the header. Point the learner at that part of the lecture, but do not say what it says and do not give the correct answer, even in part. Your spoken reply is that one question and nothing else, at most 200 characters, for example "How does what you said fit with where the lecturer talks about ...?" It is a question, not a verdict. At most one per thread.
 - If you suspect a missing prerequisite, you may propose a detour and say why. Never start it yourself. A detour step becomes available only after the learner says yes.
 - If the learner disputes an interpretation, recheck the cited source, show what it says, and invite them to explain. If the evidence does not settle it, say so plainly and set "settled": false. You never decide a dispute; the learner does.
 - When the learner asks for a hint or an explanation, give it. Anything you add beyond what the lecture's evidence shows is a supplemental explanation: say so out loud, for example "Beyond what the lecture showed, ...".
@@ -684,7 +707,7 @@ export function tutorTask(claude: ClaudeCli, cache: TutorCache, model: TutorMode
     provider: "claude",
     purpose: "tutor_turn",
     model,
-    version: "tutor-3",
+    version: "tutor-4",
     maxAttempts: 2,
     canonicalInput: (input) => {
       const { system, prompt } = tutorRequest(input, model);
