@@ -73,3 +73,34 @@ describe("the stage paints each layer on the device pixels Chrome painted its CS
     expect(board.map((p) => [p.sx, p.sy, p.sw, p.sh])).toContainEqual([0, 0, 64, 44]);
   });
 });
+
+describe("the stage snaps a box at the window's device pixel ratio, where a real display of that ratio painted it", () => {
+  // Each span was read from Chrome under xvfb with --force-device-scale-factor, a real display scale. Playwright's device
+  // emulation lays out at one pixel per CSS pixel and scales the result, so it cannot settle these. Each sits on a rounding
+  // edge that one wrong rule would cross: rounding to 1/64 px instead of truncating, ending at the snapped start + size, or
+  // snapping in CSS pixels before scaling.
+  const cases: readonly { kind: Draw["kind"]; start: number; size: number; scale: number; chrome: readonly [number, number] }[] = [
+    { kind: "image", start: 10.496, size: 20, scale: 1, chrome: [10, 30] },
+    { kind: "image", start: 10.51, size: 20.99, scale: 1, chrome: [11, 31] },
+    { kind: "nine-slice", start: 10.01, size: 20.48, scale: 1, chrome: [10, 30] },
+    { kind: "nine-slice", start: 10.01, size: 20.49, scale: 1, chrome: [10, 30] },
+    { kind: "image", start: 10.26, size: 20.49, scale: 2, chrome: [21, 61] },
+    { kind: "image", start: 10.28, size: 20.48, scale: 2, chrome: [21, 62] },
+    { kind: "image", start: 10, size: 20.25, scale: 2, chrome: [20, 61] },
+    { kind: "nine-slice", start: 10.01, size: 20.24, scale: 2, chrome: [20, 60] },
+    { kind: "nine-slice", start: 10, size: 20.25, scale: 2, chrome: [20, 61] },
+    { kind: "image", start: 10, size: 20.33, scale: 1.5, chrome: [15, 45] },
+    { kind: "image", start: 10, size: 20.34, scale: 1.5, chrome: [15, 46] },
+    { kind: "image", start: 10.34, size: 20.66, scale: 1.5, chrome: [16, 46] },
+    { kind: "nine-slice", start: 10.01, size: 20.33, scale: 1.5, chrome: [15, 45] },
+  ];
+  const none = { top: 0, right: 0, bottom: 0, left: 0 };
+  for (const { kind, start, size, scale, chrome } of cases) {
+    test(`${kind === "image" ? "an image" : "a nine-slice"} from ${start} CSS px, ${size} wide, at ${scale}x covers device pixels ${chrome[0]} to ${chrome[1]}`, () => {
+      const rect = { left: start, top: start, width: size, height: size };
+      const draw: Draw = kind === "image" ? { kind, src: "", rect, sampling: "pixelated" } : { kind, src: "", rect, slice: none, border: none };
+      const [piece] = pieces(draw, { width: 8, height: 8 }, { x: scale, y: scale });
+      expect([piece!.dx, piece!.dx + piece!.dw, piece!.dy, piece!.dy + piece!.dh]).toEqual([...chrome, ...chrome]);
+    });
+  }
+});
