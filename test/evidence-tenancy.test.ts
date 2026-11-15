@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -570,11 +571,18 @@ describe("every capture-scoped route answers 404 for a capture id the caller doe
    * Routes that take a capture id from their path or query without saying so in `Route.capture`. Both are read off the
    * route itself: a `:captureId` path segment, and a query schema that accepts a `captureId`.
    */
+  /** Whether a query schema has a `captureId` field, read from its shape so other required fields do not hide it. */
+  function queryNamesCaptureId(query: NonNullable<Route["query"]>): boolean {
+    const shape = (query as { shape?: Record<string, unknown> }).shape;
+    if (shape !== undefined) return Object.hasOwn(shape, "captureId");
+    return query.safeParse({ captureId: CAP }).success;
+  }
+
   function undeclaredCaptureRoutes(routes: Record<string, Route>): string[] {
     return Object.entries(routes)
       .filter(([, r]) => {
         const fromPath = r.path.includes(":captureId");
-        const fromQuery = r.query?.safeParse({ captureId: CAP }).success === true;
+        const fromQuery = r.query !== null && queryNamesCaptureId(r.query);
         return (fromPath && r.capture !== "path") || (fromQuery && r.capture !== "query");
       })
       .map(([name]) => name);
@@ -593,6 +601,8 @@ describe("every capture-scoped route answers 404 for a capture id the caller doe
     expect(undeclaredCaptureRoutes({ ...ROUTES, strayQuery: stray })).toEqual(["strayQuery"]);
     expect(undeclaredCaptureRoutes({ ...ROUTES, strayPath: { ...ROUTES.captureView, capture: null } })).toEqual(["strayPath"]);
     expect(undeclaredCaptureRoutes({ ...ROUTES, strayWrong: { ...ROUTES.captureView, capture: "body" } })).toEqual(["strayWrong"]);
+    const withPage = { ...ROUTES.evidence, capture: null, query: z.object({ captureId: z.string(), page: z.number() }) };
+    expect(undeclaredCaptureRoutes({ ...ROUTES, strayPaged: withPage })).toEqual(["strayPaged"]);
   });
 
   for (const c of CALLS) {
