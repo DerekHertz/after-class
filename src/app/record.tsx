@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { ConceptId, EvidenceId, NoteId, ReviewId } from "../shared/ids";
+import type { ConceptId, EvidenceId, NoteId, ReviewId, SourceId } from "../shared/ids";
 import type { DiagramFrame, EvidenceBundle, LinkDecision, LinkType, Note, Observation, ObservationStatus, RecordView, TopicDiagram, UsageSummary } from "../shared/domain";
 import type { LecturesResponse } from "../shared/wire";
 import type { AppApi } from "./api";
-import { allowanceView, citedInWatchOrder, formatClock, formatInterval, noteView, observationRow, STATUS_LABEL, usageRows } from "./core";
+import { allowanceView, citedInWatchOrder, sourceWatchOrder, formatClock, formatInterval, noteView, observationRow, STATUS_LABEL, usageRows } from "./core";
 import type { SourceTitles } from "./core";
 import { canChangeObservation, changeObservation, DISPUTE_CHOICES, loadReviewContext, observationContext } from "./observation-view";
 import type { DisputeChoice, ObservationContext, ReviewContext } from "./observation-view";
@@ -103,6 +103,7 @@ export function RecordBody({ api, data, lectures, run, drafts, setDraft }: {
     const bundles = await Promise.all(batches.map((ids) => api.evidence({ ids })));
     return { frames: bundles.flatMap((bundle) => bundle.frames), passages: bundles.flatMap((bundle) => bundle.passages) };
   }, [api, cited]));
+  const watchOrder = useMemo(() => sourceWatchOrder(lectures), [lectures]);
   const reviewIds = [...new Set([...data.notes.map((n) => n.reviewId), ...data.observations.map((o) => o.reviewId)])];
   const reviews = useReviewContexts(api, reviewIds);
   const diagrams = useReviewDiagrams(api, reviewIds);
@@ -163,6 +164,7 @@ export function RecordBody({ api, data, lectures, run, drafts, setDraft }: {
                 diagram={topicDiagram(lecture, topic, diagrams)}
                 deleted={deleted}
                 citations={citations}
+                watchOrder={watchOrder}
                 drafts={drafts}
                 setDraft={setDraft}
                 run={run}
@@ -254,7 +256,7 @@ function topicDiagram(lecture: NotebookLecture, topic: NotebookTopic, diagrams: 
 }
 
 /** One topic: the learner's explanation, the help they used, its status, then its source, under one heading. */
-export function TopicSection({ api, topic, name, headingId, contexts, retry, diagram, deleted, citations, drafts, setDraft, run }: {
+export function TopicSection({ api, topic, name, headingId, contexts, retry, diagram, deleted, citations, watchOrder, drafts, setDraft, run }: {
   readonly api: AppApi;
   readonly topic: NotebookTopic;
   readonly name: string;
@@ -264,6 +266,7 @@ export function TopicSection({ api, topic, name, headingId, contexts, retry, dia
   readonly diagram: TopicDiagramState;
   readonly deleted: ReadonlySet<string>;
   readonly citations: Citations;
+  readonly watchOrder: readonly SourceId[];
   readonly drafts: NoteDrafts;
   readonly setDraft: SetDraft;
   readonly run: Run;
@@ -302,7 +305,7 @@ export function TopicSection({ api, topic, name, headingId, contexts, retry, dia
           </ul>
         </section>
       )}
-      <TopicSource api={api} notes={topic.notes} name={name} diagram={diagram} deleted={deleted} citations={citations} run={run} />
+      <TopicSource api={api} notes={topic.notes} name={name} diagram={diagram} deleted={deleted} citations={citations} watchOrder={watchOrder} run={run} />
     </article>
   );
 }
@@ -347,18 +350,19 @@ function NoteExplanation({ api, note, topic, draft, setDraft, run }: {
 type OpenSource = { readonly ids: readonly EvidenceId[]; readonly origin: HTMLElement | null };
 
 /** The lecture's words, the cited evidence, then a compact frame and its summary. Nothing here asks for a summary until the learner does. */
-function TopicSource({ api, notes, name, diagram, deleted, citations, run }: {
+function TopicSource({ api, notes, name, diagram, deleted, citations, watchOrder, run }: {
   readonly api: AppApi;
   readonly notes: readonly Note[];
   readonly name: string;
   readonly diagram: TopicDiagramState;
   readonly deleted: ReadonlySet<string>;
   readonly citations: Citations;
+  readonly watchOrder: readonly SourceId[];
   readonly run: Run;
 }) {
   const [open, setOpen] = useState<OpenSource | null>(null);
   const lecture = notes.flatMap((n) => noteView(n).segments.filter((s) => s.author === "source"));
-  const cited = citedInWatchOrder([...new Set(notes.flatMap((n) => [...n.evidence, ...n.generated.flatMap((s) => s.evidence)]))], citations.data);
+  const cited = citedInWatchOrder([...new Set(notes.flatMap((n) => [...n.evidence, ...n.generated.flatMap((s) => s.evidence)]))], citations.data, watchOrder);
   const missingDetails = cited.some((id) => !deleted.has(id) && !citations.data?.frames.some((frame) => frame.id === id) && !citations.data?.passages.some((passage) => passage.id === id));
   if (lecture.length === 0 && cited.length === 0 && diagram.kind === "none") return null;
 

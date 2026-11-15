@@ -154,13 +154,13 @@ export function createFixture(scenario: Scenario): Fixture {
   // capturing, and the earlier lecture whose saved review the notebook holds. Notebook and Home read this one list.
   const at = (hour: number) => Date.UTC(2026, 10, 6, hour, 4);
   const lectureList = lecturesResponse.parse({ lectures: scenario === "home-empty" ? [] : [
-    { captureId: ids.capture, sourceTitles: ["Locks & deadlocks"], videos: 1, watchedSeconds: 760, status: { state: "stopped" }, reviews: [
+    { captureId: ids.capture, sourceTitles: ["Locks & deadlocks"], sourceIds: [ids.source], videos: 1, watchedSeconds: 760, status: { state: "stopped" }, reviews: [
       { reviewId: ids.review, startedMs: at(15), phase: view.state.phase, saved: view.saved, mainQuestions: view.state.mainQuestions },
       { reviewId: ids.pendingReview, startedMs: at(13), phase: "ended", saved: "save_pending", mainQuestions: 2 },
       { reviewId: ids.unsavedReview, startedMs: at(10), phase: "ended", saved: "unsaved", mainQuestions: 0 },
     ] },
-    { captureId: ids.otherCapture, sourceTitles: ["Semaphores - Operating Systems"], videos: 1, watchedSeconds: 240, status: { state: "capturing" }, reviews: [] },
-    { captureId: ids.earlierCapture, sourceTitles: ["Deadlock prevention"], videos: 1, watchedSeconds: 900, status: { state: "stopped" }, reviews: [
+    { captureId: ids.otherCapture, sourceTitles: ["Semaphores - Operating Systems"], sourceIds: [id("src", "semaphores")], videos: 1, watchedSeconds: 240, status: { state: "capturing" }, reviews: [] },
+    { captureId: ids.earlierCapture, sourceTitles: ["Deadlock prevention"], sourceIds: [id("src", "deadlock-prevention")], videos: 1, watchedSeconds: 900, status: { state: "stopped" }, reviews: [
       { reviewId: ids.earlierReview, startedMs: at(11), phase: "ended", saved: "saved", mainQuestions: earlierView?.state.mainQuestions ?? 1 },
     ] },
   ] });

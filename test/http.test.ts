@@ -489,7 +489,7 @@ describe("GET /lectures", () => {
     const before = rig.db.sql.query<{ n: number }, []>("SELECT (SELECT COUNT(*) FROM capture_facts) + (SELECT COUNT(*) FROM reviews) + (SELECT COUNT(*) FROM review_turns) AS n").get()!.n;
     const { lectures } = await get(rig.base);
     expect(lectures.map((l) => l.captureId)).toEqual([rig.capture, OTHER]);
-    expect(lectures[0]).toMatchObject({ videos: 1, watchedSeconds: 10, sourceTitles: [expect.any(String)] });
+    expect(lectures[0]).toMatchObject({ videos: 1, watchedSeconds: 10, sourceTitles: [expect.any(String)], sourceIds: [expect.any(String)] });
     expect(lectures[0]!.reviews).toEqual([{ reviewId, startedMs: expect.any(Number), phase: "paused", saved: "unsaved", mainQuestions: expect.any(Number) }]);
     expect(lectures[1]!.reviews).toEqual([]);
     const after = rig.db.sql.query<{ n: number }, []>("SELECT (SELECT COUNT(*) FROM capture_facts) + (SELECT COUNT(*) FROM reviews) + (SELECT COUNT(*) FROM review_turns) AS n").get()!.n;
