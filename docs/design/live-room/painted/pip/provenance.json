@@ -1,0 +1,62 @@
+{
+ "companion": "pip",
+ "master": "art/masters/companions-v3/pip.png",
+ "cell": 724,
+ "model": "nano-banana-pro",
+ "frames": {
+  "blink": {
+   "prompt": "Edit the reference image, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: close both eyes, drawn as two short gently curved dark lines, as in a blink. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1dd81-415f-76d4-bc41-06afc005f3c9",
+   "credits": 9,
+   "changed_vs_idle": 0.009
+  },
+  "look-board": {
+   "prompt": "Edit the reference image, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: turn the eyes up and to the right, as if reading a chalkboard above and to the right, with a small curious open mouth. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1dd81-415f-70c3-9cb4-7413ee3d2621",
+   "credits": 9,
+   "changed_vs_idle": 0.01
+  },
+  "look-mat": {
+   "prompt": "Edit the reference image, a small eraser-shaped mascot with tiny hands and dark blue feet, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: move both eye dots to the lower right, glancing down and to the right at the desk, attentive. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddb6-5148-7298-a47b-a766270d9a8a",
+   "credits": 9,
+   "changed_vs_idle": 0.007
+  },
+  "nod": {
+   "prompt": "Edit the reference image, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: a happy nod: the whole character tips forward slightly, eyes closed in two upward-curved smiling arcs, small smile. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1dd81-4160-7413-acea-c090c8c91281",
+   "credits": 9,
+   "changed_vs_idle": 0.057
+  },
+  "hop-crouch": {
+   "prompt": "Edit the reference image, a small eraser-shaped mascot with tiny hands and dark blue feet, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: squash down a little as if about to hop: slightly shorter and wider, eyes squeezed shut happily. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddb6-514b-75d2-a95a-5cd785bf4413",
+   "credits": 9,
+   "changed_vs_idle": 0.13
+  },
+  "hop-air": {
+   "prompt": "Edit the reference image, a small eraser-shaped mascot with tiny hands and dark blue feet, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: stretched a little taller and narrower as at the top of a happy hop, with a joyful open smile; keep it standing in the same place. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddb6-514d-7676-99ed-536dc6da5866",
+   "credits": 9,
+   "changed_vs_idle": 0.241
+  },
+  "think": {
+   "prompt": "Edit the reference image, a small eraser-shaped mascot with tiny hands and dark blue feet, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: move both eye dots up and to the left, make the mouth a small flat line, and add one tiny sweat drop beside the head. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddb6-514d-7677-9a5d-9cf33adb6fa1",
+   "credits": 9,
+   "changed_vs_idle": 0.014
+  },
+  "cheer": {
+   "prompt": "Edit the reference image, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: cheering: both small hands raised up beside the head, a big open happy smile and light blush marks, still sitting. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1dd81-4160-741b-9bf5-a1f5f203462b",
+   "credits": 9,
+   "changed_vs_idle": 0.093
+  },
+  "talk": {
+   "prompt": "Edit the reference image, a small eraser-shaped mascot with tiny hands and dark blue feet, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: talking: the same pose with a small open rounded mouth, as if saying something. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddb6-8309-7039-9ae0-d9ac91fedd33",
+   "credits": 9,
+   "changed_vs_idle": 0.007
+  }
+ }
+}
