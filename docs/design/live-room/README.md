@@ -103,6 +103,10 @@ Recommendations first. None block the first PRs.
 3. **Does effort (`partial`, `after_help`) show at all?** Recommend: yes, as a separate, smaller thing (for example, notebooks stack for every saved review) that never claims understanding.
 4. **Companion voice lines or sounds?** Not proposed. Voice already exists for the tutor.
 
+## Other rooms
+
+`mockup/harbor-room.png` and `mockup/canal-room.png` bring the Harbor Study Terrace and the Lantern Canal Film Club up to the Rail mockup's level of life. Each keeps its own light, midday sun on the terrace and rainy evening at the canal. They are mockups for Derek's approval, not shipping art. Approved objects are made later as painted layers (#226).
+
 ## Prototype
 
 `prototype/index.html` (throwaway; serve the folder, for example `python3 -m http.server 8765 --directory docs/design/live-room/prototype`). Rail-side Classroom only, with four modes: A today, B living room, C reactive tutor, D progression. Screenshots: `living.png`, `reactive.png`, `progress.png`. Its progression numbers and summary card are mock data and say so. Its unlock art is reused from other rooms as a placeholder.

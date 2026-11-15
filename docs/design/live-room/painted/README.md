@@ -17,5 +17,3 @@ Derek chose the painted look on 2026-11-14 ("Sure ur suggestion for the original
 The frames are blink, look-board, look-mat, nod, hop-crouch, hop-air, think, cheer and talk. Prompts are shared across companions. A companion gets its own prompt where its body differs, such as wings for Mote or a lamp arm for Lumi.
 
 The first four Pip frames were made on 2026-11-14 with an earlier one-off script. `frames.py build` reproduces them with identical alpha and colour within 15 levels.
-
-Lumi's frames change only its face. Its arm and shade stayed put in nod and both hop frames, after two tries with different prompts. Derek decided on 2026-11-14 that face changes only are fine for Lumi, so its body poses are not retried.

@@ -26,7 +26,7 @@ import type { ConnectReply, IngestAck } from "../../shared/wire";
 import { backend } from "./backend";
 import {
   FLUSH_TIMEOUT_MS, acceptsConnectSender, acceptsFact, badgeFor, closingSpanGap, connectionOf, isConnectMessage, isStaleRest, isStoredConnection, isWatchUrl, mayUpload,
-  playbackRecovered, safeReviewUrl, transition,
+  observeMessage, playbackRecovered, safeReviewUrl, transition,
 } from "./control";
 import type {
   Connection, ConnectionRequest, ControlEvent, DeadLetterSummary, FromContent, OptionsRequest, PopupRequest, StoredConnection, TabCaptureState, ToContent,
@@ -302,7 +302,7 @@ async function applyEventNow(tabId: number, event: ControlEvent): Promise<TabCap
     await saveTabs(tabs);
     const saved = tabs[tabId]!;
     renderBadge(tabId, saved);
-    post(tabId, { type: "observe", on: saved.state === "capturing", captureId: saved.captureId });
+    post(tabId, observeMessage(saved));
     if (fact) void flusher.flush(saved.captureId);
     return saved;
   });
@@ -326,13 +326,17 @@ chrome.runtime.onConnect.addListener((port) => {
     if (ports.get(tabId) === port) ports.delete(tabId);
   });
   port.onMessage.addListener((msg: FromContent) => void onContentMessage(tabId, msg));
-  void readState(tabId).then((s) => post(tabId, { type: "observe", on: s?.state === "capturing", captureId: s?.captureId ?? null }));
+  void readState(tabId).then((s) => post(tabId, observeMessage(s)));
 });
 
 async function onContentMessage(tabId: number, msg: FromContent): Promise<void> {
   if ("type" in msg) {
     if (msg.type === "flushed") {
       for (const wake of Array.from(flushWaiters.get(tabId) ?? [])) wake();
+      return;
+    }
+    if (msg.type === "resume") {
+      await resumeCapture(tabId, msg.captureId).catch((e: unknown) => console.warn("After Class: the page's Resume was refused", e));
       return;
     }
     await applyEvent(tabId, msg.type === "idle" || msg.type === "video_ended" ? { kind: msg.type, captureId: msg.captureId } : { kind: msg.type });
@@ -405,19 +409,30 @@ async function ensureWatchPage(tabId: number): Promise<void> {
   if (!isWatchUrl(tab.url)) throw new Error("open a YouTube video page (youtube.com/watch) first");
 }
 
+/**
+ * The one way capture resumes, for the popup's Resume and the page sign's Resume, so they cannot differ: only on a
+ * watch page, with the content script attached. `captureId` is the capture a sign was shown for; the popup has none.
+ */
+async function resumeCapture(tabId: number, captureId?: CaptureId): Promise<TabCaptureState | null> {
+  await ensureWatchPage(tabId);
+  await ensureContentScript(tabId);
+  // Resuming is the learner's word that they want this capture uploaded, so a quota or disk wait ends before the event's own flush.
+  const held = await readState(tabId);
+  if (held !== null && (captureId === undefined || held.captureId === captureId)) await flusher.release(held.captureId);
+  return applyEvent(tabId, captureId === undefined ? { kind: "resume" } : { kind: "resume", captureId });
+}
+
 async function handlePopup(req: PopupRequest): Promise<WorkerResponse> {
   switch (req.type) {
-    case "start":
-    case "resume": {
+    case "start": {
       // A new capture belongs to the connected account, so a hosted build needs one before it starts.
-      if (req.type === "start" && !["local", "connected"].includes((await connection()).kind)) throw new Error("connect After Class to your account first: press Connect");
+      if (!["local", "connected"].includes((await connection()).kind)) throw new Error("connect After Class to your account first: press Connect");
       await ensureWatchPage(req.tabId);
       await ensureContentScript(req.tabId);
-      // Resuming is the learner's word that they want this capture uploaded, so the wait ends before the event's own flush.
-      const held = await readState(req.tabId);
-      if (req.type === "resume" && held !== null) await flusher.release(held.captureId);
-      return { state: await applyEvent(req.tabId, req.type === "start" ? { kind: "start", tabId: req.tabId } : { kind: "resume" }) };
+      return { state: await applyEvent(req.tabId, { kind: "start", tabId: req.tabId }) };
     }
+    case "resume":
+      return { state: await resumeCapture(req.tabId) };
     case "pause":
     case "stop":
       return { state: await applyEvent(req.tabId, { kind: req.type }) };
@@ -453,7 +468,7 @@ async function handlePopup(req: PopupRequest): Promise<WorkerResponse> {
     case "retry_observe": {
       await ensureContentScript(req.tabId);
       const state = await readState(req.tabId);
-      post(req.tabId, { type: "observe", on: state?.state === "capturing", captureId: state?.captureId ?? null });
+      post(req.tabId, observeMessage(state));
       return { state };
     }
   }
