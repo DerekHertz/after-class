@@ -4,7 +4,7 @@ import type { Rect } from "./layout";
 import { slotIds } from "./progress";
 import type { Count, Progress, RoomId, UnlockId } from "./progress";
 import type { Freshness, RoomStanding } from "./room-record";
-import { UNLOCK_ART } from "./unlocks";
+import { UNLOCK_ART } from "./art";
 
 /** One line of the panel: what a count counts, as progress.ts words it, and the count. */
 export type ProgressRow = { readonly key: string; readonly label: string; readonly value: number };

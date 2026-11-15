@@ -1,12 +1,11 @@
-import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
 import { APPEARANCE_KEY, DEFAULT_APPEARANCE, SCENES } from "../src/app/appearance";
 import type { SceneId } from "../src/app/appearance";
 
 const scenes = Object.keys(SCENES) as SceneId[];
-/** Stands in for an unlocked object's painted picture, which the art step has not made yet. */
-const unlockPicture = readFileSync(new URL("../art/masters/companion-frames/lumi/nod.png", import.meta.url));
+/** An unlocked object's shipped picture. The bundle drops the room's folder, and a room fetches only its own open slots. */
+const unlockPicture = /\/[1-6]-[a-z0-9]{8}\.webp$/;
 
 type Step = { readonly wrong: number; readonly missed: number; readonly repainted: number; readonly total: number; readonly at: string | null; readonly frame: string; readonly unlocks: number };
 
@@ -47,13 +46,13 @@ test.describe("a moving room's steps match a whole repaint", () => {
       test("in last-desk, while unlocked objects decode one after another", async ({ page }) => {
         test.setTimeout(120_000);
         const held: Route[] = [];
-        await page.route(/\/unlock-test\.png\?/, (route) => { held.push(route); });
+        await page.route(unlockPicture, (route) => { held.push(route); });
         const release = async (count: number) => {
           await expect.poll(() => held.length).toBeGreaterThanOrEqual(count);
-          for (const route of held.splice(0, count)) await route.fulfill({ contentType: "image/png", body: unlockPicture });
+          for (const route of held.splice(0, count)) await route.continue();
           return count;
         };
-        const steps = await runSteps(page, "last-desk", dpr, "/unlock-test.png", { 20: () => release(1), 40: () => release(5) });
+        const steps = await runSteps(page, "last-desk", dpr, "room-grown", { 20: () => release(1), 40: () => release(5) });
         const bad = steps.flatMap((s, i) => (s.wrong + s.missed > 0 ? [`step ${i} (${s.frame}): ${s.wrong} wrong, ${s.missed} missed, first at ${s.at}`] : []));
         expect(bad).toEqual([]);
         expect(steps.map((s) => s.unlocks)).toEqual(steps.map((_, i) => (i < 20 ? 0 : i < 40 ? 1 : 6)));
@@ -65,20 +64,20 @@ test.describe("a moving room's steps match a whole repaint", () => {
 });
 
 /**
- * Opens `scene` moving at `dpr`, then steps the clock 72 times and checks each step against a whole repaint. `unlocks`
- * opens every slot with that picture (scripts/ui-preview/main.tsx). `before` runs ahead of the step it names and says how many unlock pictures it let through.
+ * Opens `scene` moving at `dpr` in the preview's `scenario`, then steps the clock 72 times and checks each step against a whole
+ * repaint. The "room-grown" scenario opens every slot (scripts/ui-preview/fixtures.ts). `before` runs ahead of the step it names and says how many unlock pictures it let through.
  */
-async function runSteps(page: Page, scene: SceneId, dpr: number, unlocks?: string, before: Record<number, () => Promise<number>> = {}): Promise<Step[]> {
+async function runSteps(page: Page, scene: SceneId, dpr: number, scenario = "review", before: Record<number, () => Promise<number>> = {}): Promise<Step[]> {
   await page.clock.install({ time: 0 });
   await page.clock.pauseAt(1000);
-  await page.addInitScript(({ key, value }) => {
+  await page.addInitScript(({ key, value, unlock }) => {
     localStorage.setItem(key, JSON.stringify(value));
     let seed = 0x2545f491;
     const decode = HTMLImageElement.prototype.decode;
     const counter = window as unknown as { unlocksDecoded: number };
     counter.unlocksDecoded = 0;
     HTMLImageElement.prototype.decode = function () {
-      return decode.call(this).then(() => { if (this.src.includes("/unlock-test.png?")) counter.unlocksDecoded++; });
+      return decode.call(this).then(() => { if (new RegExp(unlock).test(new URL(this.src).pathname)) counter.unlocksDecoded++; });
     };
     Math.random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32);
     // Frame callbacks run as soon as the stage's timer asks for one, so the clock alone decides each step.
@@ -116,8 +115,8 @@ async function runSteps(page: Page, scene: SceneId, dpr: number, unlocks?: strin
       fill();
       return { wrong, missed, repainted, total: whole.length, at, frame: canvas().dataset.companion ?? "none", unlocks: counter.unlocksDecoded };
     };
-  }, { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene, companion: "pip", visible: true, motion: "system" } });
-  await page.goto(`/?scenario=review&clean=1${unlocks === undefined ? "" : `&unlocks=${encodeURIComponent(unlocks)}`}`);
+  }, { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene, companion: "pip", visible: true, motion: "system" }, unlock: unlockPicture.source });
+  await page.goto(`/?scenario=${scenario}&clean=1`);
   await expect(page.locator(".front-row-canvas[data-stage=painted][data-companion]")).toBeAttached();
   await page.clock.runFor(1000);
   expect(await page.evaluate(() => (window as unknown as { startSteps: () => number }).startSteps())).toBe(Math.round(1440 * dpr));

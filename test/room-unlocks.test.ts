@@ -19,9 +19,14 @@ import { SavedNotes } from "../src/app/review";
 import type { UnlockId } from "../src/app/room/progress";
 import { buildScene } from "../src/app/room/scene";
 import type { Draw, PictureDraw } from "../src/app/room/scene";
-import { UNLOCK_ART, UNLOCK_SLOTS } from "../src/app/room/unlocks";
+import { UNLOCK_ART } from "../src/app/room/art";
+import { UNLOCK_SLOTS } from "../src/app/room/unlocks";
 import type { Observation, RecordView, RecordedStatus } from "../src/shared/domain";
 import { stableId } from "../src/shared/ids";
+import type { ArtEntry } from "../scripts/build-art";
+import manifestJson from "../art/manifest.json";
+
+const manifest = manifestJson as ArtEntry[];
 
 const rooms = ROOM_IDS as readonly SceneId[];
 const full = (scene: SceneId, window: Size): FullRoomLayout => {
@@ -127,11 +132,20 @@ describe("the stage draws unlocked objects", () => {
   const window = { width: 1440, height: 900 };
 
   test("nothing is drawn for a slot with no picture, however far the learner has come", () => {
-    expect(UNLOCK_ART).toEqual({});
     for (const scene of rooms) {
       const layout = full(scene, window);
-      expect(unlockDraws(buildScene(scene, layout, null, null, slotIds(scene)).draws)).toEqual([]);
+      expect(unlockDraws(buildScene(scene, layout, null, null, slotIds(scene), {}).draws)).toEqual([]);
     }
+  });
+
+  test("every slot has its painted picture, shipped at its box in plate pixels, so it is drawn one asset pixel per plate pixel", () => {
+    const shipped = new Map(manifest.map((e) => [e.ship, e]));
+    const sizes = rooms.flatMap((scene) => UNLOCK_SLOTS[scene].map((slot) => {
+      const ship = `unlock-objects/${slot.id}.webp`;
+      const entry = shipped.get(ship);
+      return { id: slot.id, drawn: UNLOCK_ART[slot.id]?.endsWith(ship), size: entry && [entry.width, entry.height] };
+    }));
+    expect(sizes).toEqual(rooms.flatMap((scene) => UNLOCK_SLOTS[scene].map((slot) => ({ id: slot.id, drawn: true, size: [slot.width, slot.height] }))));
   });
 
   test("an open slot with a picture is drawn in its box, and a closed one is not, even with a picture", () => {

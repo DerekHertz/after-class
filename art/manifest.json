@@ -1996,5 +1996,257 @@
       "width": 30,
       "height": 38
     }
+  },
+  {
+    "master": "unlock-objects/last-desk/1.png",
+    "masterSha256": "804d4b795b0ffa5e65cf50679acb6270b75f3fca444501b026a2573cd266afba",
+    "ship": "unlock-objects/last-desk/1.webp",
+    "shipSha256": "bddeed0bc08a1d2dda3542d269a2996206cdd629ddeea4981ebc04c3513b91c0",
+    "width": 52,
+    "height": 74,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a pencil cup holding a few pencils, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 41% and its right edge 60% across the picture from the left, its top 37% and its bottom 64% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (warm afternoon daylight from the window on the right), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+      "meshyTaskId": "01a1e0b0-0a68-72f1-9dad-105cfdf6e96a",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/last-desk/2.png",
+    "masterSha256": "50268083d7b7d041f2b2382f9a1dd4f0fcc7ed376ec19a1a4936600b13e05643",
+    "ship": "unlock-objects/last-desk/2.webp",
+    "shipSha256": "11f77b78a45d42a66a55f028b9f62cc14bdb1ad98b66ef8493d3c14563f202df",
+    "width": 70,
+    "height": 84,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a small potted plant in a terracotta pot, standing with its base resting on the green window sill. Put it in this exact place: its left edge 39% and its right edge 61% across the picture from the left, its top 37% and its bottom 63% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (warm afternoon daylight from the window on the right), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+      "meshyTaskId": "01a1e0b1-c917-7033-966b-e60ea9a7522f",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/last-desk/3.png",
+    "masterSha256": "0b93007e2cc6724af4db6a3cf33c5e7488fee9219200bbd7bb3dcd866a92a12f",
+    "ship": "unlock-objects/last-desk/3.webp",
+    "shipSha256": "7ab6d08b70443db963ab42c883d09158a27c0a8ead39ea122926de11b5f1b20c",
+    "width": 112,
+    "height": 52,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a low, wide stack of two closed hardback books lying flat, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 36% and its right edge 64% across the picture from the left, its top 43% and its bottom 57% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (warm afternoon daylight from the window on the right), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters. The books rest flat on the desk's top edge, not in front of it, and do not overlap the white paper mat.",
+      "meshyTaskId": "01a1e0b5-ebe4-70e9-b440-92e19dd4b5a0",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/last-desk/4.png",
+    "masterSha256": "018e12d500178567f5eeec46b46b911c040d9c5beea5f417a94c34500b3e4757",
+    "ship": "unlock-objects/last-desk/4.webp",
+    "shipSha256": "a87e8fddd711cada0d8645012c0a29d02e8242e64713476925af53f084b13ab1",
+    "width": 40,
+    "height": 40,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a red apple, standing with its base resting on the wooden chalk ledge under the chalkboard. Put it in this exact place: its left edge 38% and its right edge 62% across the picture from the left, its top 38% and its bottom 62% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (warm afternoon daylight from the window on the right), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+      "meshyTaskId": "01a1e0b1-c928-76a5-85d3-a464c0c6d781",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/last-desk/5.png",
+    "masterSha256": "2542cd2344e66461f1fffbae6ac3ef36a800bdac1a85bd7c4bbc2cc6316efa7c",
+    "ship": "unlock-objects/last-desk/5.webp",
+    "shipSha256": "ddbe9fcfa065a97647ff9acdad963b5789861b0b7f7e251f75450afcc6df2362",
+    "width": 64,
+    "height": 70,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: two closed hardback books standing and leaning on each other, standing with its base resting on the green window sill. Put it in this exact place: its left edge 53% and its right edge 85% across the picture from the left, its top 32% and its bottom 68% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (warm afternoon daylight from the window on the right), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+      "meshyTaskId": "01a1e0b1-c92b-72e3-8206-f22ca2d97fd1",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/last-desk/6.png",
+    "masterSha256": "6251152f05d053235d4e862862f767a4d177bb0954dd233da5eaa3a7097e6acd",
+    "ship": "unlock-objects/last-desk/6.webp",
+    "shipSha256": "e935ace8006cc07cc446769bd9ec1fd350efb5e5b6544504b99ae519289f08cf",
+    "width": 64,
+    "height": 72,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a small desk globe on a wooden stand, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 39% and its right edge 61% across the picture from the left, its top 37% and its bottom 63% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (warm afternoon daylight from the window on the right), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+      "meshyTaskId": "01a1e0b2-4f9c-7129-a3c4-141a73b5be9f",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/projection-booth/1.png",
+    "masterSha256": "29a122ad73040bb5d379a490596405f3a486ec8edf2913c253f502f32ac935ff",
+    "ship": "unlock-objects/projection-booth/1.webp",
+    "shipSha256": "05573b04dd9d6b6c28669403fec672d9899e8c7be2dec577e45d0f1ecb5c1efd",
+    "width": 52,
+    "height": 56,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a cup of tea on a saucer, with no steam, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 38% and its right edge 62% across the picture from the left, its top 37% and its bottom 63% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (dim blue rainy evening light with a warm glow from the lanterns outside), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+      "meshyTaskId": "01a1e0b5-ec0e-708a-bb6e-d81a10716556",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/projection-booth/2.png",
+    "masterSha256": "196cf220040c71442d9c466e40167a5a550261f326888469e0072262b02fbaf5",
+    "ship": "unlock-objects/projection-booth/2.webp",
+    "shipSha256": "aa10b5c1f2f6702c260629660dd1146fec5ee70a21621b023c57e8642eec5773",
+    "width": 50,
+    "height": 80,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a small unlit red paper lantern on a short cord, with no glow around it, hanging from the top of the window frame, off the top of the picture. Put it in this exact place: its left edge 41% and its right edge 59% across the picture from the left, its top 36% and its bottom 64% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (dim blue rainy evening light with a warm glow from the lanterns outside), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters. Keep the window and the view behind the lantern exactly as they are.",
+      "meshyTaskId": "01a1e0b5-ec0e-778f-8da5-e432c0fe99c5",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/projection-booth/3.png",
+    "masterSha256": "fa32f817a62f5e4fac3c31f317acbce217d954fa7a9a8f92d5af54607346e587",
+    "ship": "unlock-objects/projection-booth/3.webp",
+    "shipSha256": "76439c84cfc9f49cf6793d1de6d8243a88d37c3d311a56a480f4ffa045acedb7",
+    "width": 100,
+    "height": 56,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a low stack of two round metal film canisters lying flat, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 36% and its right edge 64% across the picture from the left, its top 42% and its bottom 58% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (dim blue rainy evening light with a warm glow from the lanterns outside), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters. The canisters rest flat on the desk's top edge.",
+      "meshyTaskId": "01a1e0b6-6d5a-7021-90bc-73ec874125c6",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/projection-booth/4.png",
+    "masterSha256": "4ba3e4c681dcd5bf4588823d408b71f42f2073bf5ba9057917c4d490defdd1d5",
+    "ship": "unlock-objects/projection-booth/4.webp",
+    "shipSha256": "d514915e35ce4c27f0a23fd22d4ed8241fcfa55d2f59e3c5cc338b5df34ecb43",
+    "width": 40,
+    "height": 84,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a small glass wind chime with a long white paper strip hanging below it, hanging from the top of the window frame, off the top of the picture. Put it in this exact place: its left edge 40% and its right edge 55% across the picture from the left, its top 35% and its bottom 65% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (dim blue rainy evening light with a warm glow from the lanterns outside), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+      "meshyTaskId": "01a1e0b6-6e5a-7356-a4b6-16c747a699a2",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/projection-booth/5.png",
+    "masterSha256": "1c1a2be049effd14045c38d31d0ad1c1ed147e1298799dd0fd8ac7e63bab340d",
+    "ship": "unlock-objects/projection-booth/5.webp",
+    "shipSha256": "2c7c6f3cec06ffe5a0a951a5545e04d83d4187e5fb20bd7a88315b9b8c1c55b8",
+    "width": 60,
+    "height": 74,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a small brass desk lamp, switched off, with no glow, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 39% and its right edge 61% across the picture from the left, its top 37% and its bottom 63% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (dim blue rainy evening light with a warm glow from the lanterns outside), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters. Keep the wall behind the lamp exactly as it is, unlit.",
+      "meshyTaskId": "01a1e0b6-6eb9-73a8-ae71-9fbf49167e4a",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/projection-booth/6.png",
+    "masterSha256": "a9e8cb923a865d84eed14fd03a36f12e0e59290057daa16d301f17862c623133",
+    "ship": "unlock-objects/projection-booth/6.webp",
+    "shipSha256": "4d4c397c9762279ccde5fcdd0e2956b3c8831622eaa0e21282e57fa0afe66219",
+    "width": 48,
+    "height": 58,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a small glass jar filled with colourful paper ticket stubs, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 39% and its right edge 61% across the picture from the left, its top 37% and its bottom 63% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (dim blue rainy evening light with a warm glow from the lanterns outside), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+      "meshyTaskId": "01a1e0b4-71e0-77c8-a098-f4798d4f7a8e",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/study-bench/1.png",
+    "masterSha256": "30608b7e7f89a2b251e760403c69f9261cfb36a14817fbd5b2431c251db83225",
+    "ship": "unlock-objects/study-bench/1.webp",
+    "shipSha256": "bb44e4eadc149b3df9c6da041f1df4f38da21080769ee3f6f3e188c4d5af2959",
+    "width": 56,
+    "height": 64,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a potted basil herb in a small terracotta pot, standing with its base resting on the top of the teal terrace railing. Put it in this exact place: its left edge 39% and its right edge 61% across the picture from the left, its top 37% and its bottom 63% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (bright sunny seaside daylight from above), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters. The pot stands right on top of the teal railing, not floating in front of the water.",
+      "meshyTaskId": "01a1e0b5-ec0e-778e-b0c9-18a19bcff4aa",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/study-bench/2.png",
+    "masterSha256": "757ca358551029b0a379004f7156569ff9123e2b705fefc0b836d9bfc739283d",
+    "ship": "unlock-objects/study-bench/2.webp",
+    "shipSha256": "f3ceff179d4c5011ad2450eda64e70093e65051fa0dc349e736ac9844d3eb6ac",
+    "width": 44,
+    "height": 64,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a glass of lemonade with a lemon slice and a straw, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 41% and its right edge 59% across the picture from the left, its top 36% and its bottom 64% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (bright sunny seaside daylight from above), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+      "meshyTaskId": "01a1e0b2-5229-7619-a57a-bdf6fb62c446",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/study-bench/3.png",
+    "masterSha256": "754a9b4d75bea992fa8c3e308455502164d2bd13bdd32bbb85c75a0fb95bccc6",
+    "ship": "unlock-objects/study-bench/3.webp",
+    "shipSha256": "92fbeebba91cc704de6a5c0d06c5cfc3404006e01e07740b69bec664637ba3f0",
+    "width": 52,
+    "height": 84,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a round paper lantern on a short cord, hanging from the edge of the striped awning above, off the top of the picture. Put it in this exact place: its left edge 56% and its right edge 79% across the picture from the left, its top 31% and its bottom 69% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (bright sunny seaside daylight from above), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+      "meshyTaskId": "01a1e0b2-85b1-757d-a933-b7e320f33157",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/study-bench/4.png",
+    "masterSha256": "158ab204ae23cb3e1e056e6132425fa63980452efe413620c3f7d037d3943e32",
+    "ship": "unlock-objects/study-bench/4.webp",
+    "shipSha256": "cac2ff44ca02c7055df8a2332b923c1950c5350e5104025b4e2faca925f9130d",
+    "width": 112,
+    "height": 52,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a short stack of three closed hardback books lying flat, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 36% and its right edge 64% across the picture from the left, its top 43% and its bottom 57% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (bright sunny seaside daylight from above), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+      "meshyTaskId": "01a1e0b2-f4f0-71cd-ab8f-5dc0f3dbf661",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/study-bench/5.png",
+    "masterSha256": "9e623a3d76292a832a6c1c20b28287a1576d7c202837a6c5f7743832afdb5d00",
+    "ship": "unlock-objects/study-bench/5.webp",
+    "shipSha256": "ba2103d93249b09c760cc0a9f3cac08062ff1bc747355b1f745c893d84310732",
+    "width": 60,
+    "height": 40,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a pale pink spiral seashell, standing with its base resting on the top of the wooden desk's back edge. Put it in this exact place: its left edge 37% and its right edge 64% across the picture from the left, its top 41% and its bottom 59% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (bright sunny seaside daylight from above), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+      "meshyTaskId": "01a1e0b3-09a4-7401-9a63-3ce46b1535bc",
+      "credits": 9
+    }
+  },
+  {
+    "master": "unlock-objects/study-bench/6.png",
+    "masterSha256": "6fb7210f7f375bd977bd0f7c9527ad2eb63fa6856af45ede47c4d007e5b98d82",
+    "ship": "unlock-objects/study-bench/6.webp",
+    "shipSha256": "23ad55f8987a2fecf67eac08fcc6a00147fdf84701a42ba1d71fe11a317384a0",
+    "width": 44,
+    "height": 40,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a crop of a cosy painted pixel-art room. Add ONLY one new object: a small sparrow perched side-on, standing with its base resting on the top of the teal terrace railing. Put it in this exact place: its left edge 13% and its right edge 48% across the picture from the left, its top 34% and its bottom 66% down from the top. Paint it in exactly the same soft painted HD pixel-art style, resolution, dark outlines, colours and shading as the room, lit by the room's own light (bright sunny seaside daylight from above), seen straight on from the front like the rest of the room. Keep every other pixel exactly the same: do not move, recolour, redraw, crop or restyle anything else. No cast shadow on the room, no text, no letters, no numbers, no people, no characters.",
+      "meshyTaskId": "01a1e0b3-2c35-7664-bfc2-9fa619d5bf9e",
+      "credits": 9
+    }
   }
 ]

@@ -151,7 +151,7 @@ export async function buildApp(outDir: string, root = REPO): Promise<void> {
     ["Young Serif", "src/app/assets/fonts-v2/young-serif-OFL.txt"],
     ["DM Sans", "src/app/assets/fonts-v2/dm-sans-OFL.txt"],
     ["Pixelify Sans", "src/app/assets/fonts-v2/OFL-PixelifySans.txt"],
-    ["Companion animation frames", "src/app/assets/meshy-CC-BY-4.0.txt"],
+    ["Companion animation frames and room unlock objects", "src/app/assets/meshy-CC-BY-4.0.txt"],
   ];
   for (const pkg of bundledPackages(Object.keys(result.metafile?.inputs ?? {}))) licenses.push([pkg, packageLicense(root, pkg)]);
   const notices = licenses.map(([name, path]) => `${name}\n\n${readFileSync(join(root, path), "utf8")}`).join("\n\n");

@@ -59,7 +59,8 @@ export function outputsFor(master: string, size: { readonly width: number; reado
     if (size.width !== COMPANION_CELL.large || size.height !== COMPANION_CELL.large) throw new Error(`${master} is ${size.width}x${size.height}; a companion frame is one ${COMPANION_CELL.large} px cell`);
     return [{ ship: webp(master) }, { ship: webp(master, "-small"), width: COMPANION_CELL.small, drawn: { height: 120 } }];
   }
-  if (master.startsWith("front-row/") || master.startsWith("room-objects/")) return [{ ship: webp(master) }];
+  // An unlocked object is cut at the size of its slot's box in plate pixels and drawn pixelated (room/unlocks.ts), like the room's layers.
+  if (master.startsWith("front-row/") || master.startsWith("room-objects/") || master.startsWith("unlock-objects/")) return [{ ship: webp(master) }];
   throw new Error(`art/masters/${master} has no rule in scripts/build-art.ts. Say how it is drawn, so it ships at that size.`);
 }
 

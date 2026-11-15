@@ -14,10 +14,6 @@ import type { ClerkClient } from "../../src/app/sign-in";
 import { createFixture, ids, scenarioFrom, scenarios } from "./fixtures";
 import { clearReaction, play } from "../../src/app/room/reaction-store";
 import type { Gesture } from "../../src/app/room/reactions";
-import { ROOM_IDS, TOPICS_PER_UNLOCK, UNLOCKS_PER_ROOM, slotIds } from "../../src/app/room/progress";
-import type { UnlockId } from "../../src/app/room/progress";
-import { UNLOCK_ART } from "../../src/app/room/unlocks";
-import type { ConceptId, ObservationId } from "../../src/shared/ids";
 
 /** Plays a companion gesture in the room, for browser tests and screenshots: `afterClassGesture("hop")` in the console. */
 (window as unknown as { afterClassGesture: (gesture: Gesture) => void }).afterClassGesture = (gesture) => play({ gesture, effects: [], instant: false });
@@ -29,23 +25,7 @@ const { api: fixtureApi, speech, recordReviewId, continueFixture, dictateFixture
 /** `?loading=1` holds the first review read open, so the loading screen can be seen and tested. The Finish button releases it. */
 let releaseReview: (() => void) | undefined;
 const holdReview = new URLSearchParams(location.search).get("loading") === "1";
-const heldApi: AppApi = holdReview ? { ...fixtureApi, review: async (id) => { await new Promise<void>((resolve) => { releaseReview = resolve; }); return fixtureApi.review(id); } } : fixtureApi;
-/**
- * `?unlocks=<url>` opens every slot and draws each with the picture at `<url>?<slot>`, for browser tests, as the art step has
- * made no object yet. The record gains enough topics explained independently to open them all.
- */
-const unlockArt = new URLSearchParams(location.search).get("unlocks");
-if (unlockArt !== null) Object.assign(UNLOCK_ART as Record<UnlockId, string>, Object.fromEntries(ROOM_IDS.flatMap(slotIds).map((slot) => [slot, `${unlockArt}?${slot}`])));
-const api: AppApi = unlockArt === null ? heldApi : {
-  ...heldApi,
-  record: async (query) => {
-    const record = await heldApi.record(query);
-    const [template] = record.observations;
-    if (template === undefined) return record;
-    const opened = Array.from({ length: TOPICS_PER_UNLOCK * UNLOCKS_PER_ROOM }, (_, i) => ({ ...template, id: `${template.id}-unlock-${i}` as ObservationId, status: "independent" as const, conceptIds: [`unlock-topic-${i}` as ConceptId] }));
-    return { ...record, observations: [...record.observations, ...opened] };
-  },
-};
+const api: AppApi = holdReview ? { ...fixtureApi, review: async (id) => { await new Promise<void>((resolve) => { releaseReview = resolve; }); return fixtureApi.review(id); } } : fixtureApi;
 const unsent = createMemoryUnsent();
 const speaker = { beginTurn() {}, speak() {}, stop() {} };
 const clean = new URLSearchParams(location.search).get("clean") === "1";

@@ -1,13 +1,12 @@
 import type { SceneId } from "../appearance";
 import { ambientDraws } from "./ambient";
-import { ROOM_LAYER_ART } from "./art";
+import { ROOM_LAYER_ART, UNLOCK_ART } from "./art";
 import { companionAt, companionDraw } from "./companion";
 import type { CompanionCue, Frame, Idle } from "./companion";
 import type { NineSliceLayer, Rect, RoomLayout } from "./layout";
 import type { UnlockId } from "./progress";
 import { FRONT_ROW_ROOMS } from "./rooms";
 import type { Edges } from "./rooms";
-import { UNLOCK_ART } from "./unlocks";
 
 /**
  * How a picture is resampled to its box. The room's layers are pixelated, as the HD pixel look needs. A phone's backdrop is
