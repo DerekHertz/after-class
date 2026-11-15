@@ -85,7 +85,7 @@ import { createPreparation } from "./preparation";
 import type { Preparation } from "./preparation";
 import { interpretTask, resourceSearchTask, reviseTask } from "./preparation/tasks";
 import type { FrameBytes, PreparationTasks } from "./preparation/tasks";
-import { createReviews } from "./review";
+import { createReviews, wrapUpRun } from "./review";
 import type { Reviews } from "./review";
 import { tutorCache, tutorTask, wrapUpTask } from "./review/tutor";
 import type { TutorCache, TutorInput, TutorModel, TutorOutput, WrapUpInput, WrapUpOutput } from "./review/tutor";
@@ -717,10 +717,11 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
         // A terminal failure stored before this request began answered an earlier save, so this retry clears it and asks once more.
         // A failure this request produced is returned as is. A hit is never cleared.
         const asOf = db.nextSeq();
-        let result = await memo.run(tasks.wrapUp, input);
+        const run = wrapUpRun(reviewId, turns);
+        let result = await memo.run(tasks.wrapUp, input, run);
         if (result.kind === "failed" && result.atSeq < asOf) {
           memo.clearFailures([result.key]);
-          result = await memo.run(tasks.wrapUp, input);
+          result = await memo.run(tasks.wrapUp, input, run);
         }
         if (result.kind === "hit") return result.value;
         throw new Error(result.kind === "failed" ? `wrap-up failed: ${result.lastError}` : result.kind === "held" ? heldMessage(result.hold) : `wrap-up ${result.kind}`);

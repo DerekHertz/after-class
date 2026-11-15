@@ -24,8 +24,11 @@
  * request after it is refused. So the cap can be passed by at most the overrun of the requests already sent when it is reached.
  *
  * Derek, 2026-11-13, on a learner who reaches a cap mid-review: "i think it should be allowed to finish". So the wrap-up
- * that saves a review is never held by either cap. The stop switch still holds it, and it still reserves, settles and
- * counts toward the month like any other call, so a finished review can take a month past its cap by one wrap-up.
+ * that saves a review the learner answered is not held by either cap. The stop switch still holds it, and it still reserves,
+ * settles and counts toward the month like any other call, so a finished review can take a month past its cap by one wrap-up.
+ * The exemption is bounded by the review, not by the purpose: a caller names the review it finishes (`finishes`), the hold
+ * records it, and a review gets at most `UNCAPPED_REQUESTS_PER_REVIEW` uncapped requests. A wrap-up that names no review, or
+ * that a review has used up, is capped like any other call. Whether the review has an answer is the caller's to say (main.ts).
  */
 import { stableId } from "../../shared/ids";
 import type { MemoKey, UserId } from "../../shared/ids";
@@ -70,8 +73,11 @@ export const ESTIMATE_USD: Readonly<Record<Purpose, number>> = {
 /** The call the usage page's "held" asks about: a learner's next tutor turn. */
 const PROBE: Purpose = "tutor_turn";
 
-/** Calls neither cap holds: finishing a review (see the header). */
-const UNCAPPED: ReadonlySet<Purpose> = new Set<Purpose>(["wrap_up"]);
+/**
+ * Requests one review may send past both caps: finishing it (see the header). The wrap-up task makes up to 3 attempts per run and
+ * a failed save is retried once with a new run, so 6 lets a real review finish after one failed save and no more.
+ */
+export const UNCAPPED_REQUESTS_PER_REVIEW = 6;
 
 export type BudgetLimits = {
   /** Per user per month. Null: no per-user cap. */
@@ -91,7 +97,8 @@ export type Reservation = { readonly id: string; readonly micros: number };
 export type Admission = { readonly kind: "reserved"; readonly reservation: Reservation } | { readonly kind: "held"; readonly hold: BudgetHold };
 
 export type Budget = {
-  reserve(userId: UserId, purpose: Purpose, key: MemoKey): Admission;
+  /** `finishes`: the review a wrap-up saves, which may pass the caps (see the header). Anything else is capped. */
+  reserve(userId: UserId, purpose: Purpose, key: MemoKey, finishes?: string): Admission;
   /** Record a request's known cost the moment it is read, so it counts before the attempt settles. An unknown cost changes nothing. */
   price(reservation: Reservation, cost: Cost): void;
   /** Run it inside the transaction that records the attempt's usage event. */
@@ -143,7 +150,8 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
   const q = {
     userUsed: db.sql.query<{ used: number }, [string, string]>(`SELECT ${spent} WHERE period = ? AND user_id = ?`),
     totalUsed: db.sql.query<{ used: number }, [string]>(`SELECT ${spent} WHERE period = ?`),
-    insert: db.sql.query(`INSERT INTO budget_holds (id, user_id, period, purpose, memo_key, reserved_micros, reserved_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`),
+    insert: db.sql.query(`INSERT INTO budget_holds (id, user_id, period, purpose, memo_key, reserved_micros, reserved_ms, finishes_review) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+    uncappedOf: db.sql.query<{ n: number }, [string, string]>(`SELECT COUNT(*) AS n FROM budget_holds WHERE user_id = ? AND finishes_review = ?`),
     price: db.sql.query(`UPDATE budget_holds SET priced_micros = ? WHERE id = ? AND settled_micros IS NULL`),
     settle: db.sql.query(`UPDATE budget_holds SET settled_micros = ?, settled_ms = ? WHERE id = ? AND settled_micros IS NULL`),
     interrupted: db.sql.query<{ user_id: string; memo_key: string; provider: string; model: string; purpose: string; started: number; next: number }, []>(
@@ -160,9 +168,9 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
   };
 
   /** Why an attempt for `purpose` that would add `micros` to this month is refused, or null when it may start. */
-  function holdFor(userId: UserId, atMs: number, purpose: Purpose, micros: number): BudgetHold | null {
+  function holdFor(userId: UserId, atMs: number, purpose: Purpose, micros: number, exempt = false): BudgetHold | null {
     if (opts.stopped()) return { reason: "stopped" };
-    if (UNCAPPED.has(purpose)) return null;
+    if (exempt) return null;
     const period = periodOf(atMs);
     const resetsAtMs = periodEndMs(atMs);
     if (userCap !== null) {
@@ -177,14 +185,16 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
   }
 
   return {
-    reserve(userId, purpose, key) {
+    reserve(userId, purpose, key, finishes) {
       return db.sql.transaction((): Admission => {
         const at = now();
         const micros = costMicros(ESTIMATE_USD[purpose]);
-        const hold = holdFor(userId, at, purpose, micros);
+        // Recorded only when the exemption is used, so the count below is of requests that passed the caps on it.
+        const review = purpose === "wrap_up" && finishes !== undefined && q.uncappedOf.get(userId, finishes)!.n < UNCAPPED_REQUESTS_PER_REVIEW ? finishes : null;
+        const hold = holdFor(userId, at, purpose, micros, review !== null);
         if (hold !== null) return { kind: "held", hold };
         const id = `hold_${crypto.randomUUID()}`;
-        q.insert.run(id, userId, periodOf(at), purpose, key, micros, Math.round(at));
+        q.insert.run(id, userId, periodOf(at), purpose, key, micros, Math.round(at), review);
         return { kind: "reserved", reservation: { id, micros } };
       }).immediate();
     },

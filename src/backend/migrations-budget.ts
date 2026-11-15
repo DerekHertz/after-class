@@ -35,3 +35,22 @@ BEGIN SELECT RAISE(ABORT, 'a budget hold is priced at most once, settled once, a
 CREATE TRIGGER budget_holds_no_delete BEFORE DELETE ON budget_holds
 BEGIN SELECT RAISE(ABORT, 'budget holds are never deleted'); END;`,
 };
+
+
+/**
+ * Which review a request finished past the caps, so a review can pass them only a bounded number of times (budget.ts). Null for
+ * every other request, including a wrap-up held to the caps like any call. Written with the hold and never changed after.
+ */
+export const BUDGET_HOLDS_FINISHES: Migration = {
+  id: "006-budget-holds-finishes-review",
+  sql: `
+ALTER TABLE budget_holds ADD COLUMN finishes_review TEXT;
+CREATE INDEX budget_holds_by_review ON budget_holds (user_id, finishes_review) WHERE finishes_review IS NOT NULL;
+DROP TRIGGER budget_holds_settle_once;
+CREATE TRIGGER budget_holds_settle_once BEFORE UPDATE ON budget_holds
+WHEN OLD.settled_micros IS NOT NULL OR (NEW.settled_micros IS NULL AND NEW.priced_micros IS NULL)
+  OR (OLD.priced_micros IS NOT NULL AND NEW.priced_micros IS NOT OLD.priced_micros) OR NEW.id IS NOT OLD.id OR NEW.user_id IS NOT OLD.user_id
+  OR NEW.period IS NOT OLD.period OR NEW.purpose IS NOT OLD.purpose OR NEW.memo_key IS NOT OLD.memo_key
+  OR NEW.reserved_micros IS NOT OLD.reserved_micros OR NEW.reserved_ms IS NOT OLD.reserved_ms OR NEW.finishes_review IS NOT OLD.finishes_review
+BEGIN SELECT RAISE(ABORT, 'a budget hold is priced at most once, settled once, and is otherwise never changed'); END;`,
+};

@@ -25,7 +25,7 @@ import type {
 import { Material } from "../../shared/time";
 import { asSeq } from "../db";
 import type { UserDb } from "../db";
-import type { Memo, RunResult } from "../providers/memo";
+import type { Memo, MemoRunOptions, RunResult } from "../providers/memo";
 import { MAX_MAIN_QUESTIONS, allowedMoves, askedClaims, parseMoveHeader, reviewState, settledCorrections, validateMove, tutorOwesMove, waitsForLearner } from "./tutor";
 import type { TutorInput, TutorOutput, WrapUpInput, WrapUpOutput } from "./tutor";
 import {
@@ -131,6 +131,30 @@ const NOTHING_TO_ASK_LINE = "Every statement I prepared for this part was withdr
 export const MAX_MOVES_PER_TURN = 4;
 const NON_TERMINAL = new Set(["awaiting_check", "awaiting_revision", "awaiting_recheck"]);
 
+/** Whether the learner answered, skipped or said "I don't know" to a question: a review that used something up (see `reviewedMaterial`). */
+export function hasResponded(turns: readonly Turn[]): boolean {
+  return turns.some((t) => t.actor === "learner" && (t.act.kind === "answer" || t.act.kind === "skip" || t.act.kind === "dont_know"));
+}
+
+/**
+ * How the wrap-up that saves a review is run. Derek: "i think it should be allowed to finish". A review the learner responded to
+ * names itself, so the budget lets it pass the caps a bounded number of times. A review with no response names nothing and is
+ * capped like any call, so starting and ending empty reviews can never spend past a cap (#244).
+ */
+export const wrapUpRun = (reviewId: ReviewId, turns: readonly Turn[]): MemoRunOptions => (hasResponded(turns) ? { finishes: reviewId } : {});
+
+/** Reviews one learner may start in a day without having responded to a question in them. Far above a mis-click, so a learner never meets it (#244). */
+export const UNANSWERED_REVIEWS_PER_DAY = 20;
+const DAY_MS = 86_400_000;
+
+/** Thrown by `start` when the learner has started too many reviews without responding to one. The message is for the learner. */
+export class ReviewLimitError extends Error {
+  constructor() {
+    super("You have started a lot of reviews today without answering a question in them. Answer the questions in a review, or try again tomorrow.");
+    this.name = "ReviewLimitError";
+  }
+}
+
 export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOptions = {}): Reviews {
   const softTargetS = config.softTargetS ?? 600;
   const timeInviteGapS = config.timeInviteGapS ?? 900;
@@ -146,6 +170,7 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     insertAnswer: db.sql.query("INSERT INTO invite_answers (seq, user_id, capture_id, answer, watched_s, at_ms) VALUES (?, ?, ?, ?, ?, ?)"),
     review: db.sql.query<ReviewRow, [string, string]>(`SELECT ${REVIEW_COLUMNS} FROM reviews WHERE user_id = ? AND id = ?`),
     reviewHeldByOther: db.sql.query<{ n: number }, [string, string]>("SELECT 1 AS n FROM reviews WHERE id = ? AND user_id <> ?"),
+    startedSince: db.sql.query<ReviewRow, [string, number]>(`SELECT ${REVIEW_COLUMNS} FROM reviews WHERE user_id = ? AND started_ms >= ?`),
     reviewsOf: db.sql.query<ReviewRow, [string, string]>(`SELECT ${REVIEW_COLUMNS} FROM reviews WHERE user_id = ? AND capture_id = ?`),
     insertReview: db.sql.query("INSERT INTO reviews (id, user_id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, ?, ?, ?, ?, ?)"),
     turns: db.sql.query<TurnRow, [string, string]>(
@@ -233,8 +258,7 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
   function reviewedMaterial(captureId: CaptureId): Material {
     const counts = (r: ReviewRow): boolean => {
       const turns = loadTurns(r.id as ReviewId);
-      const responded = turns.some((t) => t.actor === "learner" && (t.act.kind === "answer" || t.act.kind === "skip" || t.act.kind === "dont_know"));
-      return responded || kit.reviewState(r.id as ReviewId, turns, [], softTargetS, now()).phase !== "ended";
+      return hasResponded(turns) || kit.reviewState(r.id as ReviewId, turns, [], softTargetS, now()).phase !== "ended";
     };
     return q.reviewsOf.all(userId, captureId).filter(counts).reduce((m, r) => Material.union(m, decodeScope(r.scope_json).scope.material), Material.empty);
   }
@@ -298,6 +322,9 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     return db.tx((): StartResult => {
       // The id is the row's key across users, so another user's review would collide on insert; refuse it before anything else runs.
       if (heldByAnotherUser(reviewId)) throw new RangeError(`review ${reviewId} belongs to another user`);
+      // A review id is minted by the client, so without this one learner could start, end and restart reviews without limit (#244).
+      const unanswered = q.startedSince.all(userId, Math.round(now()) - DAY_MS).filter((r) => !hasResponded(loadTurns(r.id as ReviewId))).length;
+      if (unanswered >= UNANSWERED_REVIEWS_PER_DAY) throw new ReviewLimitError();
       let cands = candidates(captureId);
       let dropped = 0;
       if (choice === "stop_early") {
