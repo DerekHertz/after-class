@@ -5,6 +5,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createBudget, ESTIMATE_USD, periodEndMs } from "../src/backend/providers/budget";
 import type { Budget, BudgetLimits } from "../src/backend/providers/budget";
+import { priceUsage } from "../src/backend/providers/claude-api";
 import { createJevClient, jevCost } from "../src/backend/providers/jev";
 import { frameChangeTask } from "../src/backend/providers/jev-tasks";
 import { createMemo, ProviderError } from "../src/backend/providers/memo";
@@ -33,6 +34,8 @@ import { tmpDir } from "./tmp";
 const NOV_10 = Date.UTC(2026, 10, 10, 12);
 const DEC_1 = Date.UTC(2026, 11, 1);
 const TUTOR = ESTIMATE_USD.tutor_turn;
+/** Spent of a $5 cap with less than one tutor reservation left, but money left. */
+const SOME_LEFT = 5 - TUTOR / 2;
 const UNKNOWN: Cost = { kind: "unknown", reason: "test" };
 
 type In = { readonly n: number };
@@ -71,7 +74,7 @@ describe("reserve and settle", () => {
     expect(used(w.budget, w.db)).toBe(TUTOR);
     gate.resolve(ok("x", { usage: usage({ kind: "estimated", usd: 0.1234567, basis: "test" }) }));
     expect((await run).kind).toBe("hit");
-    expect(holds(w.db)).toEqual([{ reserved_micros: 750_000, settled_micros: 123_457 }]);
+    expect(holds(w.db)).toEqual([{ reserved_micros: TUTOR * 1_000_000, settled_micros: 123_457 }]);
     expect(used(w.budget, w.db)).toBe(0.123457);
   });
 
@@ -151,22 +154,36 @@ describe("caps", () => {
   test("Derek: \"i think it should be allowed to finish\". The wrap-up passes both caps and still counts, but the stop switch holds it", async () => {
     const w = world({ userUsd: TUTOR, totalUsd: TUTOR });
     const t = claudeTask("tutor_turn", () => ok("x", { usage: usage(UNKNOWN) }));
-    expect((await w.memo.run(t, { n: 1 })).kind).toBe("hit");
-    expect(await w.memo.run(t, { n: 2 })).toMatchObject({ kind: "held", hold: { reason: "user_budget" } });
+    const review = randomId("rvw");
+    expect((await w.memo.run(t, { n: 1 }, { review })).kind).toBe("hit");
+    expect(await w.memo.run(t, { n: 2 }, { review })).toMatchObject({ kind: "held", hold: { reason: "user_budget" } });
     const wrapUp = claudeTask("wrap_up", () => ok("saved", { usage: usage(UNKNOWN) }));
-    expect((await w.memo.run(wrapUp, { n: 1 })).kind).toBe("hit");
+    // A wrap-up that names no review is capped like any call (#244). One whose review has paid tutoring passes (test/wrap-up-bound.test.ts bounds it).
+    expect(await w.memo.run(wrapUp, { n: 0 })).toMatchObject({ kind: "held", hold: { reason: "user_budget" } });
+    expect((await w.memo.run(wrapUp, { n: 1 }, { review })).kind).toBe("hit");
     expect(used(w.budget, w.db)).toBe(TUTOR + ESTIMATE_USD.wrap_up);
     expect(w.db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM usage_events WHERE purpose = 'wrap_up'").get()!.n).toBe(1);
     w.stop(true);
-    expect(await w.memo.run(wrapUp, { n: 2 })).toMatchObject({ kind: "held", hold: { reason: "stopped" } });
+    expect(await w.memo.run(wrapUp, { n: 2 }, { review })).toMatchObject({ kind: "held", hold: { reason: "stopped" } });
     expect(wrapUp.calls).toEqual([{ n: 1 }]);
+  });
+
+  test("the allowance reports what is reserved for running calls apart from what has settled", async () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    const gate = deferred<FakeStep<string>>();
+    const running = w.memo.run(claudeTask("tutor_turn", () => gate.promise), { n: 1 });
+    await new Promise((res) => setTimeout(res, 0));
+    expect(w.budget.allowance(w.db.userId)).toMatchObject({ usedUsd: TUTOR, reservedUsd: TUTOR });
+    gate.resolve(ok("x", { usage: usage({ kind: "measured", usd: 0.25 }) }));
+    await running;
+    expect(w.budget.allowance(w.db.userId)).toMatchObject({ usedUsd: 0.25, reservedUsd: 0 });
   });
 
   test("no cap set means every attempt starts and is still counted", async () => {
     const w = world({ userUsd: null, totalUsd: null });
     const t = claudeTask("tutor_turn", () => ok("x", { usage: usage({ kind: "measured", usd: 2 }) }));
     for (const n of [1, 2, 3]) expect((await w.memo.run(t, { n })).kind).toBe("hit");
-    expect(w.budget.allowance(w.db.userId)).toEqual({ usedUsd: 6, limitUsd: null, resetsAtMs: DEC_1, held: null });
+    expect(w.budget.allowance(w.db.userId)).toEqual({ usedUsd: 6, reservedUsd: 0, limitUsd: null, uncapped: false, resetsAtMs: DEC_1, held: null });
   });
 });
 
@@ -182,7 +199,7 @@ describe("stop switch", () => {
     expect(w.budget.allowance(w.db.userId).held).toEqual({ reason: "stopped" });
     gate.resolve(ok("finished", { usage: usage({ kind: "measured", usd: 0.1 }) }));
     expect(await running).toMatchObject({ kind: "hit", value: "finished" });
-    expect(holds(w.db)).toEqual([{ reserved_micros: 750_000, settled_micros: 100_000 }]);
+    expect(holds(w.db)).toEqual([{ reserved_micros: TUTOR * 1_000_000, settled_micros: 100_000 }]);
     w.stop(false);
     expect(await w.memo.run(t, { n: 2 })).toMatchObject({ kind: "hit", value: "later" });
   });
@@ -367,12 +384,13 @@ describe("what the learner sees", () => {
 
   test("the usage page states this month's use and allowance, and why calls are held", () => {
     expect(allowanceView(null)).toBeNull();
-    expect(allowanceView({ usedUsd: 0.75, limitUsd: 5, resetsAtMs: DEC_1, held: null })).toEqual({
+    expect(allowanceView({ usedUsd: 0.75, reservedUsd: 0, limitUsd: 5, uncapped: false, resetsAtMs: DEC_1, held: null })).toEqual({
       line: "$0.75 of your $5.00 AI allowance used this month. It resets on December 1.",
+      reserved: null,
       held: null,
     });
-    expect(allowanceView({ usedUsd: 0.001, limitUsd: null, resetsAtMs: DEC_1, held: null })!.line).toBe("<$0.01 counted this month, with no monthly cap. The month resets on December 1.");
-    const html = renderToStaticMarkup(createElement(AllowanceNote, { allowance: { usedUsd: 5, limitUsd: 5, resetsAtMs: DEC_1, held: { reason: "user_budget", resetsAtMs: DEC_1, usedUp: true } } }));
+    expect(allowanceView({ usedUsd: 0.001, reservedUsd: 0, limitUsd: null, uncapped: false, resetsAtMs: DEC_1, held: null })!.line).toBe("<$0.01 counted this month, with no monthly cap. The month resets on December 1.");
+    const html = renderToStaticMarkup(createElement(AllowanceNote, { allowance: { usedUsd: 5, reservedUsd: 0, limitUsd: 5, uncapped: false, resetsAtMs: DEC_1, held: { reason: "user_budget", resetsAtMs: DEC_1, usedUp: true } } }));
     expect(html).toContain("$5.00 of your $5.00 AI allowance used this month.");
     expect(html).toContain("This month&#x27;s AI allowance is used up. It resets on December 1.");
   });
@@ -381,13 +399,17 @@ describe("what the learner sees", () => {
     const w = world({ userUsd: 5, totalUsd: 50 });
     const spend = (db: UserDb, usd: number) => w.memoFor(db).run(claudeTask("claim_revision", () => ok("x", { usage: usage({ kind: "measured", usd }) })), { n: usd });
     const [someLeft, spentAll, bystander] = [w.db, otherUserDb(w.db, "spent-all"), otherUserDb(w.db, "bystander")];
-    await spend(someLeft, 4.5);
+    const finisher = otherUserDb(w.db, "finisher");
+    const finishes = randomId("rvw");
+    await w.memoFor(finisher).run(claudeTask("tutor_turn", () => ok("x", { usage: usage({ kind: "measured", usd: 0.01 }) })), { n: 0 }, { review: finishes });
+    await spend(someLeft, SOME_LEFT);
     await spend(spentAll, 5);
     expect(w.budget.allowance(someLeft.userId).held).toEqual({ reason: "user_budget", resetsAtMs: DEC_1, usedUp: false });
     expect(w.budget.allowance(spentAll.userId).held).toEqual({ reason: "user_budget", resetsAtMs: DEC_1, usedUp: true });
-    for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) await spend(otherUserDb(w.db, `spender-${n}`), 5);
-    // A wrap-up passes the caps, so it can bring the month to $49.75 and then to exactly $50.
-    const wrapUp = (n: number) => w.memoFor(otherUserDb(w.db, "finisher")).run(claudeTask("wrap_up", () => ok("x", { usage: usage({ kind: "measured", usd: 0.25 }) })), { n });
+    // The 8th spender gives back what someLeft spent above $4.50, so the month still stands at $49.51 as the comment below counts it.
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) await spend(otherUserDb(w.db, `spender-${n}`), n === 8 ? 5 - (SOME_LEFT - 4.5) : 5);
+    // A wrap-up passes the caps, so it can bring the month from $49.51 to $49.91, with less than a tutor reservation left, and then to $50.31.
+    const wrapUp = (n: number) => w.memoFor(finisher).run(claudeTask("wrap_up", () => ok("x", { usage: usage({ kind: "measured", usd: 0.4 }) })), { n }, { review: finishes });
     await wrapUp(1);
     expect(w.budget.allowance(bystander.userId)).toMatchObject({ usedUsd: 0, held: { reason: "total_budget", resetsAtMs: DEC_1, usedUp: false } });
     await wrapUp(2);
@@ -397,7 +419,7 @@ describe("what the learner sees", () => {
   test("a tutor turn held with money left says so in the chat, not that the allowance is used up", async () => {
     const r = startedRig();
     const tutor = heldTutor(r.db, { userUsd: 5, totalUsd: 50 }, () => reply(askMain(r.claim), "What is the main idea?"));
-    const spent = claudeTask("claim_revision", () => ok("x", { usage: usage({ kind: "measured", usd: 4.5 }) }));
+    const spent = claudeTask("claim_revision", () => ok("x", { usage: usage({ kind: "measured", usd: SOME_LEFT }) }));
     await createMemo(r.db, "live", { budget: tutor.budget }).run(spent, { n: 1 });
     const reviews = createReviews(r.db, { ...r.world.deps, runTutor: tutor.runTutor, clearFailures: tutor.clearFailures }, { tutor: kit, now: () => 1 });
     const turnId = randomId("turn");
@@ -405,12 +427,39 @@ describe("what the learner sees", () => {
     expect(events.at(-1)).toEqual({ type: "turn_held", hold: { reason: "user_budget", resetsAtMs: DEC_1, usedUp: false } });
     expect(events.reduce(reduceLive, startLive(turnId)).error).toBe("Not enough of this month's AI allowance is left for another AI step. It resets on December 1.");
   });
+  test("the usage page shows settled spend and what is reserved on separate lines", () => {
+    const a = { usedUsd: 1.1, reservedUsd: 0.34, limitUsd: 5, uncapped: false, resetsAtMs: DEC_1, held: null } as const;
+    expect(allowanceView(a)).toEqual({
+      line: "$0.76 of your $5.00 AI allowance used this month. It resets on December 1.",
+      reserved: "$0.34 more is set aside for AI steps still running. It counts against your allowance until they finish, and whatever they do not use is given back.",
+      held: null,
+    });
+    expect(allowanceView({ ...a, reservedUsd: 0 })!.reserved).toBeNull();
+    expect(renderToStaticMarkup(createElement(AllowanceNote, { allowance: a }))).toContain("$0.34 more is set aside for AI steps still running.");
+    expect(usageResponse.parse({ byKind: {}, byPurpose: {}, allowance: { usedUsd: 1, limitUsd: 5, resetsAtMs: DEC_1, held: null } }).allowance!.reservedUsd).toBe(0);
+  });
+
+  test("starting a reservation never moves the rounded settled figure", () => {
+    const settled = { usedUsd: 0.025, reservedUsd: 0, limitUsd: 5, uncapped: false, resetsAtMs: DEC_1, held: null } as const;
+    expect(allowanceView(settled)!.line).toStartWith("$0.03 of your");
+    expect(allowanceView({ ...settled, usedUsd: 0.175, reservedUsd: 0.15 })!.line).toStartWith("$0.03 of your");
+  });
+
+  test("used and reserved come from one read, so reserved is never more than used", async () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    const r = w.budget.reserve(w.db.userId, "tutor_turn", crypto.randomUUID() as MemoKey);
+    expect(r.kind).toBe("reserved");
+    const a = w.budget.allowance(w.db.userId);
+    expect(a.reservedUsd).toBeGreaterThan(0);
+    expect(a.reservedUsd).toBeLessThanOrEqual(a.usedUsd);
+  });
+
   test("the wire carries turn_held and the allowance, and an older backend's usage without one decodes as no budget", () => {
     expect(tutorStreamEvent.parse({ type: "turn_held", hold: { reason: "stopped" } })).toEqual({ type: "turn_held", hold: { reason: "stopped" } });
     const held = { type: "turn_held", hold: { reason: "user_budget", resetsAtMs: DEC_1, usedUp: false } } as const;
     expect(tutorStreamEvent.parse(held)).toEqual(held);
     expect(() => tutorStreamEvent.parse({ type: "turn_held", hold: { reason: "user_budget", resetsAtMs: DEC_1 } })).toThrow();
-    const allowance = { usedUsd: 1, limitUsd: 5, resetsAtMs: DEC_1, held: null };
+    const allowance = { usedUsd: 1, reservedUsd: 0, limitUsd: 5, uncapped: false, resetsAtMs: DEC_1, held: null };
     expect(usageResponse.parse({ byKind: {}, byPurpose: {}, allowance }).allowance).toEqual(allowance);
     expect(usageResponse.parse({ byKind: {}, byPurpose: {} }).allowance).toBeNull();
   });
@@ -562,5 +611,24 @@ describe("Jev spend", () => {
     };
     expect(hold(0.0004991)).toBe("held");
     expect(hold(0.0005)).toBe("reserved");
+  });
+});
+
+// #236: the flat figure a tutor request reserves when its adapter passes no estimate. The request-sensitive reservation is in tutor-reservation.test.ts.
+describe("the tutor turn reservation", () => {
+  // The Fable end-to-end audit of 2026-11-14 (docs/trail/fable-e2e-2026-11-14-data.json), Sonnet: the dearest turn is the one that writes
+  // the system block, 31,241 input tokens, written at the 1 hour rate in the worst case (the turn after a long pause). 2,000 output tokens
+  // is four times the most a measured turn spent (505).
+  const dearestMeasured = priceUsage("claude-sonnet-5-5", { fresh: 0, creation5m: 0, creation1h: 31_241, read: 0, output: 2_000 })!;
+
+  test("covers the dearest turn measured on Sonnet and is not many times it", () => {
+    expect(TUTOR).toBeGreaterThanOrEqual(dearestMeasured);
+    expect(TUTOR).toBeLessThanOrEqual(2 * dearestMeasured);
+  });
+
+  test("a learner with a tutor turn's worth of allowance left is not refused", () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    w.db.sql.query("INSERT INTO budget_holds (id, user_id, period, purpose, memo_key, reserved_micros, reserved_ms, settled_micros, settled_ms) VALUES ('h', ?, '2026-11', 'claim_revision', 'k', 1, 1, ?, 1)").run(w.db.userId, 4_850_000);
+    expect(w.budget.allowance(w.db.userId).held).toBeNull();
   });
 });

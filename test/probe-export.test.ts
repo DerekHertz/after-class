@@ -14,9 +14,10 @@ import type { CaptureFact, CaptureFactBody } from "../src/shared/domain";
 import { media } from "../src/shared/time";
 import { exportCapture, pickCapture } from "../scripts/probe-export";
 import { tmpDir } from "./tmp";
+import { JPEG_BYTES } from "./jpeg-fixture";
 
 const VIDEO = "aaaaaaaaaaa";
-const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]).toString("base64");
+const JPEG = Buffer.from(JPEG_BYTES).toString("base64");
 
 describe("pickCapture", () => {
   const c = (captureId: string, watchedSeconds: number, hasEvidence = true) => ({ captureId, watchedSeconds, hasEvidence });

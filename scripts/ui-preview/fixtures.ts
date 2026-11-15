@@ -26,7 +26,7 @@ export const ids = {
   chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait"), ordering: id("cpt", "ordering"), earlierCapture: id("cap", "earlier-capture"),
   otherCapture: id("cap", "other-capture"), pendingReview: id("rvw", "pending-review"), unsavedReview: id("rvw", "unsaved-review"),
 };
-export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-processing", "capture-held", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "usage", "usage-held", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
+export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "reload-unanswered", "reload-in-flight", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-split", "capture-processing", "capture-held", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "usage", "usage-held", "usage-reserved", "usage-uncapped", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
 export type Scenario = typeof scenarios[number];
 export const scenarioFrom = (search: string): Scenario => scenarios.find(s => s === new URLSearchParams(search).get("scenario")) ?? "review";
 
@@ -83,6 +83,11 @@ export function createFixture(scenario: Scenario): Fixture {
       const help = turn("tutor", turns.length + 1, { move: { kind: "explain", threadId: ids.thread, evidence: [ids.frame, ids.passage] }, say: "The lecture calls this circular wait. Each thread is holding a resource while waiting for the other." });
       turns.push(help);
       turns.push(turn("tutor", turns.length + 1, { move: { kind: "ask_followup", threadId: ids.thread }, say: s === "long-reply" ? longReply : longReplyQuestion }));
+      // A reload after the learner's answer: the tutor's reply is not stored yet. In "reload-in-flight" the backend is still running that turn and stores it a few reads later.
+      if (s.startsWith("reload-")) {
+        turns.pop();
+        turns.push(answer(turns.length + 1, "Neither can continue until the other lets go of its lock."));
+      }
       if (disputes) {
         turns.push(turn("learner", turns.length + 1, { act: { kind: "dispute", text: "I did name circular wait: each thread holds one lock and waits for the other." } }));
         turns.push(turn("tutor", turns.length + 1, { move: { kind: "answer_dispute", threadId: ids.thread, evidence: [ids.passage], settled: false }, say: "Your answer described the waiting but not why neither thread can release its lock, which the lecture names as the condition." }));
@@ -115,7 +120,7 @@ export function createFixture(scenario: Scenario): Fixture {
       state: { reviewId, phase: s === "paused" || s === "home-paused" ? "paused" : s === "save-failure" || s === "saving" || saved ? "ended" : "active", mainQuestions: checklist ? 0 : disputes ? 2 : 1, quickChecks: saved && !disputes ? 1 : 0, fuzzy: saved ? [ids.concept] : [], openThread: checklist || saved ? null : ids.thread, lastLearnerAct: null,
         detour: s === "detour" ? { kind: "proposed", turnId: id("turn", "detour"), topic: "Resource ordering", needsResource: null } : s === "resource-wait" ? { kind: "awaiting_resource", resourceId: id("res", "resource"), topic: "Resource ordering" } : { kind: "none" },
         openDispute: null, corrections: [], activeSeconds: 30, softTargetS: 600, softTargetOffered: false, wrapUpRequested: false },
-      turns, owesMove: false, observations, saved: saved ? "saved" : s === "save-failure" || s === "saving" ? "save_pending" : "unsaved",
+      turns, owesMove: false, turnInFlight: s === "reload-in-flight", observations, saved: saved ? "saved" : s === "save-failure" || s === "saving" ? "save_pending" : "unsaved",
     };
   }
   let view: ReviewView = reviewViewz.parse(reviewJson(ids.review, scenario));
@@ -154,13 +159,15 @@ export function createFixture(scenario: Scenario): Fixture {
   // capturing, and the earlier lecture whose saved review the notebook holds. Notebook and Home read this one list.
   const at = (hour: number) => Date.UTC(2026, 10, 6, hour, 4);
   const lectureList = lecturesResponse.parse({ lectures: scenario === "home-empty" ? [] : [
-    { captureId: ids.capture, sourceTitles: ["Locks & deadlocks"], videos: 1, watchedSeconds: 760, status: { state: "stopped" }, reviews: [
+    { captureId: ids.capture, sourceTitles: ["Locks & deadlocks"], sourceIds: [ids.source], firstSeq: 2000, videos: 1, watchedSeconds: 760, status: { state: "stopped" }, reviews: [
       { reviewId: ids.review, startedMs: at(15), phase: view.state.phase, saved: view.saved, mainQuestions: view.state.mainQuestions },
-      { reviewId: ids.pendingReview, startedMs: at(13), phase: "ended", saved: "save_pending", mainQuestions: 2 },
-      { reviewId: ids.unsavedReview, startedMs: at(10), phase: "ended", saved: "unsaved", mainQuestions: 0 },
+      ...(scenario === "capture-split" ? [] : [
+        { reviewId: ids.pendingReview, startedMs: at(13), phase: "ended", saved: "save_pending", mainQuestions: 2 },
+        { reviewId: ids.unsavedReview, startedMs: at(10), phase: "ended", saved: "unsaved", mainQuestions: 0 },
+      ]),
     ] },
-    { captureId: ids.otherCapture, sourceTitles: ["Semaphores - Operating Systems"], videos: 1, watchedSeconds: 240, status: { state: "capturing" }, reviews: [] },
-    { captureId: ids.earlierCapture, sourceTitles: ["Deadlock prevention"], videos: 1, watchedSeconds: 900, status: { state: "stopped" }, reviews: [
+    { captureId: ids.otherCapture, sourceTitles: ["Semaphores - Operating Systems"], sourceIds: [id("src", "semaphores")], firstSeq: 3000, videos: 1, watchedSeconds: 240, status: { state: "capturing" }, reviews: [] },
+    { captureId: ids.earlierCapture, sourceTitles: ["Deadlock prevention"], sourceIds: [id("src", "deadlock-prevention")], firstSeq: 1000, videos: 1, watchedSeconds: 900, status: { state: "stopped" }, reviews: [
       { reviewId: ids.earlierReview, startedMs: at(11), phase: "ended", saved: "saved", mainQuestions: earlierView?.state.mainQuestions ?? 1 },
     ] },
   ] });
@@ -168,6 +175,7 @@ export function createFixture(scenario: Scenario): Fixture {
   let evidenceAttempts = 0;
   let diagramAttempts = 0;
   let reviewAttempts = 0;
+  let inFlightReads = 0;
   let topicReads = 0;
   const api: AppApi = {
     async review(reviewId) {
@@ -175,6 +183,10 @@ export function createFixture(scenario: Scenario): Fixture {
       if (earlierView !== null && reviewId === earlierView.reviewId) {
         if (scenario === "record-context-error" && reviewAttempts++ === 0) throw new ApiError("Fixture review lookup failed. Retry is available.", 503);
         return earlierView;
+      }
+      if (scenario === "reload-in-flight" && reviewId === view.reviewId && view.turnInFlight && ++inFlightReads > 4) {
+        const reply = { id: id("turn", "reload-reply"), reviewId: view.reviewId, seq: view.turns.length + 1, atMs: (view.turns.length + 1) * 1000, actor: "tutor", threadId: ids.thread, move: { kind: "ask_followup", threadId: ids.thread }, say: longReplyQuestion };
+        view = { ...view, turns: [...view.turns, reviewViewz.shape.turns.parse([reply])[0]!], turnInFlight: false };
       }
       return reviewId === view.reviewId ? view : savedView;
     },
@@ -187,7 +199,9 @@ export function createFixture(scenario: Scenario): Fixture {
     async reviewOptions() {
       log("review.options");
       const scope = { chunkRevisions: [ids.chunk], supportedClaims: 3, topics, material, partial: [{ kind: "capture_gap", gap }] };
-      return reviewOptionsz.parse(scenario === "capture-empty" ? { kind: "nothing_to_review", gaps: [gap], unverified: [], rewatch: [{ sourceId: ids.source, interval: { start: 600, end: 640 } }] } : scenario === "capture-processing" || scenario === "capture-held" ? { kind: "processing", readyNow: scope, pendingChunks: 2, estimateS: null } : { kind: "ready", scope });
+      // "capture-split": the review above holds the first 4:18 of the lecture, which this answer leaves out of the next review.
+      const heldBack = scenario === "capture-split" ? [{ reviewId: ids.review, material: [[ids.source, [[0, 258]]]] }] : [];
+      return reviewOptionsz.parse(scenario === "capture-empty" ? { kind: "nothing_to_review", heldBack: [], gaps: [gap], unverified: [], rewatch: [{ sourceId: ids.source, interval: { start: 600, end: 640 } }] } : scenario === "capture-processing" || scenario === "capture-held" ? { kind: "processing", readyNow: scope, pendingChunks: 2, estimateS: null, heldBack } : { kind: "ready", scope, heldBack });
     },
     async startReview(_capture, _choice, reviewId) { log("review.start"); return { kind: "started", reviewId, scope: view.scope }; },
     async answerInvite(_id, answer) { log(`invite.${answer}`); },
@@ -263,6 +277,8 @@ export function createFixture(scenario: Scenario): Fixture {
     async deleteEvidence(evidenceIds) { log("evidence.delete"); record = { ...record, unavailableEvidence: evidenceIds.map(id => ({ kind: "deleted", id, deletedAtMs: 1000 })) }; },
     async usage() {
       const held = scenario === "usage-held" || scenario === "capture-held" || scenario === "held-turn";
+      if (scenario === "usage-reserved") return usageSummaryz.parse({ byKind: { estimated: { calls: 12, usd: 0.76 } }, byPurpose: { tutor_turn: { calls: 12, errors: 0, unknownCost: 0 } }, allowance: { usedUsd: 1.1, reservedUsd: 0.34, limitUsd: 5, resetsAtMs: MONTH_END, held: null } });
+      if (scenario === "usage-uncapped") return usageSummaryz.parse({ byKind: { estimated: { calls: 22, usd: 11.62 } }, byPurpose: { tutor_turn: { calls: 22, errors: 0, unknownCost: 0 } }, allowance: { usedUsd: 11.62, limitUsd: null, uncapped: true, resetsAtMs: MONTH_END, held: null } });
       if (scenario === "held-turn-used-up") return usageSummaryz.parse({ byKind: {}, byPurpose: {}, allowance: { usedUsd: 5, limitUsd: 5, resetsAtMs: MONTH_END, held: { reason: "user_budget", resetsAtMs: MONTH_END, usedUp: true } } });
       return usageSummaryz.parse(held
         ? { byKind: { estimated: { calls: 14, usd: 4.31 }, unknown: { calls: 3, usd: null } }, byPurpose: { interpretation: { calls: 3, errors: 0, unknownCost: 0 }, tutor_turn: { calls: 11, errors: 0, unknownCost: 0 }, boundary: { calls: 3, errors: 0, unknownCost: 3 } }, allowance: { usedUsd: 4.79, limitUsd: 5, resetsAtMs: MONTH_END, held: { reason: "user_budget", resetsAtMs: MONTH_END, usedUp: false } } }

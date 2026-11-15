@@ -7,6 +7,7 @@ import type { UserDb } from "../src/backend/db";
 import type { DiagramSummaryInput, DiagramSummaryOutput } from "../src/backend/diagram";
 import { createDiagrams } from "../src/backend/diagram";
 import { createEvidence } from "../src/backend/evidence";
+import type { IngestLimits } from "../src/backend/evidence/ingest-limits";
 import { serve } from "../src/backend/http";
 import type { Preparation } from "../src/backend/preparation";
 import { createLedger } from "../src/backend/providers/ledger";
@@ -57,8 +58,9 @@ export function fixtureApp(): string {
   return dir;
 }
 
-function evidenceOn(db: UserDb) {
+function evidenceOn(db: UserDb, limits?: IngestLimits) {
   return createEvidence(db, scratchDir("afterclass-data-"), {
+    ...(limits ? { limits } : {}),
     lookupFrameChange: (input) => ({ kind: "missing", key: stableId("key", input.after.frame.id) }),
     runFrameChange: async () => undefined,
     frameChangeKey: (input) => stableId("key", input.after.frame.id),
@@ -66,10 +68,15 @@ function evidenceOn(db: UserDb) {
   });
 }
 
+/** Records `userId` as the owner of a capture id without storing facts, as a first ingest does. */
+export function ownCapture(db: UserDb, captureId: string): void {
+  db.sql.query("INSERT INTO capture_owners (capture_id, user_id, claimed_ms) VALUES (?, ?, 0) ON CONFLICT DO NOTHING").run(captureId, db.userId);
+}
+
 /** The real evidence module on an in-memory db; reviews is a fake whose invite state a test sets. */
-export function world() {
+export function world(limits?: IngestLimits) {
   const db = testUserDb();
-  const evidence = evidenceOn(db);
+  const evidence = evidenceOn(db, limits);
   const invite = { state: { state: "none" } as InviteState, answers: [] as InviteAnswer[] };
   const reviews = {
     invite: () => invite.state,
@@ -83,11 +90,12 @@ export function world() {
   return { db, evidence, reviews, invite, stored };
 }
 
-export function start(appDir = fixtureApp(), extra: { maxBodyBytes?: number; healthAnyHost?: boolean } = {}) {
-  const w = world();
+export function start(appDir = fixtureApp(), extra: { maxBodyBytes?: number; healthAnyHost?: boolean; limits?: IngestLimits } = {}) {
+  const { limits, ...serveExtra } = extra;
+  const w = world(limits);
   const server = serve({
     modules: { ledger: createLedger(w.db), evidence: w.evidence, reviews: w.reviews },
-    auth: { port: 0, extensionId: EXT_ID, token: TOKEN }, appDir, ...extra,
+    auth: { port: 0, extensionId: EXT_ID, token: TOKEN }, appDir, ...serveExtra,
   });
   servers.push(server);
   return { server, port: server.port as number, base: `http://127.0.0.1:${server.port}`, ...w };
@@ -365,7 +373,7 @@ export function reviewRig(script: Script = pick, extra: { turnDeadlineMs?: numbe
       return db.nextSeq();
     },
   } as unknown as Preparation;
-  const segmentation = { current: world.deps.currentChunks, heldByAnotherUser: () => false } as unknown as Segmentation;
+  const segmentation = { current: world.deps.currentChunks } as unknown as Segmentation;
 
   const evidence = evidenceOn(db);
   const diagrams = createDiagrams({
@@ -389,6 +397,7 @@ export function reviewRig(script: Script = pick, extra: { turnDeadlineMs?: numbe
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
   const capture = world.captureId;
+  ownCapture(db, capture);
 
   /** One chunk [0, 300) holding claims A and B, both supported. */
   const prepare = () => ({ rev: world.close(0, 0, 300), a: world.claim(1, 10, 20), b: world.claim(2, 30, 40) });

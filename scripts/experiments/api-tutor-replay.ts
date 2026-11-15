@@ -30,7 +30,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { z } from "zod";
 import { readKeys } from "../../src/backend/main";
 import type { ApiCallDetail, ApiClient } from "../../src/backend/providers/claude-api";
-import { API_MODELS, ApiCallError, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, createClaudeApi, outputFormatOf, redactThenClip, worstCaseUsd } from "../../src/backend/providers/claude-api";
+import { API_MODELS, ApiCallError, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, createClaudeApi, outputFormatOf, redactThenClip, estimateRequestUsd } from "../../src/backend/providers/claude-api";
 import type { ClaudeCli, ClaudeRequest, Effort } from "../../src/backend/providers/claude";
 import { ProviderError, unbudgeted } from "../../src/backend/providers/memo";
 import { parseMoveHeader, wrapUpSchema } from "../../src/backend/review/tutor";
@@ -383,9 +383,9 @@ const maxTokensOf = (purpose: Purpose) => (purpose === "tutor_turn" ? STREAM_MAX
 const WRAP_UP_SCHEMA_BYTES = Buffer.byteLength(JSON.stringify(outputFormatOf(wrapUpSchema)));
 const schemaBytesOf = (purpose: Purpose) => (purpose === "wrap_up" ? WRAP_UP_SCHEMA_BYTES : 0);
 
-/** What one call is reserved at: the upper bound in `worstCaseUsd`. Infinite for a model with no price, so it never runs. */
+/** What one call is reserved at: the upper bound in `estimateRequestUsd`. Infinite for a model with no price, so it never runs. */
 export const reservationUsd = (model: Options["model"], call: StoredCall): number =>
-  worstCaseUsd(API_MODELS[model], call.inputBytes, maxTokensOf(call.purpose), schemaBytesOf(call.purpose)) ?? Number.POSITIVE_INFINITY;
+  estimateRequestUsd(API_MODELS[model], call.inputBytes, maxTokensOf(call.purpose), schemaBytesOf(call.purpose)) ?? Number.POSITIVE_INFINITY;
 const worstOf = reservationUsd;
 
 // ───────────────────────────── paths ─────────────────────────────

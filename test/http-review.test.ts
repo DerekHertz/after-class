@@ -5,7 +5,7 @@ import { randomId } from "../src/shared/ids";
 import type { ReviewId } from "../src/shared/ids";
 import { interval } from "../src/shared/time";
 import { reviewOptionsResponse, reviewViewResponse, saveResponse, startReviewResponse, tutorStreamEvent } from "../src/shared/wire";
-import { JSON_HEADERS, SRC, bearer, count, learnerRows, moveOf, pick, post, registerCleanup, reviewRig, reviewRows, said, startedIn, tutorRows, until } from "./http-fixtures";
+import { JSON_HEADERS, SRC, bearer, count, learnerRows, moveOf, ownCapture, pick, post, registerCleanup, reviewRig, reviewRows, said, startedIn, tutorRows, until } from "./http-fixtures";
 import { raceAt } from "./interleave";
 
 registerCleanup();
@@ -23,6 +23,18 @@ describe("GET /captures/:id/review-options", () => {
     expect(await get()).toMatchObject({ kind: "processing", pendingChunks: 1 });
     expect((await fetch(`${rig.base}/captures/${rig.capture}/review-options`)).status).toBe(401);
     expect((await fetch(`${rig.base}/captures/nope/review-options`, { headers: bearer })).status).toBe(400);
+  });
+});
+
+describe("heldBack over the wire", () => {
+  test("a started review is named in the options with its Material as canonical rows", async () => {
+    const rig = reviewRig();
+    const reviewId = await startedIn(rig);
+    const body = reviewOptionsResponse.parse(await (await fetch(`${rig.base}/captures/${rig.capture}/review-options`, { headers: bearer })).json());
+    expect(body.kind).toBe("nothing_to_review");
+    expect(body.heldBack.map((h) => [h.reviewId, [...h.material]])).toEqual([[reviewId, [[SRC, expect.anything()]]]]);
+    const raw = await (await fetch(`${rig.base}/captures/${rig.capture}/review-options`, { headers: bearer })).json();
+    expect(raw.heldBack).toEqual([{ reviewId, material: [[SRC, [[0, 300]]]] }]);
   });
 });
 
@@ -46,7 +58,9 @@ describe("POST /captures/:id/reviews", () => {
     const again = await rig.startReview(first.reviewId);
     expect(again.body).toEqual(first.body);
     expect(reviewRows(rig.db)).toBe(1);
-    expect((await rig.startReview(first.reviewId, "prepared_only", randomId("cap"))).status).toBe(409);
+    const elsewhere = randomId("cap");
+    ownCapture(rig.db, elsewhere);
+    expect((await rig.startReview(first.reviewId, "prepared_only", elsewhere)).status).toBe(409);
     expect(reviewRows(rig.db)).toBe(1);
   });
 
@@ -231,7 +245,9 @@ describe("POST /reviews/:id/turns", () => {
       return pick(input);
     });
     const reviewId = await startedIn(rig);
-    const second = await rig.startReview(randomId("rvw"), "prepared_only", randomId("cap"));
+    const otherCapture = randomId("cap");
+    ownCapture(rig.db, otherCapture);
+    const second = await rig.startReview(randomId("rvw"), "prepared_only", otherCapture);
     const other = second.reviewId;
     const turnId = randomId("turn");
     const running = await post(rig.base, `/reviews/${reviewId}/turns`, { turnId, act: { kind: "resume" } });
@@ -292,6 +308,33 @@ describe("POST /reviews/:id/turns", () => {
     expect(rig.model.calls).toHaveLength(1);
     expect(learnerRows(rig.db)).toBe(1);
     expect(tutorRows(rig.db)).toBe(1);
+  });
+
+  test("GET review says a turn is in flight while the tutor is still replying, and stops saying so once the reply is stored", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const rig = reviewRig(async (input) => {
+      await gate;
+      return pick(input);
+    }, { turnDeadlineMs: 60 });
+    const reviewId = await startedIn(rig);
+    const read = async () => reviewViewResponse.parse(await (await fetch(`${rig.base}/reviews/${reviewId}`, { headers: bearer })).json());
+    expect((await read()).turnInFlight).toBe(false);
+
+    await rig.turn(reviewId, { kind: "resume" }, randomId("turn"));
+    const mid = await read();
+    expect(mid.turnInFlight).toBe(true);
+    expect(mid.turns.map((t) => t.actor)).toEqual(["learner"]);
+
+    release();
+    await until(() => tutorRows(rig.db) === 1);
+    let after = await read();
+    for (let i = 0; i < 100 && after.turnInFlight; i++) {
+      await Bun.sleep(10);
+      after = await read();
+    }
+    expect(after.turnInFlight).toBe(false);
+    expect(after.turns.map((t) => t.actor)).toEqual(["learner", "tutor"]);
   });
 
   test("a turn that fails frees the review for the next post", async () => {
