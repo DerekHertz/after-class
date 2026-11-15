@@ -65,4 +65,6 @@ systemctl enable afterclass-caddy.service afterclass-app.service
 # replacement instance whose data volume already holds one.
 systemctl restart afterclass-caddy.service
 systemctl start afterclass-app.service
+# Deploys the highest published GitHub release from now on (afterclass-autodeploy).
+systemctl enable --now afterclass-autodeploy.timer
 say "done"

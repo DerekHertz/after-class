@@ -1,0 +1,12 @@
+[Unit]
+Description=Deploy the highest published After Class release
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+RequiresMountsFor=/data
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/afterclass-autodeploy
+# A deploy waits up to 10 minutes for its lock, then pulls, restarts and checks health.
+TimeoutStartSec=1200

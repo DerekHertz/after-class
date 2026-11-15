@@ -184,6 +184,9 @@ locals {
     { path = "/usr/local/sbin/afterclass-app-start", mode = "0755", content = file("${path.module}/files/afterclass-app-start.sh") },
     { path = "/usr/local/sbin/afterclass-fetch-keys", mode = "0755", content = file("${path.module}/files/afterclass-fetch-keys.sh") },
     { path = "/usr/local/sbin/afterclass-deploy", mode = "0755", content = file("${path.module}/files/afterclass-deploy.sh") },
+    { path = "/usr/local/sbin/afterclass-autodeploy", mode = "0755", content = file("${path.module}/files/afterclass-autodeploy.sh") },
+    { path = "/etc/systemd/system/afterclass-autodeploy.service", mode = "0644", content = file("${path.module}/files/afterclass-autodeploy.service") },
+    { path = "/etc/systemd/system/afterclass-autodeploy.timer", mode = "0644", content = file("${path.module}/files/afterclass-autodeploy.timer") },
   ]
 
   user_data = "#cloud-config\n${yamlencode({
