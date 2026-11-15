@@ -72,7 +72,7 @@ import { createJevClient } from "./providers/jev";
 import type { JevClient } from "./providers/jev";
 import { createClaudeCli } from "./providers/claude";
 import type { ClaudeCli, SpawnFn } from "./providers/claude";
-import { createClaudeApi } from "./providers/claude-api";
+import { cliStreamEstimateUsd, createClaudeApi } from "./providers/claude-api";
 import type { ApiClient } from "./providers/claude-api";
 import { claimSupportTask, productBoundaryTask, productFrameChangeTask } from "./providers/jev-tasks";
 import type { BoundaryInput, FrameChangeInput } from "./providers/jev-tasks";
@@ -491,7 +491,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     mkdirSync(claudeCwd, { recursive: true });
     // No provider key may reach the child: claude -p bills the subscription login, and the Jev, voice and Messages API keys are not its business.
     const { TYPESAFE_API_KEY: _jevKey, ELEVENLABS_API_KEY: _voiceKey, AFTERCLASS_ANTHROPIC_API_KEY: _messagesKey, ...childEnv } = env;
-    return claudeLanes((maxConcurrent) => createClaudeCli({ bin: options.claudeBin ?? "claude", cwd: claudeCwd, maxConcurrent, env: childEnv, ...(options.spawn ? { spawn: options.spawn } : {}) }));
+    return claudeLanes((maxConcurrent) => createClaudeCli({ bin: options.claudeBin ?? "claude", cwd: claudeCwd, maxConcurrent, env: childEnv, estimate: cliStreamEstimateUsd, ...(options.spawn ? { spawn: options.spawn } : {}) }));
   };
   // One client per provider for the whole process, so their concurrency limits hold across users.
   const providers: { readonly jev: JevClient; readonly claude: ClaudeLanes } =

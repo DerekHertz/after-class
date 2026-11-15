@@ -9,7 +9,7 @@ import type { Message, MessageCreateParamsNonStreaming } from "@anthropic-ai/sdk
 import { z } from "zod";
 import type { ClaudeRequest } from "../src/backend/providers/claude";
 import {
-  API_MODELS, MAX_TOKEN_COUNT, REQUEST_OVERHEAD_TOKENS, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, ApiCallError, billingOfStatus, clientOptions, createClaudeApi, outputFormatOf, parseUsage, priceUsage, worstCaseUsd,
+  API_MODELS, MAX_TOKEN_COUNT, REQUEST_OVERHEAD_TOKENS, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, ApiCallError, billingOfStatus, clientOptions, createClaudeApi, outputFormatOf, parseUsage, priceUsage, estimateRequestUsd,
 } from "../src/backend/providers/claude-api";
 import type { ApiCallDetail, ApiClient, ApiStream } from "../src/backend/providers/claude-api";
 import { ProviderError, unbudgeted } from "../src/backend/providers/memo";
@@ -119,7 +119,7 @@ describe("request shape", () => {
     expect(p.output_config).toEqual({ effort: "high" });
     expect(p.max_tokens).toBe(STREAM_MAX_TOKENS);
     expect(STREAM_MAX_TOKENS).toBeGreaterThanOrEqual(16_000);
-    await claude.streamText(req({ cacheTtl: () => "1h" }), () => {}, OPEN);
+    await claude.streamText(req({ cacheLifetime: () => ({ ttl: "1h", record: () => {} }) }), () => {}, OPEN);
     expect(seen[1]!.params.system).toEqual([{ type: "text", text: "You are the tutor.", cache_control: { type: "ephemeral", ttl: "1h" } }]);
   });
 
@@ -282,15 +282,15 @@ describe("usage and cost", () => {
 describe("worstCaseUsd", () => {
   test("prices every byte of input and schema as a 1 hour cache write, plus the fixed overhead, plus the whole output limit", () => {
     // (100 + 40 + overhead) * 8 + 1000 * 20, per million, on opus
-    expect(worstCaseUsd("claude-opus-5-5", 100, 1000, 40)).toBeCloseTo(((140 + REQUEST_OVERHEAD_TOKENS) * 8 + 1000 * 20) / 1_000_000, 12);
-    expect(worstCaseUsd("claude-sonnet-5-5", 0, 0, 0)).toBeCloseTo((REQUEST_OVERHEAD_TOKENS * 4) / 1_000_000, 12);
-    expect(worstCaseUsd("claude-mystery-9", 1, 1, 1)).toBeNull();
+    expect(estimateRequestUsd("claude-opus-5-5", 100, 1000, 40)).toBeCloseTo(((140 + REQUEST_OVERHEAD_TOKENS) * 8 + 1000 * 20) / 1_000_000, 12);
+    expect(estimateRequestUsd("claude-sonnet-5-5", 0, 0, 0)).toBeCloseTo((REQUEST_OVERHEAD_TOKENS * 4) / 1_000_000, 12);
+    expect(estimateRequestUsd("claude-mystery-9", 1, 1, 1)).toBeNull();
   });
 
   test("is above the cost of a response that reports more input tokens than the text has bytes", () => {
     // The old estimate counted only the text, so 2 bytes and 100 reported input tokens went over it.
     const reported = priceUsage("claude-opus-5-5", { fresh: 100, creation5m: 0, creation1h: 0, read: 0, output: 32_000 })!;
-    expect(worstCaseUsd("claude-opus-5-5", 2, 32_000, 0)!).toBeGreaterThan(reported);
+    expect(estimateRequestUsd("claude-opus-5-5", 2, 32_000, 0)!).toBeGreaterThan(reported);
   });
 
   test("the schema the runner reserves for is the one the adapter sends", async () => {

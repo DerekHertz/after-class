@@ -26,7 +26,7 @@ import type {
 import { Material, contains } from "../../shared/time";
 import { ProviderError } from "../providers/memo";
 import type { Task } from "../providers/memo";
-import type { CacheTtl, ClaudeCli, ClaudeRequest } from "../providers/claude";
+import type { CacheLifetime, CacheTtl, ClaudeCli, ClaudeRequest } from "../providers/claude";
 import type { UserDb } from "../db";
 import { attributeTurns, moveThreads, quickCheckThreads } from "./clamp";
 import { detourTracker } from "./detour";
@@ -616,34 +616,57 @@ export function tutorPrompt(input: TutorInput): string {
  */
 export type TutorModel = "opus" | "sonnet";
 
-const TUTOR_REQUEST = { effort: "medium", images: [], webTools: false, timeoutMs: 120_000 } as const;
+/**
+ * The most output tokens a tutor turn may spend, thinking included. A turn is a move header and a few sentences: the 12 turns of the
+ * Fable audit (docs/trail/fable-e2e-2026-11-14-data.json, Sonnet, effort medium) spent 149 to 505 output tokens, thinking included.
+ * 8,000 is about 16 times the most any of them used, so a long answer or a long think still fits, and a quarter of the 32,000 the
+ * API call allowed before, which is what the budget reserved at its worst. A turn that spends all 8,000 stops with max_tokens, which the
+ * adapter records as a failed attempt (the memo stores no turn and the attempt is paid for), and the learner retries it like any other failed turn.
+ */
+export const TUTOR_MAX_OUTPUT_TOKENS = 8_000;
+
+const TUTOR_REQUEST = { effort: "medium", images: [], webTools: false, timeoutMs: 120_000, maxOutputTokens: TUTOR_MAX_OUTPUT_TOKENS } as const;
 
 /**
  * A 5 minute cache entry lives 5 minutes from the start of the request that last wrote or read it. A tutor request that starts
  * more than this after the previous one has likely found its entry gone. The 30 seconds short of 5 minutes cover the time between
- * the admission that records a start and the request reaching the API.
+ * the decision, made right before the budget is asked, and the request reaching the API.
  */
 export const LONG_PAUSE_MS = 4.5 * 60_000;
 
 /**
  * Derek, 2026-11-13: "1 hour should only be for long pauses. maybe there is some "timeout" detection that moves to 1 hour?"
- * A review's tutor prompt starts on the 5 minute cache. Once a tutor request starts more than LONG_PAUSE_MS after the review's
- * previous one, that request and every later one in the review ask for 1 hour, because the caching docs do not say whether a
- * 5 minute marker reads an entry written for 1 hour. `start` is asked by the adapter once a request is admitted and right before
- * it is sent, so a request the budget held is not a start, and one sent that then failed is. Each start is stored in tutor_cache
- * with the review's lifetime, so a restarted process makes the same choice.
+ * A review's tutor prompt starts on the 5 minute cache. Once a tutor request is decided more than LONG_PAUSE_MS after the review's
+ * previous start, that request and every later one in the review ask for 1 hour, because the caching docs do not say whether a
+ * 5 minute marker reads an entry written for 1 hour.
+ *
+ * `decide` is asked once per request by the adapter, after the queue and right before the budget is asked. The lifetime it returns is
+ * the one the budget reserves the request at (always as a write: nothing here claims that an entry is alive, so a lapsed, evicted or
+ * never-written one cannot make the reservation too low) and the one the request sends, so the two cannot disagree. Its `record` is
+ * called only when the budget admits the request, so a held request is not a start; one admitted that then failed, or was rejected
+ * before inference, is. A start that was not a real cache write only makes the next decision more likely to ask for 1 hour, which the reservation prices.
+ * Each start is stored in tutor_cache with the review's lifetime, so a restarted process makes the same choice.
  */
-export type TutorCache = { start(reviewId: ReviewId): CacheTtl };
+export type TutorCache = {
+  decide(reviewId: ReviewId): CacheLifetime;
+};
 
 export function tutorCache(db: UserDb, now: () => number = Date.now): TutorCache {
-  const start = db.sql.query<{ ttl: CacheTtl }, [string, string, number, number]>(
-    `INSERT INTO tutor_cache (user_id, review_id, last_start_ms, ttl) VALUES (?1, ?2, ?3, '5m')
+  const record = db.sql.query<unknown, [string, string, number, CacheTtl]>(
+    `INSERT INTO tutor_cache (user_id, review_id, last_start_ms, ttl) VALUES (?1, ?2, ?3, ?4)
      ON CONFLICT (user_id, review_id) DO UPDATE SET
-       ttl = CASE WHEN ttl = '1h' OR ?3 - last_start_ms > ?4 THEN '1h' ELSE '5m' END,
-       last_start_ms = MAX(last_start_ms, ?3)
-     RETURNING ttl`,
+       ttl = CASE WHEN ttl = '1h' OR ?4 = '1h' THEN '1h' ELSE '5m' END,
+       last_start_ms = MAX(last_start_ms, ?3)`,
   );
-  return { start: (reviewId) => start.get(db.userId, reviewId, Math.round(now()), LONG_PAUSE_MS)!.ttl };
+  const last = db.sql.query<{ last_start_ms: number; ttl: CacheTtl }, [string, string]>(`SELECT last_start_ms, ttl FROM tutor_cache WHERE user_id = ? AND review_id = ?`);
+  return {
+    decide: (reviewId) => {
+      const at = Math.round(now());
+      const row = last.get(db.userId, reviewId);
+      const ttl: CacheTtl = row !== null && (row.ttl === "1h" || at - row.last_start_ms > LONG_PAUSE_MS) ? "1h" : "5m";
+      return { ttl, record: () => void record.run(db.userId, reviewId, at, ttl) };
+    },
+  };
 }
 
 /** The system prompt is TUTOR_SYSTEM plus the review's stable material, the prompt only what changes per turn. */
@@ -669,7 +692,7 @@ export function tutorTask(claude: ClaudeCli, cache: TutorCache, model: TutorMode
     },
     async attempt(input, ctx) {
       const { text, usage } = await claude.streamText(
-        { ...tutorRequest(input, model), cacheTtl: () => cache.start(input.state.reviewId) },
+        { ...tutorRequest(input, model), cacheLifetime: () => cache.decide(input.state.reviewId) },
         ctx.streamTo ?? (() => {}),
         ctx,
       );

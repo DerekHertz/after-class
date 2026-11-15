@@ -12,6 +12,7 @@ import { createDevices } from "../src/backend/devices";
 import { serve } from "../src/backend/http";
 import { clerkUsers, hostedCallers, main, mainHosted, resolveAuth } from "../src/backend/main";
 import type { HostedRunning } from "../src/backend/main";
+import { ESTIMATE_USD } from "../src/backend/providers/budget";
 import type { Memo } from "../src/backend/providers/memo";
 import type { Allowance, Cost } from "../src/shared/domain";
 import { stableId } from "../src/shared/ids";
@@ -316,6 +317,11 @@ describe("mainHosted", () => {
     });
 
     const turns = (cost: Cost = UNKNOWN_COST) => fakeTask<{ n: number }, string>({ purpose: "tutor_turn", provider: "claude", answer: () => ok("turn", { usage: usage(cost) }) });
+    const upTo = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
+    /** Unknown-cost tutor turns that fit under a cap of `usd`, each counted at its reservation. */
+    const fitting = (usd: number) => Math.floor(usd / ESTIMATE_USD.tutor_turn + 1e-9);
+    /** What `n` such turns add up to in the allowance, which counts whole micro-dollars. */
+    const usd = (n: number) => Math.round(n * ESTIMATE_USD.tutor_turn * 1e6) / 1e6;
     const run = (memo: Memo, task: ReturnType<typeof turns>, ns: readonly number[]) => Promise.all(ns.map((n) => memo.run(task, { n }).then((r) => r.kind)));
 
     test("each signed-in user is held at their own $5 a month, and one user's spending never holds another", async () => {
@@ -324,15 +330,16 @@ describe("mainHosted", () => {
         const alice = await b.signIn("user_alice");
         const bob = await b.signIn("user_bob");
         const aliceTurns = turns();
+        const fits = fitting(5);
         const bobTurns = turns();
-        expect(await run(alice.memo, aliceTurns, [1, 2, 3, 4, 5, 6])).toEqual(Array(6).fill("hit"));
-        expect(await alice.memo.run(aliceTurns, { n: 7 })).toMatchObject({ kind: "held", hold: { reason: "user_budget" } });
+        expect(await run(alice.memo, aliceTurns, upTo(fits))).toEqual(Array(fits).fill("hit"));
+        expect(await alice.memo.run(aliceTurns, { n: fits + 1 })).toMatchObject({ kind: "held", hold: { reason: "user_budget" } });
         expect(await bob.allowance()).toMatchObject({ usedUsd: 0, limitUsd: 5, held: null });
-        expect(await run(bob.memo, bobTurns, [1, 2, 3, 4, 5, 6])).toEqual(Array(6).fill("hit"));
-        expect(await bob.memo.run(bobTurns, { n: 7 })).toMatchObject({ kind: "held", hold: { reason: "user_budget" } });
-        expect(aliceTurns.calls).toHaveLength(6);
-        expect(bobTurns.calls).toHaveLength(6);
-        for (const user of [alice, bob]) expect(await user.allowance()).toMatchObject({ usedUsd: 4.5, limitUsd: 5, held: { reason: "user_budget" } });
+        expect(await run(bob.memo, bobTurns, upTo(fits))).toEqual(Array(fits).fill("hit"));
+        expect(await bob.memo.run(bobTurns, { n: fits + 1 })).toMatchObject({ kind: "held", hold: { reason: "user_budget" } });
+        expect(aliceTurns.calls).toHaveLength(fits);
+        expect(bobTurns.calls).toHaveLength(fits);
+        for (const user of [alice, bob]) expect(await user.allowance()).toMatchObject({ usedUsd: usd(fits), limitUsd: 5, held: { reason: "user_budget" } });
         expect(b.providerCalls()).toBe(0);
       } finally {
         await b.r.stop();
@@ -366,10 +373,11 @@ describe("mainHosted", () => {
         expect(await run(alice.memo, turns({ kind: "measured", usd: 46 }), [1])).toEqual(["hit"]);
         expect(await alice.memo.run(turns(), { n: 2 })).toMatchObject({ kind: "held", hold: { reason: "user_budget" } });
         const bobTurns = turns();
-        expect(await run(bob.memo, bobTurns, [1, 2, 3, 4, 5])).toEqual(Array(5).fill("hit"));
-        expect(await bob.memo.run(bobTurns, { n: 6 })).toMatchObject({ kind: "held", hold: { reason: "total_budget" } });
-        expect(bobTurns.calls).toHaveLength(5);
-        expect(await bob.allowance()).toMatchObject({ usedUsd: 3.75, limitUsd: 5, held: { reason: "total_budget" } });
+        const fits = fitting(4);
+        expect(await run(bob.memo, bobTurns, upTo(fits))).toEqual(Array(fits).fill("hit"));
+        expect(await bob.memo.run(bobTurns, { n: fits + 1 })).toMatchObject({ kind: "held", hold: { reason: "total_budget" } });
+        expect(bobTurns.calls).toHaveLength(fits);
+        expect(await bob.allowance()).toMatchObject({ usedUsd: usd(fits), limitUsd: 5, held: { reason: "total_budget" } });
         expect(b.providerCalls()).toBe(0);
       } finally {
         await b.r.stop();

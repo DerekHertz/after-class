@@ -5,6 +5,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createBudget, ESTIMATE_USD, periodEndMs } from "../src/backend/providers/budget";
 import type { Budget, BudgetLimits } from "../src/backend/providers/budget";
+import { priceUsage } from "../src/backend/providers/claude-api";
 import { createJevClient, jevCost } from "../src/backend/providers/jev";
 import { frameChangeTask } from "../src/backend/providers/jev-tasks";
 import { createMemo, ProviderError } from "../src/backend/providers/memo";
@@ -33,6 +34,8 @@ import { tmpDir } from "./tmp";
 const NOV_10 = Date.UTC(2026, 10, 10, 12);
 const DEC_1 = Date.UTC(2026, 11, 1);
 const TUTOR = ESTIMATE_USD.tutor_turn;
+/** Spent of a $5 cap with less than one tutor reservation left, but money left. */
+const SOME_LEFT = 5 - TUTOR / 2;
 const UNKNOWN: Cost = { kind: "unknown", reason: "test" };
 
 type In = { readonly n: number };
@@ -71,7 +74,7 @@ describe("reserve and settle", () => {
     expect(used(w.budget, w.db)).toBe(TUTOR);
     gate.resolve(ok("x", { usage: usage({ kind: "estimated", usd: 0.1234567, basis: "test" }) }));
     expect((await run).kind).toBe("hit");
-    expect(holds(w.db)).toEqual([{ reserved_micros: 750_000, settled_micros: 123_457 }]);
+    expect(holds(w.db)).toEqual([{ reserved_micros: TUTOR * 1_000_000, settled_micros: 123_457 }]);
     expect(used(w.budget, w.db)).toBe(0.123457);
   });
 
@@ -185,7 +188,7 @@ describe("stop switch", () => {
     expect(w.budget.allowance(w.db.userId).held).toEqual({ reason: "stopped" });
     gate.resolve(ok("finished", { usage: usage({ kind: "measured", usd: 0.1 }) }));
     expect(await running).toMatchObject({ kind: "hit", value: "finished" });
-    expect(holds(w.db)).toEqual([{ reserved_micros: 750_000, settled_micros: 100_000 }]);
+    expect(holds(w.db)).toEqual([{ reserved_micros: TUTOR * 1_000_000, settled_micros: 100_000 }]);
     w.stop(false);
     expect(await w.memo.run(t, { n: 2 })).toMatchObject({ kind: "hit", value: "later" });
   });
@@ -387,13 +390,14 @@ describe("what the learner sees", () => {
     const finisher = otherUserDb(w.db, "finisher");
     const finishes = randomId("rvw");
     await w.memoFor(finisher).run(claudeTask("tutor_turn", () => ok("x", { usage: usage({ kind: "measured", usd: 0.01 }) })), { n: 0 }, { review: finishes });
-    await spend(someLeft, 4.5);
+    await spend(someLeft, SOME_LEFT);
     await spend(spentAll, 5);
     expect(w.budget.allowance(someLeft.userId).held).toEqual({ reason: "user_budget", resetsAtMs: DEC_1, usedUp: false });
     expect(w.budget.allowance(spentAll.userId).held).toEqual({ reason: "user_budget", resetsAtMs: DEC_1, usedUp: true });
-    for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) await spend(otherUserDb(w.db, `spender-${n}`), 5);
-    // A wrap-up passes the caps, so it can bring the month past $49.5 to $49.76 and then to $50.01.
-    const wrapUp = (n: number) => w.memoFor(finisher).run(claudeTask("wrap_up", () => ok("x", { usage: usage({ kind: "measured", usd: 0.25 }) })), { n }, { review: finishes });
+    // The 8th spender gives back what someLeft spent above $4.50, so the month still stands at $49.51 as the comment below counts it.
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) await spend(otherUserDb(w.db, `spender-${n}`), n === 8 ? 5 - (SOME_LEFT - 4.5) : 5);
+    // A wrap-up passes the caps, so it can bring the month from $49.51 to $49.91, with less than a tutor reservation left, and then to $50.31.
+    const wrapUp = (n: number) => w.memoFor(finisher).run(claudeTask("wrap_up", () => ok("x", { usage: usage({ kind: "measured", usd: 0.4 }) })), { n }, { review: finishes });
     await wrapUp(1);
     expect(w.budget.allowance(bystander.userId)).toMatchObject({ usedUsd: 0, held: { reason: "total_budget", resetsAtMs: DEC_1, usedUp: false } });
     await wrapUp(2);
@@ -403,7 +407,7 @@ describe("what the learner sees", () => {
   test("a tutor turn held with money left says so in the chat, not that the allowance is used up", async () => {
     const r = startedRig();
     const tutor = heldTutor(r.db, { userUsd: 5, totalUsd: 50 }, () => reply(askMain(r.claim), "What is the main idea?"));
-    const spent = claudeTask("claim_revision", () => ok("x", { usage: usage({ kind: "measured", usd: 4.5 }) }));
+    const spent = claudeTask("claim_revision", () => ok("x", { usage: usage({ kind: "measured", usd: SOME_LEFT }) }));
     await createMemo(r.db, "live", { budget: tutor.budget }).run(spent, { n: 1 });
     const reviews = createReviews(r.db, { ...r.world.deps, runTutor: tutor.runTutor, clearFailures: tutor.clearFailures }, { tutor: kit, now: () => 1 });
     const turnId = randomId("turn");
@@ -568,5 +572,24 @@ describe("Jev spend", () => {
     };
     expect(hold(0.0004991)).toBe("held");
     expect(hold(0.0005)).toBe("reserved");
+  });
+});
+
+// #236: the flat figure a tutor request reserves when its adapter passes no estimate. The request-sensitive reservation is in tutor-reservation.test.ts.
+describe("the tutor turn reservation", () => {
+  // The Fable end-to-end audit of 2026-11-14 (docs/trail/fable-e2e-2026-11-14-data.json), Sonnet: the dearest turn is the one that writes
+  // the system block, 31,241 input tokens, written at the 1 hour rate in the worst case (the turn after a long pause). 2,000 output tokens
+  // is four times the most a measured turn spent (505).
+  const dearestMeasured = priceUsage("claude-sonnet-5-5", { fresh: 0, creation5m: 0, creation1h: 31_241, read: 0, output: 2_000 })!;
+
+  test("covers the dearest turn measured on Sonnet and is not many times it", () => {
+    expect(TUTOR).toBeGreaterThanOrEqual(dearestMeasured);
+    expect(TUTOR).toBeLessThanOrEqual(2 * dearestMeasured);
+  });
+
+  test("a learner with a tutor turn's worth of allowance left is not refused", () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    w.db.sql.query("INSERT INTO budget_holds (id, user_id, period, purpose, memo_key, reserved_micros, reserved_ms, settled_micros, settled_ms) VALUES ('h', ?, '2026-11', 'claim_revision', 'k', 1, 1, ?, 1)").run(w.db.userId, 4_850_000);
+    expect(w.budget.allowance(w.db.userId).held).toBeNull();
   });
 });
