@@ -15,7 +15,7 @@ const scenes = Object.keys(SCENES) as SceneId[];
 async function openRoom(page: Page, scene: SceneId) {
   await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene } });
   await page.goto("/?scenario=review&clean=1");
-  await expect(page.locator(".front-row-canvas[data-painted]")).toBeAttached();
+  await expect(page.locator(".front-row-canvas[data-stage=painted]")).toBeAttached();
 }
 
 test.describe("the stage's backing store follows the device pixel ratio", () => {
@@ -189,6 +189,99 @@ test("the room's words wait for its pictures, and a picture that fails does not 
   await page.waitForTimeout(300);
   expect(await board.evaluate((node) => getComputedStyle(node).opacity)).toBe("0");
   release();
-  await expect(page.locator(".front-row-canvas[data-painted]")).toBeAttached();
+  await expect(page.locator(".front-row-canvas[data-stage=painted]")).toBeAttached();
   expect(await board.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
+});
+
+for (const [unusable, init] of [
+  ["has no 2D context", () => { HTMLCanvasElement.prototype.getContext = () => null; }],
+  ["cannot observe its size", () => { delete (window as { ResizeObserver?: unknown }).ResizeObserver; }],
+] as const) {
+  test(`a canvas that ${unusable} shows the room's words over the page's backdrop`, async ({ page }, info) => {
+    test.skip(info.project.name === "narrow", "a phone shows its words over the page's own backdrop");
+    await page.addInitScript(init);
+    await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene: "study-bench" } });
+    await page.goto("/?scenario=review&clean=1");
+    const board = page.locator('.front-row-area[data-area="board"]');
+    await expect(board).toContainText("What would have to change");
+    await expect.poll(() => board.evaluate((node) => getComputedStyle(node).opacity), { timeout: 3000 }).toBe("1");
+    expect(await page.locator(".scene-shell").evaluate((node) => getComputedStyle(node, "::before").content)).not.toBe("none");
+  });
+}
+
+test("the setup's words wait for the room's pictures too", async ({ page }, info) => {
+  test.skip(info.project.name === "narrow", "a phone shows its words over the page's own backdrop");
+  let release = () => {};
+  const held = new Promise<void>((done) => { release = done; });
+  await page.route(/\/harbor-board-[a-z0-9]{8}\.webp$/, async (route) => { await held; await route.continue(); });
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene: "study-bench" } });
+  await page.goto("/?scenario=fuzzy-checklist&clean=1");
+  const sections = page.locator(".setup-choices, .setup-start");
+  await expect(page.locator(".setup-choices")).toContainText("Choose a starting point");
+  await page.waitForTimeout(300);
+  const opacities = () => sections.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).opacity));
+  expect(await opacities()).toEqual(["0", "0"]);
+  release();
+  await expect(page.locator(".front-row-canvas[data-stage=painted]")).toBeAttached();
+  expect(await opacities()).toEqual(["1", "1"]);
+});
+
+test("without a device-pixel box to observe, the stage still follows a change of pixel ratio alone", async ({ page }, info) => {
+  test.skip(info.project.name === "narrow", "one window size is enough");
+  // Safari observes only CSS boxes, which a move to a screen of another pixel ratio leaves the same size. Chrome's device
+  // emulation changes the ratio without firing media query changes, so the test fires them for the queries that flipped.
+  await page.addInitScript(() => {
+    const observe = ResizeObserver.prototype.observe;
+    ResizeObserver.prototype.observe = function (this: ResizeObserver, target: Element, options?: ResizeObserverOptions) {
+      if (options?.box === "device-pixel-content-box") throw new TypeError("device-pixel-content-box is not a valid box");
+      return observe.call(this, target, options);
+    };
+    const queries: { list: MediaQueryList; matched: boolean }[] = [];
+    const match = window.matchMedia.bind(window);
+    window.matchMedia = (query: string) => { const list = match(query); queries.push({ list, matched: list.matches }); return list; };
+    (window as unknown as { flipMedia: () => void }).flipMedia = () => {
+      for (const query of queries.splice(0)) if (query.list.matches !== query.matched) query.list.dispatchEvent(new Event("change"));
+    };
+  });
+  await openRoom(page, "last-desk");
+  const { width, height } = info.project.use.viewport!;
+  const store = () => page.locator(".front-row-canvas").evaluate((canvas: HTMLCanvasElement) => [canvas.width, canvas.height, devicePixelRatio]);
+  expect(await store()).toEqual([width, height, 1]);
+  const cdp = await page.context().newCDPSession(page);
+  for (const ratio of [2, 1]) {
+    await cdp.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: ratio, mobile: false });
+    await page.evaluate(() => (window as unknown as { flipMedia: () => void }).flipMedia());
+    await expect.poll(store).toEqual([width * ratio, height * ratio, ratio]);
+  }
+});
+
+test("a room the learner moved on from does not repaint the stage when its pictures arrive", async ({ page }, info) => {
+  test.skip(info.project.name === "narrow", "the picker sits in the same place on both, and the desktop has more layers");
+  let release = () => {};
+  const held = new Promise<void>((done) => { release = done; });
+  await page.route(/\/harbor-[a-z-]+-[a-z0-9]{8}\.webp$/, async (route) => { await held; await route.continue(); });
+  await page.addInitScript(() => {
+    const clear = CanvasRenderingContext2D.prototype.clearRect;
+    (window as unknown as { paints: number }).paints = 0;
+    CanvasRenderingContext2D.prototype.clearRect = function (this: CanvasRenderingContext2D, ...args: Parameters<typeof clear>) {
+      (window as unknown as { paints: number }).paints++;
+      return clear.apply(this, args);
+    } as typeof clear;
+  });
+  await openRoom(page, "last-desk");
+  const paints = () => page.evaluate(() => (window as unknown as { paints: number }).paints);
+  const settled = async () => {
+    let last = -1;
+    await expect.poll(async () => { const now = await paints(); const still = now === last; last = now; return still; }, { intervals: [400] }).toBe(true);
+    return last;
+  };
+  await page.getByText("Room & companion").click();
+  await page.getByRole("button", { name: /Harbor Study Terrace/ }).click();
+  await page.waitForTimeout(300);
+  await page.getByRole("button", { name: /Lantern Canal Film Club/ }).click();
+  const before = await settled();
+  release();
+  await expect.poll(() => page.evaluate(() => performance.getEntriesByType("resource").filter((e) => /\/harbor-[a-z-]+-[a-z0-9]{8}\.webp$/.test(e.name)).length)).toBeGreaterThan(5);
+  await page.waitForTimeout(500);
+  expect(await paints()).toBe(before);
 });
