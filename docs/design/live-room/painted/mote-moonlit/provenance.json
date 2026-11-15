@@ -1,0 +1,62 @@
+{
+ "companion": "mote-moonlit",
+ "master": "art/masters/companions-v3/mote-moonlit.png",
+ "cell": 724,
+ "model": "nano-banana-pro",
+ "frames": {
+  "blink": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: close both eyes, drawn as two short gently curved dark lines, as in a blink. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddb8-e3c6-7296-b68e-2db0d49ef63d",
+   "credits": 9,
+   "changed_vs_idle": 0.015
+  },
+  "look-board": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: turn the eyes up and to the right, as if reading a chalkboard above and to the right, with a small curious open mouth. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddb8-e3a2-739e-924b-9bad7a84444f",
+   "credits": 9,
+   "changed_vs_idle": 0.017
+  },
+  "look-mat": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: move both eye dots to the lower right, glancing down and to the right at the desk, attentive. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddb8-e390-749c-8c91-29b3101435ea",
+   "credits": 9,
+   "changed_vs_idle": 0.014
+  },
+  "nod": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: a happy nod: the whole character tips forward slightly, eyes closed in two upward-curved smiling arcs, small smile. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddb8-e3a3-76e7-ad3b-b858fcf70272",
+   "credits": 9,
+   "changed_vs_idle": 0.014
+  },
+  "hop-crouch": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: squash down a little as if about to hop: slightly shorter and wider, eyes squeezed shut happily. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddb9-300b-7116-8ae7-b00e96257432",
+   "credits": 9,
+   "changed_vs_idle": 0.052
+  },
+  "hop-air": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: stretched a little taller and narrower as at the top of a happy hop, with a joyful open smile; keep it standing in the same place. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddb9-3060-74c7-8450-d2d6321d5f27",
+   "credits": 9,
+   "changed_vs_idle": 0.102
+  },
+  "think": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: move both eye dots up and to the left, make the mouth a small flat line, and add one tiny sweat drop beside the head. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddb9-5f72-7487-892e-c4034a8c25bd",
+   "credits": 9,
+   "changed_vs_idle": 0.018
+  },
+  "cheer": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: cheering: both wings lifted and spread a little higher, a big open happy smile and light blush marks, still sitting. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddb9-5f71-75fd-8f68-942ac2dbfe88",
+   "credits": 9,
+   "changed_vs_idle": 0.198
+  },
+  "talk": {
+   "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: talking: the same pose with a small open rounded mouth, as if saying something. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddb9-ad9a-752f-98be-b005b700b9e1",
+   "credits": 9,
+   "changed_vs_idle": 0.014
+  }
+ }
+}
