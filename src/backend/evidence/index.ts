@@ -493,13 +493,13 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
         const decoded = new Uint8Array(Buffer.from(f.jpegBase64, "base64"));
         const jpeg = isFrameJpeg(decoded, f.width, f.height);
         // A resent frameId keeps the first bytes. An id with a frame row writes nothing. An id whose raw frame expired but whose snapshot
-        // remains gets its frame row back pointing at the snapshot's file, linked rather than rewritten, so the retained bytes stay the
+        // remains gets its frame row back pointing at the snapshot's own file, with no new file, so the retained bytes stay the
         // only copy and the frame is visible to every consumer of frame rows.
         const stored = jpeg && !dead.has(id) && !claimed.has(id) && frameOf(id) === null;
         const snap = stored ? snapshotOf(id) : null;
         const linkFrom = snap?.frame_path != null && existsSync(abs(snap.frame_path)) ? snap.frame_path : null;
         if (stored) claimed.add(id);
-        frames.set(f.clientSeq, { id, path, stored, jpeg, bytes: decoded, linkFrom, size: linkFrom === null ? decoded.length : statSync(abs(linkFrom)).size });
+        frames.set(f.clientSeq, { id, path: linkFrom ?? path, stored, jpeg, bytes: decoded, linkFrom, size: linkFrom === null ? decoded.length : statSync(abs(linkFrom)).size });
       }
 
       const bodies = new Map<number, string>();
@@ -528,17 +528,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
       }
       for (const frame of frames.values()) {
         if (!frame.stored) continue;
-        if (frame.linkFrom === null) {
-          writeAtomic(abs(frame.path), frame.bytes);
-          continue;
-        }
-        mkdirSync(dirname(abs(frame.path)), { recursive: true });
-        if (existsSync(abs(frame.path))) continue;
-        try {
-          linkSync(abs(frame.linkFrom), abs(frame.path));
-        } catch {
-          copyFileSync(abs(frame.linkFrom), abs(frame.path));
-        }
+        if (frame.linkFrom === null) writeAtomic(abs(frame.path), frame.bytes);
       }
 
       const at = now();
