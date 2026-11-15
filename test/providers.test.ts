@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { JevRequest } from "../src/backend/providers/jev";
-import { createJevClient, imageFormat, imageSize } from "../src/backend/providers/jev";
+import { createJevClient, imageFormat, imageSize, jevCost, JEV_COST_BASIS } from "../src/backend/providers/jev";
 import type { ClaimSupportInput, FrameChangeInput } from "../src/backend/providers/jev-tasks";
 import { boundaryTask, claimSupportTask, frameChangeTask, THRESHOLDS, toVerdict } from "../src/backend/providers/jev-tasks";
 import type { Task } from "../src/backend/providers/memo";
@@ -11,7 +11,7 @@ import { answersBody, boundaryInput, claim, ctx, fakeJev, frame, jpeg, json, NEV
 // ───────────────────────────── Jev client ───────────────────────────────────
 
 describe("Jev client", () => {
-  test("posts one systemone request and returns probabilities, tokens and unknown cost", async () => {
+  test("posts one systemone request and returns probabilities, tokens and a cost estimated at the published input price", async () => {
     const { fetch, seen } = scriptedFetch(() => json(answersBody({ q: { type: "noul", noul: 0.82 }, c: { type: "choice", choice: "a", probabilities: { a: 0.7, b: 0.3 }, confidence: 0.9 } })));
     const jev = createJevClient({ apiKey: "k", fetch });
     const res = await jev.ask(
@@ -34,8 +34,23 @@ describe("Jev client", () => {
       inputTokens: 1234,
       outputTokens: 5,
       cacheReadTokens: null,
-      cost: { kind: "unknown", reason: "typesafe pricing not published" },
+      cost: { kind: "estimated", usd: (1234 * 0.042) / 1_000_000, basis: JEV_COST_BASIS },
     });
+  });
+
+  test("a response with no input tokens, or from a model with no listed price, costs unknown, never zero", async () => {
+    const noTokens = scriptedFetch(() => json({ model: "jev-1.13.0", answers: { q: { type: "noul", noul: 0.5 } } }));
+    const a = await createJevClient({ apiKey: "k", fetch: noTokens.fetch }).ask(noulReq(), NEVER);
+    expect(a.usage.cost).toEqual({ kind: "unknown", reason: "the response reported no input tokens" });
+    const other = scriptedFetch(() => json({ model: "jev-9.9.9", answers: { q: { type: "noul", noul: 0.5 } }, usage: { input_tokens: 10, output_tokens: 1 } }));
+    const b = await createJevClient({ apiKey: "k", fetch: other.fetch }).ask(noulReq(), NEVER);
+    expect(b.usage.cost).toEqual({ kind: "unknown", reason: "no published price for model jev-9.9.9" });
+    expect(jevCost("toString", 10).kind).toBe("unknown");
+  });
+
+  test("both listed models price at $0.042 per million input tokens", () => {
+    for (const model of ["jev-1.13.0", "jev-1.14.0"]) expect(jevCost(model, 1_000_000)).toEqual({ kind: "estimated", usd: 0.042, basis: JEV_COST_BASIS });
+    expect(jevCost("jev-1.14.0", 0)).toEqual({ kind: "estimated", usd: 0, basis: JEV_COST_BASIS });
   });
 
   test("a score question is sent with its levels and read back", async () => {
@@ -87,6 +102,7 @@ describe("Jev client", () => {
       const err = await createJevClient({ apiKey: "k", fetch }).ask(withImages({ ...okImage, format, bytes }), NEVER).catch((e) => e);
       expect(err).toBeInstanceOf(ProviderError);
       expect(err.retryable).toBe(false);
+      expect(err.billing).toBe("not_billed");
       expect(seen).toEqual([]);
     });
 

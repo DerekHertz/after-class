@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ClaudeProcess, ClaudeRequest, SpawnFn } from "../src/backend/providers/claude";
 import { createClaudeCli } from "../src/backend/providers/claude";
+import { jevCost } from "../src/backend/providers/jev";
 import type { JevClient, JevRequest } from "../src/backend/providers/jev";
 import type { BoundaryInput, ClaimSupportInput } from "../src/backend/providers/jev-tasks";
 import { unbudgeted } from "../src/backend/providers/memo";
@@ -79,14 +80,14 @@ export const noulReq = (over: Partial<JevRequest<"q">> = {}): JevRequest<"q"> =>
 
 type Answered = Record<string, unknown>;
 
-export function fakeJev(respond: (req: JevRequest<string>, call: number) => Answered | Error): { jev: JevClient; requests: JevRequest<string>[] } {
+export function fakeJev(respond: (req: JevRequest<string>, call: number) => Answered | Error, inputTokens: number | null = 100): { jev: JevClient; requests: JevRequest<string>[] } {
   const requests: JevRequest<string>[] = [];
   const jev: JevClient = {
     async ask(req) {
       requests.push(req as JevRequest<string>);
       const r = respond(req as JevRequest<string>, requests.length);
       if (r instanceof Error) throw r;
-      const usage: UsageReport = { model: "jev-1.13.0", inputTokens: 100, outputTokens: 2, cacheReadTokens: null, cost: { kind: "unknown", reason: "typesafe pricing not published" } };
+      const usage: UsageReport = { model: "jev-1.13.0", inputTokens, outputTokens: 2, cacheReadTokens: null, cost: jevCost("jev-1.13.0", inputTokens) };
       return { answers: r as never, usage };
     },
   };

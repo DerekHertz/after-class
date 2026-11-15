@@ -8,11 +8,13 @@
  *   { model, state, questions, assets? }
  * → { model, answers: { [q]: { type: "noul", noul } | { type: "choice", … } | { type: "score", … } }, usage: { input_tokens, output_tokens } }
  *
- * Cost is always { kind: "unknown", reason: "typesafe pricing not published" } until pricing is known.
+ * Cost is estimated from the response's input tokens at TypeSafe's published price (`jevCost`), and unknown only when the
+ * response carried no input tokens or the model has no listed price.
  */
 import { z } from "zod";
 import { ProviderError } from "./memo";
 import type { UsageReport } from "./memo";
+import type { Cost } from "../../shared/domain";
 
 export type JevQuestion =
   | { readonly type: "noul"; readonly instructions: string }
@@ -55,7 +57,26 @@ export const JEV_IMAGE_LIMITS = {
 
 const MAX_CHOICE_OPTIONS = 255;
 const MAX_SCORE_LEVELS = 10;
-const UNKNOWN_COST = { kind: "unknown", reason: "typesafe pricing not published" } as const;
+/**
+ * TypeSafe's published price in USD per million input tokens, by model id. Output tokens are free. Read from
+ * https://docs.typesafe.ai/models on 2026-11-14: "Price (per Btok / per Mtok) $42 / $0.042" for jev-1.14.0 and jev-1.13.0, and
+ * "You pay per input token. Output tokens are free." The page lists no separate image price, so image tokens are taken to be
+ * inside `input_tokens`. That is an assumption, checked only against an invoice.
+ */
+export const JEV_INPUT_USD_PER_MTOK: Readonly<Record<string, number>> = {
+  "jev-1.13.0": 0.042,
+  "jev-1.14.0": 0.042,
+};
+
+export const JEV_COST_BASIS = "typesafe_published_input_price";
+
+/** What a Jev response cost: estimated at the published input price, or unknown (R17) when the tokens or the model's price are missing. */
+export function jevCost(model: string, inputTokens: number | null): Cost {
+  const rate = Object.hasOwn(JEV_INPUT_USD_PER_MTOK, model) ? JEV_INPUT_USD_PER_MTOK[model]! : null;
+  if (rate === null) return { kind: "unknown", reason: `no published price for model ${model}` };
+  if (inputTokens === null) return { kind: "unknown", reason: "the response reported no input tokens" };
+  return { kind: "estimated", usd: (inputTokens * rate) / 1_000_000, basis: JEV_COST_BASIS };
+}
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -97,7 +118,7 @@ function refersTo(text: string, ref: string): boolean {
 }
 
 function reject(message: string): never {
-  throw new ProviderError(message, null, false);
+  throw new ProviderError(message, null, false, "not_billed");
 }
 
 function validateQuestions(questions: Readonly<Record<string, JevQuestion>>): void {
@@ -234,12 +255,14 @@ export function createJevClient(opts: {
       if (!parsed.success) throw new ProviderError(`jev response did not match the expected shape: ${parsed.error.message.slice(0, 300)}`, null, false);
 
       const { model, answers, usage } = parsed.data;
+      const billedModel = model ?? req.model;
+      const inputTokens = usage?.input_tokens ?? null;
       const report: UsageReport = {
-        model: model ?? req.model,
-        inputTokens: usage?.input_tokens ?? null,
+        model: billedModel,
+        inputTokens,
         outputTokens: usage?.output_tokens ?? null,
         cacheReadTokens: null,
-        cost: UNKNOWN_COST,
+        cost: jevCost(billedModel, inputTokens),
       };
 
       const out: Partial<Record<Q, JevAnswer>> = {};

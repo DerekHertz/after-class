@@ -49,13 +49,14 @@ import type { Db } from "../db";
  *   continuations, each a request that reserves $1 again. These are estimates, not upper bounds: the same worst case is $1.23 for a tutor turn with
  *   experiment 8's 69,251-token context and $4.81 for a resource search with 100,000, and reserving that much would refuse a
  *   learner's turn with a quarter of their $5 unused.
- *   Jev: TypeSafe has published no price, so every Jev call's cost is unknown and this figure is what it counts. $0.001 is a
- *   placeholder until Derek has a price.
+ *   Jev: $0.042 per million input tokens, output free (`JEV_INPUT_USD_PER_MTOK` in jev.ts). The measured calls of a 13.6 minute
+ *   lecture ran 420 to 10,632 input tokens, so $0.00002 to $0.00045 each. $0.0005 covers the largest of them. A Jev response
+ *   with tokens settles at its priced amount, so this figure is only counted for one that reported none.
  */
 export const ESTIMATE_USD: Readonly<Record<Purpose, number>> = {
-  boundary: 0.001,
-  frame_change: 0.001,
-  claim_check: 0.001,
+  boundary: 0.0005,
+  frame_change: 0.0005,
+  claim_check: 0.0005,
   interpretation: 1.08,
   claim_revision: 0.75,
   resource_search: 1,
