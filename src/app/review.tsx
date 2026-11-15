@@ -447,12 +447,30 @@ function ScopeBundle({ api, view, titles, onSource }: { readonly api: AppApi; re
   </>;
 }
 
-export function EndConfirm({ disabled, onConfirm, onCancel }: { readonly disabled: boolean; readonly onConfirm: () => void; readonly onCancel: () => void }) {
+export function EndConfirm({ id, disabled, onConfirm, onCancel }: { readonly id: string; readonly disabled: boolean; readonly onConfirm: () => void; readonly onCancel: () => void }) {
+  const panel = useRef<HTMLSpanElement>(null);
+  const keep = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    const el = panel.current;
+    if (el === null) return;
+    const fit = () => {
+      el.dataset.placement = "below";
+      el.style.maxHeight = "";
+      const room = window.innerHeight - el.getBoundingClientRect().top - 8;
+      if (room < Math.min(el.scrollHeight, 160)) el.dataset.placement = "top";
+      else el.style.maxHeight = `${room}px`;
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, []);
+  useEffect(() => { keep.current?.focus(); }, []);
   return (
-    <span className="actions end-confirm" role="alertdialog" aria-label="Finish and save this review?">
-      <span>{END_CONFIRM_TEXT}</span>
+    <span ref={panel} id={id} className="actions end-confirm" role="alertdialog" aria-labelledby={`${id}-title`} aria-describedby={`${id}-text`}>
+      <span id={`${id}-title`} className="visually-hidden">Finish and save this review?</span>
+      <span id={`${id}-text`}>{END_CONFIRM_TEXT}</span>
       <button type="button" data-action="end-confirm" disabled={disabled} onClick={onConfirm}>{ACTION_LABEL.end}</button>
-      <button type="button" data-action="end-cancel" onClick={onCancel}>Keep reviewing</button>
+      <button ref={keep} type="button" data-action="end-cancel" onClick={onCancel}>Keep reviewing</button>
     </span>
   );
 }
@@ -464,15 +482,33 @@ export function HeaderActions({ ids, state, send }: { readonly ids: readonly Act
 
 function Actions({ ids, disabled, send }: { readonly ids: readonly ActionId[]; readonly disabled: boolean; readonly send: (id: ActionId) => void }) {
   const [endStep, setEndStep] = useState<EndStep>("idle");
+  const root = useRef<HTMLSpanElement>(null);
+  const panelId = useId();
   const step = (event: EndEvent) => {
     const next = endFlow(endStep, event);
     setEndStep(next.send ? "idle" : next.step);
     if (next.send) send("end");
   };
+  const finish = () => root.current?.querySelector<HTMLElement>('[data-action="end"]') ?? null;
+  const confirming = endStep === "confirming";
+  useEffect(() => {
+    if (!confirming) return;
+    const dismiss = () => setEndStep("idle");
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { dismiss(); finish()?.focus(); } };
+    const onPointer = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (document.getElementById(panelId)?.contains(target) || finish()?.contains(target)) return;
+      dismiss();
+      setTimeout(() => { if (document.activeElement === document.body) finish()?.focus(); }, 0);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointer);
+    return () => { document.removeEventListener("keydown", onKey); document.removeEventListener("pointerdown", onPointer); };
+  }, [confirming, panelId]);
   return (
-    <span className="actions">
-      {ids.map((id) => <button key={id} type="button" data-action={id} disabled={disabled} {...(id === "end" ? { "aria-expanded": endStep === "confirming" } : {})} onClick={() => (id === "end" ? step("press_end") : send(id))}>{ACTION_LABEL[id]}</button>)}
-      {endStep === "confirming" && <EndConfirm disabled={disabled} onConfirm={() => step("confirm")} onCancel={() => step("cancel")} />}
+    <span ref={root} className="actions">
+      {ids.map((id) => <button key={id} type="button" data-action={id} disabled={disabled} {...(id === "end" ? { "aria-expanded": confirming, "aria-controls": panelId } : {})} onClick={() => (id === "end" ? step("press_end") : send(id))}>{ACTION_LABEL[id]}</button>)}
+      {confirming && <EndConfirm id={panelId} disabled={disabled} onConfirm={() => step("confirm")} onCancel={() => { step("cancel"); finish()?.focus(); }} />}
     </span>
   );
 }
