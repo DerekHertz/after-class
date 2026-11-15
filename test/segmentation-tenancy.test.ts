@@ -19,7 +19,7 @@ import { SEGMENTATION_DEFAULTS, buildWindows, createSegmentation } from "../src/
 import type { SegmentationConfig } from "../src/backend/segmentation";
 import { otherUserDb, testUserDb } from "./fakes";
 
-const CFG: SegmentationConfig = { ...SEGMENTATION_DEFAULTS, windowNewS: 30, contextS: 60, timeCapS: 150, reviseOnNextNoNo: true };
+const CFG: SegmentationConfig = { ...SEGMENTATION_DEFAULTS, windowNewS: 30, contextS: 60, timeCapS: 150, firstTimeCapS: 150, reviseOnNextNoNo: true };
 const SRC = stableId("src", "youtube", "shared-lecture");
 const CAP = stableId("cap", "shared") as CaptureId;
 const count = (db: UserDb, sql: string) => db.sql.query<{ n: number }, []>(sql).get()!.n;
@@ -127,7 +127,7 @@ describe("migration segmentation/002-user-id", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   };
-  const before = { ...MIGRATIONS, segmentation: MIGRATIONS.segmentation.filter((m) => m.id !== "002-user-id") };
+  const before = { ...MIGRATIONS, segmentation: MIGRATIONS.segmentation.filter((m) => m.id === "001-chunk-revisions") };
 
   function seedOld(path: string) {
     const db = openDb(path, before);
@@ -201,5 +201,32 @@ describe("migration segmentation/002-user-id", () => {
       expect(() => db.sql.run("INSERT INTO chunk_revisions (id, chunk_id, capture_id, ordinal, revision_no, material_json, windows_json, provenance, closed_at_seq) VALUES ('y', 'c', 'cap', 0, 1, '[]', '[]', 'boundary', 98)")).toThrow(/NOT NULL/);
       db.close();
     });
+  });
+});
+
+describe("migration segmentation/003-plain-first-cap", () => {
+  test("every capture that already has chunks is listed to keep the plain cap, per user", () => {
+    const dir = mkdtempSync(join(tmpdir(), "afterclass-seg-first-cap-"));
+    try {
+      const path = join(dir, "afterclass.sqlite");
+      const old = openDb(path, { ...MIGRATIONS, segmentation: MIGRATIONS.segmentation.filter((m) => m.id !== "003-plain-first-cap") });
+      const local = ensureLocalUser(old);
+      const other = otherUserDb(old).userId;
+      const insert = old.sql.query(`INSERT INTO chunk_revisions (user_id, id, chunk_id, capture_id, ordinal, revision_no, material_json, windows_json, provenance, closed_at_seq, supersedes)
+        VALUES (?, ?, ?, ?, ?, 1, '[]', '[]', 'time', ?, NULL)`);
+      insert.run(local, "crv_1", "chk_1", "cap_1", 0, 1);
+      insert.run(local, "crv_2", "chk_2", "cap_1", 1, 2);
+      insert.run(other, "crv_3", "chk_3", "cap_2", 0, 3);
+      old.close();
+
+      const db = openDb(path);
+      expect(db.sql.query("SELECT user_id, capture_id FROM plain_first_cap_captures ORDER BY capture_id").all()).toEqual([
+        { user_id: local, capture_id: "cap_1" },
+        { user_id: other, capture_id: "cap_2" },
+      ]);
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

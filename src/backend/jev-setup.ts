@@ -27,7 +27,7 @@ export const PRODUCT_JEV_SETUP = {
       "Is state.passage the opening of a lesson or module (a greeting, an announcement of what this lesson or module will cover, or a statement of its goals), or does state.context end with the closing of a lesson (a conclusion, a summary of what was learned, a closing remark, or a pointer to what the next lesson will study)? Answer no if both are ordinary content, including a transition to the next section, step or mechanism inside the same lesson.",
   },
   thresholds: { yesAtOrAbove: 0.5, noAtOrBelow: 0.3 },
-  segmentation: { windowNewS: 45, contextS: 120, timeCapS: 480, maxFramesPerWindow: 2, reviseOnNextNoNo: false } satisfies SegmentationConfig,
+  segmentation: { windowNewS: 45, contextS: 120, timeCapS: 480, firstTimeCapS: 210, maxFramesPerWindow: 2, reviseOnNextNoNo: false } satisfies SegmentationConfig,
   /** New concept yes + stopping point yes, OR new concept yes + lesson framing yes, closes the chunk. */
   routing: { lessonFramingCloses: true } satisfies RoutingOptions,
 } as const;

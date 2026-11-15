@@ -47,7 +47,7 @@ describe("product Jev setup, round 1", () => {
     const arm = JSON.parse(readFileSync(new URL("./fixtures/exp7-fable-1-r1-arm-config.json", import.meta.url), "utf8"));
     for (const k of ["newConcept", "stoppingPoint", "teachingChange", "lessonFraming"] as const) expect(PRODUCT_JEV_SETUP.questions[k]).toBe(arm.questions[k]);
     expect(PRODUCT_JEV_SETUP.thresholds).toEqual({ yesAtOrAbove: 0.5, noAtOrBelow: 0.3 });
-    expect(PRODUCT_JEV_SETUP.segmentation).toEqual({ windowNewS: 45, contextS: 120, timeCapS: 480, maxFramesPerWindow: 2, reviseOnNextNoNo: false });
+    expect(PRODUCT_JEV_SETUP.segmentation).toEqual({ windowNewS: 45, contextS: 120, timeCapS: 480, firstTimeCapS: 210, maxFramesPerWindow: 2, reviseOnNextNoNo: false });
     expect(PRODUCT_JEV_SETUP.routing).toEqual({ lessonFramingCloses: true });
   });
 

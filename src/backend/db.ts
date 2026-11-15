@@ -70,6 +70,7 @@ export const TABLE_SCOPES: { readonly [table: string]: TableScope } = {
   evidence_deletions: "user",
   capture_owners: "user",
   chunk_revisions: "user",
+  plain_first_cap_captures: "user",
   claim_index: "user",
   concept_index: "user", // content-derived, but carries a per-pipeline seq
   prep_controls: "user",

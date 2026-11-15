@@ -250,24 +250,24 @@ describe("a server clock that steps back does not stretch a frame's wait", () =>
   });
 });
 
-/** Captions every 5 s, watched to 495 s. Frame "b" at 485 s and "c" at 490 s are "no" once caption 99 (495 to 500 s) is near them. */
+/** Captions every 5 s, watched to 225 s, the end of the window that crosses the product's 210 s first-chunk cap. Frame "b" at 215 s and "c" at 220 s are "no" once caption 45 (225 to 230 s) is near them. */
 function lateLecture(o: { held?: string } = {}) {
   const gate = deferred<FakeStep<Verdict>>();
   const s = stream();
   const id = (name: string) => stableId("ev", s.captureId, name);
   const answer: Answer = (i) =>
-    i.after.frame.id === (o.held === undefined ? null : id(o.held)) ? gate.promise : ok(i.nearbyPassages.some((p) => p.text === "caption 99") ? "no" : "yes");
+    i.after.frame.id === (o.held === undefined ? null : id(o.held)) ? gate.promise : ok(i.nearbyPassages.some((p) => p.text === "caption 45") ? "no" : "yes");
   const play = () => {
     s.control("start");
     s.source();
     s.transcript(Array.from({ length: 120 }, (_, i): [number, number, string] => [i * 5, (i + 1) * 5, `caption ${i}`]));
-    s.span(0, 495);
+    s.span(0, 225);
     s.frame("a", 1);
-    s.frame("b", 485);
-    s.frame("c", 490);
+    s.frame("b", 215);
+    s.frame("c", 220);
     return s.facts.splice(0);
   };
-  return { gate, s, id, answer, play, playOn: () => [s.span(495, 515)] };
+  return { gate, s, id, answer, play, playOn: () => [s.span(225, 245)] };
 }
 
 describe("an interpretation that waits for frames only gains frames", () => {
@@ -380,9 +380,9 @@ describe("composition", () => {
       s.control("start");
       s.source();
       s.transcript(Array.from({ length: 120 }, (_, i): [number, number, string] => [i * 5, (i + 1) * 5, `caption ${i}`]));
-      s.span(0, 495);
+      s.span(0, 225);
       s.frame("a", 1);
-      s.frame("b", 490);
+      s.frame("b", 220);
       r.modules.evidence.ingest({ captureId: s.captureId, facts: s.facts.splice(0) });
       await until(() => f.preparation.interpret.calls.length === 1);
       const frameId = stableId("ev", s.captureId, "b");
