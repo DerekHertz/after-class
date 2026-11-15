@@ -6,7 +6,7 @@ import type {
   AssessableClaim, CodeNotice, Correction, EvidenceBundle, Frame, FrozenScope, LearnerAct, Passage, Turn, TutorMove, TutorMoveKind,
 } from "../src/shared/domain";
 import { Material, interval } from "../src/shared/time";
-import { allowedMoves, nextThreadId, parseMoveHeader, reviewState, tutorPrompt, tutorRequest, tutorTask, validateMove, validateSay, wrapUpTask } from "../src/backend/review/tutor";
+import { allowedMoves, nextThreadId, parseMoveHeader, reviewState, tutorPrompt, tutorRequest, tutorTask, validateMove, validateSay, wrapUpInput, wrapUpTask } from "../src/backend/review/tutor";
 import type { TutorInput, WrapUpOutput } from "../src/backend/review/tutor";
 import type { ClaudeCli, ClaudeRequest } from "../src/backend/providers/claude";
 import { createMemo } from "../src/backend/providers/memo";
@@ -481,6 +481,20 @@ describe("wrapUpTask", () => {
     const memo = createMemo(testUserDb(), "live", { retryDelayMs: () => 0 });
     const r = await memo.run(wrapUpTask(cli), { turns: [], claims: [claim(1)], threads: [thread(1)] });
     expect(r.kind === "hit" && r.value).toEqual(proposal);
+  });
+
+  test("the summary input leaves out the closing wrap_up line, so it can start before that line is written (#234)", () => {
+    const l = log().learner({ kind: "begin" }).tutor({ kind: "ask_main", threadId: thread(1), claimIds: [claimId(1)] }, "Q").learner({ kind: "end" }, thread(1));
+    const before = wrapUpInput([...l.turns], [claim(1)]);
+    expect(before.turns).toHaveLength(3);
+    expect(before.threads).toEqual([thread(1)]);
+    l.tutor({ kind: "wrap_up" }, "Done.");
+    expect(wrapUpInput(l.turns, [claim(1)])).toEqual(before);
+  });
+
+  test("a wrap_up that is not the last turn stays in the input", () => {
+    const l = log().learner({ kind: "end" }).tutor({ kind: "wrap_up" }, "Done.").code({ kind: "soft_target_reached", elapsedS: 1 });
+    expect(wrapUpInput(l.turns, []).turns).toEqual(l.turns);
   });
 
   test("a proposal with a malformed thread id is rejected", async () => {

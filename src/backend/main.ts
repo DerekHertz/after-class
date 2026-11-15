@@ -51,7 +51,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { buildApp } from "../../scripts/build-app";
 import { stableId } from "../shared/ids";
-import type { CaptureId, EvidenceId, UserId } from "../shared/ids";
+import type { CaptureId, EvidenceId, ReviewId, UserId } from "../shared/ids";
 import { memoDep } from "./deps";
 import type { Dep, ReadDep } from "./deps";
 import type { AssessableClaim, BoundaryJudgment, BoundaryWindow, Evidence, Frame, Passage, Verdict } from "../shared/domain";
@@ -89,7 +89,7 @@ import { interpretTask, resourceSearchTask, reviseTask } from "./preparation/tas
 import type { FrameBytes, PreparationTasks } from "./preparation/tasks";
 import { createReviews } from "./review";
 import type { Reviews } from "./review";
-import { tutorCache, tutorTask, wrapUpTask } from "./review/tutor";
+import { tutorCache, tutorTask, wrapUpInput, wrapUpTask } from "./review/tutor";
 import type { TutorCache, TutorInput, TutorModel, TutorOutput, WrapUpInput, WrapUpOutput } from "./review/tutor";
 import { createDiagrams } from "./diagram";
 import type { Diagrams, DiagramSummaryInput, DiagramSummaryOutput } from "./diagram";
@@ -718,7 +718,10 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       watchedSeconds: (captureId) => evidence.captureView(captureId).watchedSeconds,
       runTutor: (input, streamTo, signal, onRetry) => memo.run(tasks.tutor, input, { signal, streamTo, onRetry, review: input.state.reviewId }),
       clearFailures: memo.clearFailures,
-      runWrapUp: (input) => memo.run(tasks.wrapUp, input),
+      startWrapUp(reviewId) {
+        // Later, so reading the whole review to build the input never sits in front of the tutor's reply. The save reports a failure.
+        setTimeout(() => void runWrapUp(reviewId).catch(() => {}), 0);
+      },
       endedInTx: (reviewId) => record.markEndedInTx(reviewId),
       nextSeq: () => db.nextSeq(),
     });
@@ -731,25 +734,30 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       return preparation.assessableIn(captureId, scope.material).filter((c) => c.evidence.every((e) => inScope.has(e)));
     }
 
+    /**
+     * The summary call. The review's end starts it while the tutor's closing line streams (#234), and the save that follows joins it
+     * through the memo, which keys both on the same input (`wrapUpInput`). A failure stored before this run began, from the early call or
+     * an earlier save, is cleared and asked once more; one stored while this run waited, which it joined, is returned as is. That needs
+     * no state beyond the memo, so it holds across a restart. #251's six requests per review still bound the calls past a cap.
+     * A hit is never cleared.
+     */
+    async function runWrapUp(reviewId: ReviewId): Promise<WrapUpOutput> {
+      const asOf = db.nextSeq();
+      const input = wrapUpInput(reviews.view(reviewId).turns, usableNow(reviewId));
+      const run = { review: reviewId };
+      let result = await memo.run(tasks.wrapUp, input, run);
+      if (result.kind === "failed" && result.atSeq < asOf) {
+        memo.clearFailures([result.key]);
+        result = await memo.run(tasks.wrapUp, input, run);
+      }
+      if (result.kind === "hit") return result.value;
+      throw new Error(result.kind === "failed" ? `wrap-up failed: ${result.lastError}` : result.kind === "held" ? heldMessage(result.hold) : `wrap-up ${result.kind}`);
+    }
+
     const record = createRecord(db, {
       turns: (reviewId) => reviews.view(reviewId).turns,
       claims: usableNow,
-      async wrapUp(reviewId) {
-        const turns = reviews.view(reviewId).turns;
-        const threads = [...new Set(turns.flatMap((t) => (t.actor === "tutor" && (t.move.kind === "ask_main" || t.move.kind === "quick_check") ? [t.move.threadId] : [])))];
-        const input = { turns, claims: usableNow(reviewId), threads };
-        // A terminal failure stored before this request began answered an earlier save, so this retry clears it and asks once more.
-        // A failure this request produced is returned as is. A hit is never cleared.
-        const asOf = db.nextSeq();
-        const run = { review: reviewId };
-        let result = await memo.run(tasks.wrapUp, input, run);
-        if (result.kind === "failed" && result.atSeq < asOf) {
-          memo.clearFailures([result.key]);
-          result = await memo.run(tasks.wrapUp, input, run);
-        }
-        if (result.kind === "hit") return result.value;
-        throw new Error(result.kind === "failed" ? `wrap-up failed: ${result.lastError}` : result.kind === "held" ? heldMessage(result.hold) : `wrap-up ${result.kind}`);
-      },
+      wrapUp: runWrapUp,
       snapshotEvidenceInTx: evidence.snapshotInTx,
       links: preparation.linkSuggestions,
     });
