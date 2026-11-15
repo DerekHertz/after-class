@@ -515,13 +515,17 @@ export function validateMove(move: TutorMove, input: TutorInput): { readonly ok:
  */
 export const DIAGNOSTIC_MAX_CHARS = 200;
 
-/** Question marks in the scripts learners write in: Latin, CJK full width and Arabic. */
-const QUESTION_MARKS = /[?\uFF1F\u061F]/g;
+/**
+ * Question marks across scripts: Latin "?", full width "？", Arabic "؟", Armenian "՞", and the Greek question mark, written as
+ * U+037E or as the ";" it looks like. A ";" is a question mark only at the end of a reply, since inside one it is a semicolon.
+ */
+const QUESTION_MARKS = /[?\uFF1F\u061F\u055E\u037E]/gu;
+const ENDS_IN_QUESTION = /[?\uFF1F\u061F\u055E\u037E;]$/u;
 export function validateSay(move: TutorMove, say: string): Verdict {
   if (move.kind !== "diagnose") return OK;
-  const text = say.replace(/[\s"'\p{Pe}\p{Pf}]+$/u, "").trim();
+  const text = say.replace(/[\s"'\p{Pe}\p{Pf}\p{Pi}]+$/u, "").trim();
   const marks = text.match(QUESTION_MARKS) ?? [];
-  if (marks.length !== 1 || !/[?\uFF1F\u061F]$/.test(text)) return no("a diagnostic question is one question: it ends with a single question mark");
+  if (!ENDS_IN_QUESTION.test(text) || marks.length + (text.endsWith(";") ? 1 : 0) !== 1) return no("a diagnostic question is one question: it ends with a single question mark");
   if (text.length > DIAGNOSTIC_MAX_CHARS) return no(`a diagnostic question is at most ${DIAGNOSTIC_MAX_CHARS} characters. Do not say what the lecture says or give the answer`);
   return OK;
 }

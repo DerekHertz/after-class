@@ -383,7 +383,7 @@ describe("validateSay: a mismatch asks before it tells (flow: one tentative, sou
 
   test("accepts a single question that names people or terms with initials", () => {
     const d = { kind: "diagnose" } as Parameters<typeof validateSay>[0];
-    for (const q of ["How does your answer fit with the diagram, e.g. NADH entering the chain?", "How does your answer fit with B. F. Skinner's experiment?", "\u00AB Comment votre r\u00E9ponse correspond-elle au sch\u00E9ma du cours ? \u00BB", "\u300C\u4F60\u8AAA\u7684\u548C\u8B1B\u5E2B\u8B1B\u7684\u6709\u4EC0\u9EBC\u95DC\u4FC2\uFF1F\u300D"])
+    for (const q of ["How does your answer fit with the diagram, e.g. NADH entering the chain?", "How does your answer fit with B. F. Skinner's experiment?", "\u201EWie passt deine Antwort zur Abbildung in der Vorlesung?\u201C", "\u03A0\u03CE\u03C2 \u03C4\u03B1\u03B9\u03C1\u03B9\u03AC\u03B6\u03B5\u03B9 \u03B7 \u03B1\u03C0\u03AC\u03BD\u03C4\u03B7\u03C3\u03AE \u03C3\u03BF\u03C5;", "\u00AB Comment votre r\u00E9ponse correspond-elle au sch\u00E9ma du cours ? \u00BB", "\u300C\u4F60\u8AAA\u7684\u548C\u8B1B\u5E2B\u8B1B\u7684\u6709\u4EC0\u9EBC\u95DC\u4FC2\uFF1F\u300D"])
       expect(validateSay(d, q).ok, q).toBe(true);
   });
 
