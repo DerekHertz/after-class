@@ -2,7 +2,8 @@
  * The two public pages of the hosted site, `/` and `/privacy`. They are plain HTML with one inline stylesheet and no
  * script, so a visitor who is not signed in sees what After Class is before any sign-in widget. The art and the two fonts
  * are files of the built review app, named `<stem>-<8 hash chars>.<ext>` (scripts/build-app.ts), so they are found by
- * stem in the app directory. A page built without one of them still reads fine.
+ * stem in the app directory. The 1 MB art loads only from 700px wide up, so a phone gets the text and two fonts.
+ * A page built without one of them still reads fine.
  */
 import { readdirSync } from "node:fs";
 
@@ -40,7 +41,7 @@ const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").rep
 
 const CSS = `
 *{box-sizing:border-box}
-body{margin:0;min-height:100vh;font:1.0625rem/1.6 'After Class Sans',system-ui,sans-serif;color:#1c1917;background:#2a2622 var(--plate) 50% 100%/cover no-repeat fixed;display:flex;align-items:center;justify-content:center;padding:24px 16px}
+body{margin:0;min-height:100vh;font:1.0625rem/1.6 'After Class Sans',system-ui,sans-serif;color:#1c1917;background:#2a2622;display:flex;align-items:center;justify-content:center;padding:24px 16px}
 main{max-width:40rem;width:100%;background:#fafaf9;border:3px solid #1c1917;border-radius:10px;padding:32px 28px;box-shadow:0 8px 0 rgba(28,25,23,.35)}
 h1,h2{font-family:'After Class Pixel',system-ui,sans-serif;font-weight:700;line-height:1.15;margin:0 0 .5em}
 h1{font-size:2.4rem}h2{font-size:1.4rem;margin-top:1.6em}
@@ -51,6 +52,7 @@ p,li{margin:0 0 .9em}ul{padding-left:1.2em;margin:0 0 .9em}
 .muted{color:#6b6560;font-size:.95rem}
 a{color:#1d4ed8}
 nav{margin-top:1.6em}
+@media (min-width:700px){body{background-image:var(--plate);background-position:50% 100%;background-size:cover;background-repeat:no-repeat;background-attachment:fixed}}
 @media (max-width:480px){h1{font-size:2rem}main{padding:24px 18px}}
 `;
 
