@@ -175,3 +175,20 @@ for (const scene of scenes) {
     });
   }
 }
+
+test("the room's words wait for its pictures, and a picture that fails does not hold them", async ({ page }, info) => {
+  test.skip(info.project.name === "narrow", "a phone shows its words over the page's own backdrop");
+  let release = () => {};
+  const held = new Promise<void>((done) => { release = done; });
+  await page.route(/\/harbor-board-[a-z0-9]{8}\.webp$/, async (route) => { await held; await route.continue(); });
+  await page.route(/\/harbor-lamp-[a-z0-9]{8}\.webp$/, (route) => route.fulfill({ status: 404 }));
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene: "study-bench" } });
+  await page.goto("/?scenario=review&clean=1");
+  const board = page.locator('.front-row-area[data-area="board"]');
+  await expect(board).toContainText("What would have to change");
+  await page.waitForTimeout(300);
+  expect(await board.evaluate((node) => getComputedStyle(node).opacity)).toBe("0");
+  release();
+  await expect(page.locator(".front-row-canvas[data-painted]")).toBeAttached();
+  expect(await board.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
+});

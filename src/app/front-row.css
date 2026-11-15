@@ -286,6 +286,9 @@
   .front-row-scene { height: 100dvh; overflow: clip; container-type: size; }
   .front-row-stage { position: absolute; inset: 0; }
   .front-row-canvas { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; }
+  /* The room's words wait for its pictures, as they did when the stylesheet drew them, so the board's text never shows on the
+     bare background. The stage settles within one decode, and a picture that fails to decode does not hold it. */
+  .front-row-stage:has(> .front-row-canvas:not([data-painted])) > :not(.front-row-canvas) { opacity: 0; }
   .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { position: absolute; z-index: 4; inset: var(--fr-board-text); overflow: auto; overscroll-behavior: contain; }
   .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { position: absolute; z-index: 7; inset: var(--fr-desk-text); overflow: auto; overscroll-behavior: contain; }
   /* Board type follows the room scale, so the text keeps its share of the board when the window is wide or tall. */

@@ -5,6 +5,7 @@ import type { Composition, Size } from "./layout";
 import { buildScene } from "./scene";
 import type { Draw, DrawList } from "./scene";
 import { pieces } from "./paint";
+import { ROOM_LAYER_ART } from "./art";
 import type { Scale } from "./paint";
 
 /**
@@ -108,38 +109,52 @@ class Stage {
 /** Device pixels per CSS pixel on each axis, as the backing store was sized. */
 const scaleOf = ({ css, device }: Box) => ({ x: device.width / css.width, y: device.height / css.height });
 
-/** Whether every picture `list` draws has decoded. Starts any that have not, and calls `onReady` when one finishes. */
+/**
+ * Whether every picture `list` draws has settled, decoded or failed. Starts any that have not, and calls `onReady` when one
+ * settles. A picture that failed is left out of the room rather than holding the room back.
+ */
 function decoded(list: DrawList, onReady: () => void): boolean {
   let all = true;
-  for (const draw of list.draws) if (picture(draw.src, onReady) === null) all = false;
+  for (const draw of list.draws) if (picture(draw.src, onReady).state === "pending") all = false;
   return all;
 }
 
-type Picture = { image: HTMLImageElement; decoded: boolean; readonly waiting: Set<() => void> };
+type Picture = { readonly image: HTMLImageElement; state: "pending" | "decoded" | "failed"; readonly waiting: Set<() => void> };
 /** Every picture the stage has asked for, decoded once per page and kept, so switching back to a room is instant. */
 const pictures = new Map<string, Picture>();
 
-function picture(src: string, onReady: () => void): HTMLImageElement | null {
-  let entry = pictures.get(src);
-  if (entry === undefined) {
-    const image = new Image();
-    image.src = src;
-    const created: Picture = { image, decoded: false, waiting: new Set() };
-    entry = created;
-    pictures.set(src, created);
-    image.decode().then(() => {
-      created.decoded = true;
-      for (const wake of created.waiting) wake();
-      created.waiting.clear();
-    }, () => created.waiting.clear());
+function picture(src: string, onReady: () => void): Picture {
+  const known = pictures.get(src);
+  if (known !== undefined) {
+    if (known.state === "pending") known.waiting.add(onReady);
+    return known;
   }
-  if (entry.decoded) return entry.image;
-  entry.waiting.add(onReady);
-  return null;
+  const image = new Image();
+  image.src = src;
+  const entry: Picture = { image, state: "pending", waiting: new Set([onReady]) };
+  pictures.set(src, entry);
+  const settle = (state: Picture["state"]) => () => {
+    entry.state = state;
+    for (const wake of entry.waiting) wake();
+    entry.waiting.clear();
+  };
+  image.decode().then(settle("decoded"), settle("failed"));
+  return entry;
+}
+
+// A review page preloads its saved room's layers (scripts/build-app.ts). They start decoding as this script runs, so the
+// stage can paint the room as soon as it mounts instead of a decode later.
+if (typeof document !== "undefined") {
+  const art = new Set(Object.values(ROOM_LAYER_ART).flatMap(({ extras, ...layers }) => [...Object.values(layers), ...Object.values(extras)]));
+  for (const link of document.querySelectorAll('link[rel="preload"][as="image"]')) {
+    const href = link.getAttribute("href");
+    if (href !== null && art.has(href)) picture(href, () => {});
+  }
 }
 
 function paintDraw(context: CanvasRenderingContext2D, draw: Draw, scale: Scale): void {
-  const { image } = pictures.get(draw.src)!;
+  const { image, state } = pictures.get(draw.src)!;
+  if (state !== "decoded") return;
   const smooth = draw.kind === "image" && draw.sampling === "smooth";
   context.imageSmoothingEnabled = smooth;
   if (smooth) context.imageSmoothingQuality = "medium";
