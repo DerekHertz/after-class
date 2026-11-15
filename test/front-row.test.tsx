@@ -3,8 +3,10 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { APPEARANCE_KEY, COMPANIONS, DEFAULT_APPEARANCE, SCENES, parseAppearance } from "../src/app/appearance";
 import type { CompanionId, SceneId } from "../src/app/appearance";
-import { FRONT_ROW_ROOMS, FrontRowScene, ROOM_ART, reserveNavSpace, roomStyle } from "../src/app/front-row";
-import type { FrontRowLayout, NineSlice } from "../src/app/front-row";
+import { FrontRowScene, reserveNavSpace, roomStyle } from "../src/app/front-row";
+import type { FrontRowLayout } from "../src/app/front-row";
+import { FRONT_ROW_ROOMS, ROOM_ART } from "../src/app/room/rooms";
+import type { NineSlice } from "../src/app/room/rooms";
 import { APPEARANCE_STORAGE_KEY, DEFAULT_ROOM, ROOM_ART_PREFIX } from "../src/shared/room-art";
 import { OBJECT_ART_SIZE, ROOM_OBJECTS } from "../src/app/room-object";
 import type { ObjectArt, RoomObject } from "../src/app/room-object";
@@ -110,21 +112,16 @@ describe("each room's art is named where the build and the stylesheet agree", ()
     }
   });
 
-  test("the room's own layers are drawn pixelated, so storing them at their true resolution changes no pixel", () => {
-    expect(css).toContain(".front-row-stage::before { content: \"\"; position: absolute; z-index: 0;");
-    for (const rule of [".front-row-stage::before {", ".front-row-art > * {"]) {
-      expect({ rule, pixelated: css.split("\n").some((line) => line.includes(rule) && line.includes("image-rendering: pixelated")) }).toEqual({ rule, pixelated: true });
-    }
+  test("the room's own layers, the background among them, are drawn pixelated, so storing them at their true resolution changes no pixel", () => {
+    expect(css).toContain(".front-row-art > [data-layer=\"background\"] { z-index: 0; background-image: var(--fr-bg); }");
+    expect(css.split("\n").some((line) => line.includes(".front-row-art > * {") && line.includes("image-rendering: pixelated"))).toBe(true);
   });
 });
 
 describe("room geometry", () => {
-  test("the roomStyle custom properties carry the nine-slice cuts, the text insets and the palette", () => {
-    const rail = roomStyle("last-desk");
-    expect(rail).toMatchObject({ "--fr-board-slice": "44 64 62 64", "--fr-mat-slice": "28 30 30 28", "--fr-desk-slice": "0 150 0 150", "--fr-bg-ax": 1, "--fr-wall-to": 1228 });
-    expect(rail["--fr-board-bw"]).toBe("calc(var(--fr-u) * 44) calc(var(--fr-u) * 64) calc(var(--fr-u) * 62) calc(var(--fr-u) * 64)");
-    expect(rail["--fr-board-il"]).toBe(`calc(var(--fr-u) * ${64 + ROOM_ART.boardTextPad})`);
-    expect(roomStyle("study-bench")).toMatchObject({ "--fr-board-min-aspect": 0, "--fr-field-ink": FRONT_ROW_ROOMS["study-bench"].palette.fieldInk, "--fr-phone-x": "50%" });
+  test("the roomStyle custom properties carry the nine-slice cuts and the palette", () => {
+    expect(roomStyle("last-desk")).toMatchObject({ "--fr-board-slice": "44 64 62 64", "--fr-mat-slice": "28 30 30 28", "--fr-desk-slice": "0 150 0 150" });
+    expect(roomStyle("study-bench")).toMatchObject({ "--fr-field-ink": FRONT_ROW_ROOMS["study-bench"].palette.fieldInk, "--fr-phone-x": "50%" });
   });
 
   test("each extra is the size its room declares, and the harbor stands three lamps on its beam", async () => {

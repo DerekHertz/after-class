@@ -3,7 +3,7 @@ import { appendFileSync, cpSync, existsSync, mkdtempSync, readFileSync, readdirS
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { INLINE_LIMIT, buildApp } from "../scripts/build-app";
-import { FRONT_ROW_ROOMS } from "../src/app/front-row";
+import { FRONT_ROW_ROOMS } from "../src/app/room/rooms";
 import { parseAppearance } from "../src/app/appearance";
 import { FULL_ROOM_QUERY, ROOM_ART_PREFIX } from "../src/shared/room-art";
 import type { RoomArtTable } from "../src/shared/room-art";
