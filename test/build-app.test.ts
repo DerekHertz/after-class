@@ -176,6 +176,8 @@ describe("a file name the server caches for a year", () => {
       renameSync(join(art, "pip.webp"), join(art, "pip-large.webp"));
       const css = join(root, "src/app/hd-companion.css");
       writeFileSync(css, readFileSync(css, "utf8").replace("companions-v3/pip.webp", "companions-v3/pip-large.webp"));
+      const stage = join(root, "src/app/room/companion-art.ts");
+      writeFileSync(stage, readFileSync(stage, "utf8").replace("companions-v3/pip.webp", "companions-v3/pip-large.webp"));
     }],
     ["an image the stylesheet inlines changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/front-row/study-bench.webp"), "\0")],
     ["a layer the stage imports changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/front-row-v2/harbor-lamp.webp"), "\0")],

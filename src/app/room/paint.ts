@@ -18,6 +18,10 @@ export function pieces(draw: Draw, natural: Size, scale: Scale): readonly Piece[
   const box = snap(draw, scale);
   const { width: w, height: h } = natural;
   if (draw.kind === "image") return [{ sx: 0, sy: 0, sw: w, sh: h, dx: box.left, dy: box.top, dw: box.right - box.left, dh: box.bottom - box.top }];
+  if (draw.kind === "companion") {
+    const sw = w / draw.columns;
+    return [{ sx: sw * draw.column, sy: 0, sw, sh: h, dx: box.left, dy: box.top, dw: box.right - box.left, dh: box.bottom - box.top }];
+  }
   const { slice, border } = draw;
   // As Chrome paints border-image: each border width floors to whole device pixels, measured in from the snapped box's own
   // edges, after widths that would overlap all shrink by one factor.
@@ -51,7 +55,7 @@ function snapSpan(start: number, size: number, scale: number, image: boolean): r
 }
 
 function snap({ rect, kind }: Draw, s: Scale) {
-  const [left, right] = snapSpan(rect.left, rect.width, s.x, kind === "image");
-  const [top, bottom] = snapSpan(rect.top, rect.height, s.y, kind === "image");
+  const [left, right] = snapSpan(rect.left, rect.width, s.x, kind !== "nine-slice");
+  const [top, bottom] = snapSpan(rect.top, rect.height, s.y, kind !== "nine-slice");
   return { left, right, top, bottom };
 }

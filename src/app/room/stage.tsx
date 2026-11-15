@@ -3,7 +3,9 @@ import type { SceneId } from "../appearance";
 import { layoutRoom } from "./layout";
 import type { Composition, Size } from "./layout";
 import { buildScene } from "./scene";
-import type { Draw, DrawList } from "./scene";
+import type { CompanionDraw, Draw, DrawList } from "./scene";
+import { restsFrom } from "./companion";
+import type { CompanionCue, Idle } from "./companion";
 import { pieces } from "./paint";
 import { ROOM_LAYER_ART } from "./art";
 import type { Scale } from "./paint";
@@ -13,8 +15,15 @@ import type { Scale } from "./paint";
  * repaints only when the room, its size or a decoded picture changes, or while the list says something moves. Until every
  * picture of a room has decoded it keeps the room it last finished, or stays empty so the page's backdrop shows through.
  * Its `data-stage` attribute says which, and front-row.css holds the room's words back only while it is `waiting`.
+ * `companion` draws the companion in front of the room, animated only while `motion` is on (room/motion.ts). The frame it
+ * last drew is the canvas's `data-companion` attribute.
  */
-export function RoomStage({ scene, composition }: { readonly scene: SceneId; readonly composition: Composition }) {
+export function RoomStage({ scene, composition, motion, companion }: {
+  readonly scene: SceneId;
+  readonly composition: Composition;
+  readonly motion: boolean;
+  readonly companion: CompanionCue | null;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<Stage | null>(null);
   useLayoutEffect(() => {
@@ -29,7 +38,14 @@ export function RoomStage({ scene, composition }: { readonly scene: SceneId; rea
     stageRef.current = stage;
     return () => { stage.stop(); stageRef.current = null; };
   }, []);
-  useLayoutEffect(() => { stageRef.current?.show(scene, composition); }, [scene, composition]);
+  // The cue is rebuilt from its fields so a render that changes none of them, as typing in the answer does, never repaints.
+  const { id, activity } = companion ?? {};
+  const gesture = companion?.gesture?.name;
+  const at = companion?.gesture?.at;
+  useLayoutEffect(() => {
+    const cue = id === undefined || activity === undefined ? null : { id, activity, gesture: gesture === undefined || at === undefined ? null : { name: gesture, at } };
+    stageRef.current?.show({ scene, composition, motion, companion: cue });
+  }, [scene, composition, motion, id, activity, gesture, at]);
   return <canvas ref={canvasRef} className="front-row-canvas" aria-hidden="true" />;
 }
 
@@ -40,7 +56,7 @@ export function RoomStage({ scene, composition }: { readonly scene: SceneId; rea
 type StageState = "waiting" | "painted" | "off";
 const setState = (canvas: HTMLCanvasElement, state: StageState) => { canvas.dataset.stage = state; };
 
-type Wanted = { readonly scene: SceneId; readonly composition: Composition };
+type Wanted = { readonly scene: SceneId; readonly composition: Composition; readonly motion: boolean; readonly companion: CompanionCue | null };
 /** The canvas's box: its size in CSS pixels and the device pixels of its backing store. */
 type Box = { readonly css: Size; readonly device: Size };
 
@@ -49,6 +65,10 @@ class Stage {
   private shown: SceneId | null = null;
   private box: Box | null = null;
   private frame: number | null = null;
+  /** Waits out the time until the list's `next`, so a companion that changes a few times a second does not wake every frame. */
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  /** Idle blinks count from when the stage started or the last gesture ended, at intervals drawn from a seed of its own. */
+  private idle: Idle = { since: performance.now(), seed: Math.floor(Math.random() * 2 ** 32) };
   /** Set when a change arrived while the tab was hidden, so the stage paints it once the tab shows again. */
   private stale = false;
   /** The pictures this stage waits on, so it stops waiting on those of a room it no longer shows. */
@@ -72,8 +92,9 @@ class Stage {
     canvas.addEventListener("contextrestored", this.paint);
   }
 
-  show(scene: SceneId, composition: Composition): void {
-    this.wanted = { scene, composition };
+  show(wanted: Wanted): void {
+    if (wanted.companion !== null) this.idle = { ...this.idle, since: Math.max(this.idle.since, restsFrom(wanted.companion)) };
+    this.wanted = wanted;
     this.paint();
   }
 
@@ -83,8 +104,14 @@ class Stage {
     this.release();
     document.removeEventListener("visibilitychange", this.onVisibility);
     this.canvas.removeEventListener("contextrestored", this.paint);
-    if (this.frame !== null) cancelAnimationFrame(this.frame);
+    this.cancelFrame();
     this.wanted = null;
+  }
+
+  private cancelFrame(): void {
+    if (this.frame !== null) cancelAnimationFrame(this.frame);
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.frame = this.timer = null;
   }
 
   private watchRatio(): void {
@@ -114,14 +141,15 @@ class Stage {
   }
 
   private paint = (): void => {
-    if (this.frame !== null) cancelAnimationFrame(this.frame);
-    this.frame = null;
+    this.cancelFrame();
     this.release();
     const { wanted, box } = this;
     if (wanted === null || box === null || box.css.width === 0 || box.css.height === 0) return;
     this.stale = document.hidden;
     if (this.stale) return;
-    const list = (scene: SceneId) => buildScene(scene, layoutRoom(scene, box.css, wanted.composition));
+    const now = wanted.motion ? performance.now() : null;
+    const companion = wanted.companion === null ? null : { cue: wanted.companion, idle: this.idle, ratio: scaleOf(box).y };
+    const list = (scene: SceneId) => buildScene(scene, layoutRoom(scene, box.css, wanted.composition), now, companion);
     let drawn: DrawList | null = list(wanted.scene);
     if (this.decoded(drawn)) this.shown = wanted.scene;
     else drawn = this.shown === null ? null : list(this.shown);
@@ -129,10 +157,38 @@ class Stage {
     const { context } = this;
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, box.device.width, box.device.height);
-    if (drawn !== null) for (const draw of drawn.draws) paintDraw(context, draw, scaleOf(box));
+    let companionFrame: string | undefined;
+    if (drawn !== null) for (const draw of drawn.draws) {
+      if (draw.kind !== "companion") {
+        paintDraw(context, draw, scaleOf(box));
+        continue;
+      }
+      const shown = this.companion(draw);
+      if (shown !== null) paintDraw(context, shown, scaleOf(box));
+      companionFrame = shown?.frame;
+    }
+    if (companionFrame === undefined) delete this.canvas.dataset.companion;
+    else this.canvas.dataset.companion = companionFrame;
     setState(this.canvas, drawn === null ? "waiting" : "painted");
-    if (drawn?.next != null) this.frame = requestAnimationFrame(this.paint);
+    for (const src of drawn?.ahead ?? []) picture(src);
+    if (drawn?.next != null) {
+      // Rounded up, since a timer truncates its delay to whole milliseconds and would wake just before the change, paint the same frame and wait again.
+      this.timer = setTimeout(() => { this.timer = null; this.frame = requestAnimationFrame(this.paint); }, Math.max(0, Math.ceil(drawn.next - performance.now())));
+    }
   };
+
+  /** What to paint for the companion: its frame once decoded, else its stand-in once that is, else nothing. Repaints on decode. */
+  private companion(draw: CompanionDraw): CompanionDraw | null {
+    for (let candidate: CompanionDraw | null = draw; candidate !== null; candidate = candidate.standIn) {
+      const entry = picture(candidate.src);
+      if (entry.state === "decoded") return candidate;
+      if (entry.state === "pending") {
+        entry.waiting.add(this.paint);
+        this.awaited.add(entry);
+      }
+    }
+    return null;
+  }
 
   /**
    * Whether every picture `list` draws has settled, decoded or failed. Starts any that have not, and repaints when one
@@ -141,6 +197,7 @@ class Stage {
   private decoded(list: DrawList): boolean {
     let all = true;
     for (const draw of list.draws) {
+      if (draw.kind === "companion") continue;
       const entry = picture(draw.src);
       if (entry.state !== "pending") continue;
       entry.waiting.add(this.paint);
@@ -195,7 +252,10 @@ function paintDraw(context: CanvasRenderingContext2D, draw: Draw, scale: Scale):
   const smooth = draw.kind === "image" && draw.sampling === "smooth";
   context.imageSmoothingEnabled = smooth;
   if (smooth) context.imageSmoothingQuality = "medium";
+  // The drop shadow the companion had as a CSS filter: 4 CSS pixels straight down, unblurred, at a quarter black.
+  if (draw.kind === "companion") Object.assign(context, { shadowColor: "#00000040", shadowOffsetY: Math.round(4 * scale.y) });
   for (const { sx, sy, sw, sh, dx, dy, dw, dh } of pieces(draw, { width: image.naturalWidth, height: image.naturalHeight }, scale)) {
     context.drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh);
   }
+  if (draw.kind === "companion") Object.assign(context, { shadowColor: "transparent", shadowOffsetY: 0 });
 }

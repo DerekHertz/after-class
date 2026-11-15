@@ -1,5 +1,7 @@
 import type { SceneId } from "../appearance";
 import { ROOM_LAYER_ART } from "./art";
+import { companionAt, companionDraw } from "./companion";
+import type { CompanionCue, Frame, Idle } from "./companion";
 import type { NineSliceLayer, Rect, RoomLayout } from "./layout";
 import { FRONT_ROW_ROOMS } from "./rooms";
 import type { Edges } from "./rooms";
@@ -13,18 +15,28 @@ export type Sampling = "pixelated" | "smooth";
 /**
  * One thing the stage paints, in CSS pixels of the stage. `src` names the picture by its bundle URL. `image` draws the whole
  * picture into `rect`. `nine-slice` cuts the picture `slice` asset pixels from each edge, keeps the corners at `border`
- * screen pixels, and stretches the edges and the middle, as CSS `border-image` with `fill` does.
+ * screen pixels, and stretches the edges and the middle, as CSS `border-image` with `fill` does. `companion` draws column
+ * `column` of `columns` equal cells of its picture, pixelated, with the companion's drop shadow. It never holds the room
+ * back: until its picture decodes the stage draws `standIn` in its place, or nothing.
  */
 export type Draw =
   | { readonly kind: "image"; readonly src: string; readonly rect: Rect; readonly sampling: Sampling }
-  | { readonly kind: "nine-slice"; readonly src: string; readonly rect: Rect; readonly slice: Edges; readonly border: Edges };
+  | { readonly kind: "nine-slice"; readonly src: string; readonly rect: Rect; readonly slice: Edges; readonly border: Edges }
+  | CompanionDraw;
+export type CompanionDraw = {
+  readonly kind: "companion"; readonly frame: Frame; readonly src: string; readonly rect: Rect; readonly column: number; readonly columns: number;
+  readonly standIn: CompanionDraw | null;
+};
 
 /**
  * What the stage paints, back to front. `next` is the `performance.now()` time at which the list changes by itself, so the
- * stage runs its frame loop only while it is not null. Nothing animates yet, so it is always null and the stage paints only
- * when the room, the window or a decoded picture changes.
+ * stage runs its frame loop only while it is not null. It is null while the room is still, and the stage then paints only
+ * when the room, the window or a decoded picture changes. `ahead` names pictures the list will draw soon, to decode now.
  */
-export type DrawList = { readonly draws: readonly Draw[]; readonly next: number | null };
+export type DrawList = { readonly draws: readonly Draw[]; readonly next: number | null; readonly ahead?: readonly string[] };
+
+/** The companion the room shows, its idle clock, and the device pixels per CSS pixel it is drawn at. */
+export type CompanionScene = { readonly cue: CompanionCue; readonly idle: Idle; readonly ratio: number };
 
 /**
  * Depths of the room's own layers, as front-row.css stacked them. Each extra carries its own depth in rooms.ts: 1 behind the
@@ -32,8 +44,11 @@ export type DrawList = { readonly draws: readonly Draw[]; readonly next: number 
  */
 const DEPTH = { background: 0, board: 2, desk: 5, mat: 6 } as const;
 
-/** The draw list of `scene` laid out as `layout`. Layers of equal depth keep the order they are listed in, the mat last. */
-export function buildScene(scene: SceneId, layout: RoomLayout): DrawList {
+/**
+ * The draw list of `scene` laid out as `layout`. Layers of equal depth keep the order they are listed in, the mat last, and
+ * the companion in front of them all. `now` is the `performance.now()` time of the frame, or null while the room is still.
+ */
+export function buildScene(scene: SceneId, layout: RoomLayout, now: number | null = null, companion: CompanionScene | null = null): DrawList {
   const art = ROOM_LAYER_ART[scene];
   if (layout.composition === "compact") {
     return { draws: [{ kind: "image", src: art.background, rect: layout.layers.background, sampling: "smooth" }], next: null };
@@ -49,5 +64,9 @@ export function buildScene(scene: SceneId, layout: RoomLayout): DrawList {
     ...extras.map((extra) => ({ z: extra.z, draw: { kind: "image", src: extraArt[extra.name]!, rect: extra.rect, sampling: "pixelated" } as const })),
     { z: DEPTH.mat, draw: nineSlice(art.mat, mat, room.mat.art.slice) },
   ];
-  return { draws: layered.sort((a, b) => a.z - b.z).map(({ draw }) => draw), next: null };
+  const draws = layered.sort((a, b) => a.z - b.z).map(({ draw }) => draw);
+  if (companion === null) return { draws, next: null };
+  const shown = companionAt(companion.cue, companion.idle, now);
+  const { draw, files } = companionDraw(companion.cue.id, shown, layout.companion.box, companion.ratio);
+  return { draws: [...draws, draw], next: shown.next, ahead: files };
 }
