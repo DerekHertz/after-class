@@ -93,7 +93,8 @@ case "$url" in
   *) exit 2;;
 esac`,
     );
-    stub(host.root, "afterclass-pull", `echo "pull $1" >> ${host.log}\n${opts.pullFails ? "exit 1" : "exit 0"}`);
+    const outside = `/usr/bin/flock -n ${join(host.root, "lock")} true && echo "pull $1 outside the deploy lock" >> ${host.log}`;
+    stub(host.root, "afterclass-pull", `${outside} || echo "pull $1" >> ${host.log}\n${opts.pullFails ? "exit 1" : "exit 0"}`);
     stub(host.root, "afterclass-save-image", `echo "save $*" >> ${host.log}`);
     chmodSync(installScript(host, "afterclass-deploy"), 0o755);
   }
@@ -335,6 +336,13 @@ describe("afterclass-autodeploy", () => {
     expect(server.running).toBe(v016);
   });
 
+  test("every pull runs inside afterclass-deploy's lock, so it never races a manual deploy's save of the image cache", () => {
+    const server = new Server({ running: OLD });
+    server.github(v015);
+    expect(server.run().status).toBe(0);
+    expect(server.log.filter((line) => line.startsWith("pull "))).toEqual([`pull ${NEW}`]);
+  });
+
   test("an unchanged list is asked for with its ETag, answers 304, and reads no record", () => {
     const server = new Server({ running: OLD });
     server.github({ ...v015, etag: '"v15"' });
@@ -386,7 +394,7 @@ describe("afterclass-autodeploy", () => {
     expect(server.run().output).toContain("v0.1.5 is retried at 1000120");
     expect(server.log).not.toContain("systemctl restart afterclass-app.service");
     server.now = 1_000_000 + 120;
-    expect(server.run().output).toContain(`cannot pull ${NEW} for v0.1.5`);
+    expect(server.run().output).toContain("v0.1.5 did not start its rollout, afterclass-deploy exited 1. v0.1.5 is retried at 1000360");
     expect(server.running).toBe(OLD);
   });
 

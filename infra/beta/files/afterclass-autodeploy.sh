@@ -166,11 +166,6 @@ if [ "$running" = "$digest" ]; then
   exit 0
 fi
 
-# The pull comes before the master check, so a GHCR outage costs no API request. Pulling runs nothing.
-if ! /usr/local/sbin/afterclass-pull "$digest" >/dev/null 2>&1; then
-  retry_later "cannot pull ${digest} for ${target}"
-fi
-
 if ! where=$(curl -fsS --max-time 20 -H 'Accept: application/vnd.github+json' "${api}/compare/master...${commit}?per_page=1" 2>/dev/null \
   | python3 -I -c 'import json, sys; print(json.load(sys.stdin)["status"])' 2>/dev/null); then
   retry_later "cannot ask GitHub whether ${commit} is on master, nothing done"
@@ -185,7 +180,7 @@ fi
 say "deploying ${target} (${commit}, ${digest}) over ${running:-nothing}"
 result=0
 output=$(/usr/local/sbin/afterclass-deploy "$commit" "$digest" 2>&1) || result=$?
-while IFS= read -r line; do note "$line"; done <<<"$output"
+while IFS= read -r line; do if [ -n "$line" ]; then note "$line"; fi; done <<<"$output"
 case "$result" in
   0)
     handle "$target" "$digest"
