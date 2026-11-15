@@ -4,7 +4,7 @@
  */
 import { heldMessage, resetDay } from "../shared/allowance";
 import type {
-  Allowance, Author, CaptureStatus, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
+  Allowance, Author, CaptureStatus, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, HeldBack, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
   ReviewState, ReviewView, ScopePreview, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
 } from "../shared/domain";
 import type { EvidenceId, SourceId } from "../shared/ids";
@@ -207,6 +207,23 @@ export function coveredLines(material: Material, titles: SourceTitles = new Map(
     const total = spans.reduce((sum, i) => sum + (i.end - i.start), 0);
     return [spans.length === 1 ? `${titleOf(titles, id)}, ${formatInterval(only)}` : `${titleOf(titles, id)}, ${spans.length} stretches, ${formatClock(total)} in all`];
   });
+}
+
+/**
+ * What the lecture page says when earlier reviews hold part of what the learner watched. `held` is what the backend left
+ * out of the next review (R7: a started review's scope never grows, so that time stays with it), not a guess from saved
+ * state. R7 does not promise that another review covers everything else, so the last sentence follows what the options
+ * really are: a review to start, sections still preparing, or nothing yet.
+ */
+export function earlierReviewsNote(held: HeldBack, next: ReviewOptions["kind"]): { readonly heading: string; readonly body: string } | null {
+  if (held.length === 0) return null;
+  const seconds = Material.duration(held.reduce((all, h) => Material.union(all, h.material), Material.of([])));
+  const which = held.length === 1 ? "a review you already started" : `${held.length} reviews you already started`;
+  const rest = next === "ready" ? "The review below is made from the rest." : next === "processing" ? "The rest is still being prepared." : "There is nothing else to review yet.";
+  return {
+    heading: held.length === 1 ? "Earlier review" : "Earlier reviews",
+    body: `Part of this lecture is in ${which}, ${formatClock(seconds)} of what you watched. It is not offered in a new review, because a review keeps the material it started with. ${rest}`,
+  };
 }
 
 export function scopeSummary(scope: ScopePreview, titles: SourceTitles = new Map()): ScopeSummary {

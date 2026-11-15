@@ -38,7 +38,7 @@ import { join, sep } from "node:path";
 import { parseId } from "../shared/ids";
 import type { IdKind } from "../shared/ids";
 import type { CaptureId, ConceptId, DeviceId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, SourceId, TurnId, UserId } from "../shared/ids";
-import type { EvidenceBundle, Frame, FrozenScope, Passage, ReviewOptions, ReviewSaveState, ReviewView, ScopePreview, StartResult, TurnEvent } from "../shared/domain";
+import type { EvidenceBundle, Frame, FrozenScope, HeldBack, Passage, ReviewOptions, ReviewSaveState, ReviewView, ScopePreview, StartResult, TurnEvent } from "../shared/domain";
 import { Material } from "../shared/time";
 import type { Interval } from "../shared/time";
 import {
@@ -362,11 +362,14 @@ const reply = (name: keyof typeof ROUTES, body: unknown, cors: Record<string, st
 /** A `Material` is a Map and would cross JSON as `{}`; the wire carries `Material.canonical` rows. */
 const wireScope = (scope: FrozenScope) => ({ ...scope, material: Material.canonical(scope.material) });
 
-const wireStart = (r: StartResult) => (r.kind === "started" ? { ...r, scope: wireScope(r.scope) } : r);
+const wireHeld = (held: HeldBack) => held.map((h) => ({ ...h, material: Material.canonical(h.material) }));
+const wireStart = (r: StartResult) => (r.kind === "started" ? { ...r, scope: wireScope(r.scope) } : { ...r, heldBack: wireHeld(r.heldBack) });
 
 const wirePreview = (p: ScopePreview) => ({ ...p, material: Material.canonical(p.material) });
-const wireOptions = (o: ReviewOptions) =>
-  o.kind === "ready" ? { ...o, scope: wirePreview(o.scope) } : o.kind === "processing" ? { ...o, readyNow: o.readyNow && wirePreview(o.readyNow) } : o;
+const wireOptions = (o: ReviewOptions) => {
+  const heldBack = wireHeld(o.heldBack);
+  return o.kind === "ready" ? { ...o, scope: wirePreview(o.scope), heldBack } : o.kind === "processing" ? { ...o, readyNow: o.readyNow && wirePreview(o.readyNow), heldBack } : { ...o, heldBack };
+};
 
 /** Validates a response already in wire form against its `ROUTES` schema, then sends it as it is (the schema's output would decode Material back into a Map). */
 function replyWire(name: keyof typeof ROUTES, wire: unknown, cors: Record<string, string>): Response {

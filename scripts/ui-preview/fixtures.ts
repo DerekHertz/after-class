@@ -26,7 +26,7 @@ export const ids = {
   chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait"), ordering: id("cpt", "ordering"), earlierCapture: id("cap", "earlier-capture"),
   otherCapture: id("cap", "other-capture"), pendingReview: id("rvw", "pending-review"), unsavedReview: id("rvw", "unsaved-review"),
 };
-export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-processing", "capture-held", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "usage", "usage-held", "usage-reserved", "usage-uncapped", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
+export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-split", "capture-processing", "capture-held", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "usage", "usage-held", "usage-reserved", "usage-uncapped", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
 export type Scenario = typeof scenarios[number];
 export const scenarioFrom = (search: string): Scenario => scenarios.find(s => s === new URLSearchParams(search).get("scenario")) ?? "review";
 
@@ -156,8 +156,10 @@ export function createFixture(scenario: Scenario): Fixture {
   const lectureList = lecturesResponse.parse({ lectures: scenario === "home-empty" ? [] : [
     { captureId: ids.capture, sourceTitles: ["Locks & deadlocks"], sourceIds: [ids.source], firstSeq: 2000, videos: 1, watchedSeconds: 760, status: { state: "stopped" }, reviews: [
       { reviewId: ids.review, startedMs: at(15), phase: view.state.phase, saved: view.saved, mainQuestions: view.state.mainQuestions },
-      { reviewId: ids.pendingReview, startedMs: at(13), phase: "ended", saved: "save_pending", mainQuestions: 2 },
-      { reviewId: ids.unsavedReview, startedMs: at(10), phase: "ended", saved: "unsaved", mainQuestions: 0 },
+      ...(scenario === "capture-split" ? [] : [
+        { reviewId: ids.pendingReview, startedMs: at(13), phase: "ended", saved: "save_pending", mainQuestions: 2 },
+        { reviewId: ids.unsavedReview, startedMs: at(10), phase: "ended", saved: "unsaved", mainQuestions: 0 },
+      ]),
     ] },
     { captureId: ids.otherCapture, sourceTitles: ["Semaphores - Operating Systems"], sourceIds: [id("src", "semaphores")], firstSeq: 3000, videos: 1, watchedSeconds: 240, status: { state: "capturing" }, reviews: [] },
     { captureId: ids.earlierCapture, sourceTitles: ["Deadlock prevention"], sourceIds: [id("src", "deadlock-prevention")], firstSeq: 1000, videos: 1, watchedSeconds: 900, status: { state: "stopped" }, reviews: [
@@ -187,7 +189,9 @@ export function createFixture(scenario: Scenario): Fixture {
     async reviewOptions() {
       log("review.options");
       const scope = { chunkRevisions: [ids.chunk], supportedClaims: 3, topics, material, partial: [{ kind: "capture_gap", gap }] };
-      return reviewOptionsz.parse(scenario === "capture-empty" ? { kind: "nothing_to_review", gaps: [gap], unverified: [], rewatch: [{ sourceId: ids.source, interval: { start: 600, end: 640 } }] } : scenario === "capture-processing" || scenario === "capture-held" ? { kind: "processing", readyNow: scope, pendingChunks: 2, estimateS: null } : { kind: "ready", scope });
+      // "capture-split": the review above holds the first 4:18 of the lecture, which this answer leaves out of the next review.
+      const heldBack = scenario === "capture-split" ? [{ reviewId: ids.review, material: [[ids.source, [[0, 258]]]] }] : [];
+      return reviewOptionsz.parse(scenario === "capture-empty" ? { kind: "nothing_to_review", heldBack: [], gaps: [gap], unverified: [], rewatch: [{ sourceId: ids.source, interval: { start: 600, end: 640 } }] } : scenario === "capture-processing" || scenario === "capture-held" ? { kind: "processing", readyNow: scope, pendingChunks: 2, estimateS: null, heldBack } : { kind: "ready", scope, heldBack });
     },
     async startReview(_capture, _choice, reviewId) { log("review.start"); return { kind: "started", reviewId, scope: view.scope }; },
     async answerInvite(_id, answer) { log(`invite.${answer}`); },

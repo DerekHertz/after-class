@@ -25,7 +25,7 @@ describe("review options screens", () => {
 
   test("ready offers one start, names the topics and covered time, and says what each capture gap leaves out", () => {
     const screen = optionsScreen(
-      { kind: "ready", scope: scopeOf({ supportedClaims: 5, topics: [topic("Logical clocks"), topic("Happened-before")], partial: [{ kind: "unverified_claims", count: 2 }, { kind: "capture_gap", gap: { sourceId: src, interval: interval(120, 180), channel: "frames", reason: "hidden_tab" } }] }) },
+      { kind: "ready", heldBack: [], scope: scopeOf({ supportedClaims: 5, topics: [topic("Logical clocks"), topic("Happened-before")], partial: [{ kind: "unverified_claims", count: 2 }, { kind: "capture_gap", gap: { sourceId: src, interval: interval(120, 180), channel: "frames", reason: "hidden_tab" } }] }) },
       titles,
     );
     expect(screen).toMatchObject({ kind: "ready", offers: [{ choice: "prepared_only", label: "Start review" }] });
@@ -42,10 +42,10 @@ describe("review options screens", () => {
   });
 
   test("a scope with no topic names says so and falls back to its claim count, never calling claims topics", () => {
-    const out = html({ kind: "ready", scope: scopeOf({ supportedClaims: 3 }) });
+    const out = html({ kind: "ready", heldBack: [], scope: scopeOf({ supportedClaims: 3 }) });
     expect(out).toContain("Topic names are not available for this material. It has 3 claims that passed the evidence check.");
     expect(out).not.toMatch(/3 topics/);
-    const named = html({ kind: "ready", scope: scopeOf({ supportedClaims: 3, topics: [topic("Logical clocks")] }) });
+    const named = html({ kind: "ready", heldBack: [], scope: scopeOf({ supportedClaims: 3, topics: [topic("Logical clocks")] }) });
     expect(named).toContain("<li>Logical clocks</li>");
     expect(named).not.toContain("claims that passed");
   });
@@ -54,7 +54,7 @@ describe("review options screens", () => {
     const gap = (start: number, end: number, reason: "partially_watched_segment" | "hidden_tab" = "partially_watched_segment", channel: "transcript" | "frames" = "transcript") =>
       ({ kind: "capture_gap", gap: { sourceId: src, interval: interval(start, end), channel, reason } }) as const;
     const screen = optionsScreen(
-      { kind: "ready", scope: scopeOf({ partial: [gap(0, 2), { kind: "unverified_claims", count: 1 }, gap(10, 13), gap(20, 25), gap(30, 90, "hidden_tab", "frames")] }) },
+      { kind: "ready", heldBack: [], scope: scopeOf({ partial: [gap(0, 2), { kind: "unverified_claims", count: 1 }, gap(10, 13), gap(20, 25), gap(30, 90, "hidden_tab", "frames")] }) },
       titles,
     );
     if (screen.kind !== "ready") throw new Error("unreachable");
@@ -83,7 +83,7 @@ describe("review options screens", () => {
   });
 
   test("processing shows an estimate only when the backend gave a usable one", () => {
-    const processing = (estimateS: number | null) => optionsScreen({ kind: "processing", readyNow: null, pendingChunks: 2, estimateS });
+    const processing = (estimateS: number | null) => optionsScreen({ kind: "processing", heldBack: [], readyNow: null, pendingChunks: 2, estimateS });
     expect(processing(null)).toMatchObject({ estimate: null });
     expect(processing(0)).toMatchObject({ estimate: null });
     expect(processing(Number.NaN)).toMatchObject({ estimate: null });
@@ -93,16 +93,16 @@ describe("review options screens", () => {
   });
 
   test("processing offers a start only when something is ready, and both ways of starting then", () => {
-    const none = optionsScreen({ kind: "processing", readyNow: null, pendingChunks: 1, estimateS: null });
+    const none = optionsScreen({ kind: "processing", heldBack: [], readyNow: null, pendingChunks: 1, estimateS: null });
     expect(none.kind === "processing" && none.offers).toEqual([]);
-    const some = optionsScreen({ kind: "processing", readyNow: scopeOf({ supportedClaims: 3, partial: [{ kind: "chunks_still_preparing", count: 1 }] }), pendingChunks: 1, estimateS: 120 });
+    const some = optionsScreen({ kind: "processing", heldBack: [], readyNow: scopeOf({ supportedClaims: 3, partial: [{ kind: "chunks_still_preparing", count: 1 }] }), pendingChunks: 1, estimateS: 120 });
     expect(some.kind === "processing" && some.offers.map((o) => o.choice)).toEqual(["prepared_only", "stop_early"]);
     // The pending section has its own sentence on this screen, so it is not listed again as a limit.
     expect(some.kind === "processing" && some.ready?.limits).toEqual([]);
   });
 
   test("processing makes starting with ready topics the usual path and puts stopping behind a disclosure that says what it cancels", () => {
-    const out = html({ kind: "processing", readyNow: scopeOf({ topics: [topic("Logical clocks")] }), pendingChunks: 2, estimateS: null });
+    const out = html({ kind: "processing", heldBack: [], readyNow: scopeOf({ topics: [topic("Logical clocks")] }), pendingChunks: 2, estimateS: null });
     expect(out).toContain("Some topics are ready");
     expect(out).toContain("2 more sections are still being prepared. They are not in a review you start now.");
     expect(out).toContain("<li>Logical clocks</li>");
@@ -113,14 +113,14 @@ describe("review options screens", () => {
     expect(more).toContain(">Stop preparing and start</button>");
     expect(more).toContain("Cancels the preparation still running for 2 sections.");
     expect(out.indexOf("Stop preparing and start")).toBeGreaterThan(out.indexOf("<details"));
-    const waiting = html({ kind: "processing", readyNow: null, pendingChunks: 1, estimateS: null });
+    const waiting = html({ kind: "processing", heldBack: [], readyNow: null, pendingChunks: 1, estimateS: null });
     expect(waiting).toContain("Preparing your lecture");
     expect(waiting).toContain("1 section is still being prepared.");
     expect(waiting).not.toContain("<button");
   });
 
   test("nothing to review lists gaps, unverified claims with their status, and a watch link per rewatch interval", () => {
-    const options = { kind: "nothing_to_review", gaps: [], unverified: [], rewatch: [{ sourceId: src, interval: interval(120, 180) }] } as const;
+    const options = { kind: "nothing_to_review", heldBack: [], gaps: [], unverified: [], rewatch: [{ sourceId: src, interval: interval(120, 180) }] } as const;
     expect(optionsScreen(options, titles, new Map([[src, "QgWz_s7uugE"]]))).toEqual({
       kind: "nothing", gaps: [], unverified: [],
       rewatch: [{ where: "Lamport clocks, 2:00 to 3:00", href: "https://www.youtube.com/watch?v=QgWz_s7uugE&t=120s" }],
@@ -132,13 +132,13 @@ describe("review options screens", () => {
   const view = (o: Parameters<typeof optionsScreen>[0], onRetry: () => void = () => {}, videos = new Map([[src, "QgWz_s7uugE"]])) =>
     createElement(OptionsView, { screen: optionsScreen(o, titles, videos), busy: false, onStart: () => {}, onRetry, api: fakeApi, titles });
   const html = (o: Parameters<typeof optionsScreen>[0]) => renderToStaticMarkup(view(o));
-  const nothing = { kind: "nothing_to_review", gaps: [], unverified: [], rewatch: [{ sourceId: src, interval: interval(120, 180) }] } as const;
+  const nothing = { kind: "nothing_to_review", heldBack: [], gaps: [], unverified: [], rewatch: [{ sourceId: src, interval: interval(120, 180) }] } as const;
 
   test("the rendered screens carry the content", () => {
-    expect(html({ kind: "processing", readyNow: null, pendingChunks: 2, estimateS: null })).toContain("No reliable time estimate yet.");
-    expect(html({ kind: "processing", readyNow: null, pendingChunks: 2, estimateS: 300 })).toContain("about 5 min");
-    expect(html({ kind: "ready", scope: scopeOf({ supportedClaims: 4 }) })).toContain("Start review");
-    expect(html({ kind: "nothing_to_review", gaps: [], unverified: [], rewatch: [] })).toContain("Nothing to review yet");
+    expect(html({ kind: "processing", heldBack: [], readyNow: null, pendingChunks: 2, estimateS: null })).toContain("No reliable time estimate yet.");
+    expect(html({ kind: "processing", heldBack: [], readyNow: null, pendingChunks: 2, estimateS: 300 })).toContain("about 5 min");
+    expect(html({ kind: "ready", heldBack: [], scope: scopeOf({ supportedClaims: 4 }) })).toContain("Start review");
+    expect(html({ kind: "nothing_to_review", heldBack: [], gaps: [], unverified: [], rewatch: [] })).toContain("Nothing to review yet");
   });
 
   test("Flow C: nothing to review offers a retry and each rewatch interval as a link that opens the video at that time", () => {
@@ -170,7 +170,7 @@ describe("review options screens", () => {
   });
 
   test("an unverified claim shows the evidence it cited, in the evidence pane", () => {
-    const o = reviewOptionsz.parse({ kind: "nothing_to_review", gaps: [], unverified: [claimJson("unverified")], rewatch: [] });
+    const o = reviewOptionsz.parse({ kind: "nothing_to_review", heldBack: [], gaps: [], unverified: [claimJson("unverified")], rewatch: [] });
     const panes = findElements(OptionsView({ screen: optionsScreen(o, titles), busy: false, onStart: () => {}, onRetry: () => {}, api: fakeApi, titles }), (e) => e.type === EvidencePane);
     expect(panes.map((p) => (p.props as { ids: unknown }).ids)).toEqual([[ev1]]);
     expect(renderToStaticMarkup(view(o))).toContain("Loading evidence...");

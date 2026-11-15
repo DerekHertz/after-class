@@ -26,6 +26,18 @@ describe("GET /captures/:id/review-options", () => {
   });
 });
 
+describe("heldBack over the wire", () => {
+  test("a started review is named in the options with its Material as canonical rows", async () => {
+    const rig = reviewRig();
+    const reviewId = await startedIn(rig);
+    const body = reviewOptionsResponse.parse(await (await fetch(`${rig.base}/captures/${rig.capture}/review-options`, { headers: bearer })).json());
+    expect(body.kind).toBe("nothing_to_review");
+    expect(body.heldBack.map((h) => [h.reviewId, [...h.material]])).toEqual([[reviewId, [[SRC, expect.anything()]]]]);
+    const raw = await (await fetch(`${rig.base}/captures/${rig.capture}/review-options`, { headers: bearer })).json();
+    expect(raw.heldBack).toEqual([{ reviewId, material: [[SRC, [[0, 300]]]] }]);
+  });
+});
+
 describe("POST /captures/:id/reviews", () => {
   test("starts a review with the scope in the route's schema, Material as canonical rows", async () => {
     const rig = reviewRig();
