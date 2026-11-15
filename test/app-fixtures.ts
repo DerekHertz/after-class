@@ -39,7 +39,7 @@ export const claimJson = (status: string) => ({
   originalCheck: null, revision: null, revisionCheck: null, status,
 });
 
-export const READY = { kind: "ready", scope: { chunkRevisions: [crv], supportedClaims: 4, topics: [], material: [[src, [[0, 120]]]], partial: [] } };
+export const READY = { kind: "ready", heldBack: [], scope: { chunkRevisions: [crv], supportedClaims: 4, topics: [], material: [[src, [[0, 120]]]], partial: [] } };
 
 export function turnJson(n: number, actor: "learner" | "tutor" | "code", rest: Record<string, unknown>) {
   return { id: actor === "learner" ? stableId("turn", `l${n}`) : stableId("turn", `${actor}${n}`), reviewId, seq: n, atMs: n * 1000, threadId: actor === "code" ? null : thr, actor, ...rest };

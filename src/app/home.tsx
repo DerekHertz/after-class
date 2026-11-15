@@ -7,10 +7,11 @@ import { captureStatusLabel, formatDuration, lectureHeading } from "./core";
 import type { Route } from "./core";
 import { currentQuestionTopic, isQuestion } from "./diagram-view";
 import { objectFrame } from "./room-object";
+import { storeListing } from "./connect";
 import { ErrorNote, Link, navigate, useAsync } from "./ui";
 
 type Lecture = LecturesResponse["lectures"][number];
-type LectureReview = Lecture["reviews"][number];
+export type LectureReview = Lecture["reviews"][number];
 
 export const EMPTY_HOME = "No lectures captured yet. Start capture from the extension while watching a lecture.";
 
@@ -19,6 +20,13 @@ export const FIRST_CAPTURE_STEPS = [
   "Open a YouTube lecture in Chrome and turn on its captions.",
   "Click the After Class extension and choose Start capture.",
   "Watch the part you want to review. When material is ready, the extension offers a review, or choose Open the review page.",
+] as const;
+
+/** Hosted, the extension has to be installed and connected to the account before Start capture appears, so those two steps come first. */
+export const HOSTED_FIRST_CAPTURE_STEPS = [
+  "Install the After Class extension in Chrome.",
+  "Connect it to your account. Click the extension and choose Connect, or use the Connect page.",
+  ...FIRST_CAPTURE_STEPS,
 ] as const;
 
 
@@ -87,33 +95,48 @@ function ContinueCard({ api, lecture, review }: { readonly api: ResumeApi; reado
   );
 }
 
-function ReviewRow({ review }: { readonly review: LectureReview }) {
+/** One review of a lecture. `covered` is what it froze, when the page knows (the lecture page does, the home list does not). */
+export function ReviewRow({ review, covered = [] }: { readonly review: LectureReview; readonly covered?: readonly string[] }) {
   const { label, target } = reviewAction(review);
   const status = review.phase === "paused" ? "Paused · " : review.phase === "active" ? "In progress · " : "";
   return (
     <li>
       {target ? <Link to={target}>{label}</Link> : label}{" "}
-      <span className="muted">{status}{questions(review.mainQuestions)} · started {startedAt(review.startedMs)}</span>
+      <span className="muted">{status}{questions(review.mainQuestions)} · started {startedAt(review.startedMs)}{covered.length > 0 && ` · covers ${covered.join("; ")}`}</span>
     </li>
   );
 }
 
-function FirstCapture() {
+/** `extensionId`: hosted, the pinned extension ("" when the server names none); null locally. The only place the home page tells the two apart. */
+function FirstCapture({ extensionId }: { readonly extensionId: string | null }) {
   return (
     <section className="record-section home-empty" aria-labelledby="home-empty-heading">
       <h2 id="home-empty-heading">Capture your first lecture</h2>
       <p>{EMPTY_HOME}</p>
-      <ol>{FIRST_CAPTURE_STEPS.map((step) => <li key={step}>{step}</li>)}</ol>
-      <p className="muted">
-        The After Class backend answered this page, so it is running. This page can't tell whether the extension is connected to it.
-        If the extension says it can't reach the backend, open the extension's options, paste the pairing token the backend printed, and choose Save and test.
-      </p>
+      {extensionId === null ? (
+        <>
+          <ol>{FIRST_CAPTURE_STEPS.map((step) => <li key={step}>{step}</li>)}</ol>
+          <p className="muted">
+            The After Class backend answered this page, so it is running. This page can't tell whether the extension is connected to it.
+            If the extension says it can't reach the backend, open the extension's options, paste the pairing token the backend printed, and choose Save and test.
+          </p>
+        </>
+      ) : (
+        <>
+          <ol>{HOSTED_FIRST_CAPTURE_STEPS.map((step) => <li key={step}>{step}</li>)}</ol>
+          <p>
+            {extensionId !== "" && <><a href={storeListing(extensionId)} target="_blank" rel="noreferrer">Get the extension from the Chrome Web Store</a>{" · "}</>}
+            <Link to={{ page: "connect_extension" }}>Connect this browser</Link>
+          </p>
+          <p className="muted">This page can't tell whether the extension is connected. The Connect page connects it, and Connected browsers lists every browser on your account.</p>
+        </>
+      )}
     </section>
   );
 }
 
-export function HomeBody({ api, data }: { readonly api: ResumeApi; readonly data: LecturesResponse }) {
-  if (data.lectures.length === 0) return <FirstCapture />;
+export function HomeBody({ api, data, extensionId = null }: { readonly api: ResumeApi; readonly data: LecturesResponse; readonly extensionId?: string | null }) {
+  if (data.lectures.length === 0) return <FirstCapture extensionId={extensionId} />;
   const open = resumable(data);
   return (
     <>
@@ -164,7 +187,7 @@ export function OpenById() {
   );
 }
 
-export function HomeScreen({ api }: { readonly api: AppApi }) {
+export function HomeScreen({ api, extensionId = null }: { readonly api: AppApi; readonly extensionId?: string | null }) {
   const lectures = useAsync(useCallback(() => api.lectures(), [api]));
   return (
     <main className="notebook-page home-page room-paper" {...objectFrame("source")}>
@@ -174,7 +197,7 @@ export function HomeScreen({ api }: { readonly api: AppApi }) {
       </header>
       {lectures.error !== null && <ErrorNote error={lectures.error} retry={lectures.reload} />}
       {lectures.data === null && lectures.error === null && <p className="page-loading" role="status">Loading your lectures...</p>}
-      {lectures.data && <HomeBody api={api} data={lectures.data} />}
+      {lectures.data && <HomeBody api={api} data={lectures.data} extensionId={extensionId} />}
       <OpenById />
     </main>
   );

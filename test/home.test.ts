@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EMPTY_HOME, FIRST_CAPTURE_STEPS, HomeBody, OpenById, ResumeTopicLine, loadResumeTopic, resumable, reviewAction, reviewTarget } from "../src/app/home";
+import { EMPTY_HOME, FIRST_CAPTURE_STEPS, HOSTED_FIRST_CAPTURE_STEPS, HomeBody, OpenById, ResumeTopicLine, loadResumeTopic, resumable, reviewAction, reviewTarget } from "../src/app/home";
 import type { ResumeApi } from "../src/app/home";
 import { createFixture, ids } from "../scripts/ui-preview/fixtures";
 import { EndConfirm } from "../src/app/review";
@@ -21,14 +21,14 @@ const noReads: ResumeApi = {
 const data: LecturesResponse = {
   lectures: [
     {
-      captureId: cap, sourceTitles: ["Locks - Operating Systems", "Deadlock - Operating Systems"], videos: 2, watchedSeconds: 1800, status: { state: "stopped" },
+      captureId: cap, sourceTitles: ["Locks - Operating Systems", "Deadlock - Operating Systems"], sourceIds: [stableId("src", "locks"), stableId("src", "deadlock")], firstSeq: 1000, videos: 2, watchedSeconds: 1800, status: { state: "stopped" },
       reviews: [
         { reviewId: rActive, startedMs: 3, phase: "active", saved: "unsaved", mainQuestions: 1 },
         { reviewId: rEnded, startedMs: 2, phase: "ended", saved: "unsaved", mainQuestions: 0 },
         { reviewId: rSaved, startedMs: 1, phase: "ended", saved: "saved", mainQuestions: 3 },
       ],
     },
-    { captureId: cap2, sourceTitles: ["Semaphores"], videos: 1, watchedSeconds: 30, status: { state: "capturing" }, reviews: [] },
+    { captureId: cap2, sourceTitles: ["Semaphores"], sourceIds: [stableId("src", "semaphores")], firstSeq: 2000, videos: 1, watchedSeconds: 30, status: { state: "capturing" }, reviews: [] },
   ],
 };
 
@@ -154,6 +154,19 @@ describe("the home page", () => {
     expect(html).not.toContain("Continue review");
   });
 
+  test("the empty hosted home shows install and Connect steps and a link to the connect page, never the pairing token", () => {
+    const ext = "abcdefghijklmnopabcdefghijklmnop";
+    const html = renderToStaticMarkup(createElement(HomeBody, { api: noReads, data: { lectures: [] }, extensionId: ext }));
+    for (const step of HOSTED_FIRST_CAPTURE_STEPS) expect(html).toContain(step);
+    expect(html).toContain('href="/app/connect-extension"');
+    expect(html).toContain(`href="https://chromewebstore.google.com/detail/${ext}"`);
+    expect(html).not.toContain("pairing token");
+    expect(html).not.toContain("Save and test");
+    const unnamed = renderToStaticMarkup(createElement(HomeBody, { api: noReads, data: { lectures: [] }, extensionId: "" }));
+    expect(unnamed).toContain('href="/app/connect-extension"');
+    expect(unnamed).not.toContain("chromewebstore");
+  });
+
   test("opening a capture by ID sits in a closed troubleshooting disclosure", () => {
     const html = renderToStaticMarkup(createElement(OpenById));
     expect(html.startsWith("<details")).toBe(true);
@@ -176,11 +189,14 @@ describe("ending a review asks first", () => {
   });
 
   test("the confirm step reads as the spec says and offers both buttons", () => {
-    const html = renderToStaticMarkup(createElement(EndConfirm, { disabled: false, onConfirm() {}, onCancel() {} }));
+    const html = renderToStaticMarkup(createElement(EndConfirm, { id: "end-panel", disabled: false, onConfirm() {}, onCancel() {} }));
     // #116: the learner sees what stops (the conversation) and what stays (the notebook record and a read-only review).
     expect(END_CONFIRM_TEXT).toBe("Finish and save this review? The conversation ends and can't be continued. Your notes and results stay in your notebook, and you can reread this review.");
     expect(html).toContain("The conversation ends and can&#x27;t be continued.");
-    expect(html).toContain('aria-label="Finish and save this review?"');
+    expect(html).toContain('id="end-panel"');
+    expect(html).toContain('aria-labelledby="end-panel-title"');
+    expect(html).toContain('aria-describedby="end-panel-text"');
+    expect(html).toContain('id="end-panel-title" class="visually-hidden">Finish and save this review?<');
     expect(html).toContain(">Finish &amp; save<");
     expect(html).toContain(">Keep reviewing<");
   });

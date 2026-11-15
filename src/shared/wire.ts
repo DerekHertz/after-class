@@ -291,11 +291,13 @@ const captureViewz = z.object({
   watchedSeconds: z.number(),
 }) satisfies z.ZodType<CaptureView>;
 
-/** GET /lectures: every capture, newest first, with its reviews. `sourceTitles` are the lecture videos' titles. */
+/** GET /lectures: every capture, newest first, with its reviews. `sourceTitles` and `sourceIds` are the lecture videos, in the order the capture first saw them. `firstSeq` orders captures by when their first fact arrived, strictly. */
 export const lecturesResponse = z.object({
   lectures: z.array(z.object({
     captureId: idOf("cap"),
     sourceTitles: z.array(z.string()),
+    sourceIds: z.array(idOf("src")),
+    firstSeq: z.number().int().nonnegative(),
     videos: z.number().int().min(0),
     watchedSeconds: z.number(),
     status: captureViewz.shape.status,
@@ -349,16 +351,19 @@ const scopePreviewz = z.object({
   partial: z.array(partialReasonz),
 });
 
+const heldBackz = z.array(z.object({ reviewId: idOf("rvw"), material: materialWire }));
+
 const nothingToReviewz = z.object({
   kind: z.literal("nothing_to_review"),
+  heldBack: heldBackz,
   gaps: z.array(gapz),
   unverified: z.array(claimz),
   rewatch: z.array(z.object({ sourceId: idOf("src"), interval: intervalz })),
 });
 
 export const reviewOptionsResponse = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("ready"), scope: scopePreviewz }),
-  z.object({ kind: z.literal("processing"), readyNow: scopePreviewz.nullable(), pendingChunks: z.number(), estimateS: z.number().nullable() }),
+  z.object({ kind: z.literal("ready"), scope: scopePreviewz, heldBack: heldBackz }),
+  z.object({ kind: z.literal("processing"), readyNow: scopePreviewz.nullable(), pendingChunks: z.number(), estimateS: z.number().nullable(), heldBack: heldBackz }),
   nothingToReviewz,
 ]) satisfies z.ZodType<ReviewOptions>;
 
@@ -554,7 +559,9 @@ const PURPOSES = ["boundary", "frame_change", "claim_check", "interpretation", "
 
 const allowancez = z.object({
   usedUsd: z.number(),
+  reservedUsd: z.number().default(0),
   limitUsd: z.number().nullable(),
+  uncapped: z.boolean().default(false),
   resetsAtMs: z.number(),
   held: budgetHoldz.nullable(),
 }) satisfies z.ZodType<Allowance>;
@@ -658,21 +665,29 @@ export type PathParams<P extends string> = P extends `${string}:${infer K}/${inf
  */
 export type Bearer = "session" | "device";
 
+export type CaptureSource = "path" | "query" | "body";
+
 export type Route<P extends string = string> = {
   readonly method: Method;
   /** `:name` segments are path parameters (ids, percent-encoded on the wire). */
   readonly path: P;
   readonly query: z.ZodType | null;
   readonly request: z.ZodType | null;
+  /**
+   * Where the route takes a capture id from, or null when it takes none. The backend answers 404 for a `path` or
+   * `query` capture id the caller does not hold, in one check before the route runs. `body` is ingest alone: a device
+   * creates a capture by ingesting into a new id, so the route decides for itself.
+   */
+  readonly capture: CaptureSource | null;
   readonly reply: Reply;
   /** The bearer tokens hosted mode accepts. Empty: no bearer at all, because the request body carries the credential. */
   readonly bearer: readonly Bearer[];
 };
 
 function route<const P extends string>(
-  method: Method, path: P, spec: { readonly query?: z.ZodType; readonly request?: z.ZodType; readonly reply: Reply; readonly bearer: readonly Bearer[] },
+  method: Method, path: P, spec: { readonly query?: z.ZodType; readonly request?: z.ZodType; readonly capture?: CaptureSource; readonly reply: Reply; readonly bearer: readonly Bearer[] },
 ): Route<P> {
-  return { method, path, query: spec.query ?? null, request: spec.request ?? null, reply: spec.reply, bearer: spec.bearer };
+  return { method, path, query: spec.query ?? null, request: spec.request ?? null, capture: spec.capture ?? null, reply: spec.reply, bearer: spec.bearer };
 }
 
 const json = (schema: z.ZodType): Reply => ({ kind: "json", schema });
@@ -699,13 +714,13 @@ const CODE_IN_BODY: readonly Bearer[] = [];
  * locally.
  */
 export const ROUTES = {
-  ingest: route("POST", "/ingest", { request: ingestBatch, bearer: EXTENSION, reply: json(ingestAckResponse) }),
+  ingest: route("POST", "/ingest", { request: ingestBatch, capture: "body", bearer: EXTENSION, reply: json(ingestAckResponse) }),
   /** The home page's list of lectures and their reviews. Read-only. */
   lectures: route("GET", "/lectures", { bearer: APP, reply: json(lecturesResponse) }),
-  captureView: route("GET", "/captures/:captureId", { bearer: APP, reply: json(captureResponse) }),
-  answerInvite: route("POST", "/captures/:captureId/invite", { request: inviteAnswerRequest, bearer: BOTH, reply: json(inviteState) }),
-  reviewOptions: route("GET", "/captures/:captureId/review-options", { bearer: APP, reply: json(reviewOptionsResponse) }),
-  startReview: route("POST", "/captures/:captureId/reviews", { request: startReviewRequest, bearer: APP, reply: json(startReviewResponse) }),
+  captureView: route("GET", "/captures/:captureId", { capture: "path", bearer: APP, reply: json(captureResponse) }),
+  answerInvite: route("POST", "/captures/:captureId/invite", { capture: "path", request: inviteAnswerRequest, bearer: BOTH, reply: json(inviteState) }),
+  reviewOptions: route("GET", "/captures/:captureId/review-options", { capture: "path", bearer: APP, reply: json(reviewOptionsResponse) }),
+  startReview: route("POST", "/captures/:captureId/reviews", { capture: "path", request: startReviewRequest, bearer: APP, reply: json(startReviewResponse) }),
   sendTurn: route("POST", "/reviews/:reviewId/turns", { request: turnRequest, bearer: APP, reply: { kind: "ndjson", event: tutorStreamEvent } }),
   review: route("GET", "/reviews/:reviewId", { bearer: APP, reply: json(reviewViewResponse) }),
   save: route("POST", "/reviews/:reviewId/save", { bearer: APP, reply: json(saveResponse) }),
@@ -715,7 +730,7 @@ export const ROUTES = {
   requestDiagram: route("POST", "/reviews/:reviewId/diagrams/:topicId", { bearer: APP, reply: json(topicDiagramResponse) }),
   record: route("GET", "/record", { query: recordQuery, bearer: APP, reply: json(recordViewResponse) }),
   usage: route("GET", "/usage", { bearer: APP, reply: json(usageResponse) }),
-  evidence: route("GET", "/evidence", { query: evidenceQuery, bearer: APP, reply: json(evidenceBundleResponse) }),
+  evidence: route("GET", "/evidence", { query: evidenceQuery, capture: "query", bearer: APP, reply: json(evidenceBundleResponse) }),
   frameImage: route("GET", "/frames/:evidenceId", { bearer: APP, reply: { kind: "jpeg" } }),
   editNote: route("PATCH", "/record/notes/:noteId", { request: noteEditRequest, bearer: APP, reply: EMPTY }),
   deleteNote: route("DELETE", "/record/notes/:noteId", { bearer: APP, reply: EMPTY }),
@@ -724,7 +739,7 @@ export const ROUTES = {
   overrideObservation: route("POST", "/record/observations/:observationId/override", { request: observationOverrideRequest, bearer: APP, reply: EMPTY }),
   deleteEvidence: route("POST", "/record/evidence/delete", { request: evidenceDeleteRequest, bearer: APP, reply: EMPTY }),
   /** Re-queues the capture's chunks that are unfinished or have no supported claim. No body; the app's "Check again". */
-  retryPreparation: route("POST", "/captures/:captureId/retry-preparation", { bearer: APP, reply: EMPTY }),
+  retryPreparation: route("POST", "/captures/:captureId/retry-preparation", { capture: "path", bearer: APP, reply: EMPTY }),
   /** Whether tutor speech can come from ElevenLabs through the backend. */
   voiceStatus: route("GET", "/voice", { bearer: APP, reply: json(voiceStatusResponse) }),
   /** The tutor's sentence as audio/mpeg, streamed from ElevenLabs. 503 when voice is unavailable, 502 or 504 when the upstream failed. */

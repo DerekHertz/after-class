@@ -14,6 +14,8 @@ LC_ALL=C
 
 dir=/run/afterclass-app
 names=(TYPESAFE_API_KEY AFTERCLASS_ANTHROPIC_API_KEY)
+# Settings the app reads from keys.env that may be absent. A missing parameter is skipped. One that exists is checked like a key.
+optional=(AFTERCLASS_BUDGET_UNCAPPED_USERS)
 
 fail() {
   echo "afterclass-fetch-keys: $*, so the app is not started" >&2
@@ -35,21 +37,31 @@ umask 077
 tmp=$(mktemp "${dir}/keys.env.XXXXXX")
 trap 'rm -f "$tmp"' EXIT
 
-for name in "${names[@]}"; do
+written=0
+for name in "${names[@]}" "${optional[@]}"; do
   parameter="${KEY_PARAMETER_PREFIX}/${name}"
+  required=1
+  for o in "${optional[@]}"; do [ "$o" = "$name" ] && required=0; done
+  err="${dir}/aws-error.$$"
   # The x keeps the trailing newlines that command substitution would strip, so a value ending in one is seen.
-  raw=$(aws ssm get-parameter --region "$AWS_REGION" --name "$parameter" --with-decryption \
-    --query Parameter.Value --output text && printf x) || fail "cannot read ${parameter}"
+  if ! raw=$(aws ssm get-parameter --region "$AWS_REGION" --name "$parameter" --with-decryption \
+    --query Parameter.Value --output text 2>"$err" && printf x); then
+    if [ "$required" = 0 ] && grep -q ParameterNotFound "$err"; then rm -f "$err"; continue; fi
+    rm -f "$err"
+    fail "cannot read ${parameter}"
+  fi
+  rm -f "$err"
   value=${raw%$'\n'x}
   # readKeys trims spaces and strips one pair of quotes, so a value with either would reach the app changed.
   if [[ "$raw" != *$'\n'x || ! "$value" =~ ^[[:graph:]]+$ || "$value" == *[\"\']* || "$value" = None ]]; then
     fail "${parameter} is empty or not one line of printable characters without spaces or quotes"
   fi
   printf '%s=%s\n' "$name" "$value" >> "$tmp"
+  written=$((written + 1))
 done
 
 chown "${uid}:${gid}" "$dir" "$tmp"
 chmod 0700 "$dir"
 chmod 0600 "$tmp"
 mv "$tmp" "${dir}/keys.env"
-echo "afterclass-fetch-keys: wrote ${#names[@]} keys from ${KEY_PARAMETER_PREFIX} to ${dir}/keys.env"
+echo "afterclass-fetch-keys: wrote ${written} values from ${KEY_PARAMETER_PREFIX} to ${dir}/keys.env"

@@ -38,6 +38,7 @@ This AWS account is a member account that AWS manages through its account and pr
 - Cloud-init (`user_data`) installs Docker, mounts `/data` once it is formatted, and sets up two systemd units. `afterclass-app` runs the app image from GHCR, pulled by digest without a sign-in, and `afterclass-caddy` runs the pinned Caddy image as the reverse proxy on ports 80 and 443. Both containers join one Docker bridge network, `afterclass`, and Caddy proxies to `afterclass-app:8080`. Neither uses host networking, so the instance metadata hop limit of 1 keeps both away from the instance role's credentials. Both drop every capability, Caddy keeps only `NET_BIND_SERVICE`, both set `no-new-privileges`, and Caddy's root file system is read-only. Caddy's certificates live on `/data/caddy`. The app keeps its database in `/data/db`. Its config folder is `/run/afterclass-app`, mounted read-only at `/data/config` and described in "Keys" below.
 - A Systems Manager document that runs the deploy script with a commit hash and an image digest, and an SSM parameter that holds the current instance id. `scripts/deploy-beta.sh` uses both.
 - With `domain` set, an A record for the apex in the existing Route 53 hosted zone.
+- With `alarm_email` set, a free-space alarm on `/data`: a CloudWatch metric filter on the app's `{"event":"disk"}` log line, an SNS topic with an email subscription, and an alarm that fires when free space is under `disk_alarm_free_mib`. It needs no agent and does not touch `user_data`, so applying it never replaces the instance.
 
 `main/`
 
@@ -58,6 +59,7 @@ This AWS account is a member account that AWS manages through its account and pr
 - `caddy_image` is pinned by version and digest. To update it, read the new index digest from the registry and change both.
 - `clerk_publishable_key` is required. It is the `pk_live_...` or `pk_test_...` key from Clerk's API keys page, and it is public. Terraform derives the issuer and the JWKS URL from it and sets the app's public origin from `public_url`. Keep it in `infra/beta/terraform.tfvars`.
 - Ingest limits are app settings, not Terraform variables: `AFTERCLASS_USER_QUOTA_MB` (stored bytes per user, default 512) and `AFTERCLASS_MIN_FREE_MB` (free space on `/data` below which ingest answers 503, default 2048). The Caddyfile's `request_body` of 8 MiB matches `MAX_BODY_BYTES` in `src/backend/http.ts`, so change both together. Changing the Caddyfile replaces the instance on apply, like any `user_data` change.
+- `alarm_email` defaults to `null`: no alarm. Set it to get an email when free space on `/data` drops under `disk_alarm_free_mib` (default 4096 MiB), well before the app's 2048 MiB ingest floor refuses uploads. AWS emails that address once to confirm, and sends nothing until its link is opened. The app logs a reading at start and every 15 minutes, for example `{"event":"disk","level":"ok","freeMib":15360,"usedMib":5120,"totalMib":20480,"floorMib":2048}`, so the trend is also readable in the `app` stream of the log group. The alarm only has readings once the image that logs them is deployed.
 - `extension_id` defaults to `null`, which lets no extension connect. For the beta, set it to `jambcaokhnaonnemlbpnppijaojlohgl`, the id of the hosted build (`AFTERCLASS_EXT_BACKEND=https://useafterclass.com bun run build:ext`), which a pinned manifest key keeps the same on every machine. Change it to the Chrome Web Store id once the listing exists. Changing it replaces the instance on apply.
 
 ## Commands, in order
@@ -127,6 +129,15 @@ When sign-in lands and the domain exists, run `terraform apply` in `beta/` again
 ## Keys
 
 The app runs live, with Claude through the Messages API and Clerk sign-in, so it needs `TYPESAFE_API_KEY` and `AFTERCLASS_ANTHROPIC_API_KEY`. ElevenLabs stays off in the beta, so there is no key for it. The keys are SecureString parameters under `/afterclass/beta/`, encrypted with the default `aws/ssm` key. No key is in Terraform, its state, `user_data`, the image or the data volume.
+
+An optional third parameter, `AFTERCLASS_BUDGET_UNCAPPED_USERS`, lists the Clerk user ids, comma separated, whose calls skip the $5 per user cap and are left out of the $50 total (an admin account, issue #246). It is not in the repo because the repo is public. If the parameter does not exist, `afterclass-fetch-keys` skips it and no account is uncapped. If it exists it is checked like a key, and the stop switch still halts a listed account. To set it, copy the user id (it starts with `user_`) from the Clerk dashboard, under Users, then the user. Do not use the email, because the session token carries only the id.
+
+```
+read -r ADMIN_IDS && printf '%s' "$ADMIN_IDS" | aws ssm put-parameter --region us-east-2 --type SecureString \
+  --overwrite --name /afterclass/beta/AFTERCLASS_BUDGET_UNCAPPED_USERS --value file:///dev/stdin && unset ADMIN_IDS
+```
+
+The app reads the parameters at each start, so restart the app unit (`systemctl restart afterclass-app` in a Session Manager shell) for it to take effect. The startup log then says how many uncapped accounts are listed, never their ids. To end the exemption, delete the parameter and restart.
 
 At every start of the app unit, `afterclass-fetch-keys` reads both parameters and writes `keys.env`, mode 0600 and owned by the container's user, into `/run/afterclass-app`. systemd creates that folder on tmpfs at each start and removes it at each stop. The script refuses a folder that is not on tmpfs, prints no value even under `bash -x`, and fails the start when a parameter is missing, unreadable, or not one line of printable characters without spaces or quotes. The app container mounts the folder read-only at `/data/config`, where the image's `AFTERCLASS_CONFIG_DIR` points. The failure is a line that starts with `afterclass-fetch-keys:` in `journalctl -u afterclass-app`, and systemd tries again every 5 seconds.
 

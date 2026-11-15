@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -6,10 +7,13 @@ import type { Db, UserDb } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
 import { serve } from "../src/backend/http";
 import { createLedger } from "../src/backend/providers/ledger";
+import type { Preparation } from "../src/backend/preparation";
 import type { Reviews } from "../src/backend/review";
+import type { Segmentation } from "../src/backend/segmentation";
 import type { CaptureId, EvidenceId, UserId } from "../src/shared/ids";
 import { stableId } from "../src/shared/ids";
 import { DAY, JPEG, VIDEO, keyOf, stream } from "./evidence-fixtures";
+import { ROUTES, type Route, type RouteName } from "../src/shared/wire";
 import { CAP, EXT_ID, JSON_HEADERS, TOKEN, bearer, VIDEO as WIRE_VIDEO, fixtureApp, ingest, post, registerCleanup, wireFacts } from "./http-fixtures";
 import { otherUserDb, testDb } from "./fakes";
 import { tmpDir } from "./tmp";
@@ -317,6 +321,14 @@ describe("the evidence routes with a second user", () => {
     return { raw, alice, bob, a: serveFor(alice), b: serveFor(bob) };
   }
 
+  test("an empty first ingest claims nothing, so the capture stays unknown until a fact lands", async () => {
+    const r = rig();
+    expect((await ingest(r.a, [])).status).toBe(200);
+    expect((await get(r.a, `/captures/${CAP}`)).status).toBe(404);
+    expect((await ingest(r.a, wireFacts(0, 2))).status).toBe(200);
+    expect((await get(r.a, `/captures/${CAP}`)).status).toBe(200);
+  });
+
   const get = (base: string, path: string) => fetch(`${base}${path}`, { headers: bearer });
   const frame = frameIdOf(CAP);
 
@@ -504,4 +516,117 @@ describe("a database from before evidence got user_id", () => {
     expect(db.sql.query("SELECT id FROM users").all()).toEqual([]);
     db.close();
   });
+});
+
+describe("every capture-scoped route answers 404 for a capture id the caller does not hold", () => {
+  const servers: { stop(force?: boolean): void | Promise<void> }[] = [];
+  afterAll(async () => {
+    for (const s of servers.splice(0)) await s.stop(true);
+  });
+
+  const NOTHING = { kind: "nothing_to_review", heldBack: [], gaps: [], unverified: [], rewatch: [] } as const;
+
+  /** Alice ingested CAP. Bob holds nothing. A third id is held by nobody. The stubs record any call that reaches a module past the boundary. */
+  function rig() {
+    const { alice, bob } = twoUsers();
+    const reached: string[] = [];
+    const reviews = {
+      invite: () => (reached.push("invite"), { state: "none" }),
+      answerInvite: () => (reached.push("answerInvite"), { state: "later" }),
+      options: () => (reached.push("options"), NOTHING),
+      start: () => (reached.push("start"), NOTHING),
+      view: () => {
+        throw new Error("unknown review");
+      },
+      heldByAnotherUser: () => false,
+    } as unknown as Reviews;
+    const preparation = { prep: () => ({ finished: false, supportedCount: 0 }), retry: () => void reached.push("retry") } as unknown as Preparation;
+    const segmentation = { current: () => [] } as unknown as Segmentation;
+    const serveFor = (u: { db: UserDb; evidence: ReturnType<typeof twoUsers>["alice"]["evidence"] }) => {
+      const server = serve({
+        modules: { ledger: createLedger(u.db), evidence: u.evidence, reviews, preparation, segmentation },
+        auth: { port: 0, extensionId: EXT_ID, token: TOKEN },
+        appDir: fixtureApp(),
+      });
+      servers.push(server);
+      return `http://127.0.0.1:${server.port}`;
+    };
+    return { reached, a: serveFor(alice), b: serveFor(bob), alice };
+  }
+
+  const NOBODY = stableId("cap", "nobody");
+  type Call = { readonly name: RouteName; readonly path: (id: string) => string; readonly method: "GET" | "POST"; readonly body?: unknown; readonly ok: number };
+  const CALLS: readonly Call[] = [
+    { name: "captureView", method: "GET", path: (id) => `/captures/${id}`, ok: 200 },
+    { name: "answerInvite", method: "POST", path: (id) => `/captures/${id}/invite`, body: { answer: "later" }, ok: 200 },
+    { name: "reviewOptions", method: "GET", path: (id) => `/captures/${id}/review-options`, ok: 200 },
+    { name: "startReview", method: "POST", path: (id) => `/captures/${id}/reviews`, body: { reviewId: stableId("rvw", "x"), choice: "prepared_only" }, ok: 200 },
+    { name: "retryPreparation", method: "POST", path: (id) => `/captures/${id}/retry-preparation`, body: {}, ok: 204 },
+    { name: "evidence", method: "GET", path: (id) => `/evidence?captureId=${id}`, ok: 200 },
+  ];
+  const send = (base: string, c: Call, id: string) =>
+    c.method === "GET" ? fetch(`${base}${c.path(id)}`, { headers: bearer }) : post(base, c.path(id), c.body, JSON_HEADERS);
+
+  /**
+   * Routes that take a capture id from their path or query without saying so in `Route.capture`. Both are read off the
+   * route itself: a `:captureId` path segment, and a query schema that accepts a `captureId`.
+   */
+  /** Whether a query schema has a `captureId` field, read from its shape so other required fields do not hide it. */
+  function queryNamesCaptureId(query: NonNullable<Route["query"]>): boolean {
+    const shape = (query as { shape?: Record<string, unknown> }).shape;
+    if (shape !== undefined) return Object.hasOwn(shape, "captureId");
+    return query.safeParse({ captureId: CAP }).success;
+  }
+
+  function undeclaredCaptureRoutes(routes: Record<string, Route>): string[] {
+    return Object.entries(routes)
+      .filter(([, r]) => {
+        const fromPath = r.path.includes(":captureId");
+        const fromQuery = r.query !== null && queryNamesCaptureId(r.query);
+        return (fromPath && r.capture !== "path") || (fromQuery && r.capture !== "query");
+      })
+      .map(([name]) => name);
+  }
+
+  test("every route that takes a capture id from its path or query declares it, and the table below calls each", () => {
+    expect(undeclaredCaptureRoutes(ROUTES)).toEqual([]);
+    const declared = Object.entries(ROUTES)
+      .filter(([, r]) => r.capture === "path" || r.capture === "query")
+      .map(([name]) => name);
+    expect(CALLS.map((c): string => c.name).sort()).toEqual(declared.sort());
+  });
+
+  test("a route added with a capture id in its path or query and no declaration is reported", () => {
+    const stray = { ...ROUTES.evidence, capture: null };
+    expect(undeclaredCaptureRoutes({ ...ROUTES, strayQuery: stray })).toEqual(["strayQuery"]);
+    expect(undeclaredCaptureRoutes({ ...ROUTES, strayPath: { ...ROUTES.captureView, capture: null } })).toEqual(["strayPath"]);
+    expect(undeclaredCaptureRoutes({ ...ROUTES, strayWrong: { ...ROUTES.captureView, capture: "body" } })).toEqual(["strayWrong"]);
+    const withPage = { ...ROUTES.evidence, capture: null, query: z.object({ captureId: z.string(), page: z.number() }) };
+    expect(undeclaredCaptureRoutes({ ...ROUTES, strayPaged: withPage })).toEqual(["strayPaged"]);
+  });
+
+  for (const c of CALLS) {
+    test(`${c.name} answers 404 for an id nobody holds and for another user's, reaches no module, and answers the owner`, async () => {
+      const r = rig();
+      expect((await ingest(r.a, wireFacts(0, 3))).status).toBe(200);
+      r.reached.length = 0;
+      for (const id of [NOBODY, CAP]) {
+        const denied = await send(r.b, c, id);
+        expect(denied.status).toBe(404);
+        expect(await denied.text()).toContain("unknown capture");
+      }
+      expect((await send(r.a, c, NOBODY)).status).toBe(404);
+      expect(r.reached).toEqual([]);
+      expect((await send(r.a, c, CAP)).status).toBe(c.ok);
+    });
+  }
+
+  test("an ingest into an id nobody holds still creates the capture, which its device can then read", async () => {
+    const r = rig();
+    expect((await get(r.a, `/captures/${CAP}`)).status).toBe(404);
+    expect((await ingest(r.a, wireFacts(0, 2))).status).toBe(200);
+    expect((await get(r.a, `/captures/${CAP}`)).status).toBe(200);
+  });
+
+  const get = (base: string, path: string) => fetch(`${base}${path}`, { headers: bearer });
 });

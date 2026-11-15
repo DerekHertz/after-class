@@ -26,7 +26,7 @@ import type {
 import { Material, contains } from "../../shared/time";
 import { ProviderError } from "../providers/memo";
 import type { Task } from "../providers/memo";
-import type { CacheTtl, ClaudeCli, ClaudeRequest } from "../providers/claude";
+import type { CacheLifetime, CacheTtl, ClaudeCli, ClaudeRequest } from "../providers/claude";
 import type { UserDb } from "../db";
 import { attributeTurns, moveThreads, quickCheckThreads } from "./clamp";
 import { detourTracker } from "./detour";
@@ -507,6 +507,29 @@ export function validateMove(move: TutorMove, input: TutorInput): { readonly ok:
   }
 }
 
+/**
+ * Flow D: "Mismatch → one tentative, source-grounded diagnostic question." The learner finds the answer, so the spoken
+ * reply is a question that points at the source and never recites it. Code cannot judge what a sentence means, and three review
+ * rounds showed it cannot reliably find sentence ends either ("B. F. Skinner" against "option B. Why?"), so it bounds only what it
+ * can: one question mark, at the end, in a short reply. The prompt is what keeps a recital out.
+ */
+export const DIAGNOSTIC_MAX_CHARS = 200;
+
+/**
+ * Question marks across scripts: Latin "?", full width "？", Arabic "؟", and the Greek question mark, written as
+ * U+037E or as the ";" it looks like. A ";" is a question mark only at the end of a reply, since inside one it is a semicolon.
+ */
+const QUESTION_MARKS = /[?\uFF1F\u061F\u037E]/gu;
+const ENDS_IN_QUESTION = /[?\uFF1F\u061F\u037E;]$/u;
+export function validateSay(move: TutorMove, say: string): Verdict {
+  if (move.kind !== "diagnose") return OK;
+  const text = say.replace(/[\s"'\p{Pe}\p{Pf}\p{Pi}]+$/u, "").trim();
+  const marks = text.match(QUESTION_MARKS) ?? [];
+  if (!ENDS_IN_QUESTION.test(text) || marks.length + (text.endsWith(";") ? 1 : 0) !== 1) return no("a diagnostic question is one question: it ends with a single question mark");
+  if (text.length > DIAGNOSTIC_MAX_CHARS) return no(`a diagnostic question is at most ${DIAGNOSTIC_MAX_CHARS} characters. Do not say what the lecture says or give the answer`);
+  return OK;
+}
+
 export const TUTOR_SYSTEM = `You are the tutor in After Class, a review of a lecture the learner just watched. You run a short Socratic review grounded in the lecture's own evidence. Code decides which moves are allowed each turn and checks every move you pick; you decide what to say.
 
 How to tutor:
@@ -514,7 +537,7 @@ How to tutor:
 - Ask at most 3 main questions in a review, each about the usable claims you are given. Ask follow-ups inside a thread as needed, one question at a time.
 - The learner may have marked topics they feel fuzzy on, and may have left a note. Main questions go to the marked topics first. If a marked topic has no usable claim, say so in one short sentence and carry on as you otherwise would.
 - After the marked topics, a quick check is one short recall question on one unmarked topic, at most 3 per review. It is not a main question and not a follow-up thread. When the learner has answered it: if the answer is clear, close the thread and move on; if it is shaky, ask a main question on that same topic, but only if main questions remain. Never tell the learner a quick check shows they understood.
-- When an answer does not match the lecture, ask one tentative diagnostic question grounded in a passage or frame you cite, for example "The lecture puts it as ... How does that fit with what you said?" It is a question, not a verdict. At most one per thread.
+- When an answer does not match the lecture, ask one tentative diagnostic question grounded in a passage or frame you cite in the header. Point the learner at that part of the lecture, but do not say what it says and do not give the correct answer, even in part. Your spoken reply is that one question and nothing else, at most 200 characters, for example "How does what you said fit with where the lecturer talks about ...?" It is a question, not a verdict. At most one per thread.
 - If you suspect a missing prerequisite, you may propose a detour and say why. Never start it yourself. A detour step becomes available only after the learner says yes.
 - If the learner disputes an interpretation, recheck the cited source, show what it says, and invite them to explain. If the evidence does not settle it, say so plainly and set "settled": false. You never decide a dispute; the learner does.
 - When the learner asks for a hint or an explanation, give it. Anything you add beyond what the lecture's evidence shows is a supplemental explanation: say so out loud, for example "Beyond what the lecture showed, ...".
@@ -616,34 +639,57 @@ export function tutorPrompt(input: TutorInput): string {
  */
 export type TutorModel = "opus" | "sonnet";
 
-const TUTOR_REQUEST = { effort: "medium", images: [], webTools: false, timeoutMs: 120_000 } as const;
+/**
+ * The most output tokens a tutor turn may spend, thinking included. A turn is a move header and a few sentences: the 12 turns of the
+ * Fable audit (docs/trail/fable-e2e-2026-11-14-data.json, Sonnet, effort medium) spent 149 to 505 output tokens, thinking included.
+ * 8,000 is about 16 times the most any of them used, so a long answer or a long think still fits, and a quarter of the 32,000 the
+ * API call allowed before, which is what the budget reserved at its worst. A turn that spends all 8,000 stops with max_tokens, which the
+ * adapter records as a failed attempt (the memo stores no turn and the attempt is paid for), and the learner retries it like any other failed turn.
+ */
+export const TUTOR_MAX_OUTPUT_TOKENS = 8_000;
+
+const TUTOR_REQUEST = { effort: "medium", images: [], webTools: false, timeoutMs: 120_000, maxOutputTokens: TUTOR_MAX_OUTPUT_TOKENS } as const;
 
 /**
  * A 5 minute cache entry lives 5 minutes from the start of the request that last wrote or read it. A tutor request that starts
  * more than this after the previous one has likely found its entry gone. The 30 seconds short of 5 minutes cover the time between
- * the admission that records a start and the request reaching the API.
+ * the decision, made right before the budget is asked, and the request reaching the API.
  */
 export const LONG_PAUSE_MS = 4.5 * 60_000;
 
 /**
  * Derek, 2026-11-13: "1 hour should only be for long pauses. maybe there is some "timeout" detection that moves to 1 hour?"
- * A review's tutor prompt starts on the 5 minute cache. Once a tutor request starts more than LONG_PAUSE_MS after the review's
- * previous one, that request and every later one in the review ask for 1 hour, because the caching docs do not say whether a
- * 5 minute marker reads an entry written for 1 hour. `start` is asked by the adapter once a request is admitted and right before
- * it is sent, so a request the budget held is not a start, and one sent that then failed is. Each start is stored in tutor_cache
- * with the review's lifetime, so a restarted process makes the same choice.
+ * A review's tutor prompt starts on the 5 minute cache. Once a tutor request is decided more than LONG_PAUSE_MS after the review's
+ * previous start, that request and every later one in the review ask for 1 hour, because the caching docs do not say whether a
+ * 5 minute marker reads an entry written for 1 hour.
+ *
+ * `decide` is asked once per request by the adapter, after the queue and right before the budget is asked. The lifetime it returns is
+ * the one the budget reserves the request at (always as a write: nothing here claims that an entry is alive, so a lapsed, evicted or
+ * never-written one cannot make the reservation too low) and the one the request sends, so the two cannot disagree. Its `record` is
+ * called only when the budget admits the request, so a held request is not a start; one admitted that then failed, or was rejected
+ * before inference, is. A start that was not a real cache write only makes the next decision more likely to ask for 1 hour, which the reservation prices.
+ * Each start is stored in tutor_cache with the review's lifetime, so a restarted process makes the same choice.
  */
-export type TutorCache = { start(reviewId: ReviewId): CacheTtl };
+export type TutorCache = {
+  decide(reviewId: ReviewId): CacheLifetime;
+};
 
 export function tutorCache(db: UserDb, now: () => number = Date.now): TutorCache {
-  const start = db.sql.query<{ ttl: CacheTtl }, [string, string, number, number]>(
-    `INSERT INTO tutor_cache (user_id, review_id, last_start_ms, ttl) VALUES (?1, ?2, ?3, '5m')
+  const record = db.sql.query<unknown, [string, string, number, CacheTtl]>(
+    `INSERT INTO tutor_cache (user_id, review_id, last_start_ms, ttl) VALUES (?1, ?2, ?3, ?4)
      ON CONFLICT (user_id, review_id) DO UPDATE SET
-       ttl = CASE WHEN ttl = '1h' OR ?3 - last_start_ms > ?4 THEN '1h' ELSE '5m' END,
-       last_start_ms = MAX(last_start_ms, ?3)
-     RETURNING ttl`,
+       ttl = CASE WHEN ttl = '1h' OR ?4 = '1h' THEN '1h' ELSE '5m' END,
+       last_start_ms = MAX(last_start_ms, ?3)`,
   );
-  return { start: (reviewId) => start.get(db.userId, reviewId, Math.round(now()), LONG_PAUSE_MS)!.ttl };
+  const last = db.sql.query<{ last_start_ms: number; ttl: CacheTtl }, [string, string]>(`SELECT last_start_ms, ttl FROM tutor_cache WHERE user_id = ? AND review_id = ?`);
+  return {
+    decide: (reviewId) => {
+      const at = Math.round(now());
+      const row = last.get(db.userId, reviewId);
+      const ttl: CacheTtl = row !== null && (row.ttl === "1h" || at - row.last_start_ms > LONG_PAUSE_MS) ? "1h" : "5m";
+      return { ttl, record: () => void record.run(db.userId, reviewId, at, ttl) };
+    },
+  };
 }
 
 /** The system prompt is TUTOR_SYSTEM plus the review's stable material, the prompt only what changes per turn. */
@@ -661,7 +707,7 @@ export function tutorTask(claude: ClaudeCli, cache: TutorCache, model: TutorMode
     provider: "claude",
     purpose: "tutor_turn",
     model,
-    version: "tutor-3",
+    version: "tutor-4",
     maxAttempts: 2,
     canonicalInput: (input) => {
       const { system, prompt } = tutorRequest(input, model);
@@ -669,7 +715,7 @@ export function tutorTask(claude: ClaudeCli, cache: TutorCache, model: TutorMode
     },
     async attempt(input, ctx) {
       const { text, usage } = await claude.streamText(
-        { ...tutorRequest(input, model), cacheTtl: () => cache.start(input.state.reviewId) },
+        { ...tutorRequest(input, model), cacheLifetime: () => cache.decide(input.state.reviewId) },
         ctx.streamTo ?? (() => {}),
         ctx,
       );

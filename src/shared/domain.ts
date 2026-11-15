@@ -364,10 +364,17 @@ export type ScopePreview = {
   readonly partial: readonly PartialReason[];
 };
 
+/**
+ * Watched time that a review already holds and that a new review will not offer again, for each such review. It is what
+ * the backend excluded from this answer's scope, so an ended review with no response (offered again) and time that a
+ * revised section brings back into scope are not in it.
+ */
+export type HeldBack = readonly { readonly reviewId: ReviewId; readonly material: Material }[];
+
 export type ReviewOptions =
-  | { readonly kind: "ready"; readonly scope: ScopePreview }
-  | { readonly kind: "processing"; readonly readyNow: ScopePreview | null; readonly pendingChunks: number; readonly estimateS: number | null }
-  | { readonly kind: "nothing_to_review"; readonly gaps: readonly Gap[]; readonly unverified: readonly Claim[]; readonly rewatch: readonly { readonly sourceId: SourceId; readonly interval: Interval }[] };
+  | { readonly kind: "ready"; readonly scope: ScopePreview; readonly heldBack: HeldBack }
+  | { readonly kind: "processing"; readonly readyNow: ScopePreview | null; readonly pendingChunks: number; readonly estimateS: number | null; readonly heldBack: HeldBack }
+  | { readonly kind: "nothing_to_review"; readonly gaps: readonly Gap[]; readonly unverified: readonly Claim[]; readonly rewatch: readonly { readonly sourceId: SourceId; readonly interval: Interval }[]; readonly heldBack: HeldBack };
 
 /** "prepared_only": start on what's ready, other chunks keep preparing. "stop_early": cancel pending in-scope work first. */
 export type StartChoice = "prepared_only" | "stop_early";
@@ -689,8 +696,12 @@ export type BudgetHold =
 export type Allowance = {
   /** What this month's calls count against the budget: their recorded cost, or what was set aside for a call still running or of unknown cost. */
   readonly usedUsd: number;
-  /** Null when there is no per-user cap. */
+  /** The part of `usedUsd` still in flight: set aside for calls that have not finished. The rest is settled spend. */
+  readonly reservedUsd: number;
+  /** Null when there is no per-user cap, which includes an uncapped account. */
   readonly limitUsd: number | null;
+  /** An admin account the operator listed: no cap applies, and its spend is left out of everyone's total. Only the stop switch holds it. */
+  readonly uncapped: boolean;
   readonly resetsAtMs: number;
   /** Set when a new model call would be refused now. */
   readonly held: BudgetHold | null;

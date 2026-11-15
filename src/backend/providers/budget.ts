@@ -24,13 +24,28 @@
  * request after it is refused. So the cap can be passed by at most the overrun of the requests already sent when it is reached.
  *
  * Derek, 2026-11-13, on a learner who reaches a cap mid-review: "i think it should be allowed to finish". So the wrap-up
- * that saves a review is never held by either cap. The stop switch still holds it, and it still reserves, settles and
- * counts toward the month like any other call, so a finished review can take a month past its cap by one wrap-up.
+ * that saves a review is not held by either cap when the review holds tutoring the caps admitted and charged. The stop switch
+ * still holds it, and it still reserves, settles and counts toward the month like any other call, so a finished review can take
+ * a month past its cap by one wrap-up. The fact that makes a review real is a paid tutor request, not a learner act: every
+ * request names the review it is for (`review`), its hold records it, and `PAID_TUTOR_HOLD` says which holds are tutoring that
+ * counts (a tutor turn of any move, a hint or an explanation included, admitted under the caps and charged). Starting a review,
+ * answering in it and ending it cost nothing, so none of them can open the exemption. Once a user is capped no new tutor request
+ * is admitted, so a capped user cannot mint a review that qualifies: each uncapped wrap-up is paid for by a capped tutor turn,
+ * and one review passes the caps for at most `WRAP_UPS_PER_REVIEW` wrap-up requests. A wrap-up that names no review, whose review
+ * has no paid tutoring, or that has used up its requests is capped like any other call.
+ *
+ * Derek, 2026-11-14, on whether his own account could "be considered an admin account with no cap": "yes build the admin account
+ * too". An uncapped user is a property of the user row, not of a call: the budget is built with the Clerk user ids (`auth_subject`)
+ * that are uncapped, and `UNCAPPED_USERS` selects their user ids from `users`. Such a user passes both caps, and their holds are
+ * left out of the total sum, so their testing never uses up what friends share. Their holds are still written, settled and counted
+ * in their own month, so their usage is recorded. The stop switch is asked first and still holds them. A subject that has not
+ * signed in has no row yet and matches nobody, and local mode has no Clerk subject, so it is never uncapped.
  */
 import { stableId } from "../../shared/ids";
 import type { MemoKey, UserId } from "../../shared/ids";
 import type { Allowance, BudgetHold, Cost, Purpose } from "../../shared/domain";
 import type { Db } from "../db";
+import { BUDGET_HOLDS_REVIEW_ID } from "../migrations-budget";
 
 /**
  * What one request reserves, in USD. A settlement replaces it with the recorded cost, so for a priced call it only decides
@@ -40,9 +55,27 @@ import type { Db } from "../db";
  *   other task on claude-opus-5-5). Experiment 8 measured, on Opus with the 1 hour cache, a first tutor turn at $0.5575, later turns
  *   at $0.02 to $0.04 and a wrap-up at $0.1688 (docs/experiments/08-api-tutor.md, estimates at list price). Of that first turn,
  *   $0.5540 was writing 69,251 tokens at 2 times the input price. A review's first turn now writes them at 1.25 times, but the turn
- *   after a long pause writes them at 2 times again (`tutorCache` in review/tutor.ts), so $0.75 still covers that turn on Opus, and
- *   on Sonnet ($0.2770 for the write) with room. Interpretation, revision and the diagram summary are not measured on the API.
- *   Priced as `worstCaseUsd` prices a call (all of max_tokens spent, every input token a 1 hour cache write), a structured call
+ *   after a long pause writes them at 2 times again (`tutorCache` in review/tutor.ts), so $0.75 covered that turn on Opus, and
+ *   on Sonnet ($0.2770 for the write) with room, before the tutor's own estimate below was set from the Sonnet audit. Interpretation, revision and the diagram summary are not measured on the API.
+ *   Tutor turn: reserved at an estimate of its own worst case, passed by the adapter as `estimateUsd` (`streamEstimateUsd` in providers/claude-api.ts,
+ *   which is `estimateRequestUsd` on the request as sent). A flat figure cannot be right: the context has no ceiling and the model's rates
+ *   differ by 2 times, so one figure is too low for a turn that writes a long lecture on Opus and too high for a short Sonnet one. The
+ *   request is priced as `estimateRequestUsd` prices it (a byte counts as a token, plus REQUEST_OVERHEAD_TOKENS, plus the whole output limit,
+ *   TUTOR_MAX_OUTPUT_TOKENS = 8,000 in review/tutor.ts) with every input token written to the cache at the lifetime the request sends,
+ *   5 minutes (1.25 times) or, after a long pause, 1 hour (2 times). The lifetime is decided once, in `call`, right before `admit`, and
+ *   the same value prices the reservation and goes in the request (`tutorCache.decide`), so the two cannot disagree. No warm cache is
+ *   assumed: a read is cheaper than a write, but nothing here can know an entry is alive (a rejected or failed request starts nothing, an
+ *   entry can be evicted early), so a reservation that counted one could settle above itself. The price is that a warm turn reserves
+ *   what a first turn does. The "bytes are tokens" step is an estimate, not a proven bound: it holds for ordinary text (the audit measured
+ *   0.5 tokens per byte) but was not shown for every input on the current models. Four concurrent turns hold four estimates.
+ *   For the Fable audit's lecture (docs/trail/fable-e2e-2026-11-14-data.json; the system block of its 12 turns was 49,844 bytes, the
+ *   prompts 1,317 to 7,483 bytes) on Sonnet: a first turn reserves $0.2181 and is refused above $4.7819 of a $5 cap, a later turn within 5
+ *   minutes $0.2181 to $0.2336 (refused above $4.7664) and a turn after a long pause $0.3010 to $0.3257 (refused above $4.6743); on Opus
+ *   $0.4363 (first, refused above $4.5637), $0.4363 to $0.4671 and $0.6021 to $0.6514. The measured turns spent $0.0126 to $0.0241. The
+ *   old $0.75 refused from $4.25. A `claude -p` tutor turn reserves its estimate at the 1 hour rate (the CLI's cache lifetime is not
+ *   known) but the CLI cannot enforce the 8,000 output limit or bound its context, so what it settles at can exceed it, uncapped; the
+ *   usage page's "held" asks about ESTIMATE_USD.tutor_turn, an advisory figure that does not gate a request.
+ *   Priced as `estimateRequestUsd` prices a call (all of max_tokens spent, every input token a 1 hour cache write), a structured call
  *   with 50,000 input tokens comes to $0.75 at max_tokens 16,000. Interpretation streams with max_tokens 32,000 (STREAM_MAX_TOKENS), so
  *   the same formula gives 32,000 x $20 per million (Opus) = $0.64 plus (50,000 + 4,096 allowance) x $8 per million (1 hour write) =
  *   $0.432768, $1.072768, reserved as $1.08. Resource search adds up to 5 web searches at $0.01 per call and up to 3
@@ -62,7 +95,7 @@ export const ESTIMATE_USD: Readonly<Record<Purpose, number>> = {
   interpretation: 1.08,
   claim_revision: 0.75,
   resource_search: 1,
-  tutor_turn: 0.75,
+  tutor_turn: 0.15,
   wrap_up: 0.5,
   diagram_summary: 0.75,
 };
@@ -70,8 +103,22 @@ export const ESTIMATE_USD: Readonly<Record<Purpose, number>> = {
 /** The call the usage page's "held" asks about: a learner's next tutor turn. */
 const PROBE: Purpose = "tutor_turn";
 
-/** Calls neither cap holds: finishing a review (see the header). */
-const UNCAPPED: ReadonlySet<Purpose> = new Set<Purpose>(["wrap_up"]);
+/**
+ * Wrap-up requests one review may send (see the header). The wrap-up task makes up to 3 attempts per run and a failed save is
+ * retried once with a new run, so 6 lets a real review finish after one failed save and no more.
+ */
+export const WRAP_UPS_PER_REVIEW = 6;
+
+/** SQL over `budget_holds h`: a hold that is tutoring the learner got, admitted by the caps (a hold exists only when they admitted it) and charged. */
+/*
+ * A review started before migration 006 has holds with no review id, so its paid tutoring cannot be tied to it. Such a review counts
+ * as tutored when it has a stored tutor turn and the user paid for a tutor request between its start and the upgrade. The set is
+ * closed at the upgrade, and each still passes the caps at most WRAP_UPS_PER_REVIEW times.
+ */
+export const PAID_TUTOR_HOLD = "h.purpose = 'tutor_turn' AND h.settled_micros > 0";
+
+/** SQL over `users`, one `?` bound to the JSON array of uncapped Clerk user ids: the user ids that are uncapped. */
+const UNCAPPED_USERS = "SELECT id FROM users WHERE auth_provider = 'clerk' AND auth_subject IN (SELECT value FROM json_each(?))";
 
 export type BudgetLimits = {
   /** Per user per month. Null: no per-user cap. */
@@ -82,6 +129,8 @@ export type BudgetLimits = {
 
 export type BudgetOptions = {
   readonly limits: BudgetLimits;
+  /** Clerk user ids (`sub` of the session token) whose calls skip both caps and whose spend is left out of the total. Default: none. */
+  readonly uncappedSubjects?: readonly string[];
   /** The stop switch, asked before every request, so flipping it needs no restart. Requests already sent finish. */
   readonly stopped: () => boolean;
   readonly now?: () => number;
@@ -91,7 +140,11 @@ export type Reservation = { readonly id: string; readonly micros: number };
 export type Admission = { readonly kind: "reserved"; readonly reservation: Reservation } | { readonly kind: "held"; readonly hold: BudgetHold };
 
 export type Budget = {
-  reserve(userId: UserId, purpose: Purpose, key: MemoKey): Admission;
+  /**
+   * `review`: the review the request is for. A wrap-up of a review with paid tutoring may pass the caps (see the header). Anything else is capped.
+   * `estimateUsd`: this request's own estimate, which replaces the purpose's flat `ESTIMATE_USD` when the adapter can price the request it is sending.
+   */
+  reserve(userId: UserId, purpose: Purpose, key: MemoKey, review?: string, estimateUsd?: number): Admission;
   /** Record a request's known cost the moment it is read, so it counts before the attempt settles. An unknown cost changes nothing. */
   price(reservation: Reservation, cost: Cost): void;
   /** Run it inside the transaction that records the attempt's usage event. */
@@ -139,11 +192,31 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
   const now = opts.now ?? Date.now;
   const userCap = opts.limits.userUsd === null ? null : capMicros(opts.limits.userUsd);
   const totalCap = opts.limits.totalUsd === null ? null : capMicros(opts.limits.totalUsd);
+  const uncappedJson = JSON.stringify(opts.uncappedSubjects ?? []);
   const spent = "COALESCE(SUM(COALESCE(settled_micros, priced_micros, reserved_micros)), 0) AS used FROM budget_holds";
   const q = {
     userUsed: db.sql.query<{ used: number }, [string, string]>(`SELECT ${spent} WHERE period = ? AND user_id = ?`),
-    totalUsed: db.sql.query<{ used: number }, [string]>(`SELECT ${spent} WHERE period = ?`),
-    insert: db.sql.query(`INSERT INTO budget_holds (id, user_id, period, purpose, memo_key, reserved_micros, reserved_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`),
+    /** Used and still reserved, read in one statement so the reserved part is always a subset of what used counts. */
+    userUsedAndReserved: db.sql.query<{ used: number; held: number }, [string, string]>(
+      `SELECT COALESCE(SUM(COALESCE(settled_micros, priced_micros, reserved_micros)), 0) AS used,
+              COALESCE(SUM(CASE WHEN settled_micros IS NULL THEN COALESCE(priced_micros, reserved_micros) ELSE 0 END), 0) AS held
+       FROM budget_holds WHERE period = ? AND user_id = ?`,
+    ),
+    totalUsed: db.sql.query<{ used: number }, [string, string]>(`SELECT ${spent} WHERE period = ? AND user_id NOT IN (${UNCAPPED_USERS})`),
+    isUncapped: db.sql.query<{ n: number }, [string, string]>(`SELECT 1 AS n FROM users WHERE id = ? AND id IN (${UNCAPPED_USERS})`),
+    insert: db.sql.query(`INSERT INTO budget_holds (id, user_id, period, purpose, memo_key, reserved_micros, reserved_ms, review_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+    wrapUpsOf: db.sql.query<{ n: number }, [string, string]>(`SELECT COUNT(*) AS n FROM budget_holds WHERE user_id = ? AND review_id = ? AND purpose = 'wrap_up'`),
+    paidTutoringOf: db.sql.query<{ n: number }, [string, string, string, string]>(
+      `SELECT 1 AS n FROM budget_holds h WHERE h.user_id = ? AND h.review_id = ? AND ${PAID_TUTOR_HOLD}
+       UNION ALL
+       SELECT 1 AS n FROM reviews r
+       WHERE r.user_id = ? AND r.id = ?
+         AND r.started_ms < (SELECT applied_ms FROM schema_migrations WHERE id = '${BUDGET_HOLDS_REVIEW_ID}')
+         AND EXISTS (SELECT 1 FROM review_turns t WHERE t.review_id = r.id AND t.actor = 'tutor')
+         AND EXISTS (SELECT 1 FROM budget_holds h WHERE h.user_id = r.user_id AND h.review_id IS NULL AND ${PAID_TUTOR_HOLD}
+                     AND h.reserved_ms >= r.started_ms AND h.reserved_ms < (SELECT applied_ms FROM schema_migrations WHERE id = '${BUDGET_HOLDS_REVIEW_ID}'))
+       LIMIT 1`,
+    ),
     price: db.sql.query(`UPDATE budget_holds SET priced_micros = ? WHERE id = ? AND settled_micros IS NULL`),
     settle: db.sql.query(`UPDATE budget_holds SET settled_micros = ?, settled_ms = ? WHERE id = ? AND settled_micros IS NULL`),
     interrupted: db.sql.query<{ user_id: string; memo_key: string; provider: string; model: string; purpose: string; started: number; next: number }, []>(
@@ -160,9 +233,9 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
   };
 
   /** Why an attempt for `purpose` that would add `micros` to this month is refused, or null when it may start. */
-  function holdFor(userId: UserId, atMs: number, purpose: Purpose, micros: number): BudgetHold | null {
+  function holdFor(userId: UserId, atMs: number, purpose: Purpose, micros: number, exempt = false): BudgetHold | null {
     if (opts.stopped()) return { reason: "stopped" };
-    if (UNCAPPED.has(purpose)) return null;
+    if (exempt || q.isUncapped.get(userId, uncappedJson) !== null) return null;
     const period = periodOf(atMs);
     const resetsAtMs = periodEndMs(atMs);
     if (userCap !== null) {
@@ -170,21 +243,22 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
       if (used + micros > userCap) return { reason: "user_budget", resetsAtMs, usedUp: used >= userCap };
     }
     if (totalCap !== null) {
-      const used = q.totalUsed.get(period)!.used;
+      const used = q.totalUsed.get(period, uncappedJson)!.used;
       if (used + micros > totalCap) return { reason: "total_budget", resetsAtMs, usedUp: used >= totalCap };
     }
     return null;
   }
 
   return {
-    reserve(userId, purpose, key) {
+    reserve(userId, purpose, key, review, estimateUsd) {
       return db.sql.transaction((): Admission => {
         const at = now();
-        const micros = costMicros(ESTIMATE_USD[purpose]);
-        const hold = holdFor(userId, at, purpose, micros);
+        const micros = costMicros(estimateUsd ?? ESTIMATE_USD[purpose]);
+        const finishes = purpose === "wrap_up" && review !== undefined && q.paidTutoringOf.get(userId, review, userId, review) !== null && q.wrapUpsOf.get(userId, review)!.n < WRAP_UPS_PER_REVIEW;
+        const hold = holdFor(userId, at, purpose, micros, finishes);
         if (hold !== null) return { kind: "held", hold };
         const id = `hold_${crypto.randomUUID()}`;
-        q.insert.run(id, userId, periodOf(at), purpose, key, micros, Math.round(at));
+        q.insert.run(id, userId, periodOf(at), purpose, key, micros, Math.round(at), review ?? null);
         return { kind: "reserved", reservation: { id, micros } };
       }).immediate();
     },
@@ -199,9 +273,13 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
 
     allowance(userId) {
       const at = now();
+      const uncapped = q.isUncapped.get(userId, uncappedJson) !== null;
+      const both = q.userUsedAndReserved.get(periodOf(at), userId)!;
       return {
-        usedUsd: q.userUsed.get(periodOf(at), userId)!.used / MICROS,
-        limitUsd: opts.limits.userUsd,
+        usedUsd: both.used / MICROS,
+        reservedUsd: both.held / MICROS,
+        limitUsd: uncapped ? null : opts.limits.userUsd,
+        uncapped,
         resetsAtMs: periodEndMs(at),
         held: holdFor(userId, at, PROBE, costMicros(ESTIMATE_USD[PROBE])),
       };

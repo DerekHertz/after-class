@@ -43,7 +43,7 @@ function Preview() {
       <details><summary>Request ledger</summary><pre>{calls || "No requests"}</pre></details>
     </aside>
     <AppearanceProvider><SceneShell account={account}>
-      {page === "home" ? <HomeScreen api={api} /> : page === "capture" ? <CaptureScreen api={api} captureId={ids.capture} /> : page === "record" ? <RecordScreen api={api} reviewId={recordReviewId} /> : page === "usage" ? <UsageScreen api={api} hosted={hosted} /> : <ReviewScreen api={api} reviewId={ids.review} speaker={speaker} speech={speech} unsent={unsent} />}
+      {page === "home" ? <HomeScreen api={api} extensionId={hosted ? "abcdefghijklmnopabcdefghijklmnop" : null} /> : page === "capture" ? <CaptureScreen api={api} captureId={ids.capture} /> : page === "record" ? <RecordScreen api={api} reviewId={recordReviewId} /> : page === "usage" ? <UsageScreen api={api} hosted={hosted} /> : <ReviewScreen api={api} reviewId={ids.review} speaker={speaker} speech={speech} unsent={unsent} />}
     </SceneShell></AppearanceProvider>
   </>;
 }

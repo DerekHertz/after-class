@@ -19,14 +19,15 @@
 import { stableId } from "../../shared/ids";
 import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, ConceptId, EvidenceId, ReviewId, ThreadId, TurnId } from "../../shared/ids";
 import type {
-  AssessableClaim, BudgetHold, ChunkPrep, ChunkRevision, Claim, CodeNotice, Concept, Correction, EvidenceBundle, FrozenScope, InviteAnswer, InviteState,
+  AssessableClaim, BudgetHold, ChunkPrep, ChunkRevision, Claim, CodeNotice, Concept, Correction, EvidenceBundle, FrozenScope, HeldBack, InviteAnswer, InviteState,
   LearnerAct, ReviewOptions, ReviewView, ScopePreview, Seq, StartChoice, StartResult, Turn, TurnEvent, TutorMove,
 } from "../../shared/domain";
 import { Material } from "../../shared/time";
 import { asSeq } from "../db";
 import type { UserDb } from "../db";
+import { PAID_TUTOR_HOLD } from "../providers/budget";
 import type { Memo, RunResult } from "../providers/memo";
-import { MAX_MAIN_QUESTIONS, allowedMoves, askedClaims, parseMoveHeader, reviewState, settledCorrections, validateMove, tutorOwesMove, waitsForLearner } from "./tutor";
+import { MAX_MAIN_QUESTIONS, allowedMoves, askedClaims, parseMoveHeader, reviewState, settledCorrections, validateMove, validateSay, tutorOwesMove, waitsForLearner } from "./tutor";
 import type { TutorInput, TutorOutput, WrapUpInput, WrapUpOutput } from "./tutor";
 import {
   corrections as deriveCorrections, decodeScope, encodeScope, foldInvites, freezeScope, takeSentences, unreviewed, usableInScope,
@@ -131,6 +132,21 @@ const NOTHING_TO_ASK_LINE = "Every statement I prepared for this part was withdr
 export const MAX_MOVES_PER_TURN = 4;
 const NON_TERMINAL = new Set(["awaiting_check", "awaiting_revision", "awaiting_recheck"]);
 
+/**
+ * Reviews one learner may start in a day that hold no paid tutoring (`PAID_TUTOR_HOLD`: a tutor turn the caps admitted and
+ * charged, whatever its move). Far above a mis-click, so a learner never meets it (#244).
+ */
+export const UNTUTORED_REVIEWS_PER_DAY = 20;
+const DAY_MS = 86_400_000;
+
+/** Thrown by `start` when the learner has started too many reviews that got no tutoring. The message is for the learner. */
+export class ReviewLimitError extends Error {
+  constructor() {
+    super("You have started a lot of reviews today that never reached a question from the tutor. Work through the reviews you have started, or try again tomorrow.");
+    this.name = "ReviewLimitError";
+  }
+}
+
 export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOptions = {}): Reviews {
   const softTargetS = config.softTargetS ?? 600;
   const timeInviteGapS = config.timeInviteGapS ?? 900;
@@ -146,6 +162,10 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     insertAnswer: db.sql.query("INSERT INTO invite_answers (seq, user_id, capture_id, answer, watched_s, at_ms) VALUES (?, ?, ?, ?, ?, ?)"),
     review: db.sql.query<ReviewRow, [string, string]>(`SELECT ${REVIEW_COLUMNS} FROM reviews WHERE user_id = ? AND id = ?`),
     reviewHeldByOther: db.sql.query<{ n: number }, [string, string]>("SELECT 1 AS n FROM reviews WHERE id = ? AND user_id <> ?"),
+    untutoredSince: db.sql.query<{ n: number }, [string, number]>(
+      `SELECT COUNT(*) AS n FROM reviews r WHERE r.user_id = ? AND r.started_ms >= ?
+         AND NOT EXISTS (SELECT 1 FROM budget_holds h WHERE h.user_id = r.user_id AND h.review_id = r.id AND ${PAID_TUTOR_HOLD})`,
+    ),
     reviewsOf: db.sql.query<ReviewRow, [string, string]>(`SELECT ${REVIEW_COLUMNS} FROM reviews WHERE user_id = ? AND capture_id = ?`),
     insertReview: db.sql.query("INSERT INTO reviews (id, user_id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, ?, ?, ?, ?, ?)"),
     turns: db.sql.query<TurnRow, [string, string]>(
@@ -230,13 +250,24 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
    * skip or an "I don't know"). An ended review with no response, such as one ended by a mis-click, used up nothing,
    * so its material is offered again. R7 is about a started review's own frozen scope, which this never touches.
    */
-  function reviewedMaterial(captureId: CaptureId): Material {
+  function holding(captureId: CaptureId): readonly { readonly reviewId: ReviewId; readonly material: Material }[] {
     const counts = (r: ReviewRow): boolean => {
       const turns = loadTurns(r.id as ReviewId);
       const responded = turns.some((t) => t.actor === "learner" && (t.act.kind === "answer" || t.act.kind === "skip" || t.act.kind === "dont_know"));
       return responded || kit.reviewState(r.id as ReviewId, turns, [], softTargetS, now()).phase !== "ended";
     };
-    return q.reviewsOf.all(userId, captureId).filter(counts).reduce((m, r) => Material.union(m, decodeScope(r.scope_json).scope.material), Material.empty);
+    return q.reviewsOf.all(userId, captureId).filter(counts).map((r) => ({ reviewId: r.id as ReviewId, material: decodeScope(r.scope_json).scope.material }));
+  }
+
+  const reviewedMaterial = (captureId: CaptureId): Material => holding(captureId).reduce((m, r) => Material.union(m, r.material), Material.empty);
+
+  /**
+   * What the learner is told an earlier review keeps: each holding review's material that this answer's candidates do not
+   * offer. A revised section that grew back over a held scope is offered whole, so the overlap is not kept from it.
+   */
+  function heldBack(cands: Candidates, captureId: CaptureId): HeldBack {
+    const offered = cands.reduce((m, c) => Material.union(m, c.rev.material), Material.empty);
+    return holding(captureId).map((r) => ({ reviewId: r.reviewId, material: Material.subtract(r.material, offered) })).filter((r) => Material.duration(r.material) > 0);
   }
 
   function candidates(captureId: CaptureId) {
@@ -252,6 +283,7 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     const unsupported = cands.filter((c) => c.prep.finished && c.prep.supportedCount === 0);
     return {
       kind: "nothing_to_review",
+      heldBack: heldBack(cands, captureId),
       gaps,
       unverified: deps.claimsIn(captureId, material).filter((c) => c.status === "unverified"),
       rewatch: [
@@ -286,9 +318,9 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     const scope = asOf > 0 ? freezeScope(cands, (m) => deps.assessableIn(captureId, m), gapsOf, asSeq(asOf)) : null;
     const pending = cands.filter((c) => !c.prep.finished).length;
     if (pending > 0) {
-      return { kind: "processing", readyNow: scope && preview(captureId, scope), pendingChunks: pending, estimateS: config.estimateS?.(pending) ?? null };
+      return { kind: "processing", readyNow: scope && preview(captureId, scope), pendingChunks: pending, estimateS: config.estimateS?.(pending) ?? null, heldBack: heldBack(cands, captureId) };
     }
-    return scope ? { kind: "ready", scope: preview(captureId, scope) } : nothingToReview(cands, captureId);
+    return scope ? { kind: "ready", scope: preview(captureId, scope), heldBack: heldBack(cands, captureId) } : nothingToReview(cands, captureId);
   }
 
   function start(captureId: CaptureId, choice: StartChoice, reviewId: ReviewId): StartResult {
@@ -298,6 +330,8 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     return db.tx((): StartResult => {
       // The id is the row's key across users, so another user's review would collide on insert; refuse it before anything else runs.
       if (heldByAnotherUser(reviewId)) throw new RangeError(`review ${reviewId} belongs to another user`);
+      // A review id is minted by the client, so without this one learner could start, end and restart reviews without limit (#244).
+      if (q.untutoredSince.get(userId, Math.round(now()) - DAY_MS)!.n >= UNTUTORED_REVIEWS_PER_DAY) throw new ReviewLimitError();
       let cands = candidates(captureId);
       let dropped = 0;
       if (choice === "stop_early") {
@@ -444,6 +478,7 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     const ctl = new AbortController();
     let buf = "";
     let gated = false;
+    let held = false;
     let invalid: string | null = null;
     let streamedMove: TutorMove | null = null;
     let pending = "";
@@ -463,6 +498,7 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     const onRetry = () => {
       buf = "";
       gated = false;
+      held = false;
       streamedMove = null;
       pending = "";
       push({ type: "say_reset" });
@@ -470,12 +506,18 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     const onDelta = (d: string) => {
       if (invalid !== null) return;
       if (gated) return speak(d);
+      if (held) return;
       buf += d;
       const header = kit.parseMoveHeader(buf);
       if (header.kind === "pending") return;
       if (header.kind === "invalid") return rejectHeader(header.why);
       const verdict = kit.validateMove(header.move, input);
       if (!verdict.ok) return rejectHeader(verdict.why);
+      // A diagnostic question is checked as a whole before it is heard, so a reply that recites the lecture is never spoken.
+      if (header.move.kind === "diagnose") {
+        held = true;
+        return;
+      }
       gated = true;
       streamedMove = header.move;
       speak(header.rest);
@@ -511,6 +553,8 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     }
     const verdict = kit.validateMove(lookup.value.move, input);
     if (!verdict.ok) return { kind: "invalid", why: verdict.why, stored: true };
+    const said = validateSay(lookup.value.move, lookup.value.say);
+    if (!said.ok) return { kind: "invalid", why: said.why, stored: true };
     yield* spoken(lookup.value.say);
     return { kind: "spoken", move: lookup.value.move, say: lookup.value.say };
   }

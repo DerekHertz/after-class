@@ -5,7 +5,7 @@
  * Never edit an applied one: the runner refuses a migration whose text changed after it ran. db.ts runs them and re-exports this module's names.
  */
 import { stableId } from "../shared/ids";
-import { BUDGET_HOLDS } from "./migrations-budget";
+import { BUDGET_HOLDS, BUDGET_HOLDS_REVIEW } from "./migrations-budget";
 import { DEVICES_MIGRATION } from "./devices";
 import { SIZE_COLUMNS } from "./migrations-frame-bytes";
 import { OBSERVATION_STATUSES, RECORD_USER_ID } from "./migrations-record";
@@ -324,7 +324,7 @@ DROP TABLE memo_save;
 DROP TABLE memo_inputs_save;
 DROP TABLE voice_usage_events_save;`,
     },
-    BUDGET_HOLDS,
+    BUDGET_HOLDS, BUDGET_HOLDS_REVIEW,
   ],
 
   evidence: [

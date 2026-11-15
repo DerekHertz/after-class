@@ -42,7 +42,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { ParseableMessageCreateParams as MessageStreamParams } from "@anthropic-ai/sdk";
 import type { ContentBlockParam, JSONOutputFormat, Message, MessageCreateParamsNonStreaming, MessageParam, TextBlockParam, ToolUnion } from "@anthropic-ai/sdk/resources/messages";
 import type { z } from "zod";
-import { abortError, createLimiter } from "./claude";
+import { abortError, createLimiter, promptOf } from "./claude";
 import type { CacheTtl, ClaudeCli, ClaudeRequest } from "./claude";
 import { createHash } from "node:crypto";
 import { BudgetHeld, ProviderError } from "./memo";
@@ -110,25 +110,58 @@ export function priceUsage(model: string, u: UsageParts): number | null {
   return Number.isFinite(usd) && usd >= 0 ? usd : null;
 }
 
-/** The fixed allowance, in input tokens, for what a request adds around its text. See `worstCaseUsd`. */
+/** The fixed allowance, in input tokens, for what a request adds around its text. See `estimateRequestUsd`. */
 export const REQUEST_OVERHEAD_TOKENS = 4_096;
 
 /**
- * An upper bound on what this adapter can be billed for one call, in USD. The assumptions, all of them:
- *   1. A token covers at least one byte of UTF-8 text, so the bytes of the system text, the prompt and the serialized
- *      output schema (zero for a streamed tutor turn) bound the tokens those texts become above.
+ * An estimate of the most this adapter can be billed for one call, in USD. It is not a proven upper bound. The assumptions, all of them:
+ *   1. A token covers at least one byte of UTF-8 text, so the bytes of the system text, the prompt and the serialized output schema
+ *      (zero for a streamed tutor turn) bound the tokens those texts become. This holds for ordinary text and was not established for
+ *      every input: Anthropic's published legacy tokenizer NFKC-normalizes, and one character ("U+FDFA", 3 bytes) becomes 15 tokens
+ *      there. Nobody has shown that for the current models, which that tokenizer's own README says it does not count. The audit
+ *      measured 0.5 tokens per byte on a real lecture, so ordinary text has twofold headroom, but a hostile or unusual lecture is not
+ *      covered. The API's `count_tokens` endpoint is free but is a network round trip before every turn, which is the latency this
+ *      work exists to cut, and it is rate-limited separately, so it is not called here. A safety factor was not added: it would
+ *      change the number without making it a bound.
  *   2. Everything the request adds around that text is covered by REQUEST_OVERHEAD_TOKENS: role and message framing, the
  *      cache_control marker, and the instruction text the API adds to the prompt for structured output. This is an
  *      allowance chosen to be generous, not a measured figure, which is why the runner also checks each finished call.
- *   3. Every one of those tokens costs the most any input token can: a write to the 1 hour cache.
+ *   3. Every one of those tokens costs a write to the cache at the lifetime the request asks for (`ttl`; the 1 hour rate, the dearest,
+ *      when none is given). A read is never assumed, because nothing here knows an entry is alive: the reservation is made in the
+ *      same place as the lifetime and does not depend on a cache state that could be wrong.
  *   4. The call spends its whole `max_tokens` on output. Thinking tokens are output tokens and are inside that limit.
  *   5. Nothing else is billed: the request has no tools or web search, and the client makes no retry of its own (maxRetries 0).
  *      This holds for the tutor turn and the wrap-up, the only calls the replay runner makes. A request with web tools can add
- *      searches, which this bound does not include.
- * Prices are the table's. This is a bound on the estimate the table produces, not on Derek's invoice.
+ *      searches, which this estimate does not include.
+ * Prices are the table's. This is an estimate on the figure the table produces, not on Derek's invoice.
  */
-export function worstCaseUsd(model: string, inputBytes: number, maxTokens: number, schemaBytes: number): number | null {
-  return priceUsage(model, { fresh: 0, creation5m: 0, creation1h: inputBytes + schemaBytes + REQUEST_OVERHEAD_TOKENS, read: 0, output: maxTokens });
+export function estimateRequestUsd(model: string, inputBytes: number, maxTokens: number, schemaBytes: number, ttl: CacheTtl = "1h"): number | null {
+  const written = inputBytes + schemaBytes + REQUEST_OVERHEAD_TOKENS;
+  const oneHour = ttl === "1h";
+  return priceUsage(model, { fresh: 0, creation5m: oneHour ? 0 : written, creation1h: oneHour ? written : 0, read: 0, output: maxTokens });
+}
+
+const byteLength = (s: string): number => new TextEncoder().encode(s).length;
+
+/** What a streamed request's output may be, thinking included, when it does not say. */
+export const maxOutputOf = (req: ClaudeRequest): number => req.maxOutputTokens ?? STREAM_MAX_TOKENS;
+
+/**
+ * `estimateRequestUsd` for the streamed request `req` as it will be sent: its own system block and user turn, its own output limit, and
+ * the cache lifetime `ttl` it will ask for. The budget reserves this for a tutor turn instead of one flat figure, so the reservation
+ * follows the size of the lecture and the model. A tutor turn sends no images, tools or schema.
+ */
+export function streamEstimateUsd(model: string, req: ClaudeRequest, ttl?: CacheTtl): number | null {
+  return estimateRequestUsd(model, byteLength(req.system) + byteLength(promptOf(req)), maxOutputOf(req), 0, ttl);
+}
+
+/**
+ * The reservation for a streamed request served by `claude -p`, which has no cache control (priced as a 1 hour write, the dearest) and
+ * no output limit: it cannot enforce `maxOutputTokens`, so what it settles at can exceed this. Null for a model with no price.
+ */
+export function cliStreamEstimateUsd(req: ClaudeRequest): number | null {
+  const model = (API_MODELS as Readonly<Record<string, string>>)[req.model];
+  return model === undefined ? null : streamEstimateUsd(model, req);
 }
 
 /** The `output_config.format` a structured call sends, shared so the runner reserves for exactly the schema that goes on the wire. */
@@ -557,16 +590,21 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
    * is sent, so a request that waited in the queue meets the stop switch as it is when it leaves. A refusal is thrown as it is.
    * The system block is built after the admission, because its cache lifetime is asked only of a request that will be sent.
    */
-  async function call(req: ClaudeRequest, send: SendContext, work: (callSignal: AbortSignal, began: () => void, system: TextBlockParam[]) => Promise<unknown>): Promise<Untrusted> {
+  async function call(req: ClaudeRequest, send: SendContext, work: (callSignal: AbortSignal, began: () => void, system: TextBlockParam[]) => Promise<unknown>, estimate?: (ttl: CacheTtl) => number | null): Promise<Untrusted> {
     const signal = send.signal;
     const release = await limiter.acquire(signal);
     let admitted: Admitted;
     let system: TextBlockParam[];
     try {
       signal.throwIfAborted();
-      admitted = send.admit();
+      // One decision, made here, right before the budget is asked: its lifetime prices the reservation and is the one the request sends.
+      const lifetime = req.cacheLifetime?.();
+      const ttl = lifetime?.ttl ?? "5m";
+      admitted = send.admit(estimate?.(ttl) ?? undefined);
+      // Only an admitted request is a start; a held one leaves the review's cache record as it was.
+      lifetime?.record();
       // One stable block, so a review's lecture context is read from cache on its later turns.
-      system = [{ type: "text", text: req.system, cache_control: { type: "ephemeral", ttl: req.cacheTtl?.() ?? "5m" } }];
+      system = [{ type: "text", text: req.system, cache_control: { type: "ephemeral", ttl } }];
     } catch (err) {
       release();
       throw signal.aborted ? abortError() : err;
@@ -774,7 +812,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
       const sink = redactingSink(opts.apiKey, onText);
       const response = await call(req, send, async (callSignal, began, system) => {
         const stream = client.messages.stream(
-          { model, max_tokens: STREAM_MAX_TOKENS, system, messages: messagesFor(system), ...(tools ? { tools } : {}), output_config: { effort: req.effort } },
+          { model, max_tokens: maxOutputOf(req), system, messages: messagesFor(system), ...(tools ? { tools } : {}), output_config: { effort: req.effort } },
           { signal: callSignal },
         );
         stream.on("text", (delta) => {
@@ -782,7 +820,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
           sink.push(delta);
         });
         return stream.finalMessage();
-      });
+      }, (ttl) => streamEstimateUsd(model, req, ttl));
       const { parsed: reply, usage } = settle(response);
       sink.flush();
       return { text: reply.text, usage };

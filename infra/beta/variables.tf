@@ -104,3 +104,20 @@ variable "extension_id" {
     error_message = "extension_id must be 32 letters from a to p."
   }
 }
+
+variable "alarm_email" {
+  description = "Address that gets an email when the data volume runs low. Null creates no alarm, topic or metric. AWS sends a confirmation email to it once."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.alarm_email == null ? true : can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.alarm_email))
+    error_message = "alarm_email must be an email address."
+  }
+}
+
+variable "disk_alarm_free_mib" {
+  description = "The alarm fires when the free space on /data, in MiB, is under this. The app refuses uploads under 2048 MiB free. At about 24 MB per lecture-hour, the default 4096 gives roughly 85 lecture-hours of warning before that."
+  type        = number
+  default     = 4096
+}

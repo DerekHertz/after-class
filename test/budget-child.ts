@@ -48,7 +48,7 @@ if (mode === "crash") {
     waitFor(`${other}.in`, GRACE_MS);
     return Date.UTC(2026, 10, 10, 12);
   };
-  const budget = createBudget(db, { limits: { userUsd: ESTIMATE_USD.interpretation, totalUsd: 50 }, stopped: () => false, now });
+  const budget = createBudget(db, { limits: { userUsd: ESTIMATE_USD.tutor_turn, totalUsd: 50 }, stopped: () => false, now });
   writeFileSync(`${me}.begin`, "");
   console.log(budget.reserve(LOCAL_USER, "tutor_turn", `key_${me}` as MemoKey).kind);
 }

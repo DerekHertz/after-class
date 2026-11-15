@@ -4,7 +4,7 @@
  */
 import { heldMessage, resetDay } from "../shared/allowance";
 import type {
-  Allowance, Author, CaptureStatus, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
+  Allowance, Author, CaptureStatus, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, HeldBack, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
   ReviewState, ReviewView, ScopePreview, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
 } from "../shared/domain";
 import type { EvidenceId, SourceId } from "../shared/ids";
@@ -207,6 +207,23 @@ export function coveredLines(material: Material, titles: SourceTitles = new Map(
     const total = spans.reduce((sum, i) => sum + (i.end - i.start), 0);
     return [spans.length === 1 ? `${titleOf(titles, id)}, ${formatInterval(only)}` : `${titleOf(titles, id)}, ${spans.length} stretches, ${formatClock(total)} in all`];
   });
+}
+
+/**
+ * What the lecture page says when earlier reviews hold part of what the learner watched. `held` is what the backend left
+ * out of the next review (R7: a started review's scope never grows, so that time stays with it), not a guess from saved
+ * state. R7 does not promise that another review covers everything else, so the last sentence follows what the options
+ * really are: a review to start, sections still preparing, or nothing yet.
+ */
+export function earlierReviewsNote(held: HeldBack, next: ReviewOptions["kind"]): { readonly heading: string; readonly body: string } | null {
+  if (held.length === 0) return null;
+  const seconds = Material.duration(held.reduce((all, h) => Material.union(all, h.material), Material.of([])));
+  const which = held.length === 1 ? "a review you already started" : `${held.length} reviews you already started`;
+  const rest = next === "ready" ? "The review below is made from the rest." : next === "processing" ? "The rest is still being prepared." : "There is nothing else to review yet.";
+  return {
+    heading: held.length === 1 ? "Earlier review" : "Earlier reviews",
+    body: `Part of this lecture is in ${which}, ${formatClock(seconds)} of what you watched. It is not offered in a new review, because a review keeps the material it started with. ${rest}`,
+  };
 }
 
 export function scopeSummary(scope: ScopePreview, titles: SourceTitles = new Map()): ScopeSummary {
@@ -712,6 +729,37 @@ export function noteView(note: Note): NoteView {
   };
 }
 
+/**
+ * Every source in the order the learner watched it: captures by the server sequence of their first fact, which a late upload never
+ * moves, and within a capture the order the capture first saw each video. The lecture list carries that order from the capture's own sources, so it is not guessed
+ * from evidence ids, which are hashes and sort at random.
+ */
+export function sourceWatchOrder(lectures: readonly { readonly sourceIds: readonly SourceId[]; readonly firstSeq: number }[] | null): readonly SourceId[] {
+  return [...new Set([...(lectures ?? [])].sort((a, b) => a.firstSeq - b.firstSeq).flatMap((l) => l.sourceIds))];
+}
+
+/**
+ * A note's cited evidence in watch order: by lecture in `watchOrder`, then by time in it. The ids alone carry no time,
+ * so the time is read where the ids meet the loaded passages and frames. An id with no details yet keeps its place
+ * after the rest. A lecture missing from `watchOrder` follows the known ones, in source id order.
+ */
+export function citedInWatchOrder(
+  ids: readonly EvidenceId[],
+  details: { readonly passages: readonly { readonly id: EvidenceId; readonly sourceId: SourceId; readonly interval: Interval }[]; readonly frames: readonly { readonly id: EvidenceId; readonly sourceId: SourceId; readonly mediaS: number }[] } | null,
+  watchOrder: readonly SourceId[],
+): readonly EvidenceId[] {
+  const at = new Map<EvidenceId, { readonly sourceId: SourceId; readonly s: number }>();
+  for (const p of details?.passages ?? []) at.set(p.id, { sourceId: p.sourceId, s: p.interval.start });
+  for (const f of details?.frames ?? []) at.set(f.id, { sourceId: f.sourceId, s: f.mediaS });
+  const rank = new Map(watchOrder.map((s, i) => [s, i] as const));
+  const key = (id: EvidenceId) => {
+    const a = at.get(id);
+    return a ? ([rank.get(a.sourceId) ?? rank.size, a.sourceId, a.s] as const) : ([rank.size + 1, "", 0] as const);
+  };
+  const cmp = (x: readonly [number, string, number], y: readonly [number, string, number]) => (x[0] - y[0]) || (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0) || x[2] - y[2];
+  return ids.map((id, i) => ({ id, i, k: key(id) })).sort((x, y) => cmp(x.k, y.k) || x.i - y.i).map((x) => x.id);
+}
+
 // ───────────────────────────── Evidence inspector ───────────────────────────
 
 export type BundleReport = {
@@ -774,14 +822,21 @@ export function usageRows(summary: UsageSummary): UsageRow[] {
 
 const dollars = (usd: number): string => (usd > 0 && usd < 0.005 ? "<$0.01" : `$${usd.toFixed(2)}`);
 
-/** The month's allowance as the usage page states it. Null when no budget runs (replay mode). */
-export function allowanceView(a: Allowance | null): { readonly line: string; readonly held: string | null } | null {
+/**
+ * The month's allowance as the usage page states it. Null when no budget runs (replay mode). The headline figure is settled
+ * spend. `reserved` is the amount set aside for AI steps still running, which counts against the cap until they finish.
+ */
+export function allowanceView(a: Allowance | null): { readonly line: string; readonly reserved: string | null; readonly held: string | null } | null {
   if (a === null) return null;
-  const line =
-    a.limitUsd === null
-      ? `${dollars(a.usedUsd)} counted this month, with no monthly cap. The month resets on ${resetDay(a.resetsAtMs)}.`
-      : `${dollars(a.usedUsd)} of your ${dollars(a.limitUsd)} AI allowance used this month. It resets on ${resetDay(a.resetsAtMs)}.`;
-  return { line, held: a.held === null ? null : heldMessage(a.held) };
+  // Subtract in whole micro-dollars, so starting a reservation never moves the rounded settled figure.
+  const settled = Math.max(0, Math.round(a.usedUsd * 1_000_000) - Math.round(a.reservedUsd * 1_000_000)) / 1_000_000;
+  const line = a.uncapped
+    ? `Uncapped account: ${dollars(settled)} counted this month, with no cap. It is not counted toward everyone's total.`
+    : a.limitUsd === null
+      ? `${dollars(settled)} counted this month, with no monthly cap. The month resets on ${resetDay(a.resetsAtMs)}.`
+      : `${dollars(settled)} of your ${dollars(a.limitUsd)} AI allowance used this month. It resets on ${resetDay(a.resetsAtMs)}.`;
+  const reserved = a.reservedUsd > 0 ? `${dollars(a.reservedUsd)} more is set aside for AI steps still running. It counts against your allowance until they finish, and whatever they do not use is given back.` : null;
+  return { line, reserved, held: a.held === null ? null : heldMessage(a.held) };
 }
 
 // ───────────────────────────── Routing ──────────────────────────────────────
