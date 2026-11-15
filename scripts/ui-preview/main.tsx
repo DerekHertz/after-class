@@ -12,6 +12,11 @@ import type { AppApi } from "../../src/app/api";
 import { SignOutButton } from "../../src/app/sign-in";
 import type { ClerkClient } from "../../src/app/sign-in";
 import { createFixture, ids, scenarioFrom, scenarios } from "./fixtures";
+import { play } from "../../src/app/room/reaction-store";
+import type { Gesture } from "../../src/app/room/reactions";
+
+/** Plays a companion gesture in the room, for browser tests and screenshots: `afterClassGesture("hop")` in the console. */
+(window as unknown as { afterClassGesture: (gesture: Gesture) => void }).afterClassGesture = (gesture) => play({ gesture, effects: [], instant: false });
 
 const scenario = scenarioFrom(location.search);
 const { api: fixtureApi, speech, recordReviewId, continueFixture, dictateFixture, requestLedger } = createFixture(scenario);

@@ -12,8 +12,9 @@ import { decodePng } from "../test/png";
 
 const scenes = Object.keys(SCENES) as SceneId[];
 
+/** Opens the review in `scene`. The companion is hidden, so these tests see the room's layers alone; e2e/companion-stage.spec.ts covers it. */
 async function openRoom(page: Page, scene: SceneId) {
-  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene } });
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene, visible: false } });
   await page.goto("/?scenario=review&clean=1");
   await expect(page.locator(".front-row-canvas[data-stage=painted]")).toBeAttached();
 }

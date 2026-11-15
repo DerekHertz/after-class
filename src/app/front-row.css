@@ -307,6 +307,9 @@
   .scene-shell .front-row-scene .composer textarea { height: 100%; }
   .front-row-scene[data-mat-actions="beside"] .composer .assist-actions > * { flex: 1 1 auto; white-space: nowrap; }
   .front-row-scene .front-row-buddy { position: absolute; z-index: 8; }
+  /* The stage draws the companion (room/companion.ts). Its sheet stays in the page only where the browser gives the stage no
+     canvas, and display: none keeps the browser from fetching a sheet nothing shows. */
+  .front-row-stage:has(> .front-row-canvas:not([data-stage="off"])) .front-row-buddy .companion-raster { display: none; }
   /* The closed notebook lies on the desk at the far right, and the closed folio just above it. Each is its own raster. */
   .scene-shell .front-row-scene .front-row-object { position: absolute; z-index: 8; }
 }
