@@ -26,7 +26,7 @@ import { Material } from "../../shared/time";
 import { asSeq } from "../db";
 import type { UserDb } from "../db";
 import type { Memo, RunResult } from "../providers/memo";
-import { MAX_MAIN_QUESTIONS, allowedMoves, askedClaims, parseMoveHeader, reviewState, settledCorrections, validateMove, tutorOwesMove, waitsForLearner } from "./tutor";
+import { MAX_MAIN_QUESTIONS, allowedMoves, askedClaims, parseMoveHeader, reviewState, settledCorrections, validateMove, validateSay, tutorOwesMove, waitsForLearner } from "./tutor";
 import type { TutorInput, TutorOutput, WrapUpInput, WrapUpOutput } from "./tutor";
 import {
   corrections as deriveCorrections, decodeScope, encodeScope, foldInvites, freezeScope, takeSentences, unreviewed, usableInScope,
@@ -444,6 +444,7 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     const ctl = new AbortController();
     let buf = "";
     let gated = false;
+    let held = false;
     let invalid: string | null = null;
     let streamedMove: TutorMove | null = null;
     let pending = "";
@@ -463,6 +464,7 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     const onRetry = () => {
       buf = "";
       gated = false;
+      held = false;
       streamedMove = null;
       pending = "";
       push({ type: "say_reset" });
@@ -470,12 +472,18 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     const onDelta = (d: string) => {
       if (invalid !== null) return;
       if (gated) return speak(d);
+      if (held) return;
       buf += d;
       const header = kit.parseMoveHeader(buf);
       if (header.kind === "pending") return;
       if (header.kind === "invalid") return rejectHeader(header.why);
       const verdict = kit.validateMove(header.move, input);
       if (!verdict.ok) return rejectHeader(verdict.why);
+      // A diagnostic question is checked as a whole before it is heard, so a reply that recites the lecture is never spoken.
+      if (header.move.kind === "diagnose") {
+        held = true;
+        return;
+      }
       gated = true;
       streamedMove = header.move;
       speak(header.rest);
@@ -511,6 +519,8 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     }
     const verdict = kit.validateMove(lookup.value.move, input);
     if (!verdict.ok) return { kind: "invalid", why: verdict.why, stored: true };
+    const said = validateSay(lookup.value.move, lookup.value.say);
+    if (!said.ok) return { kind: "invalid", why: said.why, stored: true };
     yield* spoken(lookup.value.say);
     return { kind: "spoken", move: lookup.value.move, say: lookup.value.say };
   }

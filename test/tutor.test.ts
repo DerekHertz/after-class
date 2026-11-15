@@ -6,7 +6,7 @@ import type {
   AssessableClaim, CodeNotice, Correction, EvidenceBundle, Frame, FrozenScope, LearnerAct, Passage, Turn, TutorMove, TutorMoveKind,
 } from "../src/shared/domain";
 import { Material, interval } from "../src/shared/time";
-import { allowedMoves, nextThreadId, parseMoveHeader, reviewState, tutorPrompt, tutorRequest, tutorTask, validateMove, wrapUpTask } from "../src/backend/review/tutor";
+import { allowedMoves, nextThreadId, parseMoveHeader, reviewState, tutorPrompt, tutorRequest, tutorTask, validateMove, validateSay, wrapUpTask } from "../src/backend/review/tutor";
 import type { TutorInput, WrapUpOutput } from "../src/backend/review/tutor";
 import type { ClaudeCli, ClaudeRequest } from "../src/backend/providers/claude";
 import { createMemo } from "../src/backend/providers/memo";
@@ -359,6 +359,31 @@ describe("validateMove", () => {
 });
 
 /** A fake `claude -p` that replays scripted replies as stream deltas. No process, no network. */
+describe("validateSay: a mismatch asks before it tells (flow: one tentative, source-grounded diagnostic question)", () => {
+  const diagnose: TutorMove = { kind: "diagnose", threadId: thread(1), hypothesis: "h", evidence: [ev(1)] };
+
+  test("a pointer to the source and one question passes", () => {
+    expect(validateSay(diagnose, "How does what you said fit with where the lecturer talks about what happens after the cycle?").ok).toBe(true);
+    expect(validateSay(diagnose, "How does that fit with the part of the lecture on the electron transport chain?").ok).toBe(true);
+    expect(validateSay(diagnose, "  Where in the lecture does the speaker put that step, and how does it fit with your answer?\n").ok).toBe(true);
+  });
+
+  test("a reply that states the lecture's answer before asking is rejected", () => {
+    const recital = "The lecture puts it differently. The lecturer says NADH and FADH2 go to the electron transport chain. He says each NADH makes three ATP and each FADH2 makes two. How does that fit with what you said?";
+    expect(validateSay(diagnose, recital).ok).toBe(false);
+  });
+
+  test("a reply that is not one question is rejected", () => {
+    expect(validateSay(diagnose, "Not quite. Look at the passage again.").ok).toBe(false);
+    expect(validateSay(diagnose, "What do you think? And why?").ok).toBe(false);
+    expect(validateSay(diagnose, `${"The lecturer covers the chain at length ".repeat(8)}so how does that fit with what you said?`).ok).toBe(false);
+  });
+
+  test("other moves speak freely", () => {
+    expect(validateSay({ kind: "explain", threadId: thread(1), evidence: [ev(1)] }, "Here is what the lecture says. It has several parts. Then a long account follows.").ok).toBe(true);
+  });
+});
+
 function fakeClaude(replies: string[]) {
   const requests: ClaudeRequest[] = [];
   const cli: ClaudeCli = {
