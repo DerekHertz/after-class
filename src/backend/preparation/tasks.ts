@@ -253,7 +253,7 @@ function toInterpretation(raw: z.infer<typeof interpretationSchema>, labels: Lab
       } catch (err) {
         if (!(dropBad && err instanceof ProviderError)) throw err;
         firstError ??= err;
-        const evidence = d.evidence.map((label) => labels.ids.get(label) ?? label);
+        const evidence = d.evidence.flatMap((label) => labels.ids.get(label) ?? []);
         dropped.push({ text: d.text, evidence, reason: `cites unknown evidence: ${d.evidence.filter((label) => !labels.ids.has(label)).join(", ")}` });
         return [];
       }

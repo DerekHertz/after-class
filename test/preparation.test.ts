@@ -513,7 +513,7 @@ describe("a claim citing evidence the model was never shown", () => {
   });
   /** The model cites by label: the chunk's passages are p1, p2 in order. */
   const good = (text: string, k: number) => ({ text, evidence: [`p${k + 1}`] });
-  const bad = (text: string) => ({ text, evidence: [UNSEEN as string] });
+  const bad = (text: string) => ({ text, evidence: ["p1", "p999", UNSEEN as string] });
 
   test("one bad claim among three: the two good claims are kept, the bad one is dropped and reported, and it is never assessable", async () => {
     const claude = fakeClaude(() => raw([good("first", 0), bad("ghost"), good("second", 1)]));
@@ -533,7 +533,7 @@ describe("a claim citing evidence the model was never shown", () => {
     const stored = w.memo.inspect(unit.memo_key as MemoKey)!;
     expect(stored.failure).toBeNull();
     expect((stored.output as { dropped: unknown }).dropped).toEqual([
-      { text: "ghost", evidence: [UNSEEN], reason: `cites unknown evidence: ${UNSEEN}` },
+      { text: "ghost", evidence: [P[0]!.id], reason: `cites unknown evidence: p999, ${UNSEEN}` },
     ]);
   });
 
@@ -561,7 +561,7 @@ describe("a claim citing evidence the model was never shown", () => {
     const unit = w.db.sql.query<{ memo_key: string }, []>(`SELECT memo_key FROM prep_inputs WHERE kind = 'interpretation'`).get()!;
     const failure = w.memo.inspect(unit.memo_key as MemoKey)!.failure;
     expect(failure).toMatchObject({ attempts: 2, terminal: true });
-    expect(failure!.lastError).toBe(`ProviderError: claim "ghost one" cites unknown evidence: ${UNSEEN}`);
+    expect(failure!.lastError).toBe(`ProviderError: claim "ghost one" cites unknown evidence: p999, ${UNSEEN}`);
     expect(w.usable(r1.material)).toEqual([]);
 
     answer = () => raw([good("recovered", 0)]);
