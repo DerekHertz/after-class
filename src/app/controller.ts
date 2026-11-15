@@ -219,6 +219,16 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
     }
   }
 
+  /** The room's observer is a side channel: it never stops the stream, and an old review's events never reach it. */
+  function observe(started: number, event: TurnEvent): void {
+    if (generation !== started) return;
+    try {
+      deps.onTurnEvent?.(event);
+    } catch {
+      // A throwing observer must not fail the turn.
+    }
+  }
+
   async function runTurn(turnId: TurnId, act: LearnerAct): Promise<void> {
     const started = generation;
     speaker.beginTurn();
@@ -227,7 +237,7 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
     let wrappedUp = false;
     try {
       for await (const event of api.sendTurn(reviewId, turnId, act)) {
-        deps.onTurnEvent?.(event);
+        observe(started, event);
         if (event.type === "move" && event.move.kind === "wrap_up") wrappedUp = true;
         if (event.type === "learner_turn_stored") {
           await unsent.remove(turnId);

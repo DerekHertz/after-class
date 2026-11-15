@@ -29,7 +29,7 @@ export type ReviewDeps = { readonly api: AppApi; readonly speaker: Speaker; read
  * field lies on the desk. The lecture folio and the review notebook are picked up over the room, one at a time, only
  * when the learner asks; the response field stays mounted underneath, so a draft survives.
  */
-function reactToTurnEvent(event: TurnEvent) {
+export function reactToTurnEvent(event: TurnEvent) {
   const input = inputFromTurnEvent(event);
   if (input !== null) react(input);
 }
