@@ -181,14 +181,15 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const actions = availableActions(view.state, soft !== null);
   const streaming = state.live?.status === "streaming";
   /** The controller's lock outlasts the stream: while it refreshes the view and saves, an act would be refused. */
-  const held = streaming || state.busy;
+  const held = streaming || state.busy || view.turnInFlight;
   const evidenceIds = selectedEvidenceIds(selection, automaticIds);
   const videos = sourceVideos(capture.data?.capture ?? null);
   const unanswered = unansweredLearnerTurn(view.turns);
   const heading = lectureHeading([...titles.values()]);
   const scopeSeconds = Material.sources(view.scope.material).reduce((sum, id) => sum + Material.get(view.scope.material, id).intervals().reduce((s, i) => s + (i.end - i.start), 0), 0);
   /** The backend is still running a turn this page did not start, so the reply is on its way and Retry would only replay it. */
-  const awaitingReply = view.turnInFlight && !streaming && state.unsent.length === 0;
+  const awaitingReply = view.turnInFlight && !streaming;
+  const waitingLine = showsWaitingLine(awaitingReply, handoff);
   const canRetry = !streaming && !awaitingReply && state.live?.status !== "held" && (state.unsent.length > 0 || unanswered !== null || owedLearnerTurn(view) !== null || strandedEndTurn(view) !== null || state.live?.status === "failed");
 
   const questionMarker = view.state.mainQuestions > 0 ? `Question ${view.state.mainQuestions}` : null;
@@ -214,7 +215,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
       </section>
     )}
     {handoff !== "none" && <p ref={startStatus} className="note" role="status" tabIndex={-1}>{canRetry ? "Your review has started, but the tutor's first question has not arrived." : "Your review has started. Waiting for the tutor's first question."}</p>}
-    {awaitingReply && <p className="note" role="status">The tutor is still replying. It will show up here when it is ready.</p>}
+    {waitingLine && <p className="note" role="status">The tutor is still replying. It will show up here when it is ready.</p>}
     {canRetry && (
       <UndeliveredNote
         unsent={state.unsent.length}
@@ -233,7 +234,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
 
   const deskContent = <Composer
     actions={actions.filter((a) => !["continue", "wrap_up", "pause", "resume", "end"].includes(a))}
-    disabled={held || awaitingReply || state.unsent.length > 0}
+    disabled={held || state.unsent.length > 0}
     sendError={state.sendError}
     speech={speech}
     showSpeak={voice}
@@ -461,9 +462,14 @@ export function EndConfirm({ disabled, onConfirm, onCancel }: { readonly disable
   );
 }
 
-/** Pause, Resume and Finish: held while a stream is live, while the controller's lock is held, and while an earlier turn is unsent. */
+/** The reply-is-coming line gives way to the start handoff's own status line, so the learner never sees two waiting lines at once. */
+export function showsWaitingLine(awaitingReply: boolean, handoff: StartHandoff): boolean {
+  return awaitingReply && handoff === "none";
+}
+
+/** Pause, Resume and Finish: held while a stream is live, while the controller's lock is held, while the backend runs a turn, and while an earlier turn is unsent. */
 export function HeaderActions({ ids, state, send }: { readonly ids: readonly ActionId[]; readonly state: SessionState; readonly send: (id: ActionId) => void }) {
-  return <Actions ids={ids} disabled={state.live?.status === "streaming" || state.busy || state.unsent.length > 0} send={send} />;
+  return <Actions ids={ids} disabled={state.live?.status === "streaming" || state.busy || state.view?.turnInFlight === true || state.unsent.length > 0} send={send} />;
 }
 
 function Actions({ ids, disabled, send }: { readonly ids: readonly ActionId[]; readonly disabled: boolean; readonly send: (id: ActionId) => void }) {

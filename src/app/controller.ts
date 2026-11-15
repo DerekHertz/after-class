@@ -128,13 +128,29 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
     for (const l of listeners) l();
   };
 
-  async function refreshView(): Promise<void> {
+  /** Bumped by `dispose`, so a read that started before it never starts a watcher after it. */
+  let generation = 0;
+
+  /** Every read of the review goes through here: whatever it learns about a turn still running on the backend is handled in one place. */
+  async function refreshView(started = generation): Promise<void> {
     try {
       const view = await api.review(reviewId);
       set({ view, loadError: null, ...(view.saved === "saved" ? { saveError: null } : {}) });
+      await reconcileUnsent(view);
+      if (generation === started && view.turnInFlight && state.live?.status !== "streaming") watchRunningTurn();
     } catch (e) {
       set({ loadError: message(e) });
     }
+  }
+
+  /** A turn the backend already stored is no longer unsent, whether or not this page saw the acknowledgment. */
+  async function reconcileUnsent(view: ReviewView): Promise<void> {
+    const stored = new Set<string>(view.turns.map((t) => t.id));
+    const rows = await unsent.forReview(reviewId);
+    const settled = rows.filter((r) => stored.has(r.turnId));
+    if (settled.length === 0) return;
+    for (const r of settled) await unsent.remove(r.turnId);
+    await refreshUnsent();
   }
 
   let stopWatching: (() => void) | null = null;
@@ -149,6 +165,7 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
       onResult: (view) => {
         failures = 0;
         set({ view, loadError: null });
+        void reconcileUnsent(view);
         if (!view.turnInFlight) {
           stopWatching = null;
           void saveIfEnded(false);
@@ -175,6 +192,8 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
   /** One turn at a time, claimed before the first await so a double click cannot start two. */
   async function exclusive<T>(run: () => Promise<T>): Promise<T | undefined> {
     if (streaming) return undefined;
+    // The backend allows one turn at a time and would answer 409: hold every act that sends a turn until the running one is over.
+    if (state.view?.turnInFlight) return undefined;
     streaming = true;
     set({ busy: true });
     try {
@@ -241,9 +260,9 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
     },
     async load() {
       // Unsent turns first, so a loaded view never shows before the unsent store is known (the review opens by checking both).
+      const started = generation;
       await refreshUnsent();
-      await refreshView();
-      if (state.view?.turnInFlight && !streaming) watchRunningTurn();
+      await refreshView(started);
     },
     send: async (act) => {
       const sent = await exclusive(async () => {
@@ -294,6 +313,7 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
     save,
     learnerSpeaking: () => speaker.stop(),
     dispose: () => {
+      generation++;
       stopWatching?.();
       stopWatching = null;
     },
