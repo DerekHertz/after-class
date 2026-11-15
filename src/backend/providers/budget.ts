@@ -49,13 +49,16 @@ import type { Db } from "../db";
  *   continuations, each a request that reserves $1 again. These are estimates, not upper bounds: the same worst case is $1.23 for a tutor turn with
  *   experiment 8's 69,251-token context and $4.81 for a resource search with 100,000, and reserving that much would refuse a
  *   learner's turn with a quarter of their $5 unused.
- *   Jev: TypeSafe has published no price, so every Jev call's cost is unknown and this figure is what it counts. $0.001 is a
- *   placeholder until Derek has a price.
+ *   Jev: $0.042 per million input tokens, output free (`JEV_INPUT_NANOUSD_PER_TOKEN` in jev.ts). The measured calls of a 13.6 minute
+ *   lecture ran 420 to 10,632 input tokens, so $0.00002 to $0.00045 each. $0.0005 covers the largest of them. A Jev response
+ *   with tokens settles at its priced amount, so this figure is only counted for one that reported none. It is also the bound
+ *   when a process ends before a response was read: that call settles at this reservation with an unknown cost (R17), which
+ *   understates a call over about 11,900 input tokens. Once a response's usage is read its price is stored, so a later crash settles at it.
  */
 export const ESTIMATE_USD: Readonly<Record<Purpose, number>> = {
-  boundary: 0.001,
-  frame_change: 0.001,
-  claim_check: 0.001,
+  boundary: 0.0005,
+  frame_change: 0.0005,
+  claim_check: 0.0005,
   interpretation: 1.08,
   claim_revision: 0.75,
   resource_search: 1,
@@ -102,7 +105,24 @@ export type Budget = {
 export const INTERRUPTED = "the process ended before the call finished, so it may have been billed";
 
 const MICROS = 1_000_000;
-const toMicros = (usd: number): number => Math.round(usd * MICROS);
+/**
+ * A cost or reservation in whole micro-dollars, rounded up: the smallest whole number of micros whose dollar value, as a double,
+ * is not below `usd`. So a settled amount is never below the cost recorded for it and at most one micro above it, with no
+ * tolerance: a cost that is already a whole number of micros (`jevCost` makes Jev's one) comes back as exactly those micros.
+ */
+function costMicros(usd: number): number {
+  const r = Math.round(usd * MICROS);
+  return r / MICROS >= usd ? r : r + 1;
+}
+
+/**
+ * A cap in whole micro-dollars, rounded down, so a cap is never raised: the largest whole number of micros whose dollar value is
+ * not above `usd`. A cost is rounded the other way, because a cap that admitted more than it was set to is the weaker check.
+ */
+function capMicros(usd: number): number {
+  const r = Math.round(usd * MICROS);
+  return r / MICROS <= usd ? r : r - 1;
+}
 
 /** The calendar month in UTC, "YYYY-MM". */
 export function periodOf(ms: number): string {
@@ -117,8 +137,8 @@ export function periodEndMs(ms: number): number {
 
 export function createBudget(db: Db, opts: BudgetOptions): Budget {
   const now = opts.now ?? Date.now;
-  const userCap = opts.limits.userUsd === null ? null : toMicros(opts.limits.userUsd);
-  const totalCap = opts.limits.totalUsd === null ? null : toMicros(opts.limits.totalUsd);
+  const userCap = opts.limits.userUsd === null ? null : capMicros(opts.limits.userUsd);
+  const totalCap = opts.limits.totalUsd === null ? null : capMicros(opts.limits.totalUsd);
   const spent = "COALESCE(SUM(COALESCE(settled_micros, priced_micros, reserved_micros)), 0) AS used FROM budget_holds";
   const q = {
     userUsed: db.sql.query<{ used: number }, [string, string]>(`SELECT ${spent} WHERE period = ? AND user_id = ?`),
@@ -160,7 +180,7 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
     reserve(userId, purpose, key) {
       return db.sql.transaction((): Admission => {
         const at = now();
-        const micros = toMicros(ESTIMATE_USD[purpose]);
+        const micros = costMicros(ESTIMATE_USD[purpose]);
         const hold = holdFor(userId, at, purpose, micros);
         if (hold !== null) return { kind: "held", hold };
         const id = `hold_${crypto.randomUUID()}`;
@@ -170,11 +190,11 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
     },
 
     price(reservation, cost) {
-      if (cost.kind !== "unknown") q.price.run(toMicros(cost.usd), reservation.id);
+      if (cost.kind !== "unknown") q.price.run(costMicros(cost.usd), reservation.id);
     },
 
     settle(reservation, cost) {
-      q.settle.run(cost.kind === "unknown" ? reservation.micros : toMicros(cost.usd), Math.round(now()), reservation.id);
+      q.settle.run(cost.kind === "unknown" ? reservation.micros : costMicros(cost.usd), Math.round(now()), reservation.id);
     },
 
     allowance(userId) {
@@ -183,7 +203,7 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
         usedUsd: q.userUsed.get(periodOf(at), userId)!.used / MICROS,
         limitUsd: opts.limits.userUsd,
         resetsAtMs: periodEndMs(at),
-        held: holdFor(userId, at, PROBE, toMicros(ESTIMATE_USD[PROBE])),
+        held: holdFor(userId, at, PROBE, costMicros(ESTIMATE_USD[PROBE])),
       };
     },
 

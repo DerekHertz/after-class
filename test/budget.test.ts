@@ -5,6 +5,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createBudget, ESTIMATE_USD, periodEndMs } from "../src/backend/providers/budget";
 import type { Budget, BudgetLimits } from "../src/backend/providers/budget";
+import { createJevClient, jevCost } from "../src/backend/providers/jev";
+import { frameChangeTask } from "../src/backend/providers/jev-tasks";
 import { createMemo, ProviderError } from "../src/backend/providers/memo";
 import type { Memo, Task } from "../src/backend/providers/memo";
 import { createLedger } from "../src/backend/providers/ledger";
@@ -25,6 +27,7 @@ import type { Cost, Purpose } from "../src/shared/domain";
 import { deferred, fakeTask, ok, otherUserDb, testUserDb, usage } from "./fakes";
 import type { FakeStep } from "./fakes";
 import { answer, askMain, collect, kit, reply, startedRig, types } from "./review-fixtures";
+import { frame, jpeg, json, scriptedFetch, withBytes } from "./providers-fixtures";
 import { tmpDir } from "./tmp";
 
 const NOV_10 = Date.UTC(2026, 10, 10, 12);
@@ -410,5 +413,154 @@ describe("what the learner sees", () => {
     const allowance = { usedUsd: 1, limitUsd: 5, resetsAtMs: DEC_1, held: null };
     expect(usageResponse.parse({ byKind: {}, byPurpose: {}, allowance }).allowance).toEqual(allowance);
     expect(usageResponse.parse({ byKind: {}, byPurpose: {} }).allowance).toBeNull();
+  });
+});
+
+describe("Jev spend", () => {
+  const sum = (db: Db, column: string) => db.sql.query<{ n: number }, []>(`SELECT COALESCE(SUM(${column}), 0) AS n FROM ${column === "cost_usd" ? "usage_events" : "budget_holds"}`).get()!.n;
+
+  test("once every call has finished, the allowance equals the sum of the usage events and no hold is left open", async () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    const tokens = [5161, 5364, 5515, 420, 10_632];
+    let call = 0;
+    const fetched = scriptedFetch(() => json({ model: "jev-1.13.0", answers: { teaching_change: { type: "noul", noul: 0.2 } }, usage: { input_tokens: tokens[call++], output_tokens: 3 } }));
+    const jev = createJevClient({ apiKey: "k", fetch: fetched.fetch });
+    const task = frameChangeTask(jev);
+    const input = (i: number, width = 1280) => ({ before: withBytes(frame(`a${i}`)), after: withBytes(frame(`b${i}`, width, 720), jpeg(width, 720)), nearbyPassages: [] });
+    const outcomes = await Promise.all([...tokens.keys()].map((i) => w.memo.run(task, input(i))));
+    expect(outcomes.map((o) => o.kind)).toEqual(tokens.map(() => "hit"));
+    const bad = await w.memo.run(task, input(9, 100));
+    expect(bad.kind).toBe("failed");
+    expect(fetched.seen).toHaveLength(tokens.length);
+
+    const events = w.db.sql.query<{ cost_kind: string; cost_usd: number }, []>("SELECT cost_kind, cost_usd FROM usage_events ORDER BY started_ms, id").all();
+    expect(events.filter((e) => e.cost_kind === "estimated")).toHaveLength(tokens.length + 1);
+    expect(events.filter((e) => e.cost_kind === "estimated" && e.cost_usd === 0)).toHaveLength(1);
+    expect(events.some((e) => e.cost_kind === "unknown")).toBe(false);
+    expect(w.db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM budget_holds WHERE settled_micros IS NULL").get()!.n).toBe(0);
+    const priced = tokens.reduce((a, t) => a + Math.ceil((t * 42) / 1000) / 1_000_000, 0);
+    expect(sum(w.db, "cost_usd")).toBeCloseTo(priced, 9);
+    expect(used(w.budget, w.db)).toBeCloseTo(sum(w.db, "cost_usd"), 5);
+    expect(sum(w.db, "settled_micros") / 1_000_000).toBe(used(w.budget, w.db));
+  });
+
+  test("a Jev response with no tokens is unknown cost and counts at the reservation, a priced one counts its price", async () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    const task = frameChangeTask(createJevClient({ apiKey: "k", fetch: scriptedFetch(() => json({ model: "jev-1.13.0", answers: { teaching_change: { type: "noul", noul: 0.2 } } })).fetch }));
+    await w.memo.run(task, { before: withBytes(frame("a")), after: withBytes(frame("b")), nearbyPassages: [] });
+    expect(w.db.sql.query("SELECT cost_kind, cost_usd FROM usage_events").get()).toEqual({ cost_kind: "unknown", cost_usd: null });
+    expect(used(w.budget, w.db)).toBe(ESTIMATE_USD.frame_change);
+  });
+  const jevTask = (tokens: number, answer: unknown = { type: "noul", noul: 0.2 }) =>
+    frameChangeTask(createJevClient({ apiKey: "k", fetch: scriptedFetch(() => json({ model: "jev-1.13.0", answers: { teaching_change: answer }, usage: { input_tokens: tokens, output_tokens: 3 } })).fetch }));
+  const pair = { before: withBytes(frame("a")), after: withBytes(frame("b")), nearbyPassages: [] };
+  const settledMicros = (db: Db) => db.sql.query<{ settled_micros: number }, []>("SELECT settled_micros FROM budget_holds").all().map((h) => h.settled_micros);
+
+  test("a process that ends after a valid response is reconciled at the price already read, not the reservation", async () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    const task = jevTask(30_000);
+    void w.memo.run({ ...task, attempt: async (i, c) => (await task.attempt(i, c), new Promise<never>(() => {})) }, pair);
+    await new Promise((r) => setTimeout(r, 20));
+    const next = createBudget(w.db, { limits: { userUsd: 5, totalUsd: 50 }, stopped: () => false });
+    expect(next.reconcileInterrupted()).toBe(1);
+    expect(settledMicros(w.db)).toEqual([1260]);
+    expect(w.db.sql.query("SELECT cost_kind FROM usage_events").get()).toEqual({ cost_kind: "unknown" });
+  });
+
+  test("an answer that fails validation still settles at the price of the tokens Jev billed", async () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    const out = await w.memo.run(jevTask(30_000, { type: "noul", noul: 1.5 }), pair);
+    expect(out.kind).toBe("failed");
+    expect(w.db.sql.query<{ cost_kind: string; cost_usd: number }, []>("SELECT cost_kind, cost_usd FROM usage_events").get()).toEqual({ cost_kind: "estimated", cost_usd: expect.closeTo(0.00126, 9) as unknown as number });
+    expect(settledMicros(w.db)).toEqual([1260]);
+  });
+
+  test("an implausible token count is recorded as unknown and still settles, while a valid input count beside it is priced", async () => {
+    const cases: [unknown, unknown, string, number][] = [
+      [1e30, 3, "unknown", ESTIMATE_USD.frame_change * 1_000_000],
+      [1.5, 3, "unknown", ESTIMATE_USD.frame_change * 1_000_000],
+      [30_000, 1e30, "estimated", 1260],
+    ];
+    for (const [input_tokens, output_tokens, kind, micros] of cases) {
+      const w = world({ userUsd: 5, totalUsd: 50 });
+      const task = frameChangeTask(createJevClient({ apiKey: "k", fetch: scriptedFetch(() => json({ model: "jev-1.13.0", answers: { teaching_change: { type: "noul", noul: 0.2 } }, usage: { input_tokens, output_tokens } })).fetch }));
+      await w.memo.run(task, pair);
+      expect(w.db.sql.query<{ cost_kind: string }, []>("SELECT cost_kind FROM usage_events").all(), String(input_tokens)).toEqual([{ cost_kind: kind }]);
+      expect(settledMicros(w.db), String(input_tokens)).toEqual([micros]);
+    }
+  });
+
+  test("a settled amount is never below the cost recorded for it, down to a response of 11 tokens", async () => {
+    for (const [tokens, micros] of [[5364, 226], [11, 1], [0, 0]] as const) {
+      const w = world({ userUsd: 5, totalUsd: 50 });
+      await w.memo.run(jevTask(tokens), pair);
+      const [settled] = settledMicros(w.db);
+      const recorded = w.db.sql.query<{ cost_usd: number }, []>("SELECT cost_usd FROM usage_events").get()!.cost_usd;
+      expect(settled).toBe(micros);
+      expect(settled! / 1_000_000).toBeGreaterThanOrEqual(recorded);
+    }
+  });
+
+  test("an envelope-invalid reply is not memoised, though its answers are valid", async () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    const answers = { teaching_change: { type: "noul", noul: 0.2 } };
+    for (const body of [{ model: "jev-1.13.0", answers, usage: { input_tokens: "bad" } }, { model: 3, answers, usage: { input_tokens: 30_000 } }]) {
+      const task = frameChangeTask(createJevClient({ apiKey: "k", fetch: scriptedFetch(() => json(body)).fetch }));
+      expect((await w.memo.run(task, { before: withBytes(frame("a")), after: withBytes(frame("b")), nearbyPassages: [] })).kind).toBe("failed");
+    }
+    expect(w.db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM memo").get()!.n).toBe(0);
+  });
+
+  test("input tokens settle at their price when output_tokens is malformed, and on an HTTP 500 that carries usage", async () => {
+    for (const [status, body] of [
+      [200, { model: "jev-1.13.0", answers: { teaching_change: { type: "noul", noul: 0.2 } }, usage: { input_tokens: 30_000, output_tokens: "bad" } }],
+      [500, { message: "boom", usage: { input_tokens: 30_000 } }],
+    ] as const) {
+      const w = world({ userUsd: 5, totalUsd: 50 });
+      const task = frameChangeTask(createJevClient({ apiKey: "k", fetch: scriptedFetch(() => json(body, status)).fetch }));
+      await w.memo.run(task, { before: withBytes(frame("a")), after: withBytes(frame("b")), nearbyPassages: [] });
+      const settled = settledMicros(w.db);
+      expect(settled.length).toBeGreaterThan(0);
+      expect(settled.every((m) => m === 1260)).toBe(true);
+    }
+  });
+
+  test("a settlement is the exact price rounded up, for 1,500 tokens and for every count from 0 to 3,000", async () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    await w.memo.run(jevTask(1500), pair);
+    expect(settledMicros(w.db)).toEqual([63]);
+    const w2 = world({ userUsd: null, totalUsd: null });
+    for (let t = 0; t <= 3000; t++) {
+      const c = jevCost("jev-1.13.0", t);
+      const ticket = w2.budget.reserve(w2.db.userId, "frame_change", `k${t}` as never);
+      if (ticket.kind !== "reserved" || c.kind === "unknown") throw new Error("not reserved or priced");
+      w2.budget.settle(ticket.reservation, c);
+    }
+    const all = settledMicros(w2.db);
+    expect(all).toHaveLength(3001);
+    expect(all.every((settled, t) => settled * 1000 >= t * 42 && settled * 1000 < t * 42 + 1000)).toBe(true);
+  });
+
+  test("any other cost (Claude's floats) settles at the next micro above it, and a whole number of micros stays itself", () => {
+    const w = world({ userUsd: null, totalUsd: null });
+    const settle = (usd: number) => {
+      const t = w.budget.reserve(w.db.userId, "frame_change", `k${usd}` as never);
+      if (t.kind !== "reserved") throw new Error("held");
+      w.budget.settle(t.reservation, { kind: "notional", usd, basis: "claude_subscription" });
+      return settledMicros(w.db).at(-1);
+    };
+    expect(settle(0.00006300000000000001)).toBe(64);
+    expect(settle(0.0000631)).toBe(64);
+    expect(settle(0.000063)).toBe(63);
+    expect(settle(0.0421)).toBe(42_100);
+  });
+
+  test("a cap is never rounded up: $0.0004991 refuses a $0.0005 reservation, and a cap of exactly $0.0005 admits it", () => {
+    const hold = (cap: number) => {
+      const w = world({ userUsd: null, totalUsd: cap });
+      return w.budget.reserve(w.db.userId, "frame_change", "k" as never).kind;
+    };
+    expect(hold(0.0004991)).toBe("held");
+    expect(hold(0.0005)).toBe("reserved");
   });
 });

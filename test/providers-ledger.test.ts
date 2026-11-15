@@ -24,12 +24,12 @@ describe("R17 and the ledger", () => {
     },
   });
 
-  test("Jev events are stored with cost unknown and usd NULL; Claude events are notional; totals never mix them", async () => {
+  test("Jev events are estimated at the published price, a call with no usage stays unknown with usd NULL, Claude events are notional; totals never mix them", async () => {
     const db = testUserDb();
     const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
     const ledger = createLedger(db);
 
-    const { jev } = fakeJev(() => ({ new_concept: p(0.9), stopping_point: p(0.1) }));
+    const { jev } = fakeJev(() => ({ new_concept: p(0.9), stopping_point: p(0.1) }), 1_000_000);
     await memo.run(boundaryTask(jev), boundaryInput());
     await memo.run(boundaryTask(jev), boundaryInput({ newPassages: [passage("ev_n2", 5, "x")] }));
     const failing = fakeJev(() => new ProviderError("jev 400", null, false));
@@ -45,14 +45,16 @@ describe("R17 and the ledger", () => {
     await memo.run(claudeTask(noCost, "wrap_up"), { tag: "c" });
 
     const raw = db.sql.query<{ provider: string; cost_kind: string; cost_usd: number | null; cost_reason: string | null }, []>(`SELECT provider, cost_kind, cost_usd, cost_reason FROM usage_events`).all();
-    expect(raw.filter((r) => r.provider === "jev").every((r) => r.cost_kind === "unknown" && r.cost_usd === null && r.cost_reason !== null)).toBe(true);
+    expect(raw.filter((r) => r.provider === "jev" && r.cost_kind === "estimated").map((r) => r.cost_usd)).toEqual([0.042, 0.042]);
+    expect(raw.filter((r) => r.provider === "jev" && r.cost_kind === "unknown").every((r) => r.cost_usd === null && r.cost_reason !== null)).toBe(true);
     expect(raw.filter((r) => r.provider === "claude" && r.cost_kind === "notional").every((r) => r.cost_usd === 0.0421)).toBe(true);
 
     const s = ledger.summary();
-    expect(s.byKind.unknown).toEqual({ calls: 4, usd: null });
+    expect(s.byKind.unknown).toEqual({ calls: 2, usd: null });
+    expect(s.byKind.estimated).toEqual({ calls: 2, usd: 0.084 });
     expect(s.byKind.notional).toEqual({ calls: 2, usd: 0.0842 });
     expect(s.byKind.measured).toEqual({ calls: 0, usd: null });
-    expect(s.byPurpose.boundary).toEqual({ calls: 2, errors: 0, unknownCost: 2 });
+    expect(s.byPurpose.boundary).toEqual({ calls: 2, errors: 0, unknownCost: 0 });
     expect(s.byPurpose.claim_check).toEqual({ calls: 1, errors: 1, unknownCost: 1 });
     expect(s.byPurpose.wrap_up).toEqual({ calls: 1, errors: 0, unknownCost: 1 });
 
@@ -61,7 +63,7 @@ describe("R17 and the ledger", () => {
     const interp = stages.find((x) => x.purpose === "interpretation")!;
     expect(interp).toMatchObject({ provider: "claude", calls: 2, unknownCostCalls: 0, usd: { measured: null, notional: 0.0842, estimated: null }, inputTokens: 300, outputTokens: 150, cacheReadTokens: 1800 });
     const boundary = stages.find((x) => x.purpose === "boundary")!;
-    expect(boundary).toMatchObject({ provider: "jev", calls: 2, unknownCostCalls: 2, usd: { measured: null, notional: null, estimated: null }, inputTokens: 200, outputTokens: 4, cacheReadTokens: null });
+    expect(boundary).toMatchObject({ provider: "jev", calls: 2, unknownCostCalls: 0, usd: { measured: null, notional: null, estimated: 0.084 }, inputTokens: 2_000_000, outputTokens: 4, cacheReadTokens: null });
     expect(stages.find((x) => x.purpose === "claim_check")).toMatchObject({ calls: 1, errors: 1, inputTokens: null });
   });
 
@@ -91,7 +93,7 @@ describe("R17 and the ledger", () => {
   test("a kind with no calls reports usd null, not $0; a ledger of only unknown-cost calls prices nothing", async () => {
     const db = testUserDb();
     const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
-    const { jev } = fakeJev(() => ({ new_concept: p(0.9), stopping_point: p(0.1) }));
+    const { jev } = fakeJev(() => ({ new_concept: p(0.9), stopping_point: p(0.1) }), null);
     await memo.run(boundaryTask(jev), boundaryInput());
     const s = createLedger(db).summary();
     expect(s.byKind.unknown).toEqual({ calls: 1, usd: null });

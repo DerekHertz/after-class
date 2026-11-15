@@ -8,11 +8,13 @@
  *   { model, state, questions, assets? }
  * → { model, answers: { [q]: { type: "noul", noul } | { type: "choice", … } | { type: "score", … } }, usage: { input_tokens, output_tokens } }
  *
- * Cost is always { kind: "unknown", reason: "typesafe pricing not published" } until pricing is known.
+ * Cost is estimated from the response's input tokens at TypeSafe's published price (`jevCost`), and unknown only when the
+ * response carried no input tokens or the model has no listed price.
  */
 import { z } from "zod";
 import { ProviderError } from "./memo";
-import type { UsageReport } from "./memo";
+import type { Admitted, UsageReport } from "./memo";
+import type { Cost } from "../../shared/domain";
 
 export type JevQuestion =
   | { readonly type: "noul"; readonly instructions: string }
@@ -41,7 +43,7 @@ export type JevClient = {
    * whole request on Jev's side, so we fail fast and the task maps it to uncertain.
    * Throws ProviderError (retryable: status >= 500 || 429), with usage when the response carried it.
    */
-  ask<Q extends string>(req: JevRequest<Q>, signal: AbortSignal): Promise<{ readonly answers: Readonly<Record<Q, JevAnswer>>; readonly usage: UsageReport }>;
+  ask<Q extends string>(req: JevRequest<Q>, signal: AbortSignal, admitted?: Admitted): Promise<{ readonly answers: Readonly<Record<Q, JevAnswer>>; readonly usage: UsageReport }>;
 };
 
 export const JEV_IMAGE_LIMITS = {
@@ -55,7 +57,37 @@ export const JEV_IMAGE_LIMITS = {
 
 const MAX_CHOICE_OPTIONS = 255;
 const MAX_SCORE_LEVELS = 10;
-const UNKNOWN_COST = { kind: "unknown", reason: "typesafe pricing not published" } as const;
+/**
+ * TypeSafe's published price, by model id, in nano-dollars per input token, so every price is a whole number and a cost is
+ * integer arithmetic. Output tokens are free. Read from https://docs.typesafe.ai/models on 2026-11-14: "Price (per Btok / per
+ * Mtok) $42 / $0.042" for jev-1.14.0 and jev-1.13.0, and "You pay per input token. Output tokens are free." $0.042 per million
+ * tokens is 42 nano-dollars per token. The page lists no separate image price, so image tokens are taken to be inside
+ * `input_tokens`. That is an assumption, checked only against an invoice.
+ */
+export const JEV_INPUT_NANOUSD_PER_TOKEN: Readonly<Record<string, number>> = {
+  "jev-1.13.0": 42,
+  "jev-1.14.0": 42,
+};
+
+export const JEV_COST_BASIS = "typesafe_published_input_price";
+
+/** A count above this is not a real call (10 billion tokens would be $420), so it is read as an invalid figure, not priced. */
+const MAX_PRICED_TOKENS = 10_000_000_000;
+
+/**
+ * What a Jev response cost: estimated at the published input price, or unknown (R17) when the tokens or the model's price are
+ * missing or invalid. The cost is the exact price rounded up to a whole micro-dollar, in integers, so `usd` is a whole number of
+ * micros over a million, never below the exact price and under one micro above it. The budget then takes it back as exactly
+ * those micros.
+ */
+export function jevCost(model: string, inputTokens: number | null): Cost {
+  const rate = Object.hasOwn(JEV_INPUT_NANOUSD_PER_TOKEN, model) ? JEV_INPUT_NANOUSD_PER_TOKEN[model]! : null;
+  if (rate === null) return { kind: "unknown", reason: `no published price for model ${model}` };
+  if (inputTokens === null) return { kind: "unknown", reason: "the response reported no input tokens" };
+  if (!Number.isSafeInteger(inputTokens) || inputTokens < 0 || inputTokens > MAX_PRICED_TOKENS) return { kind: "unknown", reason: "the response's input token count is not a plausible count" };
+  const micros = Math.floor((inputTokens * rate + 999) / 1000);
+  return { kind: "estimated", usd: micros / 1_000_000, basis: JEV_COST_BASIS };
+}
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -97,7 +129,7 @@ function refersTo(text: string, ref: string): boolean {
 }
 
 function reject(message: string): never {
-  throw new ProviderError(message, null, false);
+  throw new ProviderError(message, null, false, "not_billed");
 }
 
 function validateQuestions(questions: Readonly<Record<string, JevQuestion>>): void {
@@ -133,11 +165,34 @@ const answerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("score"), score: z.number(), probabilities: z.record(z.string(), z.number()) }),
 ]);
 
+/** The whole reply envelope. A reply that does not match it is never accepted, whatever its answers say. */
 const responseSchema = z.object({
   model: z.string().nullish(),
   answers: z.record(z.string(), answerSchema),
-  usage: z.object({ input_tokens: z.number().nullish(), output_tokens: z.number().nullish() }).nullish(),
+  usage: z.object({ input_tokens: z.number().nonnegative().nullish(), output_tokens: z.number().nonnegative().nullish() }).nullish(),
 });
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * What a reply bills, read on its own from whatever the body holds, so one malformed or unrelated field (free output tokens, an
+ * answer) never hides the input tokens Jev charged for. The reply is accepted or refused by `responseSchema`, never by this.
+ * Null when the body is not an object. A figure that is missing or not a plausible count is null, so it prices as unknown.
+ */
+function billedUsage(body: unknown, requested: string): UsageReport | null {
+  if (!isRecord(body)) return null;
+  const usage = isRecord(body.usage) ? body.usage : {};
+  const count = (v: unknown): number | null => (Number.isSafeInteger(v) && (v as number) >= 0 && (v as number) <= MAX_PRICED_TOKENS ? (v as number) : null);
+  const inputTokens = count(usage.input_tokens);
+  const model = body.model === undefined || body.model === null ? requested : typeof body.model === "string" ? body.model : null;
+  return {
+    model: model ?? requested,
+    inputTokens,
+    outputTokens: count(usage.output_tokens),
+    cacheReadTokens: null,
+    cost: model === null ? { kind: "unknown", reason: "the response named no readable model" } : jevCost(model, inputTokens),
+  };
+}
 
 const errorSchema = z.object({
   message: z.string().nullish(),
@@ -179,7 +234,7 @@ export function createJevClient(opts: {
   const timeoutMs = opts.timeoutMs ?? 60_000;
 
   return {
-    async ask<Q extends string>(req: JevRequest<Q>, signal: AbortSignal) {
+    async ask<Q extends string>(req: JevRequest<Q>, signal: AbortSignal, admitted?: Admitted) {
       validateQuestions(req.questions);
       validateImages(req);
 
@@ -222,25 +277,26 @@ export function createJevClient(opts: {
         throw transportFailure(err);
       }
 
-      if (!res.ok) throw new ProviderError(describeError(res.status, text), null, res.status >= 500 || res.status === 429);
-
-      let json: unknown;
+      let json: unknown = undefined;
       try {
         json = JSON.parse(text);
       } catch {
-        throw new ProviderError(`jev ${res.status}: response is not JSON`, null, false);
+        // not JSON: no usage to read
       }
-      const parsed = responseSchema.safeParse(json);
-      if (!parsed.success) throw new ProviderError(`jev response did not match the expected shape: ${parsed.error.message.slice(0, 300)}`, null, false);
-
-      const { model, answers, usage } = parsed.data;
-      const report: UsageReport = {
-        model: model ?? req.model,
-        inputTokens: usage?.input_tokens ?? null,
-        outputTokens: usage?.output_tokens ?? null,
-        cacheReadTokens: null,
-        cost: UNKNOWN_COST,
+      // Jev bills the input tokens of a reply whether or not it is usable, so a reply that reports them is priced on every path.
+      const reportOf = (): UsageReport | null => {
+        const r = billedUsage(json, req.model);
+        if (r === null || r.inputTokens === null) return null;
+        admitted?.priced(r.cost);
+        return r;
       };
+      if (!res.ok) throw new ProviderError(describeError(res.status, text), reportOf(), res.status >= 500 || res.status === 429);
+      if (json === undefined) throw new ProviderError(`jev ${res.status}: response is not JSON`, null, false);
+      const parsed = responseSchema.safeParse(json);
+      if (!parsed.success) throw new ProviderError(`jev response did not match the expected shape: ${parsed.error.message.slice(0, 300)}`, reportOf(), false);
+      const { answers } = parsed.data;
+      const report = billedUsage(json, req.model)!;
+      admitted?.priced(report.cost);
 
       const out: Partial<Record<Q, JevAnswer>> = {};
       for (const id of Object.keys(req.questions) as Q[]) {
