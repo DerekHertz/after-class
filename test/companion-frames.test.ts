@@ -135,11 +135,11 @@ for (const who of COMPANIONS) describe(`${who}'s gesture frames ship through the
   }, 120_000);
 });
 
-describe("nothing prefetches or draws the frames before #222 wires them", () => {
+describe("the frames load only when the stage draws a companion", () => {
   const read = (path: string) => readFileSync(join(REPO, path), "utf8");
   const sources = (dir: string): string[] => readdirSync(join(REPO, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === "assets" ? [] : sources(join(dir, e.name))) : [join(dir, e.name)]));
-  test("no app source, stylesheet or room-art table names companion-frames, so the room's prefetch hints are unchanged", () => {
+  test("only the companion art table names companion-frames, and the page's preload and prefetch script never does", () => {
     const named = [...sources("src"), "scripts/build-app.ts"].filter((f) => read(f).includes("companion-frames"));
-    expect(named).toEqual([]);
+    expect(named).toEqual(["src/app/room/companion-art.ts"]);
   });
 });
