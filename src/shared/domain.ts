@@ -687,8 +687,10 @@ export type BudgetHold =
 export type Allowance = {
   /** What this month's calls count against the budget: their recorded cost, or what was set aside for a call still running or of unknown cost. */
   readonly usedUsd: number;
-  /** Null when there is no per-user cap. */
+  /** Null when there is no per-user cap, which includes an uncapped account. */
   readonly limitUsd: number | null;
+  /** An admin account the operator listed: no cap applies, and its spend is left out of everyone's total. Only the stop switch holds it. */
+  readonly uncapped: boolean;
   readonly resetsAtMs: number;
   /** Set when a new model call would be refused now. */
   readonly held: BudgetHold | null;

@@ -33,6 +33,13 @@
  * is admitted, so a capped user cannot mint a review that qualifies: each uncapped wrap-up is paid for by a capped tutor turn,
  * and one review passes the caps for at most `WRAP_UPS_PER_REVIEW` wrap-up requests. A wrap-up that names no review, whose review
  * has no paid tutoring, or that has used up its requests is capped like any other call.
+ *
+ * Derek, 2026-11-14, on whether his own account could "be considered an admin account with no cap": "yes build the admin account
+ * too". An uncapped user is a property of the user row, not of a call: the budget is built with the Clerk user ids (`auth_subject`)
+ * that are uncapped, and `UNCAPPED_USERS` selects their user ids from `users`. Such a user passes both caps, and their holds are
+ * left out of the total sum, so their testing never uses up what friends share. Their holds are still written, settled and counted
+ * in their own month, so their usage is recorded. The stop switch is asked first and still holds them. A subject that has not
+ * signed in has no row yet and matches nobody, and local mode has no Clerk subject, so it is never uncapped.
  */
 import { stableId } from "../../shared/ids";
 import type { MemoKey, UserId } from "../../shared/ids";
@@ -92,6 +99,9 @@ export const WRAP_UPS_PER_REVIEW = 6;
  */
 export const PAID_TUTOR_HOLD = "h.purpose = 'tutor_turn' AND h.settled_micros > 0";
 
+/** SQL over `users`, one `?` bound to the JSON array of uncapped Clerk user ids: the user ids that are uncapped. */
+const UNCAPPED_USERS = "SELECT id FROM users WHERE auth_provider = 'clerk' AND auth_subject IN (SELECT value FROM json_each(?))";
+
 export type BudgetLimits = {
   /** Per user per month. Null: no per-user cap. */
   readonly userUsd: number | null;
@@ -101,6 +111,8 @@ export type BudgetLimits = {
 
 export type BudgetOptions = {
   readonly limits: BudgetLimits;
+  /** Clerk user ids (`sub` of the session token) whose calls skip both caps and whose spend is left out of the total. Default: none. */
+  readonly uncappedSubjects?: readonly string[];
   /** The stop switch, asked before every request, so flipping it needs no restart. Requests already sent finish. */
   readonly stopped: () => boolean;
   readonly now?: () => number;
@@ -159,10 +171,12 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
   const now = opts.now ?? Date.now;
   const userCap = opts.limits.userUsd === null ? null : capMicros(opts.limits.userUsd);
   const totalCap = opts.limits.totalUsd === null ? null : capMicros(opts.limits.totalUsd);
+  const uncappedJson = JSON.stringify(opts.uncappedSubjects ?? []);
   const spent = "COALESCE(SUM(COALESCE(settled_micros, priced_micros, reserved_micros)), 0) AS used FROM budget_holds";
   const q = {
     userUsed: db.sql.query<{ used: number }, [string, string]>(`SELECT ${spent} WHERE period = ? AND user_id = ?`),
-    totalUsed: db.sql.query<{ used: number }, [string]>(`SELECT ${spent} WHERE period = ?`),
+    totalUsed: db.sql.query<{ used: number }, [string, string]>(`SELECT ${spent} WHERE period = ? AND user_id NOT IN (${UNCAPPED_USERS})`),
+    isUncapped: db.sql.query<{ n: number }, [string, string]>(`SELECT 1 AS n FROM users WHERE id = ? AND id IN (${UNCAPPED_USERS})`),
     insert: db.sql.query(`INSERT INTO budget_holds (id, user_id, period, purpose, memo_key, reserved_micros, reserved_ms, review_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
     wrapUpsOf: db.sql.query<{ n: number }, [string, string]>(`SELECT COUNT(*) AS n FROM budget_holds WHERE user_id = ? AND review_id = ? AND purpose = 'wrap_up'`),
     paidTutoringOf: db.sql.query<{ n: number }, [string, string, string, string]>(
@@ -194,7 +208,7 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
   /** Why an attempt for `purpose` that would add `micros` to this month is refused, or null when it may start. */
   function holdFor(userId: UserId, atMs: number, purpose: Purpose, micros: number, exempt = false): BudgetHold | null {
     if (opts.stopped()) return { reason: "stopped" };
-    if (exempt) return null;
+    if (exempt || q.isUncapped.get(userId, uncappedJson) !== null) return null;
     const period = periodOf(atMs);
     const resetsAtMs = periodEndMs(atMs);
     if (userCap !== null) {
@@ -202,7 +216,7 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
       if (used + micros > userCap) return { reason: "user_budget", resetsAtMs, usedUp: used >= userCap };
     }
     if (totalCap !== null) {
-      const used = q.totalUsed.get(period)!.used;
+      const used = q.totalUsed.get(period, uncappedJson)!.used;
       if (used + micros > totalCap) return { reason: "total_budget", resetsAtMs, usedUp: used >= totalCap };
     }
     return null;
@@ -232,9 +246,11 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
 
     allowance(userId) {
       const at = now();
+      const uncapped = q.isUncapped.get(userId, uncappedJson) !== null;
       return {
         usedUsd: q.userUsed.get(periodOf(at), userId)!.used / MICROS,
-        limitUsd: opts.limits.userUsd,
+        limitUsd: uncapped ? null : opts.limits.userUsd,
+        uncapped,
         resetsAtMs: periodEndMs(at),
         held: holdFor(userId, at, PROBE, costMicros(ESTIMATE_USD[PROBE])),
       };
