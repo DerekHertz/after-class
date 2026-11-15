@@ -78,6 +78,21 @@ export type AppApi = Api & {
   revokeDevice(id: DeviceId): Promise<void>;
 };
 
+/**
+ * `api` with one hook on every call that changes the saved record: `changed` runs once each settles, whether it succeeded or
+ * failed, since a failed call may still have changed some of it. A reader of the record calls it to read again.
+ */
+export function onRecordChange(api: AppApi, changed: () => void): AppApi {
+  const settle = <A extends unknown[]>(call: (...args: A) => Promise<void>) => async (...args: A): Promise<void> => {
+    try { await call(...args); } finally { changed(); }
+  };
+  return {
+    ...api,
+    editNote: settle(api.editNote), deleteNote: settle(api.deleteNote), decideLink: settle(api.decideLink),
+    resolveDispute: settle(api.resolveDispute), overrideObservation: settle(api.overrideObservation), deleteEvidence: settle(api.deleteEvidence),
+  };
+}
+
 export class ApiError extends Error {
   override readonly name = "ApiError";
   constructor(

@@ -4,12 +4,13 @@ import type { Ref } from "react";
 import { Material } from "../shared/time";
 import type { ConceptId, EvidenceId, ReviewId } from "../shared/ids";
 import type { Concept, TurnEvent } from "../shared/domain";
+import { onRecordChange } from "./api";
 import type { AppApi } from "./api";
 import { useAppearance, useSceneActivity } from "./appearance";
 import { FrontRowScene, reserveNavSpace } from "./front-row";
 import { react } from "./room/reaction-store";
 import { inputFromTurnEvent } from "./room/reactions";
-import { deriveProgress } from "./room/progress";
+import { standing } from "./room/progress";
 import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
 import { ACTION_LABEL, END_CONFIRM_TEXT, composerActions, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow, softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, strandedEndTurn, selectedEvidenceIds, shouldSubmitAnswer, questionScrollTop, } from "./core";
@@ -88,7 +89,10 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const record = useAsync(useCallback(() => api.record({}), [api]));
   const reloadRecord = record.reload;
   useEffect(() => { if (saved) reloadRecord(); }, [saved, reloadRecord]);
-  const progress = useMemo(() => (record.data === null ? null : deriveProgress(record.data.observations)), [record.data]);
+  const { data: recordData, error: recordError } = record;
+  const roomStanding = useMemo(() => standing({ data: recordData, error: recordError }), [recordData, recordError]);
+  // Every change made to the saved record from this screen reads it again, so the room never outlives a correction.
+  const notebookApi = useMemo(() => onRecordChange(api, reloadRecord), [api, reloadRecord]);
   useSceneActivity(state.saving ? "saving" : listening ? "listening" : state.view?.state.phase === "paused" ? "paused" : state.live?.status === "streaming" ? "waiting" : "idle");
 
   /** Picks up an object. Switching from one object to the other keeps the control that picked up the first. */
@@ -267,7 +271,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     <main className="review front-row">
       {notebookOpen && <dialog className="room-object room-notebook-dialog" {...objectFrame("history")} aria-label="Saved notes" ref={node => { if (node && !node.open) node.showModal(); }} onClose={closeNotebook}>
         <div className="room-object-tools"><button type="button" onClick={closeNotebook}>Close notebook</button></div>
-        <RecordScreen api={api} reviewId={null} />
+        <RecordScreen api={notebookApi} reviewId={null} />
       </dialog>}
       <header ref={reserveNavSpace} className="review-header front-row-bar">
         <div className="front-row-title">
@@ -289,7 +293,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           scene={appearance.scene}
           appearance={appearance}
           activity={activity}
-          progress={progress}
+          progress={roomStanding?.progress ?? null} stale={roomStanding?.stale === true ? record.reload : null}
           boardRef={board}
           layout={checklist ? { kind: "setup", form: setupForm } : { kind: "review", board: boardContent, desk: deskContent, objects: { cited: automaticIds.length, open: inspect } }}
         />

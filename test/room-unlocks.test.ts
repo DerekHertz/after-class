@@ -7,7 +7,9 @@ import type { FullRoomLayout, Rect, Size, UnlockLayer } from "../src/app/room/la
 import { readyDraws } from "../src/app/room/paint";
 import type { PictureState } from "../src/app/room/paint";
 import { ProgressPanel, progressRows } from "../src/app/room/progress-panel";
-import { ROOM_IDS, deriveProgress, slotIds } from "../src/app/room/progress";
+import { onRecordChange } from "../src/app/api";
+import type { AppApi } from "../src/app/api";
+import { ROOM_IDS, deriveProgress, drawnUnlocks, slotIds, standing } from "../src/app/room/progress";
 import type { UnlockId } from "../src/app/room/progress";
 import { buildScene } from "../src/app/room/scene";
 import type { Draw } from "../src/app/room/scene";
@@ -179,5 +181,70 @@ describe("the Your room panel", () => {
     expect(html).toContain("<dt>Topics explained on your own</dt><dd>6</dd>");
     expect(html).toMatch(/class="room-progress-effort"><div data-count="effort"><dt>Questions answered with some help or only in part<\/dt><dd>2<\/dd>/);
     expect(html.replace(/<[^>]*>/g, " ")).not.toMatch(/understood|mastered|learned/i);
+  });
+});
+
+describe("the room reads the saved record again after any change made to it in the app", () => {
+  const ok = async () => {};
+  const calls = (): AppApi => ({
+    editNote: ok, deleteNote: ok, decideLink: ok, resolveDispute: ok, overrideObservation: ok, deleteEvidence: ok,
+    record: async () => ({}), lectures: async () => ({}),
+  } as unknown as AppApi);
+
+  test("each call that changes the record reads it again once it settles, and a read does not", async () => {
+    let reads = 0;
+    const api = onRecordChange(calls(), () => { reads += 1; });
+    const changes = [
+      () => api.editNote("note" as never, "text"), () => api.deleteNote("note" as never), () => api.decideLink("lnk" as never, "accepted" as never),
+      () => api.resolveDispute("obs" as never, "it_was_my_gap"), () => api.overrideObservation("obs" as never, "after_help"), () => api.deleteEvidence([]),
+    ];
+    for (const [i, change] of changes.entries()) { await change(); expect(reads).toBe(i + 1); }
+    await api.record({});
+    await api.lectures();
+    expect(reads).toBe(changes.length);
+  });
+
+  test("a change that fails still reads again, and still fails", async () => {
+    let reads = 0;
+    const api = onRecordChange({ ...calls(), overrideObservation: async () => { throw new Error("nope"); } }, () => { reads += 1; });
+    await expect(api.overrideObservation("obs" as never, "after_help")).rejects.toThrow("nope");
+    expect(reads).toBe(1);
+  });
+
+  test("a correction to after_help takes the topic out of the count and its object out of the room", () => {
+    const independent = Array.from({ length: 3 }, () => obs("independent"));
+    expect(deriveProgress(independent).unlocks["last-desk"]).toEqual(["last-desk/1"]);
+    const corrected = deriveProgress([independent[0]!, independent[1]!, { ...independent[2]!, status: "after_help" }]);
+    expect([corrected.understood.value, corrected.unlocks["last-desk"]]).toEqual([2, []]);
+  });
+});
+
+describe("counts from a record that could not be read again are not shown as current", () => {
+  const record = { observations: Array.from({ length: 3 }, () => obs("independent")) };
+
+  test("a failed read keeps the last counts but marks them stale; a good read does not", () => {
+    expect(standing({ data: null, error: null })).toBeNull();
+    expect(standing({ data: null, error: "down" })).toBeNull();
+    expect(standing({ data: record, error: null })?.stale).toBe(false);
+    const stale = standing({ data: record, error: "down" })!;
+    expect([stale.stale, stale.progress.understood.value]).toEqual([true, 3]);
+  });
+
+  test("no object is drawn from stale counts, and the same counts draw it once current", () => {
+    const { progress } = standing({ data: record, error: null })!;
+    expect(drawnUnlocks(progress, "last-desk", true)).toEqual([]);
+    expect(drawnUnlocks(progress, "last-desk", false)).toEqual(["last-desk/1"]);
+    expect(drawnUnlocks(null, "last-desk", false)).toEqual([]);
+  });
+
+  test("the panel says the counts may be out of date and offers a retry, and says so to a screen reader", () => {
+    const html = renderToStaticMarkup(createElement(ProgressPanel, { progress: twoOpen, room: "study-bench", rect: undefined, retry: () => {} }));
+    expect(html).toContain("These counts may be out of date.");
+    expect(html).toMatch(/<button type="button">Retry<\/button>/);
+    expect(html).toMatch(/aria-describedby="([^"]+)"[\s\S]*id="\1"/);
+    expect(html).not.toContain("Counted from your saved reviews.");
+    const current = renderToStaticMarkup(createElement(ProgressPanel, { progress: twoOpen, room: "study-bench", rect: undefined }));
+    expect(current).toContain("Counted from your saved reviews.");
+    expect(current).not.toContain("out of date");
   });
 });

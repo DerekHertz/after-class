@@ -27,9 +27,10 @@ export function progressRows(progress: Progress, room: RoomId, art: Readonly<Par
  * "Your room": a button that opens the learner's counts from their saved reviews. Full rooms place it at `rect`, the desk's
  * corner around the companion, so it never covers the board or Your thinking. A phone stacks it below the desk.
  */
-export function ProgressPanel({ progress, room, rect }: { readonly progress: Progress; readonly room: RoomId; readonly rect: Rect | undefined }) {
+export function ProgressPanel({ progress, room, rect, retry = null }: { readonly progress: Progress; readonly room: RoomId; readonly rect: Rect | undefined; readonly retry?: (() => void) | null }) {
   const [open, setOpen] = useState(false);
   const body = useId();
+  const staleId = useId();
   const toggle = useRef<HTMLButtonElement>(null);
   const { main, effort } = progressRows(progress, room);
   const style: CSSProperties | undefined = rect && { left: rect.left, top: rect.top, width: rect.width, maxHeight: rect.height };
@@ -43,9 +44,13 @@ export function ProgressPanel({ progress, room, rect }: { readonly progress: Pro
         toggle.current?.focus();
       }}
     >
-      <button ref={toggle} type="button" aria-expanded={open} aria-controls={body} onClick={() => setOpen(!open)}>Your room</button>
+      <button ref={toggle} type="button" aria-expanded={open} aria-controls={body} aria-describedby={retry === null ? undefined : staleId} onClick={() => setOpen(!open)}>Your room</button>
       <div id={body} className="room-progress-body" hidden={!open}>
-        <p>Counted from your saved reviews.</p>
+        {retry === null ? <p>Counted from your saved reviews.</p> : (
+          <p id={staleId} className="room-progress-stale" role="alert">
+            These counts may be out of date. Your saved reviews could not be read again, so no objects are shown in the room until they can. <button type="button" onClick={retry}>Retry</button>
+          </p>
+        )}
         <dl>{main.map(({ key, label, value }) => <div key={key} data-count={key}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
         <dl className="room-progress-effort">{effort.map(({ key, label, value }) => <div key={key} data-count={key}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
       </div>

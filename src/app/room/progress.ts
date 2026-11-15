@@ -99,3 +99,19 @@ export function deriveProgress(observations: readonly Observation[]): Progress {
       : { value: (open + 1) * TOPICS_PER_UNLOCK - understood, label: "more topics explained on your own for the next object" },
   };
 }
+
+/**
+ * The record the room last read: the progress derived from it and whether the latest read failed. A failed read keeps the
+ * previous record (useAsync), so `stale` is what stops those counts passing as current. With no record read yet there is
+ * no progress and nothing to show.
+ */
+export type Standing = { readonly progress: Progress; readonly stale: boolean } | null;
+
+export function standing(read: { readonly data: { readonly observations: readonly Observation[] } | null; readonly error: string | null }): Standing {
+  return read.data === null ? null : { progress: deriveProgress(read.data.observations), stale: read.error !== null };
+}
+
+/** The objects the room draws: none while the counts may be out of date, since an unlock is only awarded from a record just read. */
+export function drawnUnlocks(progress: Progress | null, room: RoomId, stale: boolean): readonly UnlockId[] {
+  return progress === null || stale ? [] : progress.unlocks[room];
+}
