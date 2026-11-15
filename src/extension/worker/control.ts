@@ -122,7 +122,16 @@ export function mayUpload(owner: string | undefined, stored: StoredConnection): 
 
 export type ControlEvent =
   | { readonly kind: "start"; readonly tabId: number }
-  | { readonly kind: "pause" | "resume" | "stop" | "left_watch_page" | "returned_to_watch_page" | "tab_closed" | "idle" | "video_ended" };
+  | { readonly kind: "pause" | "resume" | "stop" | "left_watch_page" | "returned_to_watch_page" | "tab_closed" }
+  | RestEvent;
+
+/** The page saw the player at rest during `captureId`. It means nothing for any other capture. */
+export type RestEvent = { readonly kind: "idle" | "video_ended"; readonly captureId: CaptureId };
+
+/** True for a rest event aimed at a capture the tab is no longer in, whether it ended, restarted or never was. */
+export function isStaleRest(current: TabCaptureState | null, event: ControlEvent): boolean {
+  return (event.kind === "idle" || event.kind === "video_ended") && current?.captureId !== event.captureId;
+}
 
 /**
  * Pure control transition. One table, unit-tested; the only place auto-pause policy lives.
@@ -158,7 +167,7 @@ export function transition(
     case "left_watch_page":
       return current?.state === "capturing" ? { next: to("paused", "left_watch_page"), fact: control("pause", "left_watch_page") } : noop;
     case "idle":
-      return current?.state === "capturing" ? { next: to("paused", "idle"), fact: control("pause", "idle") } : noop;
+      return isStaleRest(current, event) ? noop : current?.state === "capturing" ? { next: to("paused", "idle"), fact: control("pause", "idle") } : noop;
     case "resume":
       return current?.state === "paused" ? { next: to("capturing", null), fact: control("resume", "user") } : noop;
     case "returned_to_watch_page":
@@ -166,7 +175,7 @@ export function transition(
     case "stop":
     case "tab_closed":
     case "video_ended":
-      return current !== null && current.state !== "stopped"
+      return current !== null && current.state !== "stopped" && !isStaleRest(current, event)
         ? { next: to("stopped", event.kind === "video_ended" ? "video_ended" : null), fact: control("stop", event.kind === "stop" ? "user" : event.kind) }
         : noop;
   }

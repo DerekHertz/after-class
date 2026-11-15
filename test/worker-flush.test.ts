@@ -1,5 +1,7 @@
 /** Pause and stop must not lose the span the content script closes in response (pass bar 1). */
 import { afterAll, describe, expect, test } from "bun:test";
+import { createPlaybackTracker, VIDEO_END_GRACE_MS } from "../src/extension/content/capture";
+import type { PlaybackEnv } from "../src/extension/content/capture";
 import { answeringFlush, boot, connectPort, feed, kindsOf, newEnv, restoreGlobals, sendPopup, span, wait } from "./worker-harness";
 import type { FakePort } from "./worker-harness";
 
@@ -14,6 +16,7 @@ async function capturing() {
   await wait();
   return { env, c, p };
 }
+const captureIdOf = async (c: Parameters<typeof sendPopup>[0]) => (await sendPopup(c, { type: "status", tabId: 1 })).state.captureId;
 const stored = (env: ReturnType<typeof newEnv>) => kindsOf([...env.backend.stored.values()][0]);
 
 describe("the closing span", () => {
@@ -45,7 +48,7 @@ describe("the closing span", () => {
   test("a video_ended signal from the page stops the capture after the closing span, as Stop does", async () => {
     const { env, c, p } = await capturing();
     answeringFlush(p);
-    feed(p, { type: "video_ended" } as never);
+    feed(p, { type: "video_ended", captureId: await captureIdOf(c) });
     await wait(120);
     expect(stored(env)).toEqual(["control:start", "span", "span", "control:stop"]);
     expect(await sendPopup(c, { type: "status", tabId: 1 })).toMatchObject({ state: { state: "stopped", pauseReason: "video_ended" } });
@@ -54,7 +57,7 @@ describe("the closing span", () => {
   test("an idle signal pauses the capture after the closing span, and the learner's Resume brings it back", async () => {
     const { env, c, p } = await capturing();
     answeringFlush(p);
-    feed(p, { type: "idle" } as never);
+    feed(p, { type: "idle", captureId: await captureIdOf(c) });
     await wait(120);
     expect(stored(env)).toEqual(["control:start", "span", "span", "control:pause"]);
     const paused = await sendPopup(c, { type: "status", tabId: 1 });
@@ -194,5 +197,54 @@ describe("worker to content messages", () => {
     const r = await sendPopup(c, { type: "retry_observe", tabId: 1 });
     expect(r.error).toBeUndefined();
     expect(p.posted.slice(before)).toEqual([{ type: "observe", on: true, captureId: r.state.captureId }]);
+  });
+});
+
+describe("a rest signal belongs to one capture", () => {
+  /** The real tracker over a video that ended and whose end timer is overdue, signalling the way the content script stamps it. */
+  function overdueEndedTracker(p: FakePort, captureId: () => string) {
+    let now = 0;
+    const video = Object.assign(new EventTarget(), { paused: true, ended: true, seeking: false, currentTime: 1, playbackRate: 1, readyState: 4, duration: 600 });
+    const player = { classList: { contains: () => false }, querySelector: () => null };
+    const env: PlaybackEnv = { now: () => now, isHidden: () => true, every: () => () => {}, onVisibilityChange: () => () => {} };
+    const tracker = createPlaybackTracker(
+      video as unknown as HTMLVideoElement, player as unknown as HTMLElement, () => {}, () => "aaaaaaaaaaa", () => 600, env,
+      (s) => feed(p, { ...s, captureId: captureId() }),
+    );
+    tracker.setObserving(true);
+    video.dispatchEvent(new Event("ended"));
+    now += VIDEO_END_GRACE_MS + 1;
+    return tracker;
+  }
+
+  test("the learner's Pause stays a Pause when its flush finds the end timer overdue", async () => {
+    const { env, c, p } = await capturing();
+    const id = await captureIdOf(c);
+    const tracker = overdueEndedTracker(p, () => id);
+    p.onPost = (m) => {
+      if (m.type === "flush") {
+        tracker.setObserving(false);
+        feed(p, { type: "flushed" });
+      }
+    };
+    await sendPopup(c, { type: "pause", tabId: 1 });
+    await wait(120);
+    expect((await sendPopup(c, { type: "status", tabId: 1 })).state.state).toBe("paused");
+    expect(stored(env)).not.toContain("control:stop");
+  });
+
+  test("a video_ended from a capture the learner stopped does not stop the capture that replaced it", async () => {
+    const { c, p } = await capturing();
+    answeringFlush(p);
+    const first = await captureIdOf(c);
+    await sendPopup(c, { type: "stop", tabId: 1 });
+    const second = await sendPopup(c, { type: "start", tabId: 1 });
+    expect(second.state.captureId).not.toBe(first);
+    p.posted.length = 0;
+    feed(p, { type: "video_ended", captureId: first });
+    feed(p, { type: "idle", captureId: first });
+    await wait(120);
+    expect((await sendPopup(c, { type: "status", tabId: 1 })).state.state).toBe("capturing");
+    expect(p.posted.filter((m) => m.type === "flush" || (m.type === "observe" && m.on === false))).toEqual([]);
   });
 });

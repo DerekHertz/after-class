@@ -80,6 +80,10 @@ function rig() {
         if (i % 4 === 3) for (const fn of Array.from(intervals)) fn();
       }
     },
+    /** Wall time passes with no timer callback and no event, as in a throttled background tab. */
+    elapse(seconds: number) {
+      wall += seconds * 1000;
+    },
     /** Wall time passes while the player buffers: currentTime does not move. */
     stall(seconds: number) {
       for (let i = 0; i < Math.round(seconds * 4); i++) {
@@ -667,6 +671,25 @@ describe("a capture the learner leaves running (flow B amendment, 2026-11-14)", 
     r.pause();
     r.stall(idle * 2);
     expect(r.signals).toEqual([]);
+  });
+
+  test("closing the observation never decides to stop, even when the end timer is overdue", () => {
+    const r = watching();
+    finish(r);
+    r.elapse(grace + 1);
+    r.tracker.setObserving(false);
+    expect(r.signals).toEqual([]);
+  });
+
+  test("closing the observation still folds in the time watched since the last tick", () => {
+    const r = watching();
+    const before = r.spans().length;
+    r.video.currentTime += 3;
+    r.elapse(3);
+    r.tracker.setObserving(false);
+    const last = r.spans().at(-1)!;
+    expect(r.spans().length).toBeGreaterThan(before);
+    expect(last.end).toBeGreaterThanOrEqual(108 - 1e-6);
   });
 
   test("stepRest: a video that ended after a pause counts its grace from the end", () => {

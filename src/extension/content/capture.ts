@@ -9,6 +9,7 @@
  *   content ──{fact body}──▶ SW (stamps clientSeq, persists, uploads)
  */
 import type { AdSignal, CaptureFactBody, NonEmpty } from "../../shared/domain";
+import type { CaptureId } from "../../shared/ids";
 import { media } from "../../shared/time";
 
 export type Emit = (fact: CaptureFactBody) => void;
@@ -19,10 +20,15 @@ export type ControlMessage = { readonly type: "observe"; readonly on: boolean } 
 export type ContentSignal =
   | { readonly type: "left_watch_page" }
   | { readonly type: "returned_to_watch_page"; readonly videoId: string }
-  | RestSignal;
+  | StampedRest;
 
 /** The player has been at rest long enough that capture should pause (`idle`) or stop (`video_ended`). */
 export type RestSignal = { readonly type: "idle" } | { readonly type: "video_ended" };
+/**
+ * What reaches the worker: the rest signal plus the capture the page was observing for when it saw the rest.
+ * The worker acts only if the tab is still in that capture, so a late signal never ends a later one.
+ */
+export type StampedRest = RestSignal & { readonly captureId: CaptureId };
 
 /**
  * How long nothing may play before the page asks the worker to pause. Derek has not chosen this number; it is his to change.
@@ -343,6 +349,10 @@ export function createPlaybackTracker(
     visible: !env.isHidden(),
     ad: isAdShowing(readAdSignals(player, video, sourceDurationS())),
   });
+  /** Folds in the playback sample. Evidence only: a flush must never be the thing that decides to stop or pause. */
+  const sampleOnly = () => {
+    if (st.observing) run({ type: "tick", s: sample() });
+  };
   const tick = () => {
     if (!st.observing) return;
     const s = sample();
@@ -373,7 +383,7 @@ export function createPlaybackTracker(
       stopInterval = env.every(1000, tick);
       tick();
     } else {
-      tick(); // fold in the final observed time before closing; the end is observed, not extrapolated
+      sampleOnly(); // fold in the final observed time before closing; the end is observed, not extrapolated
       stopInterval?.();
       stopInterval = null;
       run({ type: "observing", on: false, wallMs: env.now() });

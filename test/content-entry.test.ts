@@ -11,7 +11,8 @@ import type { FromContent, ToContent } from "../src/extension/worker/control";
 
 const VID = "aaaaaaaaaaa";
 const VID2 = "bbbbbbbbbbb";
-const CAP_A = "cap_a";
+import type { CaptureId } from "../src/shared/ids";
+const CAP_A = "cap_a" as unknown as CaptureId;
 const CAP_B = "cap_b";
 const wait = (ms = 5) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -313,6 +314,6 @@ describe("a finished video and a playlist", () => {
     r.fire("ended");
     r.tick(20, 600);
     r.tick(20, 600);
-    expect(signals(r)).toEqual([{ type: "video_ended" }]);
+    expect(signals(r)).toEqual([{ type: "video_ended", captureId: CAP_A }]);
   });
 });
