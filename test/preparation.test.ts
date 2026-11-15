@@ -431,30 +431,19 @@ describe("preparation", () => {
     expect(w.prep.prep(r1.id)).toMatchObject({ interpretation: "done", supportedCount: 1 });
   });
 
-  test("R6: readiness ignores resource search, which runs last on supported claims and records citations", async () => {
+  test("R6: a prepared capture with supported claims runs no resource search", async () => {
     const w = world();
     const r1 = w.close(0, 0, 20);
     w.script.interpret = () => ok(output([{ label: "Elimination", claims: [draft("pivots", [P[0]!]), draft("wrong", [P[1]!])] }]));
     w.script.check = (i) => verdict(i.claim.text === "pivots" ? "yes" : "no");
     w.script.revise = () => ok(draft("still wrong", [P[1]!]));
-    const search = hold<readonly ResourceConnection[]>();
-    w.script.resources = search.answer;
     await w.drain();
+    expect(w.prep.demand(w.captureId)).toEqual([]);
 
     const prep = w.prep.prep(r1.id);
-    const conceptId = prep.claims[0]!.conceptId;
     expect(prep).toMatchObject({ finished: true, supportedCount: 1 });
-    expect(w.prep.resources(conceptId).state).toBe("searching");
-    expect(w.tasks.searchResources.calls.map((c) => c.supportedClaims.map((a) => a.text))).toEqual([["pivots"]]);
-
-    const found: ResourceConnection = {
-      id: stableId("res", conceptId, "https://ocw.mit.edu/18-06"), conceptId, url: "https://ocw.mit.edu/18-06", title: "18.06 notes",
-      provenance: "web_search", relevance: "Worked elimination examples", supportingPassages: [P[0]!.id],
-    };
-    search.release(ok([found]));
-    await w.drain();
-    expect(w.prep.resources(conceptId)).toEqual({ state: "found", connections: [found] });
-    expect(w.prep.prep(r1.id)).toEqual(prep);
+    expect(w.tasks.searchResources.calls).toEqual([]);
+    expect(w.prep.resources(prep.claims[0]!.conceptId)).toEqual({ state: "not_started", connections: [] });
   });
 
   test("a frozen input slot is a dependency: demand reports reading it, and freezing it is announced once, after its commit", async () => {
@@ -462,27 +451,16 @@ describe("preparation", () => {
     const announced: Dep[][] = [];
     const w = world({ read: (d) => void reads.add(d), changed: (keys) => void announced.push([...keys]) });
     const r1 = w.close(0, 0, 20);
-    w.script.interpret = () => ok(output([{ label: "Elimination", claims: [draft("pivots", [P[0]!])] }]));
-    w.script.resources = () => ok([]);
+    w.script.interpret = () => ok(output([{ label: "Elimination", claims: [draft("wrong", [P[1]!])] }]));
+    w.script.check = () => verdict("no");
+    w.script.revise = () => ok(draft("still wrong", [P[1]!]));
     await w.drain();
-    const conceptId = w.prep.prep(r1.id).claims[0]!.conceptId;
-    expect(announced).toContainEqual([slotDep("resource_search", conceptId)]);
-    expect(announced.filter((keys) => keys[0] === slotDep("resource_search", conceptId))).toHaveLength(1);
+    const claimId = w.prep.prep(r1.id).claims[0]!.id;
+    expect(announced).toContainEqual([slotDep("revision", claimId)]);
+    expect(announced.filter((keys) => keys[0] === slotDep("revision", claimId))).toHaveLength(1);
     reads.clear();
     w.prep.demand(w.captureId);
-    expect(reads.has(slotDep("resource_search", conceptId))).toBe(true);
-  });
-
-  test("R6: a failed resource search leaves the chunk ready", async () => {
-    const w = world();
-    const r1 = w.close(0, 0, 20);
-    w.script.interpret = () => ok(output([{ label: "A", claims: [draft("c", [P[0]!])] }]));
-    w.script.resources = () => fail("web search refused");
-    await w.drain();
-    const conceptId = w.prep.prep(r1.id).claims[0]!.conceptId;
-    expect(w.prep.resources(conceptId).state).toBe("failed");
-    expect(w.prep.prep(r1.id)).toMatchObject({ finished: true, supportedCount: 1 });
-    expect(w.prep.resources(stableId("cpt", "never seen")).state).toBe("not_started");
+    expect(reads.has(slotDep("revision", claimId))).toBe(true);
   });
 
   test("R5: an answered Later leaves demand unchanged, and preparation then finishes", async () => {

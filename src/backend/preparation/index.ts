@@ -45,7 +45,7 @@ import type { InterpretationInput, InterpretationOutput, PreparationTasks, Resou
 
 export type Preparation = {
   prep(chunkRevisionId: ChunkRevisionId): ChunkPrep;
-  /** Interpretation, claim checks, revisions, rechecks, resource searches still needed. Excludes cancelled scope. */
+  /** Interpretation, claim checks, revisions, rechecks still needed. Resource searches are paused: nothing demands them (see docs/flows/after-class.md, Amendment 2026-11-14). Excludes cancelled scope. */
   demand(captureId: CaptureId): readonly WorkItem[];
   /** Flow C Stop early: one fact. Pending work in these chunks stops being demanded; late results are ignored. */
   stopEarly(captureId: CaptureId, chunkRevisionIds: readonly ChunkRevisionId[]): Seq;
@@ -363,23 +363,6 @@ export function createPreparation(db: UserDb, deps: {
     return { state: "pending", need: need(tasks.interpret, input, key, { kind: "interpretation", subject: rev.id, json: encodeUnit(unit) }) };
   }
 
-  function resourceNeeds(v: View, current: readonly ChunkRevision[]): Need[] {
-    const byConcept = new Map<ConceptId, { readonly concept: Concept; readonly claims: AssessableClaim[] }>();
-    for (const c of v.claims) {
-      const a = assessable(c.claim);
-      if (!a || !current.some((r) => inside(c, r.material))) continue;
-      const entry = byConcept.get(c.concept.id) ?? { concept: c.concept, claims: [] };
-      entry.claims.push(a);
-      byConcept.set(c.concept.id, entry);
-    }
-    return [...byConcept.values()].flatMap(({ concept, claims }) => {
-      const prior = frozenSlot("resource_search", concept.id);
-      const input: ResourceSearchInput = prior ? (JSON.parse(prior.input_json) as ResourceSearchInput) : { concept, supportedClaims: claims };
-      const l = deps.lookup(tasks.searchResources, input);
-      return open(l) ? [need(tasks.searchResources, input, l.key, prior ? null : { kind: "resource_search", subject: concept.id, json: input })] : [];
-    });
-  }
-
   function prep(chunkRevisionId: ChunkRevisionId): ChunkPrep {
     const rev = deps.chunk(chunkRevisionId);
     if (!rev) throw new Error(`prep: unknown chunk revision ${chunkRevisionId}`);
@@ -399,7 +382,6 @@ export function createPreparation(db: UserDb, deps: {
       ...v.units.flatMap((u) => (u.state === "pending" && open(u.lookup) ? [need(tasks.interpret, u.unit.input, u.lookup.key)] : [])),
       ...current.flatMap((r) => residual(v, r).need ?? []),
       ...v.claims.flatMap((c) => (c.next && current.some((r) => inside(c, r.material)) ? [c.next] : [])),
-      ...resourceNeeds(v, current),
     ];
     const seen = new Set<MemoKey>();
     return needs.filter((n) => !seen.has(n.key) && !!seen.add(n.key)).map((n) => workItem(captureId, n));

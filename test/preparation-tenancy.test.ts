@@ -135,8 +135,8 @@ describe("two users watch one lecture in one database", () => {
 
     const idsA = wa.prep.prep(ra.id).claims.map((c) => c.id);
     expect(wb.prep.prep(rb.id).claims[0]!.id).toBe(idsA[0]!);
-    // One concept row each; prep_inputs holds the interpretation and the resource search the claims led to.
-    for (const [table, n] of [["prep_inputs", 2], ["concept_index", 1]] as const) {
+    // One concept row each; prep_inputs holds the interpretation.
+    for (const [table, n] of [["prep_inputs", 1], ["concept_index", 1]] as const) {
       expect(rowsOf(a, table, a.userId)).toBe(n);
       expect(rowsOf(a, table, b.userId)).toBe(n);
     }
@@ -212,30 +212,6 @@ describe("two users watch one lecture in one database", () => {
     expect(wb.texts(rb)).toEqual(["a pivot is a nonzero entry"]);
     expect(rowsOf(a, "claim_index", a.userId)).toBe(0);
     expect(rowsOf(a, "claim_index", b.userId)).toBe(1);
-  });
-
-  test("a frozen input is per user: a second user's different resource-search input is not dropped by the first's", async () => {
-    const a = testUserDb();
-    const b = otherUserDb(a);
-    const connection = (concept: ConceptId, url: string): ResourceConnection => ({ id: stableId("res", concept, url) as never, conceptId: concept, url, title: url, provenance: "web_search", relevance: "r", supportingPassages: [] });
-    const search = (url: string) => (i: ResourceSearchInput) => ok([connection(i.concept.id, `${url}-${i.supportedClaims.length}`)] as readonly ResourceConnection[]);
-    const wa = preparationOf(a, { interpret: () => ok(output(POINTS)), search: search("https://a.example/") });
-    const wb = preparationOf(b, {
-      interpret: () => ok(output([{ label: "Pivots", claims: [draft("a pivot is a nonzero entry", P[0]!), draft("pivots drive elimination", P[1]!)] }])),
-      search: search("https://b.example/"),
-    });
-    wa.close(0, 20);
-    wb.close(0, 20);
-    await wa.drain();
-    await wb.drain();
-
-    const pivots = stableId("cpt", "pivots") as ConceptId;
-    expect(wa.tasks.searchResources.calls.map((c) => c.supportedClaims.length)).toEqual([1]);
-    expect(wb.tasks.searchResources.calls.map((c) => c.supportedClaims.length)).toEqual([2]);
-    expect(wa.prep.resources(pivots).connections.map((c) => c.url)).toEqual(["https://a.example/-1"]);
-    expect(wb.prep.resources(pivots).connections.map((c) => c.url)).toEqual(["https://b.example/-2"]);
-    expect(rowsOf(a, "prep_inputs", a.userId)).toBe(2);
-    expect(rowsOf(a, "prep_inputs", b.userId)).toBe(2);
   });
 
   test("prep_inputs.memo_key resolves through the same user's memo only", async () => {
