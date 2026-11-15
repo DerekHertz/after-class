@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>After Class: live room prototype (throwaway)</title>
+<style>
+@font-face { font-family: 'Px'; src: url('a/pixelify-sans.ttf') format('truetype'); font-display: block; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #0e1118; color: #f6efd9; font-family: 'Px', system-ui, sans-serif; overflow: hidden; }
+#panel { position: fixed; left: 0; right: 0; top: 0; z-index: 50; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 10px; background: #0e1118ee; border-bottom: 2px solid #2b3550; font-size: 14px; }
+#panel b { color: #f2b648; margin-right: 4px; }
+#panel button { font: inherit; min-height: 30px; padding: 2px 10px; border: 2px solid #4b5a80; background: #1a2338; color: #f6efd9; cursor: pointer; box-shadow: 0 3px 0 #0008; }
+#panel button[aria-pressed="true"] { background: #f6efd9; color: #1a2338; }
+#panel .sep { width: 2px; height: 26px; background: #2b3550; margin: 0 4px; }
+#panel label { display: flex; gap: 6px; align-items: center; }
+#stat { margin-left: auto; color: #9fb0d0; font-size: 12px; font-family: ui-monospace, monospace; }
+#note { flex-basis: 100%; max-width: none; font-size: 13px; color: #c9d3ea; background: #0e1118d0; padding: 6px 10px; border-left: 3px solid #f2b648; }
+#viewport { position: fixed; inset: 0; overflow: hidden; }
+#stage { position: absolute; width: 1586px; height: 992px; transform-origin: 0 0; overflow: hidden; }
+#world { position: absolute; inset: 0; transform-origin: 0 0; }
+canvas#scene { position: absolute; left: 0; top: 0; width: 1586px; height: 992px; image-rendering: pixelated; }
+/* DOM text and controls stay real HTML over the canvas: accessible, selectable, IME-safe. */
+.board-text { position: absolute; left: 140px; top: 92px; width: 1090px; color: #f6efd9; }
+.board-text .topic { font-size: 19px; letter-spacing: .14em; color: #c9e6cf; display: flex; align-items: center; gap: 14px; }
+.board-text .topic::after { content: ""; display: block; width: 280px; height: 3px; background: #c9e6cf; }
+.board-text .lbl { margin-top: 26px; font-size: 14px; letter-spacing: .12em; color: #c9e6cf; }
+.board-text .expl { font-size: 23px; line-height: 1.45; margin-top: 4px; }
+.board-text .q { margin-top: 30px; font-size: 40px; line-height: 1.38; font-weight: 700; min-height: 120px; }
+.board-text .caret { display: inline-block; width: 0; }
+.pips { position: absolute; right: 0; top: -4px; display: flex; gap: 10px; }
+.pip { width: 26px; height: 26px; border: 3px solid #c9e6cf; }
+.pip.on { background: #f6efd9; border-color: #f6efd9; }
+.mat-ui { position: absolute; left: 290px; top: 700px; width: 980px; color: #1e2b45; }
+.mat-ui h2 { margin: 0 0 10px; font-size: 25px; }
+.mat-ui textarea { width: 100%; height: 108px; font: 19px/1.4 'Px', sans-serif; padding: 10px 14px; border: 3px solid #2f4f86; background: #fffaf3; color: #1e2b45; resize: none; outline: none; }
+.mat-ui .row { display: flex; gap: 14px; margin-top: 12px; }
+.mat-ui button { font: 600 20px 'Px', sans-serif; padding: 8px 20px; border: 3px solid #2a2620; background: #f4e8d2; color: #2a2620; box-shadow: 0 4px 0 #b59a75; cursor: pointer; }
+.mat-ui button.primary { background: #2d5aa8; color: #fff; border-color: #1e2b45; box-shadow: 0 4px 0 #1e2b45; }
+.mat-ui button:active { transform: translateY(3px); box-shadow: 0 1px 0 #1e2b45; }
+.summary { position: absolute; left: 470px; top: 210px; width: 640px; padding: 24px 30px; background: #fbf3e2; color: #2c2620; border: 4px solid #2c2620; box-shadow: 8px 8px 0 #0006; font-size: 21px; line-height: 1.5; display: none; }
+.summary h3 { margin: 0 0 8px; font-size: 30px; }
+.summary .mock { font-size: 14px; color: #a52f28; }
+.prog { position: absolute; left: 1330px; top: 14px; width: 236px; padding: 10px 12px; background: #1a2b3bdd; border: 2px solid #f6ecd875; color: #f6ecd8; font-size: 15px; line-height: 1.35; display: none; }
+.prog .bar { height: 14px; border: 2px solid #f6ecd8; margin: 4px 0 8px; position: relative; }
+.prog .bar i { position: absolute; inset: 0 auto 0 0; background: #f2b648; }
+.prog small { color: #c9d3ea; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="panel">
+  <b>Mode</b>
+  <button data-mode="today">A · Today (static layers)</button>
+  <button data-mode="living">B · Living room</button>
+  <button data-mode="reactive">C · Reactive tutor</button>
+  <button data-mode="progress">D · Progression</button>
+  <span class="sep"></span>
+  <span id="moves"><b>Simulate</b>
+    <button data-move="ask">Tutor asks</button>
+    <button data-move="share">I share thinking</button>
+    <button data-move="hint">Hint</button>
+    <button data-move="close">Thread closed</button>
+    <button data-move="wrap">Wrap up</button>
+  </span>
+  <label id="slider" style="display:none">Saved reviews <input type="range" min="0" max="20" value="0" id="saved"> <span id="savedN">0</span></label>
+  <span id="stat"></span>
+  <div id="note"></div>
+</div>
+<div id="viewport"><div id="stage"><div id="world">
+  <canvas id="scene"></canvas>
+  <div class="board-text">
+    <div class="pips" id="pips"><span class="pip"></span><span class="pip"></span><span class="pip"></span></div>
+    <div class="topic">CIRCULAR WAIT</div>
+    <div class="lbl">EXPLANATION</div>
+    <div class="expl">The lecture calls this circular wait. Each thread is holding a resource while waiting for the other.</div>
+    <div class="q"><span id="qtext">What would have to change for either thread to continue?</span><span class="caret" id="caret"></span></div>
+  </div>
+  <div class="mat-ui">
+    <h2>Your thinking</h2>
+    <textarea id="answer">Taking the locks in the same order would prevent the circular wait.</textarea>
+    <div class="row"><button class="primary" id="shareBtn">Share my thinking</button><button>I don't know</button><button>Hint</button></div>
+  </div>
+  <div class="summary" id="summary"><h3>Review saved</h3>
+    Explained on your own: 2<br>Explained after a hint: 1<br>Still open: 1 (circular wait vs. hold-and-wait)<br>
+    <span class="mock">MOCK numbers. Prototype only, not from a real review.</span></div>
+  <div class="prog" id="prog"></div>
+</div></div></div>
+<script>
+// Throwaway prototype. One canvas draws every picture in the room; HTML draws every word and control on top of it.
+const W = 1586, H = 992, P = 2;              // P: plate pixels per art pixel cluster (measured ~2.2 in the masters)
+const LW = W / P, LH = H / P;                 // effects are drawn at art-pixel resolution, then scaled up with nearest neighbour
+const $ = (s) => document.querySelector(s);
+const cv = $('#scene'), ctx = cv.getContext('2d');
+const fxBack = Object.assign(document.createElement('canvas'), { width: LW, height: LH }), fb = fxBack.getContext('2d');
+const fxFront = Object.assign(document.createElement('canvas'), { width: LW, height: LH }), ff = fxFront.getContext('2d');
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const names = ['rail-background', 'rail-board', 'rail-desk', 'rail-mat', 'rail-ledge-items', 'rail-vine', 'pip', 'closed-notebook', 'closed-folio', 'harbor-lamp', 'harbor-cushion'];
+const img = {};
+Promise.all(names.map(n => new Promise(r => { const i = new Image(); i.onload = r; i.src = `a/${n}.webp`; img[n] = i; }))).then(() => document.fonts.ready).then(start);
+
+// Room geometry, in plate pixels. In the app this would come from FRONT_ROW_ROOMS computed in TS, not CSS calc().
+const G = {
+  board: { x: 62, y: 28, w: 1250, h: 534, s: { t: 44, r: 64, b: 62, l: 64 } },
+  desk: { x: -110, y: 633, w: 1806, h: 359, s: { t: 0, r: 150, b: 0, l: 150 } },
+  mat: { x: 232, y: 650, w: 1080, h: 330, s: { t: 28, r: 30, b: 30, l: 28 } },
+  buddy: { x: 26, y: 752, size: 220 },
+  book: { x: 1372, y: 818, size: 150 },
+};
+
+let mode = 'living', t0 = performance.now(), last = t0;
+const mouse = { x: 0, y: 0, sx: 0, sy: 0 };
+const cam = { z: 1, tz: 1, x: 0, y: 0, tx: 0, ty: 0 };
+const buddy = { pose: 0, poseUntil: 0, hopT: -1, squash: 0, emote: null, emoteT: 0, emoteUntil: 0 };
+const book = { bounceT: -1 };
+let particles = [], floaters = [], petals = [], motes = [];
+let threads = 0, saved = 0, writing = null;
+
+function snap(v) { return Math.round(v / P) * P; }
+function nine(im, s, x, y, w, h) {
+  const sx = [0, s.l, im.width - s.r, im.width], sy = [0, s.t, im.height - s.b, im.height];
+  const dx = [x, x + s.l, x + w - s.r, x + w], dy = [y, y + s.t, y + h - s.b, y + h];
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+    const sw = sx[i + 1] - sx[i], sh = sy[j + 1] - sy[j];
+    if (sw > 0 && sh > 0) ctx.drawImage(im, sx[i], sy[j], sw, sh, dx[i], dy[j], dx[i + 1] - dx[i], dy[j + 1] - dy[j]);
+  }
+}
+
+// ---------- tiny pixel glyphs for RPG-style emote balloons ----------
+const GLYPH = {
+  '?': ['01110', '10001', '00001', '00110', '00100', '00000', '00100'],
+  '!': ['00100', '00100', '00100', '00100', '00100', '00000', '00100'],
+  '.': ['00000', '00000', '00000', '00000', '00000', '00000', '10101'],
+  '*': ['00100', '00100', '11111', '01110', '01010', '10001', '00000'],
+  '+': ['00000', '00100', '00100', '11111', '00100', '00100', '00000'],
+};
+let PK = 1; // balloon pixel size in art pixels
+function px(c, x, y, w, h, col) { c.fillStyle = col; c.fillRect(x | 0, y | 0, w, h); }
+function bp(c, ox, oy, x, y, w, h, col) { c.fillStyle = col; c.fillRect((ox + x * PK) | 0, (oy + y * PK) | 0, w * PK, h * PK); }
+function balloon(c, x, y, ch, col) {
+  PK = 2; const bw = 17, bh = 15; x |= 0; y |= 0; const d = (a, b, w, h, k) => bp(c, x, y, a, b, w, h, k);
+  d(1, 0, bw - 2, bh, '#2a2233'); d(0, 1, bw, bh - 2, '#2a2233');
+  d(2, 1, bw - 4, bh - 2, '#fffaf3'); d(1, 2, bw - 2, bh - 4, '#fffaf3');
+  d(3, bh, 4, 1, '#2a2233'); d(4, bh - 1, 2, 1, '#fffaf3'); d(3, bh + 1, 2, 1, '#2a2233'); d(2, bh + 2, 1, 1, '#2a2233');
+  GLYPH[ch].forEach((row, r) => [...row].forEach((b, k) => { if (b === '1') d(6 + k, 4 + r, 1, 1, col); }));
+}
+
+// ---------- particles, all integer positions on the art-pixel grid ----------
+function burst(x, y, n, cols, opt = {}) {
+  for (let i = 0; i < n; i++) particles.push({ x, y, vx: (Math.random() - .5) * (opt.spread ?? 60), vy: -Math.random() * (opt.up ?? 50) - 10, g: opt.g ?? 90, life: (opt.life ?? 0.9) * (0.6 + Math.random() * .6), age: 0, col: cols[i % cols.length], size: opt.size ?? 1, layer: opt.layer ?? 'front' });
+}
+function initAmbient() {
+  petals = Array.from({ length: 7 }, () => ({ x: 640 + Math.random() * 160, y: Math.random() * 300, ph: Math.random() * 6, sp: 6 + Math.random() * 6 }));
+  motes = Array.from({ length: 26 }, () => ({ x: 0, y: 0, u: Math.random(), v: Math.random(), ph: Math.random() * 6 }));
+}
+
+function start() { initAmbient(); setMode('living'); requestAnimationFrame(frame); }
+
+// ---------- the frame ----------
+let drawMs = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; const t = (now - t0) / 1000;
+  const a0 = performance.now();
+  resize();
+  const live = mode !== 'today' && !reduce;
+  // mouse parallax, eased
+  mouse.sx += ((live ? mouse.x : 0) - mouse.sx) * Math.min(1, dt * 4);
+  mouse.sy += ((live ? mouse.y : 0) - mouse.sy) * Math.min(1, dt * 4);
+  cam.z += (cam.tz - cam.z) * Math.min(1, dt * 3); cam.x += (cam.tx - cam.x) * Math.min(1, dt * 3); cam.y += (cam.ty - cam.y) * Math.min(1, dt * 3);
+  $('#world').style.transform = `translate(${-cam.x * (cam.z - 1)}px, ${-cam.y * (cam.z - 1)}px) scale(${cam.z})`;
+
+  const par = (d) => [live ? snap(-mouse.sx * d) : 0, live ? snap(-mouse.sy * d * 0.5) : 0];
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, W, H);
+  // 1 background (slight overscan so parallax never shows an edge)
+  let [bx, by] = par(6); ctx.drawImage(img['rail-background'], bx - 8, by - 6, W + 16, H + 12);
+  // 2 vine and board
+  let [ox, oy] = par(10);
+  const vineGrow = mode === 'progress' ? Math.min(1, 0.45 + saved / 20 * 0.55) : 1;
+  { const v = img['rail-vine'], vh = Math.round(v.height * vineGrow / P) * P; ctx.drawImage(v, 0, 0, v.width, vh, G.board.x - 150 + ox, G.board.y - 62 + oy, v.width, vh); }
+  nine(img['rail-board'], G.board.s, G.board.x + ox, G.board.y + oy, G.board.w, G.board.h);
+  ctx.drawImage(img['rail-ledge-items'], G.board.x + G.board.w * .09 + ox, G.board.y + G.board.h - 88 + oy);
+  if (mode === 'progress') for (let i = 0; i < Math.min(3, Math.floor(saved / 4)); i++) ctx.drawImage(img['harbor-lamp'], G.board.x + G.board.w * (0.2 + i * 0.3) + ox, G.board.y - 70 + oy);
+  // light shaft and chalk dust, at art-pixel resolution, between the board and the desk
+  fb.clearRect(0, 0, LW, LH);
+  if (live) drawShaft(t, ox, oy);
+  stepParticles(fb, 'back', dt);
+  ctx.drawImage(fxBack, 0, 0, W, H);
+  // 3 desk, mat, objects
+  [ox, oy] = par(18);
+  nine(img['rail-desk'], G.desk.s, G.desk.x + ox, G.desk.y + oy, G.desk.w, G.desk.h);
+  nine(img['rail-mat'], G.mat.s, G.mat.x + ox, G.mat.y + oy, G.mat.w, G.mat.h);
+  if (mode === 'progress') {
+    if (saved >= 2) ctx.drawImage(img['harbor-cushion'], 1300 + ox, 900 + oy, 186, 92);
+    const stack = Math.min(5, Math.floor(saved / 2));
+    for (let i = 0; i < stack; i++) ctx.drawImage(img['closed-notebook'], 1400 + ox - i * 2, 800 - (i + 1) * 16 + oy, 130, 130);
+  }
+  drawBook(t, ox, oy);
+  drawBuddy(t, dt, ox, oy, live);
+  // front effects
+  ff.clearRect(0, 0, LW, LH);
+  if (live) drawPetals(t, dt);
+  stepParticles(ff, 'front', dt);
+  drawFloaters(dt);
+  if (buddy.emote && t < buddy.emoteUntil) {
+    const pop = t - buddy.emoteT < 0.08 ? 3 : t - buddy.emoteT < 0.16 ? -1 : 0;   // stepped pop, no tween
+    balloon(ff, (G.buddy.x + 150 + ox) / P, (G.buddy.y - 10 + oy) / P - 36 - pop, buddy.emote, buddy.emote === '!' ? '#c2410c' : '#2d5aa8');
+  }
+  ctx.drawImage(fxFront, 0, 0, W, H);
+  // chalk writing
+  if (writing) stepWriting(t);
+  drawMs = drawMs * 0.95 + (performance.now() - a0) * 0.05;
+  $('#stat').textContent = `canvas ${cv.width}x${cv.height} · draw ${drawMs.toFixed(2)} ms/frame`;
+  requestAnimationFrame(frame);
+}
+
+function drawShaft(t, ox, oy) {
+  // a slanted beam from the window (right) toward the desk, quantised to the art grid; slow breathing alpha
+  const a = 0.07 + 0.02 * Math.sin(t * 0.6);
+  fb.save(); fb.globalAlpha = a; fb.fillStyle = '#fff1c4';
+  fb.beginPath(); fb.moveTo(590 + ox / P, 0); fb.lineTo(793, 0); fb.lineTo(700, LH); fb.lineTo(430, LH); fb.closePath(); fb.fill(); fb.restore();
+  for (const m of motes) {
+    const y = ((m.v * LH + t * 4 * (0.5 + m.u)) % LH);
+    const k = y / LH; const x = (590 + (430 - 590) * k) + m.u * ((793 + (700 - 793) * k) - (590 + (430 - 590) * k)) + Math.sin(t * .7 + m.ph) * 3;
+    fb.globalAlpha = 0.35 + 0.35 * Math.sin(t * 1.3 + m.ph);
+    px(fb, x, y, 1, 1, '#fff6dc');
+  }
+  fb.globalAlpha = 1;
+}
+function drawPetals(t, dt) {
+  for (const p of petals) {
+    p.x -= p.sp * dt; p.y += (p.sp * 0.55) * dt; if (p.x < -5 || p.y > LH) { p.x = 640 + Math.random() * 160; p.y = Math.random() * 60; }
+    const flip = Math.floor(t * 3 + p.ph) % 2;                        // 2-frame flutter, stepped like a sprite
+    px(ff, p.x, p.y + Math.round(Math.sin(t + p.ph) * 2), flip ? 2 : 1, flip ? 1 : 2, '#f7b7c8');
+  }
+}
+function stepParticles(c, layer, dt) {
+  for (const p of particles) {
+    if (p.layer !== layer) continue;
+    p.age += dt; p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+    c.globalAlpha = Math.max(0, 1 - p.age / p.life);
+    px(c, p.x, p.y, p.size, p.size, p.col);
+  }
+  c.globalAlpha = 1;
+  particles = particles.filter(p => p.age < p.life);
+}
+function drawFloaters(dt) {
+  for (const f of floaters) {
+    f.age += dt; const y = f.y - Math.floor(f.age * 8) * 1;       // rises one art pixel per step
+    ff.globalAlpha = f.age < f.life - .3 ? 1 : Math.max(0, (f.life - f.age) / .3);
+    balloon(ff, f.x, y, f.ch, f.col);
+  }
+  ff.globalAlpha = 1; floaters = floaters.filter(f => f.age < f.life);
+}
+function drawBook(t, ox, oy) {
+  let lift = 0;
+  if (book.bounceT >= 0) { const k = t - book.bounceT; lift = k < .1 ? 8 : k < .2 ? 14 : k < .3 ? 6 : k < .4 ? 2 : 0; if (k > .5) book.bounceT = -1; }
+  ctx.drawImage(img['closed-notebook'], G.book.x + ox, G.book.y + oy - lift, G.book.size, G.book.size);
+}
+function drawBuddy(t, dt, ox, oy, live) {
+  const s = G.buddy.size, sheet = img['pip'];
+  if (t > buddy.poseUntil) buddy.pose = 0;
+  let x = G.buddy.x + ox, y = G.buddy.y + oy, sx = 1, sy = 1;
+  if (!live) {
+    // today: smooth sub-pixel CSS-style breathing with rotation (what the app does now)
+    ctx.save(); ctx.imageSmoothingEnabled = true;
+    ctx.translate(x + s / 2, y + s * .94); ctx.rotate(Math.sin(t * 1.0) * 0.012); ctx.scale(1 + Math.sin(t) * .004, 1 + Math.sin(t) * .009);
+    ctx.drawImage(sheet, buddy.pose * 724, 0, 724, 724, -s / 2, -s * .94, s, s); ctx.restore(); return;
+  }
+  // live: stepped timing (8 fps), whole art pixels, squash on landing; never rotates the pixels
+  const step = Math.floor(t * 8);
+  let lift = (step % 16 < 8) ? 0 : P;                                  // idle bob, one art pixel
+  if (buddy.hopT >= 0) {
+    const k = Math.floor((t - buddy.hopT) * 12); const arc = [0, 10, 18, 22, 22, 18, 10, 0];
+    if (k < arc.length) lift = arc[k]; else if (k < arc.length + 2) { sx = 1.06; sy = 0.92; } else buddy.hopT = -1;
+    if (k === 0) { sx = 1.05; sy = 0.94; }
+  }
+  const dw = snap(s * sx), dh = snap(s * sy);
+  ctx.drawImage(sheet, buddy.pose * 724, 0, 724, 724, snap(x + (s - dw) / 2), snap(y + s - dh - lift), dw, dh);
+}
+
+// ---------- chalk writing on the board (DOM text revealed letter by letter, dust from the caret) ----------
+const QUESTIONS = ['What would have to change for either thread to continue?', 'If both threads took the locks in the same order, which of the four conditions breaks?', 'Why does a timeout not remove the deadlock, only end it?'];
+let qi = 0;
+function ask() {
+  qi = (qi + 1) % QUESTIONS.length;
+  writing = { text: QUESTIONS[qi], at: performance.now() / 1000 - (performance.now() - t0) / 1000 + (performance.now() - t0) / 1000, start: (performance.now() - t0) / 1000 };
+  $('#qtext').textContent = '';
+  if (mode !== 'today' && !reduce) { cam.tz = 1.045; cam.tx = 690; cam.ty = 300; }
+  emote('?', 1.6);
+}
+function stepWriting(t) {
+  const n = Math.floor((t - writing.start) * 34);
+  if (mode === 'today' || reduce) { $('#qtext').textContent = writing.text; writing = null; return; }
+  if (n !== writing.n) {
+    writing.n = n; $('#qtext').textContent = writing.text.slice(0, n);
+    const r = $('#caret').getBoundingClientRect(), wr = $('#world').getBoundingClientRect(), k = wr.width / W;
+    const x = (r.left - wr.left) / k / P, y = (r.top - wr.top) / k / P - 6;
+    if (n % 2 === 0) burst(x, y, 2, ['#f6efd9', '#c9e6cf'], { spread: 20, up: 6, g: 30, life: .7, layer: 'back' });
+  }
+  if (n > writing.text.length + 40) { writing = null; cam.tz = 1; cam.tx = 0; cam.ty = 0; }
+}
+function emote(ch, secs) { const t = (performance.now() - t0) / 1000; buddy.emote = ch; buddy.emoteT = t; buddy.emoteUntil = t + secs; }
+function now() { return (performance.now() - t0) / 1000; }
+const MOVES = {
+  ask,
+  share() {
+    buddy.hopT = now(); emote('.', 2.2);
+    const r = $('#answer').getBoundingClientRect(), wr = $('#world').getBoundingClientRect(), k = wr.width / W;
+    burst(((r.left + r.right) / 2 - wr.left) / k / P, (r.top - wr.top) / k / P, 14, ['#2d5aa8', '#fffaf3', '#f2b648'], { spread: 120, up: 60 });
+    setTimeout(ask, 2300);
+  },
+  hint() { emote('!', 1.8); buddy.pose = 1; buddy.poseUntil = now() + 1.4; },
+  close() {
+    threads = Math.min(3, threads + 1); renderPips();
+    book.bounceT = now(); buddy.pose = 2; buddy.poseUntil = now() + 1.2;
+    floaters.push({ x: (G.book.x + 40) / P, y: (G.book.y - 80) / P, ch: '+', col: '#0f6b5d', age: 0, life: 1.6 });
+    burst((G.book.x + 75) / P, (G.book.y + 20) / P, 16, ['#f2b648', '#fff6dc'], { spread: 70, up: 50 });
+  },
+  wrap() {
+    for (let i = 0; i < 5; i++) setTimeout(() => burst(100 + Math.random() * 600, 40 + Math.random() * 80, 24, ['#f6efd9', '#c9e6cf', '#f2b648', '#f7b7c8'], { spread: 140, up: 30, g: 60, life: 2.2, layer: 'front' }), i * 160);
+    emote('*', 3); buddy.hopT = now();
+    $('#summary').style.display = 'block'; setTimeout(() => $('#summary').style.display = 'none', 4200);
+  },
+};
+function renderPips() { document.querySelectorAll('.pip').forEach((p, i) => p.classList.toggle('on', i < threads)); }
+
+// ---------- modes ----------
+const NOTES = {
+  today: 'A · What ships now: CSS-placed WebP layers. The companion breathes with smooth sub-pixel CSS transforms (it rotates the pixels, which softens them). No ambient life; reactions are a pose swap for ~1 s.',
+  living: 'B · Same art, drawn by one canvas. Move the mouse: 3-depth parallax. Ambient life is drawn at the art\'s own pixel grid (light shaft, dust motes, blossom petals), and the companion moves in whole art pixels on stepped 8 fps timing, never rotated.',
+  reactive: 'C · B plus reactions wired to the tutor\'s move header (ask_main, hint, close_thread, wrap_up already stream before any words). Try the Simulate buttons: chalk writes the question with dust from the caret and the camera leans in, the companion hops and shows RPG emote balloons, the notebook catches a page. Reactions describe what happened (you answered, a thread closed), never whether you were right.',
+  progress: 'D · B plus progression from saved reviews. Drag the slider: notebooks stack on the desk, the vine grows, lamps and a cushion appear. Placeholder art reused from other rooms. The panel shows honest counts: only saved "explained on your own" counts as understood (R12, R13, R18).',
+};
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+  $('#moves').style.display = m === 'reactive' || m === 'today' ? '' : 'none';
+  $('#slider').style.display = m === 'progress' ? '' : 'none';
+  $('#prog').style.display = m === 'progress' ? 'block' : 'none';
+  $('#note').textContent = NOTES[m] + (reduce ? ' (Your system asks for reduced motion, so ambient motion is off.)' : '');
+  cam.tz = 1; cam.tx = 0; cam.ty = 0; renderProg();
+}
+function renderProg() {
+  const own = Math.round(saved * 1.6), help = Math.round(saved * 0.9), open = Math.round(saved * 0.5);
+  const lvl = [0, 2, 4, 8, 12, 16].filter(n => saved >= n).length;
+  $('#prog').innerHTML = `<b>Room level ${lvl}</b><div class="bar"><i style="width:${Math.min(100, (saved % 4) / 4 * 100)}%"></i></div>`
+    + `Explained on your own: ${own}<br>After a hint: ${help}<br>Still open: ${open}<br><small>MOCK. Only "on your own" grows the room; skipped and helped answers never do.</small>`;
+}
+document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+document.querySelectorAll('[data-move]').forEach(b => b.onclick = () => MOVES[b.dataset.move]());
+$('#shareBtn').onclick = () => MOVES.share();
+$('#saved').oninput = (e) => { saved = +e.target.value; $('#savedN').textContent = saved; renderProg(); };
+addEventListener('mousemove', (e) => { mouse.x = (e.clientX / innerWidth - .5) * 2; mouse.y = (e.clientY / innerHeight - .5) * 2; });
+
+// ---------- sizing: fit the plate into the window, back the canvas at device resolution ----------
+let lastKey = '';
+function resize() {
+  const top = $('#panel').offsetHeight, vw = innerWidth, vh = innerHeight - top; $('#viewport').style.top = top + 'px'; s = Math.min(vw / W, vh / H);
+  const key = `${vw}x${vh}x${devicePixelRatio}x${top}`; if (key === lastKey) return; lastKey = key;
+  const st = $('#stage').style; st.transform = `scale(${s})`; st.left = `${(vw - W * s) / 2}px`; st.top = `${(vh - H * s) / 2}px`;
+  const dpr = devicePixelRatio || 1; cv.width = Math.round(W * s * dpr); cv.height = Math.round(H * s * dpr);
+  ctx.setTransform(cv.width / W, 0, 0, cv.height / H, 0, 0);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+@font-face { font-family: Px; src: url('pixelify-sans.ttf'); }
+body { margin: 0; background: #000; }
+.s { position: relative; width: 1586px; height: 992px; background: url('live-room.png'); font-family: Px; image-rendering: pixelated; }
+.chip { position: absolute; padding: 8px 14px; background: #1a2b3bdb; border: 2px solid #f6ecd873; color: #f6ecd8; font-size: 19px; box-shadow: 0 3px 0 #0006; }
+.b { position: absolute; left: 196px; top: 96px; width: 1000px; color: #f6efd9; }
+.t { font-size: 20px; letter-spacing: .14em; color: #c9e6cf; display: flex; gap: 14px; align-items: center; }
+.t::after { content: ""; width: 260px; height: 3px; background: #c9e6cf; }
+.l { margin-top: 28px; font-size: 15px; letter-spacing: .12em; color: #c9e6cf; }
+.e { font-size: 24px; line-height: 1.45; }
+.q { margin-top: 34px; font-size: 42px; line-height: 1.36; font-weight: 700; }
+.pips { position: absolute; right: 0; top: 0; display: flex; gap: 10px; } .pips i { width: 24px; height: 24px; border: 3px solid #c9e6cf; } .pips i.on { background: #f6efd9; border-color: #f6efd9; }
+.m { position: absolute; left: 330px; top: 682px; width: 930px; color: #1e2b45; }
+.m h2 { margin: 0 0 10px; font-size: 26px; } .m .ta { height: 110px; padding: 10px 14px; border: 3px solid #2f4f86; background: #fffaf3; font-size: 20px; line-height: 1.4; }
+.m .r { display: flex; gap: 14px; margin-top: 14px; } .m button { font: 600 21px Px; padding: 8px 20px; border: 3px solid #2a2620; background: #f4e8d2; box-shadow: 0 4px 0 #b59a75; }
+.m button.p { background: #2d5aa8; color: #fff; border-color: #1e2b45; box-shadow: 0 4px 0 #1e2b45; }
+.prog { position: absolute; right: 30px; bottom: 120px; width: 0; }
+.tag { position: absolute; left: 1372px; top: 896px; padding: 4px 8px; background: #1a2b3bdb; color: #f6ecd8; border: 2px solid #f6ecd873; font-size: 16px; }
+</style></head><body><div class="s">
+<div class="chip" style="left:14px;top:12px;font-weight:600;font-size:22px">After Class</div>
+<div class="chip" style="left:190px;top:8px;padding:4px 14px"><div style="font-weight:600">Locks &amp; deadlocks</div><div style="font-size:14px;opacity:.85">Reviewing this lecture · 12:40 of lecture</div></div>
+<div class="chip" style="right:14px;top:12px">Room &amp; companion</div>
+<div class="b"><div class="pips"><i class="on"></i><i></i><i></i></div>
+<div class="t">CIRCULAR WAIT</div><div class="l">EXPLANATION</div>
+<div class="e">The lecture calls this circular wait. Each thread is holding a resource while waiting for the other.</div>
+<div class="q">What would have to change for either thread to continue?</div></div>
+<div class="m"><h2>Your thinking</h2><div class="ta">Taking the locks in the same order would prevent the circular wait.</div>
+<div class="r"><button class="p">Share my thinking</button><button>I don't know</button><button>Hint</button></div></div>
+<div class="tag">My notebook · 4</div>
+</div></body></html>
