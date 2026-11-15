@@ -113,6 +113,16 @@ describe("idle blinks at irregular intervals, the same ones for the same seed", 
     for (let t = 50_680; t < 70_000; t += 37) expect(companionAt(cue("pip", null), kept, t)).toEqual(companionAt(nod, idle, t));
   });
 
+  test("a gesture cut short still wakes the stage, at the moment it would have ended, so blinking resumes", () => {
+    const think = cue("pip", "think", 50_000);
+    const kept = { ...idle, since: Math.max(idle.since, restsFrom(think)) };
+    const cleared = companionAt(cue("pip", null), kept, 50_100);
+    expect(cleared.frame).toBe("idle");
+    expect(cleared.next).toBe(51_050);
+    const blinked = play(cue("pip", null), 50_100, 70_000, kept).filter(([, f]) => f === "blink");
+    expect(blinked.length).toBeGreaterThan(0);
+  });
+
   test("blinks count from the end of the last gesture", () => {
     const after = companionAt(cue("pip", "nod", 50_000), idle, 50_680);
     expect(after.frame).toBe("idle");

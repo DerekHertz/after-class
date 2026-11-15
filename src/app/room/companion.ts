@@ -128,7 +128,10 @@ export function companionAt(cue: CompanionCue, idle: Idle, now: number | null): 
     if (playing !== null) return shown(playing.step, playing.end);
   }
   const from = Math.max(idle.since, restsFrom(cue));
-  if (cue.activity === "paused" || !has(cue.id, "blink") || now < from) return { frame: rest, lift: 0, next: null };
+  if (cue.activity === "paused" || !has(cue.id, "blink")) return { frame: rest, lift: 0, next: null };
+  // The stage keeps a gesture's end as `since` while it plays. A cue cleared before then, by a room or companion switch, has
+  // no gesture left to wake the stage at that end, so the wake is asked for here and blinking resumes.
+  if (now < from) return { frame: rest, lift: 0, next: from };
   const window = Math.floor((now - from) / BLINK_WINDOW);
   const blinkAt = (k: number) => from + k * BLINK_WINDOW + unit(idle.seed, k) * BLINK_SPREAD;
   const steps = unit(idle.seed ^ 0x5bd1e995, window) < 0.25 ? DOUBLE_BLINK : BLINK;

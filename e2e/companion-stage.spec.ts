@@ -25,6 +25,7 @@ async function openRoom(page: Page, appearance: Partial<Appearance> = {}) {
 }
 const paints = (page: Page) => page.evaluate(() => (window as unknown as { paints: number }).paints);
 const frames = (page: Page) => page.evaluate(() => (window as unknown as { frames: string[] }).frames.splice(0));
+const clearReaction = (page: Page) => page.evaluate(() => (window as unknown as { afterClassClearReaction: () => void }).afterClassClearReaction());
 const gesture = (page: Page, name: string) => page.evaluate((name) => (window as unknown as { afterClassGesture: (g: string) => void }).afterClassGesture(name), name);
 
 test.describe("the stage draws the companion", () => {
@@ -58,6 +59,20 @@ test.describe("the stage draws the companion", () => {
     await gesture(page, "hop");
     await page.waitForTimeout(900);
     expect((await frames(page)).filter((f) => f !== "blink").slice(0, 4)).toEqual(["hop-crouch", "hop-air", "hop-crouch", "idle"]);
+  });
+
+  test("a gesture cut short, as a room or companion switch cuts it, leaves the companion blinking again", async ({ page }) => {
+    await openRoom(page);
+    await page.waitForTimeout(500);
+    await gesture(page, "think");
+    await page.waitForTimeout(100);
+    await clearReaction(page);
+    await frames(page);
+    await page.waitForTimeout(1200);
+    const settled = await paints(page);
+    await page.waitForTimeout(14_000);
+    expect((await frames(page)).filter((f) => f === "blink").length).toBeGreaterThanOrEqual(2);
+    expect(await paints(page)).toBeGreaterThan(settled);
   });
 
   test("Lumi, who has no cheer frame, hops instead", async ({ page }) => {
