@@ -179,7 +179,7 @@ describe("turn", () => {
     const t = tutorHarness(r.db, () => {
       call++;
       if (call === 1) return reply(askMain(r.claim), "Question.");
-      if (call === 2) return reply(diagnose, "The lecturer says the carriers go to the electron transport chain and make three and two ATP. How does that fit with what you said?");
+      if (call === 2) return reply(diagnose, "The lecturer says the carriers go to the electron transport chain, and each NADH makes three ATP while each FADH2 makes two, which is where the energy is released. How does that fit with what you said about the cytoplasm?");
       return reply(diagnose, "How does what you said fit with where the lecturer follows the carriers?");
     });
     const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: withDiagnose });

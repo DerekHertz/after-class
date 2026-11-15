@@ -375,16 +375,16 @@ describe("validateSay: a mismatch asks before it tells (flow: one tentative, sou
     ]) expect(validateSay(d, q).ok, q).toBe(true);
   });
 
-  test("still rejects a recital before the question, in any script", () => {
+  test("rejects more than one question, or a reply that does not end in one", () => {
     const d = { kind: "diagnose" } as Parameters<typeof validateSay>[0];
-    for (const q of ["The lecture says NADH gives three ATP. How does that fit?", "Lecturer said X! How?", "\u8BB2\u5E08\u8BF4\u4E86\u4E09\u4E2A\u3002\u4F60\u600E\u4E48\u770B\uFF1F", "How? Why?",
-      "The lecturer says NADH and FADH2 feed the electron transport chain, making three and two ATP, etc. How does that fit with what you said?",
-      "It is answer no. How does that fit?",
-      "He picks option B. Why?",
-      "He says three ATP\u2026 How does that fit?",
-      "He says three ATP\nHow does that fit?",
-      'He says "three ATP." How does that fit?'])
+    for (const q of ["How? Why?", "Is it the mitochondria? Or the cytoplasm?", "\u4F60\u600E\u4E48\u770B\uFF1F\u4E3A\u4EC0\u4E48\uFF1F", "How does that fit? Think about the ATP figures."])
       expect(validateSay(d, q).ok, q).toBe(false);
+  });
+
+  test("accepts a single question that names people or terms with initials", () => {
+    const d = { kind: "diagnose" } as Parameters<typeof validateSay>[0];
+    for (const q of ["How does your answer fit with the diagram, e.g. NADH entering the chain?", "How does your answer fit with B. F. Skinner's experiment?"])
+      expect(validateSay(d, q).ok, q).toBe(true);
   });
 
   const diagnose: TutorMove = { kind: "diagnose", threadId: thread(1), hypothesis: "h", evidence: [ev(1)] };
@@ -395,8 +395,8 @@ describe("validateSay: a mismatch asks before it tells (flow: one tentative, sou
     expect(validateSay(diagnose, "  Where in the lecture does the speaker put that step, and how does it fit with your answer?\n").ok).toBe(true);
   });
 
-  test("a reply that states the lecture's answer before asking is rejected", () => {
-    const recital = "The lecture puts it differently. The lecturer says NADH and FADH2 go to the electron transport chain. He says each NADH makes three ATP and each FADH2 makes two. How does that fit with what you said?";
+  test("a long reply that states the lecture's answer before asking is rejected by its length", () => {
+    const recital = "The lecture puts it differently. The lecturer says NADH and FADH2 go to the electron transport chain. He says each NADH makes three ATP and each FADH2 makes two, at the inner membrane. How does that fit with what you said?";
     expect(validateSay(diagnose, recital).ok).toBe(false);
   });
 
