@@ -60,7 +60,7 @@ describe("releaseNotes", () => {
         "### Other",
         "- Room: react to the tutor's moves from one table (#293)",
         "",
-        "Try it with `scripts/try-release.sh v0.1.5`. Publishing this release deploys it to the beta within about a minute.",
+        "Try it with `scripts/try-release.sh v0.1.5`. Publishing this release deploys it to the beta within a few minutes.",
         "",
       ].join("\n"),
     );

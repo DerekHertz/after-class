@@ -110,7 +110,7 @@ export function releaseNotes(range: ReleaseRange): string {
   for (const [group, lines] of groups) {
     if (lines.length > 0) out.push(`### ${HEADINGS[group]}`, ...lines.map((line) => `- ${line}`), "");
   }
-  out.push(`Try it with \`scripts/try-release.sh ${tag}\`. Publishing this release deploys it to the beta within about a minute.`, "");
+  out.push(`Try it with \`scripts/try-release.sh ${tag}\`. Publishing this release deploys it to the beta within a few minutes.`, "");
   return out.join("\n");
 }
 

@@ -1,10 +1,11 @@
 [Unit]
-Description=Check for a newly published After Class release every minute
+Description=Check for a newly published After Class release every 75 seconds
 
 [Timer]
 OnBootSec=2min
-# Counted from the end of the last check, so a long deploy never overlaps the next check.
-OnUnitInactiveSec=1min
+# Counted from the end of the last check, so a long deploy never overlaps the next check. GitHub allows 60 unsigned API
+# requests an hour and counts a 304 too, so 75 seconds, about 48 an hour, leaves room for the master check of a deploy.
+OnUnitInactiveSec=75s
 AccuracySec=5s
 
 [Install]

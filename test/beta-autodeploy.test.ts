@@ -293,10 +293,10 @@ describe("afterclass-autodeploy", () => {
   test("a failed pull leaves the app alone, and the next check tries again", () => {
     const server = new Server({ running: OLD, pullFails: true });
     server.github(v015);
-    expect(server.run().output).toContain("trying again next minute");
+    expect(server.run().output).toContain("trying again at the next check");
     expect(server.log).not.toContain("systemctl restart afterclass-app.service");
     expect(server.log.filter((line) => line.startsWith("curl https://api.github.com/repos/DerekHertz/after-class/compare/"))).toEqual([]);
-    expect(server.run().output).toContain("trying again next minute");
+    expect(server.run().output).toContain("trying again at the next check");
   });
 
   test("an unmounted /data asks GitHub nothing", () => {
@@ -310,9 +310,9 @@ describe("afterclass-autodeploy", () => {
 describe("the autodeploy units", () => {
   const read = (name: string) => readFileSync(join(FILES, name), "utf8");
 
-  test("the timer runs the check a minute after the last one ends, so checks never overlap", () => {
+  test("the timer runs the check 75 seconds after the last one ends, so checks never overlap and stay under GitHub's 60 an hour", () => {
     const timer = read("afterclass-autodeploy.timer");
-    expect(timer).toContain("OnUnitInactiveSec=1min");
+    expect(timer).toContain("OnUnitInactiveSec=75s");
     expect(timer).toContain("WantedBy=timers.target");
   });
 

@@ -1,9 +1,9 @@
 #!/bin/bash
-# Run every minute by afterclass-autodeploy.timer. Deploys the highest published release of the repository through
+# Run every 75 seconds by afterclass-autodeploy.timer. Deploys the highest published release of the repository through
 # afterclass-deploy, so publishing a draft release on GitHub is the deploy approval. Drafts and pre-releases never count.
 # It asks the public GitHub API without a sign-in and sends the ETag of the last list it finished with, so an unchanged
-# list answers 304, which GitHub does not count against the 60 requests an hour it allows. A GitHub error, a rate limit, a
-# malformed image-digest.txt or a commit off master deploys nothing. Every decision goes to the log group's autodeploy stream.
+# list answers 304 with no body to read. A GitHub error, a rate limit, a malformed image-digest.txt or a commit off master
+# deploys nothing. Every decision goes to the log group's autodeploy stream.
 #
 # The release it last acted on, as "<tag> <digest>", is in /data/afterclass/autodeploy. It acts once per release:
 # - A manual deploy with scripts/deploy-beta.sh stays until a different release becomes the highest published one.
@@ -132,7 +132,7 @@ fi
 
 # The pull comes before the master check, so a GHCR outage costs no API request. Pulling runs nothing.
 if ! /usr/local/sbin/afterclass-pull "$digest" >/dev/null 2>&1; then
-  say "cannot pull ${digest} for ${target}, trying again next minute"
+  say "cannot pull ${digest} for ${target}, trying again at the next check"
   exit 0
 fi
 
