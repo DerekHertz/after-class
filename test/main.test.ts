@@ -25,10 +25,11 @@ import { canonicalInterpretation, canonicalResourceSearch, canonicalRevision } f
 import type { InterpretationInput, InterpretationOutput } from "../src/backend/preparation/tasks";
 import { UNASKED_CACHE, deferred, fail, fakeTask, ok } from "./fakes";
 import type { FakeStep, FakeTask } from "./fakes";
+import { JPEG_BYTES } from "./jpeg-fixture";
 
 const CAP = stableId("cap", "main-test") as CaptureId;
 const VIDEO = "dQw4w9WgXcQ";
-const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+const JPEG = Buffer.from(JPEG_BYTES);
 
 const scratch: string[] = [];
 const running: Running[] = [];

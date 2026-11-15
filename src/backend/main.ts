@@ -77,6 +77,7 @@ import type { ApiClient } from "./providers/claude-api";
 import { claimSupportTask, productBoundaryTask, productFrameChangeTask } from "./providers/jev-tasks";
 import type { BoundaryInput, FrameChangeInput } from "./providers/jev-tasks";
 import { createEvidence } from "./evidence";
+import { resolveIngestLimits } from "./evidence/ingest-limits";
 import type { EvidenceStoreWithProbe } from "./evidence";
 import { PRODUCT_JEV_SETUP } from "./jev-setup";
 import { createSegmentation } from "./segmentation";
@@ -448,6 +449,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
     throw new Error(`AFTERCLASS_CLAUDE_BACKEND=api needs AFTERCLASS_ANTHROPIC_API_KEY in ${keysPath}; refusing to start`);
   }
   const budgetLimits = resolveBudgetLimits(env);
+  const ingestLimits = resolveIngestLimits(env, resolve(env.AFTERCLASS_DATA ?? "data"));
   const tutorModel = resolveTutorModel(env);
   const paidCallsStopped = stopSwitch(env, configDir);
   // Hosted mode has no pairing token: sign-in replaces it.
@@ -596,6 +598,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       runFrameChange: (input, signal) => (input.before === null ? Promise.resolve(null) : memo.run(tasks.frameChange, input, { signal })),
       frameChangeKey: (input) => memo.key(tasks.frameChange, input),
       read,
+      limits: ingestLimits,
       ...(options.frameHoldMs === undefined ? {} : { frameHoldMs: options.frameHoldMs }),
       wakeIn(captureId, delayMs) {
         const at = performance.now() + delayMs;
