@@ -495,8 +495,9 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
   const linkId = matched.params.linkId as LinkId | undefined;
   const observationId = matched.params.observationId as ObservationId | undefined;
   try {
-    // Another user's capture answers as one this caller cannot see. An id nobody has ingested keeps its empty view.
-    if (captureId !== undefined && evidence.capturedByAnotherUser(captureId)) return failure(404, "unknown capture", cors);
+    // The one ownership check for every capture-scoped route. A capture id the caller does not hold answers 404, whether
+    // nobody holds it or another user does. Ingest is the exception: a device creates a capture by ingesting into a new id.
+    if (name !== "ingest" && captureId !== undefined && !evidence.holdsCapture(captureId)) return failure(404, "unknown capture", cors);
     switch (name) {
       case "ingest": {
         const raw = await readJson(req);
@@ -591,8 +592,6 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
       }
       case "retryPreparation": {
         if (!preparation || !segmentation) return null;
-        // Chunks are per user: a capture only another user holds answers as unknown. A capture nobody holds stays a no-op 204.
-        if (segmentation.heldByAnotherUser(captureId!)) return failure(404, "unknown capture", cors);
         const stuck = segmentation.current(captureId!).filter((rev) => {
           const prep = preparation.prep(rev.id);
           return !prep.finished || prep.supportedCount === 0;
@@ -642,7 +641,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
       }
       case "evidence": {
         const q = parseQuery("evidence", new URL(req.url)) as { material: Material } | { ids: EvidenceId[] } | { captureId: CaptureId };
-        if ("captureId" in q && evidence.capturedByAnotherUser(q.captureId)) return failure(404, "unknown capture", cors);
+        if ("captureId" in q && !evidence.holdsCapture(q.captureId)) return failure(404, "unknown capture", cors);
         const bundle =
           "material" in q ? evidence.bundle(q.material)
           : "ids" in q ? evidenceByIds(evidence, q.ids)

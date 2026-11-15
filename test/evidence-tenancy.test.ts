@@ -6,10 +6,13 @@ import type { Db, UserDb } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
 import { serve } from "../src/backend/http";
 import { createLedger } from "../src/backend/providers/ledger";
+import type { Preparation } from "../src/backend/preparation";
 import type { Reviews } from "../src/backend/review";
+import type { Segmentation } from "../src/backend/segmentation";
 import type { CaptureId, EvidenceId, UserId } from "../src/shared/ids";
 import { stableId } from "../src/shared/ids";
 import { DAY, JPEG, VIDEO, keyOf, stream } from "./evidence-fixtures";
+import { ROUTES } from "../src/shared/wire";
 import { CAP, EXT_ID, JSON_HEADERS, TOKEN, bearer, VIDEO as WIRE_VIDEO, fixtureApp, ingest, post, registerCleanup, wireFacts } from "./http-fixtures";
 import { otherUserDb, testDb } from "./fakes";
 import { tmpDir } from "./tmp";
@@ -504,4 +507,81 @@ describe("a database from before evidence got user_id", () => {
     expect(db.sql.query("SELECT id FROM users").all()).toEqual([]);
     db.close();
   });
+});
+
+describe("every capture-scoped route answers 404 for a capture id the caller does not hold", () => {
+  const servers: { stop(force?: boolean): void | Promise<void> }[] = [];
+  afterAll(async () => {
+    for (const s of servers.splice(0)) await s.stop(true);
+  });
+
+  /** Alice ingested CAP. Bob holds nothing. A third id is held by nobody. The stubs record any call that reaches a module past the boundary. */
+  function rig() {
+    const { alice, bob } = twoUsers();
+    const reached: string[] = [];
+    const reviews = {
+      invite: () => (reached.push("invite"), { state: "none" }),
+      answerInvite: () => (reached.push("answerInvite"), { state: "later" }),
+      options: () => (reached.push("options"), { kind: "none" }),
+      start: () => (reached.push("start"), { kind: "none" }),
+      heldByAnotherUser: () => false,
+    } as unknown as Reviews;
+    const preparation = { prep: () => ({ finished: false, supportedCount: 0 }), retry: () => void reached.push("retry") } as unknown as Preparation;
+    const segmentation = { current: () => [] } as unknown as Segmentation;
+    const serveFor = (u: { db: UserDb; evidence: ReturnType<typeof twoUsers>["alice"]["evidence"] }) => {
+      const server = serve({
+        modules: { ledger: createLedger(u.db), evidence: u.evidence, reviews, preparation, segmentation },
+        auth: { port: 0, extensionId: EXT_ID, token: TOKEN },
+        appDir: fixtureApp(),
+      });
+      servers.push(server);
+      return `http://127.0.0.1:${server.port}`;
+    };
+    return { reached, a: serveFor(alice), b: serveFor(bob), alice };
+  }
+
+  const NOBODY = stableId("cap", "nobody");
+  type Call = { readonly name: string; readonly path: (id: string) => string; readonly method: "GET" | "POST"; readonly body?: unknown };
+  const CALLS: readonly Call[] = [
+    { name: "captureView", method: "GET", path: (id) => `/captures/${id}` },
+    { name: "answerInvite", method: "POST", path: (id) => `/captures/${id}/invite`, body: { answer: "later" } },
+    { name: "reviewOptions", method: "GET", path: (id) => `/captures/${id}/review-options` },
+    { name: "startReview", method: "POST", path: (id) => `/captures/${id}/reviews`, body: { reviewId: stableId("rvw", "x"), choice: "prepared_only" } },
+    { name: "retryPreparation", method: "POST", path: (id) => `/captures/${id}/retry-preparation`, body: {} },
+    { name: "evidence", method: "GET", path: (id) => `/evidence?captureId=${id}` },
+  ];
+  const send = (base: string, c: Call, id: string) =>
+    c.method === "GET" ? fetch(`${base}${c.path(id)}`, { headers: bearer }) : post(base, c.path(id), c.body, JSON_HEADERS);
+
+  test("the table above names every route that takes a capture id in its path, plus GET /evidence, whose query may", () => {
+    const scoped = Object.entries(ROUTES)
+      .filter(([, r]) => r.path.includes(":captureId"))
+      .map(([name]) => name);
+    expect(CALLS.map((c) => c.name).sort()).toEqual([...scoped, "evidence"].sort());
+  });
+
+  for (const c of CALLS) {
+    test(`${c.name} answers 404 for an id nobody holds and for another user's, reaches no module, and answers the owner`, async () => {
+      const r = rig();
+      expect((await ingest(r.a, wireFacts(0, 3))).status).toBe(200);
+      r.reached.length = 0;
+      for (const id of [NOBODY, CAP]) {
+        const denied = await send(r.b, c, id);
+        expect(denied.status).toBe(404);
+        expect(await denied.text()).toContain("unknown capture");
+      }
+      expect((await send(r.a, c, NOBODY)).status).toBe(404);
+      expect(r.reached).toEqual([]);
+      expect((await send(r.a, c, CAP)).status).not.toBe(404);
+    });
+  }
+
+  test("an ingest into an id nobody holds still creates the capture, which its device can then read", async () => {
+    const r = rig();
+    expect((await get(r.a, `/captures/${CAP}`)).status).toBe(404);
+    expect((await ingest(r.a, wireFacts(0, 2))).status).toBe(200);
+    expect((await get(r.a, `/captures/${CAP}`)).status).toBe(200);
+  });
+
+  const get = (base: string, path: string) => fetch(`${base}${path}`, { headers: bearer });
 });
