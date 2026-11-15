@@ -1,0 +1,17 @@
+The companion animation frames (blink, look-board, look-mat, nod, hop-crouch,
+hop-air, think, cheer and talk for each companion) were generated with Meshy
+(https://www.meshy.ai) on its free plan, as image-to-image edits of each
+companion's painted idle frame. Meshy licenses free-plan output under the
+Creative Commons Attribution 4.0 International license:
+https://creativecommons.org/licenses/by/4.0/
+
+Credit: Meshy (https://www.meshy.ai).
+
+Changes made after generation: alpha made binary, stray specks removed, frames
+moved vertically onto a shared ground line, and a second copy resized to half
+size. Each frame's prompt and Meshy task id are in provenance.json beside its
+master under art/masters/companion-frames/ and docs/design/live-room/painted/.
+
+This license covers these files and copies of them:
+art/masters/companion-frames/, src/app/assets/companion-frames/ and
+docs/design/live-room/painted/<companion>/.

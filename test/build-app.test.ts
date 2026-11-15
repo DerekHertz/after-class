@@ -131,6 +131,14 @@ describe("the review app bundle", () => {
     const { files } = built();
     expect(files.filter((f) => f !== "index.html" && f !== "asset-notices.txt" && !/-[a-z0-9]{8}\.[a-z]+$/.test(f))).toEqual([]);
   });
+
+  test("the shipped notices credit Meshy for the companion frames under CC BY 4.0, beside the font and icon licenses", () => {
+    const { out } = built();
+    const notices = readFileSync(join(out, "asset-notices.txt"), "utf8");
+    for (const name of ["Feather icons", "Young Serif", "DM Sans", "Pixelify Sans", "Companion animation frames"]) expect(notices).toContain(name);
+    expect(notices).toContain("Credit: Meshy (https://www.meshy.ai)");
+    expect(notices).toContain("https://creativecommons.org/licenses/by/4.0/");
+  });
 });
 
 describe("a file name the server caches for a year", () => {
