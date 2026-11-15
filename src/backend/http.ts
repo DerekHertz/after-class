@@ -51,6 +51,7 @@ import { LOCAL_USER } from "./db";
 import { clientAddress } from "./devices";
 import type { Devices } from "./devices";
 import type { EvidenceStore, EvidenceStoreWithProbe } from "./evidence";
+import { IngestRefused } from "./evidence/ingest-limits";
 import type { Preparation } from "./preparation";
 import type { Reviews } from "./review";
 import type { LearningRecord } from "./record";
@@ -157,12 +158,12 @@ type ServeCommon = {
 export const DEFAULT_PORT = 4317;
 
 /**
- * 16 MiB. The extension caps a batch at 8 MiB (`BATCH_MAX_BYTES`) but always sends at least one fact, and the wire
- * schema allows a single frame fact of 8 MiB of base64; 16 MiB holds either with 2x margin for JSON overhead. A full
- * 500-fact batch of small facts is well under 1 MiB. Bun's default (128 MiB) would let any local process make the
- * backend buffer a hundred megabytes before the token is even checked.
+ * 8 MiB. The extension caps a batch at 4 MiB (`BATCH_MAX_BYTES`) but always sends at least one fact, and the wire schema
+ * allows a single frame fact of 1.4 MiB of base64 (`MAX_FRAME_BYTES`); 8 MiB holds either with 2x margin for JSON overhead.
+ * A full 500-fact batch of small facts is well under 1 MiB. Bun's default (128 MiB) would let any local process make the
+ * backend buffer a hundred megabytes before the token is even checked. The Caddyfile's `request_body` repeats this number.
  */
-export const MAX_BODY_BYTES = 16 * 1024 * 1024;
+export const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 /** Path parameter name → id kind, so `matchRoute` (which does not validate) never hands a raw string to a module. */
 const PARAM_KIND = {
@@ -508,6 +509,8 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
         } catch (e) {
           // evidence checks every fact before it stores any, so this refusal leaves nothing behind.
           if (e instanceof RangeError) throw new BadRequest(e.message);
+          // 507 is the account's quota, which retrying does not clear. 503 is the volume's floor, which freed space does.
+          if (e instanceof IngestRefused) return e.reason === "quota" ? failure(507, e.message, cors) : failure(503, e.message, { ...cors, "Retry-After": "300" });
           throw e;
         }
         return reply(

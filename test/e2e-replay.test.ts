@@ -33,13 +33,14 @@ import { nextThreadId, tutorTask, wrapUpTask } from "../src/backend/review/tutor
 import type { TutorInput } from "../src/backend/review/tutor";
 import { isLearningGap } from "../src/backend/review/clamp";
 import { UNASKED_CACHE } from "./fakes";
+import { JPEG_BYTES } from "./jpeg-fixture";
 
 const CAP = stableId("cap", "e2e-replay") as CaptureId;
 const REVIEW = stableId("rvw", "e2e-replay") as ReviewId;
 const turnId = (n: number) => stableId("turn", "e2e-replay", n) as TurnId;
 const VIDEO = "dQw4w9WgXcQ";
 const EXT_ID = "abcdefghijklmnopabcdefghijklmnop";
-const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+const JPEG = Buffer.from(JPEG_BYTES);
 
 const realFetch = globalThis.fetch;
 

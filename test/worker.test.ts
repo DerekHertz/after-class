@@ -356,16 +356,16 @@ describe("acknowledgement bounds", () => {
 describe("batching", () => {
   const stored = (n: number, body: CaptureFactBody): StoredFact => ({ captureId: CAP, clientSeq: n, wallMs: n, body });
   const frame = (mb: number): CaptureFactBody =>
-    ({ kind: "frame", videoId: "QgWz_s7uugE", frameId: "f", mediaS: media(1), width: 640, height: 360, trigger: "first", diff: 0, jpegBase64: "x".repeat(mb * 1024 * 1024) });
+    ({ kind: "frame", videoId: "QgWz_s7uugE", frameId: "f", mediaS: media(1), width: 640, height: 360, trigger: "first", diff: 0, jpegBase64: "x".repeat(Math.floor(mb * 1024 * 1024)) });
 
   test("count cap", () => {
     expect(selectBatch(Array.from({ length: BATCH_MAX_FACTS + 50 }, (_, i) => stored(i, fact(i))))).toHaveLength(BATCH_MAX_FACTS);
   });
 
-  test("frames are counted by bytes: 8 MiB per batch", () => {
-    const facts = [stored(0, frame(3)), stored(1, frame(3)), stored(2, frame(3)), stored(3, fact(3))];
+  test("frames are counted by bytes: 4 MiB per batch", () => {
+    const facts = [stored(0, frame(1.5)), stored(1, frame(1.5)), stored(2, frame(1.5)), stored(3, fact(3))];
     expect(selectBatch(facts).map((f) => f.clientSeq)).toEqual([0, 1]);
-    expect(BATCH_MAX_BYTES).toBe(8 * 1024 * 1024);
+    expect(BATCH_MAX_BYTES).toBe(4 * 1024 * 1024);
   });
 
   test("an oversized first fact still goes alone, so the outbox cannot wedge", () => {
