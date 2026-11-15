@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { buildApp } from "../scripts/build-app";
 import type { AuthConfig } from "../src/backend/http";
 import { MAX_BODY_BYTES, authorize } from "../src/backend/http";
+import { HEALTH as HEALTH_FORMAT, validate } from "../scripts/release-input";
 import { stableId } from "../src/shared/ids";
 import { ROUTES, captureResponse, ingestAckResponse, lecturesResponse } from "../src/shared/wire";
 import { CAP, EXT_ID, PAGE, TOKEN, VIDEO, ackOf, bearer, fixtureApp, ingest, post, raw, registerCleanup, reviewRig, scratchDir, start, startedIn, wireFacts } from "./http-fixtures";
@@ -70,6 +71,13 @@ describe("health and the API", () => {
     expect(r.status).toBe(200);
     expect(await r.text()).toBe(HEALTH);
     expect((await raw(port, "/health", { Host: `localhost:${port}` })).body).toBe(HEALTH);
+  });
+
+  test("GET /health answers exactly the bytes the release tool accepts", async () => {
+    const { base } = start();
+    const body = new Uint8Array(await (await fetch(`${base}/health`)).arrayBuffer());
+    const version = (await Bun.file(new URL("../package.json", import.meta.url)).json()).version;
+    expect(validate(HEALTH_FORMAT, body)).toEqual({ ok: true, value: { version } });
   });
 
   test("healthAnyHost answers /health for a load balancer's Host and leaves every other route on the localhost Host check", async () => {

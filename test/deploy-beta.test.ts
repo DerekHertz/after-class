@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { makeHost, stub } from "./beta-host";
+import { makeHost, offlineEnv, stub } from "./beta-host";
 
 const SCRIPT = resolve(import.meta.dir, "../scripts/deploy-beta.sh");
 const COMMIT = "f".repeat(40);
@@ -95,7 +95,7 @@ exit 0`,
   );
   stub(host.bin, "sleep", "exit 0");
   const result = Bun.spawnSync(["bash", SCRIPT, opts.tag ?? "v0.1.0", ...(opts.expected === undefined ? [] : [opts.expected]), ...(opts.expectedCommit === undefined ? [] : [opts.expectedCommit])], {
-    env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` },
+    env: offlineEnv(host.bin),
   });
   const raw = existsSync(calls) ? readFileSync(calls, "utf8") : "";
   return {
@@ -188,14 +188,15 @@ describe("scripts/deploy-beta.sh", () => {
 
   const badRecords: [string, string | null, string][] = [
     ["a release without image-digest.txt", null, "has no image-digest.txt"],
-    ["an empty record", "", "is not a commit line and a digest line"],
-    ["a record without a digest line", `commit ${COMMIT}\n`, "is not a commit line and a digest line"],
-    ["a digest that is too short", `commit ${COMMIT}\ndigest sha256:${"1".repeat(63)}\n`, "is not a commit line and a digest line"],
-    ["an uppercase digest", `commit ${COMMIT}\ndigest sha256:${"A".repeat(64)}\n`, "is not a commit line and a digest line"],
-    ["a digest that is a tag", `commit ${COMMIT}\ndigest ${COMMIT}\n`, "is not a commit line and a digest line"],
-    ["a digest with a registry in it", `commit ${COMMIT}\ndigest evil.example/x@${APPROVED}\n`, "is not a commit line and a digest line"],
-    ["a record with a line after the digest", `${RECORD}digest ${ATTACKER}\n`, "is not a commit line and a digest line"],
+    ["an empty record", "", "image-digest.txt is not in its format"],
+    ["a record without a digest line", `commit ${COMMIT}\n`, "image-digest.txt is not in its format"],
+    ["a digest that is too short", `commit ${COMMIT}\ndigest sha256:${"1".repeat(63)}\n`, "image-digest.txt is not in its format"],
+    ["an uppercase digest", `commit ${COMMIT}\ndigest sha256:${"A".repeat(64)}\n`, "image-digest.txt is not in its format"],
+    ["a digest that is a tag", `commit ${COMMIT}\ndigest ${COMMIT}\n`, "image-digest.txt is not in its format"],
+    ["a digest with a registry in it", `commit ${COMMIT}\ndigest evil.example/x@${APPROVED}\n`, "image-digest.txt is not in its format"],
+    ["a record with a line after the digest", `${RECORD}digest ${ATTACKER}\n`, "image-digest.txt is not in its format"],
     ["a record for another commit", `commit ${"0".repeat(40)}\ndigest ${APPROVED}\n`, "records commit 0000"],
+    ["a NUL inside the digest, which a shell would drop", `commit ${COMMIT}\ndigest sha\u0000256:${"1".repeat(64)}\n`, "image-digest.txt is not in its format"],
   ];
   for (const [name, record, reason] of badRecords) {
     test(`refuses ${name}, and asks GHCR and AWS nothing`, () => {

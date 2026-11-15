@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { digestOf, makeHost, stub } from "./beta-host";
+import { digestOf, makeHost, offlineEnv, stub } from "./beta-host";
 
 const SCRIPT = resolve(import.meta.dir, "../scripts/release.sh");
+const LIVE_RELEASE = resolve(import.meta.dir, "../scripts/live-release.ts");
 const COMMIT = "c".repeat(40);
 const DIGEST = digestOf("b");
 
@@ -35,8 +36,9 @@ interface Run {
 
 /**
  * Runs a copy of the real script in a temp clone whose scripts/try-release.sh and scripts/deploy-beta.sh are stubs that
- * record their arguments, with curl, git, gh, bun, aws and sleep stubbed too. The release names DIGEST for COMMIT. The
- * server runs v0.1.4 until the deploy, then the deployed release.
+ * record their arguments, with curl, git, gh, bun, aws and sleep stubbed too. The bun stub hands `live-release.ts record`
+ * to the real script, which reads `record` through the gh stub. The release names DIGEST for COMMIT. The server runs
+ * v0.1.4 until the deploy, then the deployed release.
  */
 function release(opts: Opts = {}): Run {
   const host = makeHost("afterclass-release-");
@@ -67,6 +69,7 @@ case "$*" in
     [ "$(wc -l < ${host.root}/server)" -gt 1 ] && sed -i 1d ${host.root}/server
     ${answer};;
   "scripts/live-release.ts public") answer=$(cat ${host.root}/public); ${answer};;
+  "scripts/live-release.ts record "*) exec ${process.execPath} ${LIVE_RELEASE} record "$3";;
   "scripts/release-notes.ts --warnings "*) echo "WARNINGS $*";;
   "scripts/release-notes.ts "*) echo "NOTES $*";;
 esac`,
@@ -82,7 +85,7 @@ echo 123456789012`,
   );
   stub(host.bin, "sleep", "exit 0");
   const result = Bun.spawnSync(["bash", join(scripts, "release.sh"), ...(opts.args ?? [])], {
-    env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` },
+    env: offlineEnv(host.bin),
     stdin: Buffer.from(opts.input ?? "\ny\n"),
   });
   const raw = existsSync(calls) ? readFileSync(calls, "utf8") : "";
@@ -268,8 +271,9 @@ describe("scripts/release.sh", () => {
 
   const records: [string, string, string][] = [
     ["a record for another commit", `commit ${"0".repeat(40)}\ndigest ${DIGEST}\n`, "records commit 0000"],
-    ["a record without a digest", `commit ${COMMIT}\n`, "is not a commit line and a digest line"],
-    ["a second digest line", `commit ${COMMIT}\ndigest ${DIGEST}\ndigest ${digestOf("e")}\n`, "is not a commit line and a digest line"],
+    ["a record without a digest", `commit ${COMMIT}\n`, "image-digest.txt is not in its format"],
+    ["a second digest line", `commit ${COMMIT}\ndigest ${DIGEST}\ndigest ${digestOf("e")}\n`, "image-digest.txt is not in its format"],
+    ["a NUL inside the digest, which a shell would drop", `commit ${COMMIT}\ndigest sha\u0000256:${"b".repeat(64)}\n`, "image-digest.txt is not in its format"],
   ];
   for (const [name, record, reason] of records) {
     test(`refuses ${name} before it tries or deploys anything`, () => {

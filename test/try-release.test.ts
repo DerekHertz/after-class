@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { digestOf, makeHost, REPOSITORY, stub } from "./beta-host";
+import { digestOf, makeHost, offlineEnv, REPOSITORY, stub } from "./beta-host";
 
 const SCRIPT = resolve(import.meta.dir, "../scripts/try-release.sh");
 const COMMIT = "c".repeat(40);
@@ -72,7 +72,7 @@ exit 0`,
   stub(host.bin, "sleep", "exit 0");
   stub(host.bin, "aws", log);
   const command = ["bash", SCRIPT, opts.tag ?? "v0.1.5", ...(opts.expected === undefined ? [] : [opts.expected]), ...(opts.expectedCommit === undefined ? [] : [opts.expectedCommit])];
-  const env = { ...process.env, PATH: `${host.bin}:${process.env.PATH}`, ANTHROPIC_API_KEY: KEY, TYPESAFE_API_KEY: KEY };
+  const env = offlineEnv(host.bin, { ANTHROPIC_API_KEY: KEY, TYPESAFE_API_KEY: KEY });
   const finish = (status: number, stdout: string, stderr: string): Run => ({
     status,
     stdout,
@@ -213,12 +213,13 @@ describe("scripts/try-release.sh", () => {
     ["a tag instead of a digest", `commit ${COMMIT}\ndigest v0.1.5\n`],
     ["a digest that names another registry", `commit ${COMMIT}\ndigest evil.example/x@${DIGEST}\n`],
     ["a second digest line", `commit ${COMMIT}\ndigest ${DIGEST}\ndigest ${digestOf("e")}\n`],
+    ["a NUL inside the digest, which a shell would drop", `commit ${COMMIT}\ndigest sha\u0000256:${"b".repeat(64)}\n`],
   ];
   for (const [name, record] of records) {
     test(`refuses a record with ${name} and pulls nothing`, () => {
       const run = tryRelease({ record, arm64: true });
       expect(run.status).not.toBe(0);
-      expect(run.stderr).toContain("is not a commit line and a digest line");
+      expect(run.stderr).toContain("image-digest.txt is not in its format");
       expect(of(run, "docker")).toEqual([]);
     });
   }

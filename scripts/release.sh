@@ -10,7 +10,6 @@
 # curl, docker and the AWS CLI.
 set -euo pipefail
 
-github_repository=DerekHertz/after-class
 release_tag='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 
 say() { echo "release: $*"; }
@@ -96,12 +95,10 @@ EOF
 fi
 
 commit=$(bun scripts/check-release-tag.ts "$tag")
-record=$(gh release download "$tag" --repo "$github_repository" --pattern image-digest.txt --output -) \
-  || fail "the ${tag} release has no image-digest.txt. Wait for the release workflow to finish, or rerun it."
-pattern=$'^commit ([0-9a-f]{40})\ndigest (sha256:[0-9a-f]{64})$'
-[[ "$record" =~ $pattern ]] || fail "the ${tag} release's image-digest.txt is not a commit line and a digest line"
-[ "${BASH_REMATCH[1]}" = "$commit" ] || fail "the ${tag} release records commit ${BASH_REMATCH[1]}, but the tag is on ${commit}"
-digest="${BASH_REMATCH[2]}"
+checked=$(bun scripts/live-release.ts record "$tag") \
+  || fail "nothing was tried or deployed. If the release workflow is still running, wait for it to finish, or rerun it."
+read -r recorded_commit digest <<<"$checked"
+[ "$recorded_commit" = "$commit" ] || fail "the ${tag} release records commit ${recorded_commit}, but the tag is on ${commit}"
 
 echo
 say "${tag} is commit ${commit}"

@@ -9,7 +9,6 @@
 set -euo pipefail
 
 region=us-east-2
-github_repository=DerekHertz/after-class
 repository=derekhertz/after-class
 instance_parameter=/afterclass-beta/instance_id
 document=afterclass-beta-deploy
@@ -20,20 +19,15 @@ expected="${2:-}"
 expected_commit="${3:-}"
 commit=$(bun scripts/check-release-tag.ts "$tag")
 
-if ! record=$(gh release download "$tag" --repo "$github_repository" --pattern image-digest.txt --output -); then
-  echo "deploy-beta: the ${tag} release has no image-digest.txt. Wait for the release workflow to finish, or rerun it." >&2
+if ! checked=$(bun scripts/live-release.ts record "$tag"); then
+  echo "deploy-beta: nothing was deployed. If the release workflow is still running, wait for it to finish, or rerun it." >&2
   exit 1
 fi
-pattern=$'^commit ([0-9a-f]{40})\ndigest (sha256:[0-9a-f]{64})$'
-if [[ ! "$record" =~ $pattern ]]; then
-  echo "deploy-beta: the ${tag} release's image-digest.txt is not a commit line and a digest line" >&2
+read -r recorded_commit digest <<<"$checked"
+if [ "$recorded_commit" != "$commit" ]; then
+  echo "deploy-beta: the ${tag} release records commit ${recorded_commit}, but the tag is on ${commit}" >&2
   exit 1
 fi
-if [ "${BASH_REMATCH[1]}" != "$commit" ]; then
-  echo "deploy-beta: the ${tag} release records commit ${BASH_REMATCH[1]}, but the tag is on ${commit}" >&2
-  exit 1
-fi
-digest="${BASH_REMATCH[2]}"
 if [ -n "$expected_commit" ] && [ "$commit" != "$expected_commit" ]; then
   echo "deploy-beta: the ${tag} tag and its release now name commit ${commit}, not the ${expected_commit} you tried. Nothing was deployed." >&2
   exit 1

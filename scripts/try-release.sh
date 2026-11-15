@@ -3,7 +3,7 @@
 # release's image-digest.txt names, by digest, on 127.0.0.1, and stops it when you press Enter. The app runs in replay
 # mode with no keys file and a database that lives and dies with the container, so it makes no Jev, Claude or AWS call
 # and never changes the beta server. With a digest and a commit, it refuses a release whose record names others, so
-# scripts/release.sh tries the release it showed. Needs gh, docker and curl.
+# scripts/release.sh tries the release it showed. Needs bun, gh, docker and curl.
 #
 # The release image is linux/arm64. On a machine that cannot run arm64 images, the script builds a local image from the
 # release image's own /app and /data on the amd64 build of the Bun base image that the release's Dockerfile pins, and
@@ -28,12 +28,9 @@ if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
 fi
 [[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] || fail "AFTERCLASS_TRY_PORT '${port}' is not a port"
 
-record=$(gh release download "$tag" --repo "$github_repository" --pattern image-digest.txt --output -) \
-  || fail "the ${tag} release has no image-digest.txt. Wait for the release workflow to finish."
-pattern=$'^commit ([0-9a-f]{40})\ndigest (sha256:[0-9a-f]{64})$'
-[[ "$record" =~ $pattern ]] || fail "the ${tag} release's image-digest.txt is not a commit line and a digest line"
-commit="${BASH_REMATCH[1]}"
-digest="${BASH_REMATCH[2]}"
+checked=$(bun "$(dirname "$0")/live-release.ts" record "$tag") \
+  || fail "nothing ran. If the release workflow is still running, wait for it to finish."
+read -r commit digest <<<"$checked"
 if [ -n "$expected" ] && [ "$digest" != "$expected" ]; then
   fail "the ${tag} release now names ${digest}, not the ${expected} shown before. Nothing ran."
 fi
