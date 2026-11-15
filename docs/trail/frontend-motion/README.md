@@ -1,47 +1,28 @@
 # Tactile interaction review
 
-The whole-device press and drawer treatment below were superseded after user annotations: see [mechanical-control correction](../mechanical-controls/README.md).
+User annotations later replaced the whole-device press and drawer treatment below. See the [mechanical-control correction](../mechanical-controls/README.md).
 
-Preview branch: `codex/tactile-motion`, stacked above the reference-fidelity correction. Final visual acceptance remains on base PR #44. No merge or deployment.
+The preview branch `codex/tactile-motion` sits above the reference-fidelity correction. Final visual acceptance stays on base PR #44, and nothing here merges or deploys. To view it, run `bun scripts/preview-ui.ts` and open http://127.0.0.1:8770/?scenario=review&clean=1. The preview makes no live microphone or provider calls.
 
-Run `bun scripts/preview-ui.ts` and open http://127.0.0.1:8770/?scenario=review&clean=1. Use Room & companion to choose a room. Motion follows the system preference; Reduce motion is an explicit override. Omit `clean=1` for deterministic scenario controls, fake speech and the request ledger. This preview makes no live microphone/provider calls.
+## Outcome
 
-## Inspected flow
+1. **Review.** The masthead blocked pointer clicks on Pause and Resume. Its empty area now passes pointer events through, and both buttons work by pointer.
+2. **Lecture source.** The Study Bench drawer moves its illustrated front and handle, and the content slides in and out. Closed evidence leaves the accessibility tree at once. On mobile, smaller recorder bounds stop the recorder target blocking the drawer. A typed draft survives open and close.
+3. **Speak and companion.** The recorder presses down while held by pointer, touch or keyboard and stays down while listening, and Composer Speak follows the same lifecycle. Mascots breathe, lean, shift, tuck and settle with the app state. These move the existing raster body and are not a new character rig. All three rooms were tested.
+4. **Notebook.** The book turns its cover around the spine in 380 ms, then the page animates in over 480 ms. Back or another route cancels the pending navigation, and focus lands on My notebook. Connection rationale replaces raw IDs, and citations show real frame and transcript timestamps. Metadata batches hold at most 250 IDs.
+5. **Reduced motion and narrow layout.** Reduce motion stops the mascot loop, zeroes the source transition and navigates to the notebook at once. At 390×844 the page is 390px wide, and the source and Speak targets act separately. No console errors appeared.
 
-1. **Review — healthy after fixes.** Actual desktop review inspected before implementation. The masthead intercepted pointer clicks on Pause/Resume; keyboard activation alone had concealed this. Its empty area now passes pointer events through, while the logo and appearance controls remain interactive. Pointer Pause and Resume both verified; pausing active speech produces speech.stop and the paused mascot state.
-2. **Lecture source — healthy after fixes.** Previously, content simply disappeared while the machine stayed still. The Study Bench drawer now moves its authentic illustrated front and handle; content enters/exits with a brief slide. Closed evidence is hidden from accessibility/navigation immediately. A mobile overlap initially let the transparent recorder target intercept the drawer; smaller recorder bounds separate them. At390px the source handle center resolves to source-handle, source opens and speech remains off. Typed draft remains unchanged across open/close.
-3. **Speak and companion — healthy in fixture.** The physical recorder depresses while held with pointer, touch or keyboard and stays depressed while listening. Composer Speak reflects the same lifecycle. Repeated keydown defaults are suppressed. Mascots breathe subtly, lean while listening, shift while waiting, tuck while saving and settle while paused. These animate the existing detailed raster body; no claim of independent eye/wing rigging or a newly generated character animation. All three rooms tested.
-4. **Notebook — healthy after fixes.** Activating the actual book turns its illustration around the spine before navigation; the notebook page opens into view. This is a 380ms Web Animations cover turn followed by a 480ms page animation, with normal anchor/modified-click behavior retained. Back or another route cancels pending navigation. Focus lands on My notebook, including reduced-motion navigation. Note headings use existing wording; connection rationale replaces raw IDs; citations show actual frame/transcript timestamps. Metadata batches stay at 250 IDs, below wire limits. Open/close citation focus verified.
-5. **Reduced motion and narrow layout — healthy in fixture.** Explicit Reduce motion yields no mascot loop, zero source transition duration and immediate notebook navigation without page animation. Pressed state remains visible without movement interpolation. Mobile 390×844 has 390px page width; source/Speak targets act separately. Console errors: none observed.
-
-## Before and after evidence
-
-The screenshots are static evidence. Live actions, computed transforms, focus and request ledger checks establish motion/state behavior; screenshots alone cannot establish timing or full accessibility compliance.
-
-Before: [review](01-current-review-full.jpg), [closed source](02-before-source-closed.jpg), [notebook](03-before-notebook.jpg).
-
-After source movement and draft continuity:
-
-![Open source](05-source-open.jpg)
-
-After Speak/listening (room-specific assets): [Last Desk](last-desk-listening.jpg), [Booth](projection-booth-listening.jpg), [Bench](study-bench-listening.jpg).
-
-![Book during cover turn](07-opening-book.jpg)
-
-![Settled notebook with resolved citations](08-notebook.jpg)
-
-![Mobile listening and separate drawer target](09-mobile-listening.jpg)
-
-[Final Study Bench](study-bench.jpg) · [Paired source comparison](reference-comparison.jpg) · [Browser checks](browser-checks.json) · [Room checks](room-checks.json).
+Screenshots: [before review](01-current-review-full.jpg), [source open](05-source-open.jpg), [listening in Last Desk](last-desk-listening.jpg), [Booth](projection-booth-listening.jpg) and [Bench](study-bench-listening.jpg), [cover turn](07-opening-book.jpg), [notebook](08-notebook.jpg), [mobile](09-mobile-listening.jpg) and the [paired comparison](reference-comparison.jpg). [Browser checks](browser-checks.json) and [room checks](room-checks.json) hold the motion and state results, which screenshots alone cannot show.
 
 ## Verification
 
-Code commit `167caaa`. Full suite: 941 passed, 4 pre-existing TODOs, 0 failures. Typecheck, app, extension and fixture builds passed. After the final citation batching/focus edits, 49 focused tests and typecheck passed. CI checks the final published head.
+At code commit `167caaa`, the suite had 941 passed, 4 existing TODOs and 0 failures, and typecheck and all builds passed. After the final citation edits, 49 focused tests and typecheck passed.
 
-Independent code verification exercised navigation completion, competing routes, Back cancellation (including completion/microtask ordering), no-animation fallback and reduced-motion fallback. It identified a stale completion edge; invalidating the pending animation before cancel fixed it. It executed the actual citation loader with 0, 1, 250, 251, 1000, 1001 IDs: 0, 1, 1, 2, 4, 5 requests, each at most 250 and valid against the actual wire parser. Deleted evidence is checked before cached metadata. Mutation identities remain unchanged.
+Independent code verification ran navigation completion, competing routes, Back cancellation and both animation fallbacks. It found a stale completion edge, fixed by invalidating the pending animation before cancel. The real citation loader with 0, 1, 250, 251, 1000 and 1001 IDs made 0, 1, 1, 2, 4 and 5 requests, each valid against the wire parser. Independent visual review found raw IDs and unlabeled citations, and both were fixed. The parent drove the live browser, since the visual worker could not reach it.
 
-Independent visual review used fresh captured screenshots, including the final paired comparison. It identified raw IDs and unlabeled citations; both were fixed. Final notebook evidence was recaptured only after opacity reached 1 and metadata resolved. The parent controlled the live browser because the visual worker could not access IAB. No independent-live-browser claim is made for that worker.
+Not resolved or not verified:
 
-Remaining P3: long histories can begin with a partially clipped previous line; multiple close-source affordances remain. Evidence labels use honest generic lecture provenance where the record API supplies no lecture title. Real microphone, provider and captured-lecture behavior were not exercised. User final visual acceptance remains pending.
-
-Swarm roles: physical Speak/mascot implementation, notebook/audit implementation, independent code probes, parent browser integration. Workers inherited the available model; per-call dollar costs are unavailable.
+- Two P3 items remain. Long histories can start with a partly clipped line, and the page has more than one way to close the source.
+- Without a lecture title from the record API, evidence labels use generic provenance.
+- Nobody tested a real microphone, provider or captured lecture.
+- The user's final visual acceptance is pending.
