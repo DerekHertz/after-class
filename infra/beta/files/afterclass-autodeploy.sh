@@ -23,6 +23,11 @@ dir=/data/afterclass
 handled="${dir}/autodeploy"
 etag_file="${dir}/autodeploy.etag"
 retry_file="${dir}/autodeploy.retry"
+# GitHub's answers are read whole by Python, so their size bounds its memory. The newest 30 releases hold the next one to
+# publish, and 30 release notes fit in 4 MiB many times over. A compare of a commit on master lists no files.
+newest=30
+list_kib=4096
+compare_bytes=$((1024 * 1024))
 
 events=()
 note() {
@@ -82,8 +87,14 @@ finish() {
 etag=$(cat "$etag_file" 2>/dev/null || true)
 conditional=()
 if [ -n "$etag" ]; then conditional=(-H "If-None-Match: ${etag}"); fi
-status=$(curl -sS --max-time 20 -o "$body" -D "$headers" -w '%{http_code}' -H 'Accept: application/vnd.github+json' \
-  "${conditional[@]}" "${api}/releases?per_page=100" 2>/dev/null) || status=000
+# The file size limit stops curl when the body reaches the limit, whatever it says about its length.
+status=$(ulimit -f "$list_kib" && curl -sS --max-time 20 --max-filesize $((list_kib * 1024)) -o "$body" -D "$headers" \
+  -w '%{http_code}' -H 'Accept: application/vnd.github+json' "${conditional[@]}" "${api}/releases?per_page=${newest}" 2>/dev/null) \
+  || status=000
+if [ "$(stat -c %s "$body")" -ge $((list_kib * 1024)) ]; then
+  say "GitHub's release list is over 4 MiB, nothing done"
+  exit 0
+fi
 case "$status" in
   304)
     say "no release changed since the last check"
@@ -101,11 +112,12 @@ if ! target=$(python3 -I -c 'import json, re, sys
 releases = json.load(open(sys.argv[1]))
 if not isinstance(releases, list):
     sys.exit(1)
+releases = releases[:int(sys.argv[2])]
 version = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 tags = [r["tag_name"] for r in releases
         if r.get("draft") is False and r.get("prerelease") is False and version.match(str(r.get("tag_name", "")))]
 if tags:
-    print(max(tags, key=lambda t: tuple(int(n) for n in t[1:].split("."))))' "$body" 2>/dev/null); then
+    print(max(tags, key=lambda t: tuple(int(n) for n in t[1:].split("."))))' "$body" "$newest" 2>/dev/null); then
   say "GitHub's release list is not a list of releases, nothing done"
   exit 0
 fi
@@ -135,7 +147,8 @@ retry_later() {
   exit 0
 }
 
-if ! record=$(curl -fsSL --max-time 30 --max-filesize 4096 "https://github.com/${repository}/releases/download/${target}/image-digest.txt" 2>/dev/null); then
+if ! record=$(curl -fsSL --max-time 30 --max-filesize 4096 "https://github.com/${repository}/releases/download/${target}/image-digest.txt" 2>/dev/null \
+  | head -c 4096); then
   retry_later "cannot read ${target}'s image-digest.txt, nothing done"
 fi
 pattern=$'^commit ([0-9a-f]{40})\ndigest (sha256:[0-9a-f]{64})$'
@@ -166,8 +179,13 @@ if [ "$running" = "$digest" ]; then
   exit 0
 fi
 
-if ! where=$(curl -fsS --max-time 20 -H 'Accept: application/vnd.github+json' "${api}/compare/master...${commit}?per_page=1" 2>/dev/null \
-  | python3 -I -c 'import json, sys; print(json.load(sys.stdin)["status"])' 2>/dev/null); then
+if ! where=$(curl -fsS --max-time 20 --max-filesize "$compare_bytes" -H 'Accept: application/vnd.github+json' \
+  "${api}/compare/master...${commit}?per_page=1" 2>/dev/null | head -c $((compare_bytes + 1)) \
+  | python3 -I -c 'import json, sys
+data = sys.stdin.buffer.read()
+if len(data) > int(sys.argv[1]):
+    sys.exit(1)
+print(json.loads(data)["status"])' "$compare_bytes" 2>/dev/null); then
   retry_later "cannot ask GitHub whether ${commit} is on master, nothing done"
 fi
 if [ "$where" != identical ] && [ "$where" != behind ]; then

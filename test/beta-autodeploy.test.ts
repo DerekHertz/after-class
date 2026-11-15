@@ -26,6 +26,8 @@ interface GitHub {
   records?: Record<string, string>;
   /** What the compare API says of the record's commit against master, or null for an error. */
   compare?: string | null;
+  /** Bytes of filler in the compare answer, as a large diff adds. */
+  comparePadding?: number;
 }
 
 /**
@@ -74,7 +76,7 @@ done
 echo "curl $url $inm" >> ${host.log}
 gh=${gh}
 case "$url" in
-  https://api.github.com/repos/DerekHertz/after-class/releases\?per_page=100)
+  https://api.github.com/repos/DerekHertz/after-class/releases\?per_page=*)
     [ -e $gh/down ] && exit 6
     code=$(cat $gh/status)
     [ "$code" = 200 ] && [ -n "$inm" ] && [ "$inm" = "$(cat $gh/etag)" ] && code=304
@@ -87,7 +89,9 @@ case "$url" in
     cat "$gh/records/$tag";;
   https://api.github.com/repos/DerekHertz/after-class/compare/master...*)
     [ -e $gh/compare ] || exit 22
-    printf '{"status":"%s","ahead_by":0}' "$(cat $gh/compare)";;
+    printf '{"status":"%s","ahead_by":0,"files":"' "$(cat $gh/compare)"
+    head -c "$(cat $gh/compare-padding 2>/dev/null || echo 0)" /dev/zero | tr '\0' x
+    printf '"}';;
   http://127.0.0.1:8080/health)
     case " ${(opts.unhealthy ?? []).join(" ")} " in *" $(cat ${state}) "*) exit 22;; esac;;
   *) exit 2;;
@@ -120,6 +124,7 @@ esac`,
     for (const [tag, text] of Object.entries(g.records ?? {})) writeFileSync(join(gh, "records", tag), text);
     if (g.compare === null) Bun.spawnSync(["rm", "-f", join(gh, "compare")]);
     else writeFileSync(join(gh, "compare"), g.compare ?? "behind");
+    writeFileSync(join(gh, "compare-padding"), String(g.comparePadding ?? 0));
     if (g.down) writeFileSync(join(gh, "down"), "");
     else Bun.spawnSync(["rm", "-f", join(gh, "down")]);
   }
@@ -343,6 +348,35 @@ describe("afterclass-autodeploy", () => {
     expect(server.log.filter((line) => line.startsWith("pull "))).toEqual([`pull ${NEW}`]);
   });
 
+  test("a release list over 4 MiB is refused and deploys nothing", () => {
+    const server = new Server({ running: OLD });
+    const big = JSON.stringify([{ tag_name: "v0.1.5", draft: false, prerelease: false, body: "x".repeat(5 * 1024 * 1024) }]);
+    server.github({ releases: big, records: v015.records });
+    const run = server.run();
+    expect(run.status).toBe(0);
+    expect(run.output).toContain("GitHub's release list is over 4 MiB, nothing done");
+    expect(server.running).toBe(OLD);
+    expect(server.deploys()).toEqual([]);
+  });
+
+  test("only the 30 newest releases count, even when GitHub sends more", () => {
+    const server = new Server({ running: OLD });
+    const releases = [...Array.from({ length: 30 }, () => ({ tag_name: "v0.1.5" })), { tag_name: "v0.2.0" }];
+    server.github({ releases, records: { ...v015.records, "v0.2.0": record(digestOf("e")) } });
+    expect(server.run().status).toBe(0);
+    expect(server.running).toBe(NEW);
+    expect(server.log[0]).toStartWith("curl https://api.github.com/repos/DerekHertz/after-class/releases?per_page=30 ");
+  });
+
+  test("a compare answer over 1 MiB deploys nothing and is retried", () => {
+    const server = new Server({ running: OLD });
+    server.github({ ...v015, comparePadding: 2 * 1024 * 1024 });
+    const run = server.run();
+    expect(run.output).toContain("cannot ask GitHub whether");
+    expect(server.running).toBe(OLD);
+    expect(server.deploys()).toEqual([]);
+  });
+
   test("an unchanged list is asked for with its ETag, answers 304, and reads no record", () => {
     const server = new Server({ running: OLD });
     server.github({ ...v015, etag: '"v15"' });
@@ -350,7 +384,7 @@ describe("afterclass-autodeploy", () => {
     const before = server.log.length;
     const run = server.run();
     expect(run.output).toContain("no release changed since the last check");
-    expect(server.log.slice(before)).toEqual(['curl https://api.github.com/repos/DerekHertz/after-class/releases?per_page=100 "v15"']);
+    expect(server.log.slice(before)).toEqual(['curl https://api.github.com/repos/DerekHertz/after-class/releases?per_page=30 "v15"']);
   });
 
   test("publishing an older version deploys nothing", () => {
