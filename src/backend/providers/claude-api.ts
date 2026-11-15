@@ -11,6 +11,7 @@
  * Sources for every SDK call (the claude-api skill's reference files, read 2026-11-12):
  *   client.messages.stream(...), stream.on("text"), stream.finalMessage()   typescript/claude-api/streaming.md
  *   client.messages.create(...) with output_config.format = zodOutputFormat  typescript/claude-api/tool-use.md
+ *   stream.on("streamEvent") (first event = message_start), cache_control on a user text block   typescript/claude-api/streaming.md, SDK lib/MessageStream.d.ts, shared/prompt-caching.md (Concurrent-request timing)
  *   system block with cache_control { type: "ephemeral", ttl: "5m" | "1h" }   typescript/claude-api/README.md, shared/prompt-caching.md
  *   typed error classes (Anthropic.RateLimitError and the rest)               typescript/claude-api/README.md, shared/error-codes.md
  *   Opus 5.5 request rules                                                     shared/model-migration.md, Migrating to Claude Opus 5.5
@@ -42,14 +43,19 @@ import type { ParseableMessageCreateParams as MessageStreamParams } from "@anthr
 import type { ContentBlockParam, JSONOutputFormat, Message, MessageCreateParamsNonStreaming, MessageParam, TextBlockParam, ToolUnion } from "@anthropic-ai/sdk/resources/messages";
 import type { z } from "zod";
 import { abortError, createLimiter } from "./claude";
-import type { ClaudeCli, ClaudeRequest } from "./claude";
+import type { CacheTtl, ClaudeCli, ClaudeRequest } from "./claude";
+import { createHash } from "node:crypto";
 import { BudgetHeld, ProviderError } from "./memo";
 import type { Admitted, SendContext, UsageReport } from "./memo";
 
 /** The only two models this backend serves. Ids carry no date suffix. */
 export const API_MODELS = { opus: "claude-opus-5-5", sonnet: "claude-sonnet-5-5" } as const;
 
-/** Streaming gets a generous limit because thinking counts toward it. The non-streaming call stays at 16000, which needs no stream. */
+/**
+ * Streaming gets a generous limit because thinking counts toward it. Opus 5.5 and Sonnet 5.5 allow 128K output (claude-api skill, Defaults and
+ * Common Pitfalls, read 2026-11-14), and the SDK wants a stream for a limit that large. A request that sets `longOutput` (interpretation) is
+ * streamed at this limit; every other structured call stays at 16000 through `create`, which needs no stream.
+ */
 export const STREAM_MAX_TOKENS = 32_000;
 export const STRUCTURED_MAX_TOKENS = 16_000;
 
@@ -132,16 +138,20 @@ export function outputFormatOf(schema: z.ZodType): JSONOutputFormat {
 }
 
 /**
- * The user turn. Text only when there are no images, so a tutor request is the plain string it always was. With images, each is a
- * base64 block after a text block that names its label, because the task prompts cite frames by that label, and the prompt follows them.
+ * The user turn. Text only when there are no images and no cached head, so a tutor request is the plain string it always was. With images,
+ * each is a base64 block after a text block that names its label, because the task prompts cite frames by that label, and the prompt follows
+ * them. With a cached head (`cachedPrompt`), the head is its own text block right after the images and carries the cache breakpoint, so the
+ * prefix up to and including it is what a later call reads from the cache, and the rest of the prompt follows uncached.
  */
-function userContent(req: ClaudeRequest, prompt: string): string | ContentBlockParam[] {
-  if (req.images.length === 0) return prompt;
+function userContent(req: ClaudeRequest, prompt: string, ttl: CacheTtl): string | ContentBlockParam[] {
+  const head = req.cachedPrompt;
+  if (req.images.length === 0 && head === undefined) return prompt;
   return [
     ...req.images.flatMap((img): ContentBlockParam[] => [
       { type: "text", text: `Image ${img.label}:` },
       { type: "image", source: { type: "base64", media_type: img.mediaType, data: Buffer.from(img.bytes).toString("base64") } },
     ]),
+    ...(head === undefined ? [] : [{ type: "text", text: head, cache_control: { type: "ephemeral", ttl } } as const]),
     { type: "text", text: prompt },
   ];
 }
@@ -185,7 +195,8 @@ export function extractJsonObject(text: string): unknown {
 
 /** The parts of the SDK client this adapter uses, so a test can fake the network away. */
 export type ApiStream = {
-  on(event: "text", listener: (delta: string) => void): unknown;
+  /** "text" fires per text delta. "streamEvent" fires for every server-sent event, the first being message_start: the response has begun and a cache write is readable. */
+  on(event: "text" | "streamEvent", listener: (delta: string) => void): unknown;
   finalMessage(): Promise<Message>;
   abort(): void;
 };
@@ -459,8 +470,61 @@ type Untrusted = { readonly value: unknown; readonly admitted: Admitted };
 /** What a request turned away before any model ran costs. */
 const NOT_BILLED_REQUEST = { kind: "estimated", usd: 0, basis: "rejected before any model ran" } as const;
 
+/**
+ * What a cache entry is keyed by, in the parts this adapter controls: the model, the system text, every image and the cached head. Two requests
+ * with the same key read one entry. Hashed so the key is small, and so an image is never held as a map key.
+ */
+function prefixKey(req: ClaudeRequest, model: string): string {
+  const h = createHash("sha256");
+  const part = (x: string | Uint8Array) => h.update(typeof x === "string" ? Buffer.byteLength(x).toString() + ":" : x.byteLength.toString() + ":").update(x);
+  part(model);
+  part(req.system);
+  for (const img of req.images) {
+    part(img.label);
+    part(img.bytes);
+  }
+  part(req.cachedPrompt ?? "");
+  return h.digest("hex");
+}
+
 export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
   if (opts.apiKey === "") throw new Error("createClaudeApi needs a non-empty apiKey");
+  /**
+   * A cache entry is readable only once the response that writes it has begun, so requests that share a prefix and run together all pay the
+   * write. The first request for a prefix registers here and the rest wait, before they take a concurrency slot or a budget hold, until its
+   * first stream event or its end, whichever comes first. A later arrival finds no entry and goes straight through.
+   */
+  const warming = {
+    pending: new Map<string, Promise<void>>(),
+    /** Resolves to the handle the first request opens, or to null for a request that waited on another's. */
+    async enter(key: string, signal: AbortSignal): Promise<{ readonly open: () => void } | null> {
+      // A request cancelled before it arrives must not wait on, or become, the first request.
+      if (signal.aborted) throw abortError();
+      const ahead = this.pending.get(key);
+      if (ahead === undefined) {
+        let release!: () => void;
+        const p = new Promise<void>((r) => (release = r));
+        this.pending.set(key, p);
+        return {
+          open: () => {
+            if (this.pending.get(key) === p) this.pending.delete(key);
+            release();
+          },
+        };
+      }
+      let onAbort!: () => void;
+      const aborted = new Promise<never>((_, reject) => {
+        onAbort = () => reject(abortError());
+        signal.addEventListener("abort", onAbort, { once: true });
+      });
+      try {
+        await Promise.race([ahead, aborted]);
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+      }
+      return null;
+    },
+  };
   const client = opts.client ?? sdkClient(opts.apiKey);
   const limiter = createLimiter(opts.maxConcurrent);
   const safe = (text: string, max?: number) => redactThenClip(text, opts.apiKey, max);
@@ -536,7 +600,11 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
     const model = (API_MODELS as Readonly<Record<string, string>>)[req.model];
     // Nothing has been sent when these throw, so none of them can be billed.
     if (model === undefined) throw new ApiCallError(`claude api backend serves only "opus" and "sonnet", got "${safe(req.model, 80)}"`, null, false, "not_billed", null);
-    return { model, messages: [{ role: "user", content: userContent(req, req.prompt + promptSuffix) }] as const, tools: req.webTools ? WEB_TOOLS : null };
+    // The cache lifetime is asked only of a request that will be sent, so the messages are built from the system block's own.
+    const messagesFor = (system: readonly TextBlockParam[]): MessageParam[] => [
+      { role: "user", content: userContent(req, req.prompt + promptSuffix, system[0]?.cache_control?.ttl ?? "5m") },
+    ];
+    return { model, messagesFor, tools: req.webTools ? WEB_TOOLS : null };
   }
 
   /** Parse the response, report it, and price its request. Throws only for a response that cannot be read, whose request stays unpriced. */
@@ -656,23 +724,39 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
         }
         const suffix = `\n\nWhen you have finished searching, end your reply with only one JSON object that matches this JSON Schema, and nothing after it:\n${schemaText}`;
         const prepared = prepare(req, suffix);
-        const { parsed: reply, usage } = await structuredWithTools(req, prepared.model, prepared.messages, prepared.tools!, send);
+        const { parsed: reply, usage } = await structuredWithTools(req, prepared.model, prepared.messagesFor([]), prepared.tools!, send);
         const payload = extractJsonObject(reply.tail);
         if (payload === undefined) throw new ProviderError("claude returned text that is not JSON", usage, false);
         const checked = schema.safeParse(payload);
         if (!checked.success) throw new ProviderError(`claude output failed validation: ${safe(checked.error.message)}`, usage, false);
         return { output: checked.data, usage };
       }
-      const { model, messages } = prepare(req);
+      const { model, messagesFor } = prepare(req);
       let format: JSONOutputFormat;
       try {
         format = outputFormatOf(schema);
       } catch (err) {
         throw new ApiCallError(`output schema cannot be expressed as JSON Schema: ${safe(textOfError(err))}`, null, false, "not_billed", null);
       }
-      const response = await call(req, send, async (callSignal, _began, system) =>
-        client.messages.create({ model, max_tokens: STRUCTURED_MAX_TOKENS, system, messages: [...messages], output_config: { effort: req.effort, format } }, { signal: callSignal }),
-      );
+      const maxTokens = req.longOutput ? STREAM_MAX_TOKENS : STRUCTURED_MAX_TOKENS;
+      // A long answer needs a stream, and so does a request with a cached head: its first event is the moment siblings may read the cache.
+      const streamed = req.longOutput === true || req.cachedPrompt !== undefined;
+      const warm = req.cachedPrompt === undefined ? null : await warming.enter(prefixKey(req, model), send.signal);
+      let response: Untrusted;
+      try {
+        response = await call(req, send, async (callSignal, began, system) => {
+          const params = { model, max_tokens: maxTokens, system, messages: messagesFor(system), output_config: { effort: req.effort, format } };
+          if (!streamed) return client.messages.create(params, { signal: callSignal });
+          const stream = client.messages.stream(params, { signal: callSignal });
+          stream.on("streamEvent", () => {
+            began();
+            warm?.open();
+          });
+          return stream.finalMessage();
+        });
+      } finally {
+        warm?.open();
+      }
       const { parsed: reply, usage } = settle(response);
       let payload: unknown;
       try {
@@ -686,11 +770,11 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
     },
 
     async streamText(req, onText, send) {
-      const { model, messages, tools } = prepare(req);
+      const { model, messagesFor, tools } = prepare(req);
       const sink = redactingSink(opts.apiKey, onText);
       const response = await call(req, send, async (callSignal, began, system) => {
         const stream = client.messages.stream(
-          { model, max_tokens: STREAM_MAX_TOKENS, system, messages: [...messages], ...(tools ? { tools } : {}), output_config: { effort: req.effort } },
+          { model, max_tokens: STREAM_MAX_TOKENS, system, messages: messagesFor(system), ...(tools ? { tools } : {}), output_config: { effort: req.effort } },
           { signal: callSignal },
         );
         stream.on("text", (delta) => {

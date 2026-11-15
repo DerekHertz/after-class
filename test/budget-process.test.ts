@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { writeFileSync } from "node:fs";
 import { ensureLocalUser, openDb } from "../src/backend/db";
-import { INTERRUPTED } from "../src/backend/providers/budget";
+import { ESTIMATE_USD, INTERRUPTED } from "../src/backend/providers/budget";
 import { main } from "../src/backend/main";
 import type { Running } from "../src/backend/main";
 import { tmpDir } from "./tmp";
@@ -54,7 +54,7 @@ describe("a process killed while its paid call is in flight", () => {
     const path = freshDb(dataDir);
     const killed = await finished(child("crash", path));
     expect(killed.signal, `crash child exited ${killed.code}: ${killed.err}`).toBe("SIGKILL");
-    expect(read(path)).toEqual({ holds: [{ reserved_micros: 750_000, settled_micros: null }], events: [] });
+    expect(read(path)).toEqual({ holds: [{ reserved_micros: ESTIMATE_USD.interpretation * 1_000_000, settled_micros: null }], events: [] });
 
     const configDir = tmpDir("budget-crash-config-");
     writeFileSync(join(configDir, "keys.env"), "TYPESAFE_API_KEY=sk-budget-crash\n", { mode: 0o600 });
@@ -70,11 +70,11 @@ describe("a process killed while its paid call is in flight", () => {
     };
     const first = await boot();
     expect(read(path)).toEqual({
-      holds: [{ reserved_micros: 750_000, settled_micros: 750_000 }],
+      holds: [{ reserved_micros: ESTIMATE_USD.interpretation * 1_000_000, settled_micros: ESTIMATE_USD.interpretation * 1_000_000 }],
       events: [{ purpose: "interpretation", outcome: "aborted", cost_kind: "unknown", cost_reason: INTERRUPTED }],
     });
     expect(first.logs.join("\n")).toContain("1 call(s) a previous process left unfinished");
-    expect(first.r.modules.ledger.summary().allowance?.usedUsd).toBe(0.75);
+    expect(first.r.modules.ledger.summary().allowance?.usedUsd).toBe(ESTIMATE_USD.interpretation);
     await first.r.stop();
     running.length = 0;
 

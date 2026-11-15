@@ -16,7 +16,7 @@ import { interpretTask, resourceSearchTask, reviseTask } from "../src/backend/pr
 import { claudeArgs } from "../src/backend/providers/claude";
 import type { ClaudeCli, ClaudeRequest } from "../src/backend/providers/claude";
 import { COST_BASIS, MAX_PAUSE_CONTINUATIONS, WEB_SEARCH_USD, ApiCallError, createClaudeApi, parseUsage, priceUsage } from "../src/backend/providers/claude-api";
-import type { ApiClient } from "../src/backend/providers/claude-api";
+import type { ApiClient, ApiStream } from "../src/backend/providers/claude-api";
 import { createLedger } from "../src/backend/providers/ledger";
 import { createMemo } from "../src/backend/providers/memo";
 import type { Task } from "../src/backend/providers/memo";
@@ -44,7 +44,7 @@ const REPLIES = {
   diagram: { title: "How do clocks order events?", lines: [{ text: "The board shows the arrow.", evidence: [ev("f1")] }] },
 };
 
-type Call = { params: Record<string, unknown>; via: "create" | "stream" };
+export type Call = { params: Record<string, unknown>; via: "create" | "stream" };
 
 /** A client that answers every call with `reply` as JSON text and the given usage, and keeps the request it was sent. */
 function fakeApi(reply: unknown, usage: Record<string, unknown> = {}): { client: ApiClient; calls: Call[] } {
@@ -56,8 +56,10 @@ function fakeApi(reply: unknown, usage: Record<string, unknown> = {}): { client:
   } as unknown as Message;
   const client: ApiClient = {
     messages: {
-      stream: () => {
-        throw new Error("no stream call expected");
+      stream: (params) => {
+        calls.push({ params: params as unknown as Record<string, unknown>, via: "stream" });
+        const stream: ApiStream = { on: () => stream, finalMessage: () => Promise.resolve(message), abort: () => {} };
+        return stream;
       },
       create: (params) => {
         calls.push({ params: params as unknown as Record<string, unknown>, via: "create" });
@@ -113,7 +115,7 @@ describe("every Claude task on the Messages API", () => {
         expect(blocks[1]!.type).toBe("image");
         expect(blocks[2]).toEqual({ type: "text", text: `Image ${ev("f2")}:` });
         expect(blocks.at(-1)!.type).toBe("text");
-        expect(blocks.at(-1)!.text).toContain("image attached");
+        expect(blocks.filter((x) => x.type === "text").map((x) => x.text).join("")).toContain("image attached");
       }
       if (c.web) expect(params.tools).toEqual([{ type: "web_search_20260209", name: "web_search", max_uses: 5 }, { type: "web_fetch_20260209", name: "web_fetch", max_uses: 5 }]);
       else expect("tools" in params).toBe(false);

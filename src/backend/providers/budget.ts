@@ -43,7 +43,9 @@ import type { Db } from "../db";
  *   after a long pause writes them at 2 times again (`tutorCache` in review/tutor.ts), so $0.75 still covers that turn on Opus, and
  *   on Sonnet ($0.2770 for the write) with room. Interpretation, revision and the diagram summary are not measured on the API.
  *   Priced as `worstCaseUsd` prices a call (all of max_tokens spent, every input token a 1 hour cache write), a structured call
- *   with 50,000 input tokens comes to $0.75. Resource search adds up to 5 web searches at $0.01 per call and up to 3
+ *   with 50,000 input tokens comes to $0.75 at max_tokens 16,000. Interpretation streams with max_tokens 32,000 (STREAM_MAX_TOKENS), so
+ *   the same formula gives 32,000 x $20 per million (Opus) = $0.64 plus (50,000 + 4,096 allowance) x $8 per million (1 hour write) =
+ *   $0.432768, $1.072768, reserved as $1.08. Resource search adds up to 5 web searches at $0.01 per call and up to 3
  *   continuations, each a request that reserves $1 again. These are estimates, not upper bounds: the same worst case is $1.23 for a tutor turn with
  *   experiment 8's 69,251-token context and $4.81 for a resource search with 100,000, and reserving that much would refuse a
  *   learner's turn with a quarter of their $5 unused.
@@ -54,7 +56,7 @@ export const ESTIMATE_USD: Readonly<Record<Purpose, number>> = {
   boundary: 0.001,
   frame_change: 0.001,
   claim_check: 0.001,
-  interpretation: 0.75,
+  interpretation: 1.08,
   claim_revision: 0.75,
   resource_search: 1,
   tutor_turn: 0.75,

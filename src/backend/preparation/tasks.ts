@@ -175,8 +175,12 @@ function describeEvidence(b: EvidenceBundle, gaps: EvidenceBundle["gaps"], bytes
   return { text, images };
 }
 
-function request(system: string, prompt: string, images: readonly ClaudeImage[], opts: { effort: ClaudeRequest["effort"]; webTools: boolean }): ClaudeRequest {
-  return { model: "opus", effort: opts.effort, system, prompt, images, webTools: opts.webTools, timeoutMs: 600_000 };
+function request(system: string, prompt: string, images: readonly ClaudeImage[], opts: { effort: ClaudeRequest["effort"]; webTools: boolean; cachedPrompt?: string; longOutput?: boolean }): ClaudeRequest {
+  return {
+    model: "opus", effort: opts.effort, system, prompt, images, webTools: opts.webTools, timeoutMs: 600_000,
+    ...(opts.cachedPrompt === undefined ? {} : { cachedPrompt: opts.cachedPrompt }),
+    ...(opts.longOutput ? { longOutput: true } : {}),
+  };
 }
 
 const INTERPRET_SYSTEM = `You prepare one chunk of a lecture the learner watched for a later Socratic review. You write the concepts the chunk teaches, as claims tied to evidence.
@@ -207,7 +211,7 @@ export function interpretTask(claude: ClaudeCli, frameBytes: FrameBytes): Task<I
       const evidence = describeEvidence(input.newMaterial, input.gaps, frameBytes);
       const existing = input.existingClaims.length > 0 ? input.existingClaims.map((c) => `- ${c.id}: ${c.text}`).join("\n") : "- none";
       const prompt = `${evidence.text}\n\nExisting claims:\n${existing}`;
-      const { output, usage } = await claude.structured(request(INTERPRET_SYSTEM, prompt, evidence.images, { effort: "high", webTools: false }), interpretationSchema, ctx);
+      const { output, usage } = await claude.structured(request(INTERPRET_SYSTEM, prompt, evidence.images, { effort: "high", webTools: false, longOutput: true }), interpretationSchema, ctx);
       return { output: toInterpretation(output, bundleIds(input.newMaterial), new Set(input.existingClaims.map((c) => c.id)), usage, attemptNo >= INTERPRET_MAX_ATTEMPTS), usage };
     },
     decode: (stored) => {
@@ -271,16 +275,15 @@ export function reviseTask(claude: ClaudeCli, frameBytes: FrameBytes): Task<Revi
     async attempt(input, ctx) {
       const evidence = describeEvidence(input.evidence, input.evidence.gaps, frameBytes);
       const o = input.original;
+      // The evidence leads, so every revision of this chunk shares one cached head. It ends in the blank line the claim block always followed.
       const prompt = [
-        evidence.text,
-        "",
         `Original claim: ${o.text}`,
         `Cited: ${o.evidence.join(", ")}`,
         `Visual-dependent: ${o.visualDependent}`,
         `Assumptions: ${o.assumptions.length > 0 ? o.assumptions.join("; ") : "none"}`,
         `Check verdict: ${input.check.verdict}${input.check.p === null ? "" : ` (p = ${input.check.p.toFixed(2)})`}`,
       ].join("\n");
-      const { output, usage } = await claude.structured(request(REVISE_SYSTEM, prompt, evidence.images, { effort: "high", webTools: false }), draftSchema, ctx);
+      const { output, usage } = await claude.structured(request(REVISE_SYSTEM, prompt, evidence.images, { effort: "high", webTools: false, cachedPrompt: `${evidence.text}\n\n` }), draftSchema, ctx);
       return { output: toDraft(output, bundleIds(input.evidence), usage), usage };
     },
     decode: (stored) => draftSchema.parse(stored) as unknown as ClaimDraft,

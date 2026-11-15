@@ -48,7 +48,16 @@ export type ClaudeRequest = {
   readonly model: string; // "opus" (default per stack) | "sonnet" (lab comparison arm)
   readonly effort: Effort;
   readonly system: string;
+  /** The user turn after `cachedPrompt`, or all of it when there is none. */
   readonly prompt: string;
+  /**
+   * The head of the user turn that is byte-identical across calls about one chunk (its evidence). The Messages API adapter puts its
+   * images and this text first and a cache breakpoint after them, so a later call with the same system, images and head reads them from
+   * the cache. The model is shown `cachedPrompt + prompt` either way, and `claude -p` is sent exactly that string.
+   */
+  readonly cachedPrompt?: string;
+  /** An answer that may run past STRUCTURED_MAX_TOKENS. The Messages API adapter streams it with STREAM_MAX_TOKENS. `claude -p` has no such limit. */
+  readonly longOutput?: boolean;
   readonly images: readonly ClaudeImage[];
   readonly webTools: boolean; // true only for resource search
   readonly timeoutMs: number;
@@ -60,6 +69,9 @@ export type ClaudeRequest = {
 };
 
 export type CacheTtl = "5m" | "1h";
+
+/** The user turn the model reads: the cached head, then the rest. */
+export const promptOf = (req: ClaudeRequest): string => (req.cachedPrompt ?? "") + req.prompt;
 
 /** Every request is sent through `send.admit()`, called after the concurrency queue and right before the request leaves, so a budget is asked at that moment. */
 export type ClaudeCli = {
@@ -382,7 +394,7 @@ export function createClaudeCli(opts: {
       signal.addEventListener("abort", onAbort, { once: true });
       try {
         try {
-          proc.stdin.write(req.prompt + staged.note);
+          proc.stdin.write(promptOf(req) + staged.note);
           proc.stdin.end();
         } catch {
           // the process already exited; its exit code and stderr explain why

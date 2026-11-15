@@ -31,8 +31,12 @@ function world() {
   const sent: { system: string; answer: (m: Message) => void }[] = [];
   const client: ApiClient = {
     messages: {
-      stream: () => {
-        throw new Error("no stream call expected");
+      // Interpretation is streamed because it can be long, so a stream answers the same way a create does.
+      stream: (params: { system: unknown }) => {
+        const d = deferred<Message>();
+        sent.push({ system: JSON.stringify(params.system), answer: d.resolve });
+        const stream = { on: () => stream, finalMessage: () => d.promise, abort: () => {} };
+        return stream;
       },
       create: (params: { system: unknown }) => {
         const d = deferred<Message>();
