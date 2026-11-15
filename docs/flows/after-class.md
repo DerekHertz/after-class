@@ -227,6 +227,8 @@ Amendment (2026-11-13), Derek, on the cost of a review: "yeah we should use the 
 
 Amendment (2026-11-14), Derek, on how friends sign in: "Google and email". Then, on who can sign up: "need to make sure signup is limited to who i send the app to". The agent drafted this paragraph. The hosted sign-in offers Google and email. The production Clerk instance runs in Invite-only access mode, so only addresses Derek invites can sign up. No rule text changed.
 
+Amendment (2026-11-14), Derek, on the cost of preparation, after the agent asked "Stop running resource searches until something uses them?": "Yes, stop them". The agent drafted this paragraph. Preparation no longer queues the separate job "[agent] Separate job: find supplemental resources for supported concepts." In the live test those searches were about $0.72 of $1.36 of Claude preparation spend, and nothing read their results. The step is paused, not deleted: the resource search task, the stored-resources query, and the tutor's `propose_detour.needsResource` and `resource_ready` handling stay in the code, ready for the day something uses them. A pending resource search never blocks a review that is otherwise ready (R6) holds trivially while none run. No rule text changed.
+
 ## Experiments and pass bars (adopted by Derek, 2026-11-03)
 
 Set before any results; not to be tuned to fit observations. Derek runs the tests that need him later.
