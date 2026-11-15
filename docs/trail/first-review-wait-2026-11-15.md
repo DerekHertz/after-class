@@ -1,6 +1,6 @@
 # Where the first review's wait goes, and the first-chunk cap
 
-Measurement report, 2026-11-15, for issue #247. Derek's goal is a beta his friends find fast. On preparing only reviewed blocks he said: "this is enticing but i think we can come up with a method to reduce the wait time". This report times every stage of the first review's wait on replayed lectures, ships the cut that needs no product call, and lists the rest for Derek.
+Measurement report, 2026-11-15, for issue #247. Derek's goal is a beta his friends find fast. On preparing only reviewed blocks he said: "this is enticing but i think we can come up with a method to reduce the wait time". This report times every stage of the first review's wait on replayed lectures, proposes a shorter cap for a capture's first chunk, which is a behavior change for Derek to adopt, and lists the other cuts for him.
 
 ## How to read the numbers
 
@@ -40,20 +40,38 @@ All figures are measured except the label estimate for Krebs. That estimate take
 - **The queue is not a limiter.** Interpretation starts 0.3 to 2.6 s after a close in all four runs. Claim checks and revisions already outrank interpretation in the scheduler, so a first chunk's revision never waits behind the next chunk's interpretation.
 - **Interpretation is second.** With labels it takes 36 to 48 s for a first section.
 
-## The change: a 210 s cap for a capture's first chunk
+## Proposed change: a 210 s cap for a capture's first chunk
 
-The first chunk of a new capture now closes once it holds 210 s of material, cut back to the latest soft pause, as the 8-minute cap is. Later chunks keep the 8-minute cap. Flow B calls its numbers "starting values to tune", and this tunes the cap for the first chunk only. No Jev question, threshold, window or Claude prompt changes.
+This branch implements the change so it can be measured, and it is a proposal until Derek adopts it. Flow B lists one shared cap, "Chunk exceeds time cap (~8 min watched) → close it, provenance 'time'", and calls its numbers "starting values to tune". Tuning that one number is within the flow. A different cap by chunk ordinal is a new rule, so it needs Derek's decision and a line in flow B. This work does not edit the flow doc.
 
-**Choosing 210 s.** The decision rule was the smallest first cap whose first chunk ends at a soft pause in every recorded capture. Replayed over six recorded captures (runs A and C, Derek's two lectures, the Fable run's two captures):
+The first chunk of a new capture closes once it holds 210 s of material, cut back to the latest soft pause, as the 8-minute cap is. Later chunks keep the 8-minute cap. The segmentation routing rows are unchanged, and a soft pause alone still does not close a chunk. No Jev question, threshold, window or Claude prompt changes.
+
+Proposed flow B line for Derek to adopt or reword: "The first chunk of a capture closes at a ~3.5 min cap (cut at the latest soft pause), provenance 'time'. Later chunks keep ~8 min." The TLA+ model treats time as abstract, so it is unaffected.
+
+**Choosing 210 s.** The decision rule was a first cap whose first chunk ends at a soft pause in every recorded capture. Replayed over six recorded captures (the Krebs lecture in runs A and in the Fable run, run C's Global Memory System lecture, Derek's two lectures in `fable/data1`, and the Fable run's edge-case capture). The data is a fresh copy of each source made on 2026-11-15. The first-close range is the earliest and latest first close across the six:
 
 | First cap | First close, the six captures | First chunk ends at a soft pause |
 | --- | --- | --- |
 | 480 s, today | 542 to 757 s | 6 of 6 |
 | 240 s | 289 to 493 s | 6 of 6 |
 | 210 s | 243 to 442 s | 6 of 6 |
-| 180 s | 192 to 391 s | 4 of 6 |
+| 180 s | 192 to 391 s | 3 of 6 |
 
-At 210 s the first chunk is the same as at 240 s in all six, about 50 s sooner. At 180 s three captures cut at a window Jev did not call a stopping point. The chunk count is unchanged in all six.
+The same sweep per capture (first close in seconds, then the first chunk's material):
+
+| Capture | Watched | 480 s | 240 s | 210 s | 180 s |
+| --- | --- | --- | --- | --- | --- |
+| Derek, GT AOS MapReduce | 2,420 s | 598 | 299 | 254 | 200 |
+| Derek, GT AOS | 5,116 s | 542 | 289 | 243 | 192, no soft pause |
+| Fable run, edge-case | 602 s | 757 | 493 | 442 | 391, no soft pause |
+| Fable run, Krebs | 1,067 s | 575 (est) | 318 (est) | 266 | 211 |
+| Run A, Krebs | 1,067 s | 583 | 328 | 275 | 218 |
+| Run C, GMS | 1,131 s | 554 | 296 | 249 | 195, no soft pause |
+
+- **At 210 s the first chunk is the same as at 240 s in all six, and closes 45 to 53 s sooner.** The chunk count is unchanged in all six.
+- **At 180 s three captures cut at a window Jev did not call a stopping point.** They are Derek's GT AOS, the Fable edge-case capture and run C.
+- **Why 210 s and not the strict minimum.** A finer sweep in 5 s steps (replayed) gives the same first chunk in all six from 195 s to 240 s, and 190 s also passes. At 185 s three captures fail. So 190 s is the smallest passing cap on six captures, 5 s above a cliff, and 210 s sits in the middle of the plateau that passes. The sweep tested 180, 210 and 240 s before the report chose 210 s, and the finer sweep was run afterwards.
+- **One capture's judgment times are estimated.** In the Fable run's Krebs capture, 10 of 22 windows have a Jev judgment stored 1,669 to 1,670 s after the capture's first fact, while the capture ended at 1,093 s. Those judgments were written in a later pass, not live, so their stored time is not when a live close would have been decided. The sweep reads a window's judgment time as its stored time, so for these 10 windows it reported 1,669 s as the 240 s and 480 s first close. The table replaces each such window's time with the previous judged window's time plus the capture's median gap between judgments (52 s), and takes the first close as the latest judgment time among the windows up to the closing one (estimated). That gives 318 s and 575 s, and the same figures are within 10 s of run A's replay of the same lecture (328 s and 583 s). No capture is excluded. Without the replacement the 240 s and 480 s maxima would read 1,669 s for that capture and "about 50 s sooner" would not be checkable there. The cause of the late pass is not established. The 180 s and 210 s closes of that capture do not depend on the 10 windows. A first version of this table was written from a summary that was not kept, and it listed 4 of 6 at 180 s against the three named captures above, which is 3 of 6.
 
 **Stored lectures are not re-planned.** The fold runs again over every stored capture at boot, so a new first cap would cut an old lecture's first chunk again and orphan claims that cross the new cut. Migration `segmentation/003-plain-first-cap` lists every capture that already has chunks, and those keep the plain cap. On a copy of Derek's data the new code booted with no new chunk revision. With the list emptied, the same boot appended 4 revisions to the GT AOS lecture.
 
@@ -98,11 +116,11 @@ Measured or replayed, and not built.
 3. **Interpret the first section in two pieces at once.** It would cut about 36 to 41 s of interpretation to perhaps 20 to 25 s (guess) and adds one Opus call per lecture. Interpretation would see half a section, which changes model input and needs an audit.
 4. **Sonnet or effort medium for interpretation.** This is experiment 4 and the cost work's first lever. It shortens the 36 to 48 s interpretation by an amount not measured on this lecture.
 
-Proposed flow B line for Derek to adopt or reword, since the flow doc does not yet say it: "The first chunk of a capture closes at a ~3.5 min cap (cut at the latest soft pause), provenance 'time'. Later chunks keep ~8 min." The TLA+ model treats time as abstract, so it is unaffected.
-
 ## Limits
 
 - One run per side, and runs K and G ran at the same time while run C ran alone.
 - The Krebs before with labels is estimated from run A and a paired call, not a full run.
+- The 240 s and 480 s first closes for the Fable run's Krebs capture are estimates, as the section above explains. The other five captures use stored judgment times as measured.
+- The 210 s choice rests on six captures that cover five distinct lectures, because Krebs appears in both run A and the Fable run. A new lecture could put its first soft pause outside 190 to 240 s.
 - Claim quality under the shorter first chunk is not audited. Jev's first-check pass rate is a proxy only.
 - All timings are local `claude -p`, not the hosted Messages API.
