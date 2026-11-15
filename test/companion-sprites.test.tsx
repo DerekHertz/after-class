@@ -23,6 +23,13 @@ describe("companion poses", () => {
     expect(html).toContain("--cell-aspect:724 / 724");
     expect(renderToStaticMarkup(<CompanionDrawing id="pip" />)).toContain("--pose:0");
   });
+
+  test("a richer gesture lands on its mapped pose, and reduced motion marks the change instant", () => {
+    expect(companionPose("look-board")).toBe("draw");
+    expect(companionPose("nod")).toBe("idle");
+    expect(renderToStaticMarkup(<CompanionDrawing id="pip" gesture="think" instant />)).toContain('data-instant="true"');
+    expect(renderToStaticMarkup(<CompanionDrawing id="pip" gesture="think" />)).not.toContain("data-instant");
+  });
 });
 
 describe("every companion sheet is three whole, transparent, registered poses", () => {

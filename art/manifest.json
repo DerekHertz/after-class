@@ -1,5 +1,1090 @@
 [
   {
+    "master": "companion-frames/lumi/blink.png",
+    "masterSha256": "befe98bc49ca3421c2e1174022f0d131bdabdf1dc17f9b9f0b44904c2de14dea",
+    "ship": "companion-frames/lumi/blink.webp",
+    "shipSha256": "a425a262644413e235418d26fb0ad403a02ece9bf4179caa4b88a9d9037f1e48",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: close both eyes, drawn as two short gently curved dark lines, as in a blink. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbb-fba3-75cc-9afd-b41a00f4e34a",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/lumi/blink.png",
+    "masterSha256": "befe98bc49ca3421c2e1174022f0d131bdabdf1dc17f9b9f0b44904c2de14dea",
+    "ship": "companion-frames/lumi/blink-small.webp",
+    "shipSha256": "2874eb235e82892f8eaa7589fb84d983a685d3fda6c3de5a0e5f83d5bda217ba",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: close both eyes, drawn as two short gently curved dark lines, as in a blink. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbb-fba3-75cc-9afd-b41a00f4e34a",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/lumi/hop-air.png",
+    "masterSha256": "6381fb200eab6c362eb6f8f78685332d9ed0d94b6eff42b2fc72483c1911a214",
+    "ship": "companion-frames/lumi/hop-air.webp",
+    "shipSha256": "603929675a6042deaab729dfb097370245f0931daf4dc5f743956b35957000b6",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: stretched up at the top of a happy hop: redraw the two arm segments almost straight and upright so the shade sits clearly higher than now, joyful open smile; the base stays where it is. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddc2-22ec-709a-91e7-d0c853badeaf",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/lumi/hop-air.png",
+    "masterSha256": "6381fb200eab6c362eb6f8f78685332d9ed0d94b6eff42b2fc72483c1911a214",
+    "ship": "companion-frames/lumi/hop-air-small.webp",
+    "shipSha256": "a47d7055c1a8ea3f0d61ef556c6e3454ff29e5f01121e003d14697d9f6ec0bdb",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: stretched up at the top of a happy hop: redraw the two arm segments almost straight and upright so the shade sits clearly higher than now, joyful open smile; the base stays where it is. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddc2-22ec-709a-91e7-d0c853badeaf",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/lumi/hop-crouch.png",
+    "masterSha256": "3a6196d6ca46f192b9ea6c2b973b8a7912920d67fd9019b40c81b132fb0428c8",
+    "ship": "companion-frames/lumi/hop-crouch.webp",
+    "shipSha256": "75b930aa26e8d1eb25801a513f748d22637a354afb3556cb4fa084ba30f265e4",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: crouched low before a hop: redraw the two arm segments folded much more sharply so the shade sits clearly lower, close above the base, eyes squeezed shut happily; the base stays where it is. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddc2-22ef-76a5-bf3b-b4e17f37e443",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/lumi/hop-crouch.png",
+    "masterSha256": "3a6196d6ca46f192b9ea6c2b973b8a7912920d67fd9019b40c81b132fb0428c8",
+    "ship": "companion-frames/lumi/hop-crouch-small.webp",
+    "shipSha256": "4f82beac8faa638e95b26341d35a351455a2f5408550d1d0cb0c95e820654797",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: crouched low before a hop: redraw the two arm segments folded much more sharply so the shade sits clearly lower, close above the base, eyes squeezed shut happily; the base stays where it is. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddc2-22ef-76a5-bf3b-b4e17f37e443",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/lumi/look-board.png",
+    "masterSha256": "66908837a345aabf44841c4747b446e87e4ae875ff50d96fb93b68bbd8e695e8",
+    "ship": "companion-frames/lumi/look-board.webp",
+    "shipSha256": "10f98af5323adf74156c74db6b2f6e8698352a47010951a7f596ff0bf6ab8583",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: turn the eyes up and to the right, as if reading a chalkboard above and to the right, with a small curious open mouth. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbb-fb84-74ff-832c-38503dea95aa",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/lumi/look-board.png",
+    "masterSha256": "66908837a345aabf44841c4747b446e87e4ae875ff50d96fb93b68bbd8e695e8",
+    "ship": "companion-frames/lumi/look-board-small.webp",
+    "shipSha256": "4242d203a929998271f2ef0efe7b08d2ecbb2e9f15b10c9c6c4acaf0a2ab802e",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: turn the eyes up and to the right, as if reading a chalkboard above and to the right, with a small curious open mouth. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbb-fb84-74ff-832c-38503dea95aa",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/lumi/look-mat.png",
+    "masterSha256": "f436519d4e0dd8cadf52f838a8f52d60d00f7d5f25609fc6deab56d2e3d22965",
+    "ship": "companion-frames/lumi/look-mat.webp",
+    "shipSha256": "684972c51429fd59d43e8621f19cb69b3a896524b317c284c3a742114c9d8052",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: move both eye dots to the lower right, glancing down and to the right at the desk, attentive. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbb-fba4-70e0-b4a7-6901cd6cee85",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/lumi/look-mat.png",
+    "masterSha256": "f436519d4e0dd8cadf52f838a8f52d60d00f7d5f25609fc6deab56d2e3d22965",
+    "ship": "companion-frames/lumi/look-mat-small.webp",
+    "shipSha256": "ac7aefb12b3034a500f40610512809f1ed1fc2a991b9f37dc8d389fcddd6472e",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: move both eye dots to the lower right, glancing down and to the right at the desk, attentive. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbb-fba4-70e0-b4a7-6901cd6cee85",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/lumi/nod.png",
+    "masterSha256": "285023c88fcecc5b9eaffc415632e6301a8623f18824b473640070aebfa8aab5",
+    "ship": "companion-frames/lumi/nod.webp",
+    "shipSha256": "c4ee60327d0020fb82bb0b4066557afa8119b123954d147c35ee765f4236a443",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: a clear happy nod: redraw the lamp shade tilted about 20 degrees further forward and down so its face points at the desk, the shade lower than now, eyes closed in two upward-curved smiling arcs; the base stays where it is. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddc2-22ed-71fb-a804-a5f9269157b6",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/lumi/nod.png",
+    "masterSha256": "285023c88fcecc5b9eaffc415632e6301a8623f18824b473640070aebfa8aab5",
+    "ship": "companion-frames/lumi/nod-small.webp",
+    "shipSha256": "19120608487488b685e95f0def95b608826aa8f3b8719295886445da029e9c93",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: a clear happy nod: redraw the lamp shade tilted about 20 degrees further forward and down so its face points at the desk, the shade lower than now, eyes closed in two upward-curved smiling arcs; the base stays where it is. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddc2-22ed-71fb-a804-a5f9269157b6",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/lumi/talk.png",
+    "masterSha256": "09153b577a5f37bdac989011f0426ef6681bc34adeccfc4de421bae7058c8f35",
+    "ship": "companion-frames/lumi/talk.webp",
+    "shipSha256": "b169438729391268cd6f6d3130ee8a8590764658868beee70ffdebb7f283ab9f",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: talking: the same pose with a small open rounded mouth, as if saying something. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbc-fb5a-7277-8dfb-5944346fa749",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/lumi/talk.png",
+    "masterSha256": "09153b577a5f37bdac989011f0426ef6681bc34adeccfc4de421bae7058c8f35",
+    "ship": "companion-frames/lumi/talk-small.webp",
+    "shipSha256": "f20381b8a827791f5361093bff954c156d6873c920120a18dafd981b153654d3",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: talking: the same pose with a small open rounded mouth, as if saying something. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbc-fb5a-7277-8dfb-5944346fa749",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/lumi/think.png",
+    "masterSha256": "a02706d69a92b4bf98edc1be65e57fdcdf9bddf1565d6f0762f0e8aa7f4a65a8",
+    "ship": "companion-frames/lumi/think.webp",
+    "shipSha256": "e812885b138c2e81fc40647192914b5a1afbd2d834df154e6f48ebadbcdc0922",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: the shade tilts slightly to the left, eyes look up and to the left, the mouth is a small flat line, one tiny sweat drop beside the shade. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbc-b301-70f3-90f1-29556b445b60",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/lumi/think.png",
+    "masterSha256": "a02706d69a92b4bf98edc1be65e57fdcdf9bddf1565d6f0762f0e8aa7f4a65a8",
+    "ship": "companion-frames/lumi/think-small.webp",
+    "shipSha256": "b716367e0ac215e4b2add6ba0fabd5b54e73d11c37714ee4ee69e60d0d390f53",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: the shade tilts slightly to the left, eyes look up and to the left, the mouth is a small flat line, one tiny sweat drop beside the shade. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbc-b301-70f3-90f1-29556b445b60",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/blink.png",
+    "masterSha256": "476653293950339a9f4e9a3f32f8d092fdce9fff80411738b8ae14037c8498d8",
+    "ship": "companion-frames/mote-moonlit/blink.webp",
+    "shipSha256": "4c0875d813dd0b29e8042d26a6802a4d9c16b5adeadaa6e7b6a62c5c80f096e9",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: close both eyes, drawn as two short gently curved dark lines, as in a blink. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb8-e3c6-7296-b68e-2db0d49ef63d",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/blink.png",
+    "masterSha256": "476653293950339a9f4e9a3f32f8d092fdce9fff80411738b8ae14037c8498d8",
+    "ship": "companion-frames/mote-moonlit/blink-small.webp",
+    "shipSha256": "e11b8335dd729744af60ecf13df6161e1659cd64acb8472872d26472466bc3e9",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: close both eyes, drawn as two short gently curved dark lines, as in a blink. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb8-e3c6-7296-b68e-2db0d49ef63d",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/cheer.png",
+    "masterSha256": "9a42f6075175e6aaa55689f9618a6842b4bcc1937494eb66428cd617d11f0f3a",
+    "ship": "companion-frames/mote-moonlit/cheer.webp",
+    "shipSha256": "3462adc8e720c39a4c8d944f7fe35bea6b3d1d80afec099525743f56c4ce58a6",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: cheering: both wings lifted and spread a little higher, a big open happy smile and light blush marks, still sitting. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb9-5f71-75fd-8f68-942ac2dbfe88",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/cheer.png",
+    "masterSha256": "9a42f6075175e6aaa55689f9618a6842b4bcc1937494eb66428cd617d11f0f3a",
+    "ship": "companion-frames/mote-moonlit/cheer-small.webp",
+    "shipSha256": "e0db36e02f53851cd2abb598b5d85b9144932f4944208c2158546ceb45cd9279",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: cheering: both wings lifted and spread a little higher, a big open happy smile and light blush marks, still sitting. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb9-5f71-75fd-8f68-942ac2dbfe88",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/hop-air.png",
+    "masterSha256": "af03670cfd54f030de4fc3900df2b17b93bd41548b85a9c44ba4b19649f6b25e",
+    "ship": "companion-frames/mote-moonlit/hop-air.webp",
+    "shipSha256": "c93de883841cc2adc1b62ef529ec928391f1b40ccc15225d58305f783484cd3b",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: stretched a little taller and narrower as at the top of a happy hop, with a joyful open smile; keep it standing in the same place. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb9-3060-74c7-8450-d2d6321d5f27",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/hop-air.png",
+    "masterSha256": "af03670cfd54f030de4fc3900df2b17b93bd41548b85a9c44ba4b19649f6b25e",
+    "ship": "companion-frames/mote-moonlit/hop-air-small.webp",
+    "shipSha256": "ab8b0441acaf38679dd34d56f5fc8f488883a04999f315f6a970a8c2eebc06da",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: stretched a little taller and narrower as at the top of a happy hop, with a joyful open smile; keep it standing in the same place. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb9-3060-74c7-8450-d2d6321d5f27",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/hop-crouch.png",
+    "masterSha256": "5e69870b173fa13d8c3dcf899967b6236af481c400d426fe2822dd4603d44476",
+    "ship": "companion-frames/mote-moonlit/hop-crouch.webp",
+    "shipSha256": "c4c3d4d9b423488e82c99db748dbccdbdc2607d1788ef9ae62b0792cc282a498",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: squash down a little as if about to hop: slightly shorter and wider, eyes squeezed shut happily. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb9-300b-7116-8ae7-b00e96257432",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/hop-crouch.png",
+    "masterSha256": "5e69870b173fa13d8c3dcf899967b6236af481c400d426fe2822dd4603d44476",
+    "ship": "companion-frames/mote-moonlit/hop-crouch-small.webp",
+    "shipSha256": "a8c21f4a083e31b01c07c4cf8646b5090bb5771712d558201235f56faedaea23",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: squash down a little as if about to hop: slightly shorter and wider, eyes squeezed shut happily. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb9-300b-7116-8ae7-b00e96257432",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/look-board.png",
+    "masterSha256": "65078a51b26654b9e74b0f5bbbf027eb2896595fc2ae00c5c24a14ffea761930",
+    "ship": "companion-frames/mote-moonlit/look-board.webp",
+    "shipSha256": "be9f00a114092dc6e7e66cad5aee9c3d5928c7f75f0413ae2c950567a71d51c0",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: turn the eyes up and to the right, as if reading a chalkboard above and to the right, with a small curious open mouth. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb8-e3a2-739e-924b-9bad7a84444f",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/look-board.png",
+    "masterSha256": "65078a51b26654b9e74b0f5bbbf027eb2896595fc2ae00c5c24a14ffea761930",
+    "ship": "companion-frames/mote-moonlit/look-board-small.webp",
+    "shipSha256": "bb0b546beb9b68cbf54c4c8d15d98cf132b29dc80bc48d7cec4146d5a81c71a9",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: turn the eyes up and to the right, as if reading a chalkboard above and to the right, with a small curious open mouth. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb8-e3a2-739e-924b-9bad7a84444f",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/look-mat.png",
+    "masterSha256": "094661da867cc94df47f0612c2081702edb71723105053f50d7e435122c6d22c",
+    "ship": "companion-frames/mote-moonlit/look-mat.webp",
+    "shipSha256": "a8039dfe19e4520e21efd8e17b66e443f02bd3cab1204f7a38ec2c62c85002d4",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: move both eye dots to the lower right, glancing down and to the right at the desk, attentive. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb8-e390-749c-8c91-29b3101435ea",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/look-mat.png",
+    "masterSha256": "094661da867cc94df47f0612c2081702edb71723105053f50d7e435122c6d22c",
+    "ship": "companion-frames/mote-moonlit/look-mat-small.webp",
+    "shipSha256": "3720446c3a7eab01298970e74433092988593dff1aba8bc5742520fd4551c37f",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: move both eye dots to the lower right, glancing down and to the right at the desk, attentive. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb8-e390-749c-8c91-29b3101435ea",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/nod.png",
+    "masterSha256": "4be79c3148f906957878642e3fb8967e0b9666dca64af7fc3f360b989b2d6732",
+    "ship": "companion-frames/mote-moonlit/nod.webp",
+    "shipSha256": "e14699ecfc79a210e6c23a91ac5a511044f4168b31be7b832eedbb689fbf38c1",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: a happy nod: the whole character tips forward slightly, eyes closed in two upward-curved smiling arcs, small smile. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb8-e3a3-76e7-ad3b-b858fcf70272",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/nod.png",
+    "masterSha256": "4be79c3148f906957878642e3fb8967e0b9666dca64af7fc3f360b989b2d6732",
+    "ship": "companion-frames/mote-moonlit/nod-small.webp",
+    "shipSha256": "41dc33c3dc0eb84a74168b2c044d8cc91897304fe54532c00d2c1f21bccbc1be",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: a happy nod: the whole character tips forward slightly, eyes closed in two upward-curved smiling arcs, small smile. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb8-e3a3-76e7-ad3b-b858fcf70272",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/talk.png",
+    "masterSha256": "28f6740a9a1d1e97c1363d22eee9b2ff542f11086eecc968a9ef825008451830",
+    "ship": "companion-frames/mote-moonlit/talk.webp",
+    "shipSha256": "6f49e09b15a8eef5d9bd4cd636e0ce053e12322237dbc849eae2f7196e5f7ddd",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: talking: the same pose with a small open rounded mouth, as if saying something. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb9-ad9a-752f-98be-b005b700b9e1",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/talk.png",
+    "masterSha256": "28f6740a9a1d1e97c1363d22eee9b2ff542f11086eecc968a9ef825008451830",
+    "ship": "companion-frames/mote-moonlit/talk-small.webp",
+    "shipSha256": "5bfd240b1186268dfed01b6f9b46375d6db159f99d4922bfef47959ccc377391",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: talking: the same pose with a small open rounded mouth, as if saying something. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb9-ad9a-752f-98be-b005b700b9e1",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/think.png",
+    "masterSha256": "b5bf1477801c52da0f76f4ae2adcada6b151e66f42cf1ac7566258c69ff70339",
+    "ship": "companion-frames/mote-moonlit/think.webp",
+    "shipSha256": "1e9dbb562561956e43d432f7dd2a2607c68dd9749c6c37f1a37e3c0c881fb262",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: move both eye dots up and to the left, make the mouth a small flat line, and add one tiny sweat drop beside the head. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb9-5f72-7487-892e-c4034a8c25bd",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-moonlit/think.png",
+    "masterSha256": "b5bf1477801c52da0f76f4ae2adcada6b151e66f42cf1ac7566258c69ff70339",
+    "ship": "companion-frames/mote-moonlit/think-small.webp",
+    "shipSha256": "a6364781989dbcd131de673b80a1f7312680c4b5baa43f2bd6d081d8685272a0",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a navy scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: move both eye dots up and to the left, make the mouth a small flat line, and add one tiny sweat drop beside the head. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb9-5f72-7487-892e-c4034a8c25bd",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/blink.png",
+    "masterSha256": "4e69526c949b75e0cb597e36ddf5ab07a3eef101eef653b3ef5fc47b1cea5852",
+    "ship": "companion-frames/mote-pagewing/blink.webp",
+    "shipSha256": "e8e0bf09c2e2db426a1a4306ff1ad5dc5c77db0dfca32b69a62fce64f8aad675",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: close both eyes, drawn as two short gently curved dark lines, as in a blink. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddba-2c5c-7389-9898-8b4ec9f6dca4",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/blink.png",
+    "masterSha256": "4e69526c949b75e0cb597e36ddf5ab07a3eef101eef653b3ef5fc47b1cea5852",
+    "ship": "companion-frames/mote-pagewing/blink-small.webp",
+    "shipSha256": "10a06501f97e03f1212ca0ab823525a6a804fb69796deca3c2c5182e58dd8bc1",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: close both eyes, drawn as two short gently curved dark lines, as in a blink. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddba-2c5c-7389-9898-8b4ec9f6dca4",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/cheer.png",
+    "masterSha256": "fe5a187479ba040c5b71b4daabe679c48898087164f934844385e3ebc5538570",
+    "ship": "companion-frames/mote-pagewing/cheer.webp",
+    "shipSha256": "fce17b838fffe6ceef9f580d3b97f7a0aec52869f484ddd7391739c5b14fe220",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: cheering: both wings lifted and spread a little higher, a big open happy smile and light blush marks, still sitting. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddba-e109-7365-8e2a-192bf944ff15",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/cheer.png",
+    "masterSha256": "fe5a187479ba040c5b71b4daabe679c48898087164f934844385e3ebc5538570",
+    "ship": "companion-frames/mote-pagewing/cheer-small.webp",
+    "shipSha256": "918aeb1db374de2eaf80380610911f2eac62e71523fa923588078dca3d561d80",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: cheering: both wings lifted and spread a little higher, a big open happy smile and light blush marks, still sitting. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddba-e109-7365-8e2a-192bf944ff15",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/hop-air.png",
+    "masterSha256": "13694b753b254c41493e26940e73f1216095afd0b608c136547d92f3a08b5781",
+    "ship": "companion-frames/mote-pagewing/hop-air.webp",
+    "shipSha256": "d51af67fc3738514368e840dbdb7af3a55d00c9de3e5f11eef9b87be26143bce",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: stretched a little taller and narrower as at the top of a happy hop, with a joyful open smile; keep it standing in the same place. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddba-a412-7467-9c55-b0d94f6df0f5",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/hop-air.png",
+    "masterSha256": "13694b753b254c41493e26940e73f1216095afd0b608c136547d92f3a08b5781",
+    "ship": "companion-frames/mote-pagewing/hop-air-small.webp",
+    "shipSha256": "b09aa23c52e99ba08f15f659a456af5cd58c62f9965bde19a8a348785ee7cb62",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: stretched a little taller and narrower as at the top of a happy hop, with a joyful open smile; keep it standing in the same place. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddba-a412-7467-9c55-b0d94f6df0f5",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/hop-crouch.png",
+    "masterSha256": "3b29b7443bb8b821c44ce2a18947a2e7ec1aa56cb06ca9ab708093e9104f6bf0",
+    "ship": "companion-frames/mote-pagewing/hop-crouch.webp",
+    "shipSha256": "172e4cf7070d62855a493fc3937a3a3aeed08a83a93b8b71ca46e4ef6cfdce84",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: squash down a little as if about to hop: slightly shorter and wider, eyes squeezed shut happily. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddba-a3d2-76d4-9ce2-ffed932b28e7",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/hop-crouch.png",
+    "masterSha256": "3b29b7443bb8b821c44ce2a18947a2e7ec1aa56cb06ca9ab708093e9104f6bf0",
+    "ship": "companion-frames/mote-pagewing/hop-crouch-small.webp",
+    "shipSha256": "d6591907472a51b64cb36de0254f131a0da6626e5b4ae5f4ba86019c492e9b0f",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: squash down a little as if about to hop: slightly shorter and wider, eyes squeezed shut happily. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddba-a3d2-76d4-9ce2-ffed932b28e7",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/look-board.png",
+    "masterSha256": "5470979179400a90f3afad456a4457766c8937443fd7d3ad6a69b1293a3b452d",
+    "ship": "companion-frames/mote-pagewing/look-board.webp",
+    "shipSha256": "b972103341d838d146ac5c69adba5fee337d1004d3605c52b2e811b61a580389",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: turn the eyes up and to the right, as if reading a chalkboard above and to the right, with a small curious open mouth. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddba-2c70-74c3-abc6-ce4cc01dd42d",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/look-board.png",
+    "masterSha256": "5470979179400a90f3afad456a4457766c8937443fd7d3ad6a69b1293a3b452d",
+    "ship": "companion-frames/mote-pagewing/look-board-small.webp",
+    "shipSha256": "4c6accc961ecd3d7cb562b68f6a71b8343def95f8a458161837d410512ea588e",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: turn the eyes up and to the right, as if reading a chalkboard above and to the right, with a small curious open mouth. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddba-2c70-74c3-abc6-ce4cc01dd42d",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/look-mat.png",
+    "masterSha256": "710d6cb9eb35536af0ef98789801914b481abef74874abe596f347b179b1ca2e",
+    "ship": "companion-frames/mote-pagewing/look-mat.webp",
+    "shipSha256": "6dda4ed34161b3ce6dc33b523356759c45e90a343134ca0ad29a71cc0b60094a",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: move both eye dots to the lower right, glancing down and to the right at the desk, attentive. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddba-2ccd-7001-be73-c48f8ac9f036",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/look-mat.png",
+    "masterSha256": "710d6cb9eb35536af0ef98789801914b481abef74874abe596f347b179b1ca2e",
+    "ship": "companion-frames/mote-pagewing/look-mat-small.webp",
+    "shipSha256": "bd4914690a8c0117695206f927986107c298513e788889596bd005468a842d0a",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: move both eye dots to the lower right, glancing down and to the right at the desk, attentive. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddba-2ccd-7001-be73-c48f8ac9f036",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/nod.png",
+    "masterSha256": "ef8ad94a6a1aa37ba074224720f0568719e9dac516630a0189f99856dcf1a523",
+    "ship": "companion-frames/mote-pagewing/nod.webp",
+    "shipSha256": "a031e2c6d76d8b22703cc0cc8cd3643fcc614f44b6157ad82b1a6518ed293d7e",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: a happy nod: the whole character tips forward slightly, eyes closed in two upward-curved smiling arcs, small smile. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddba-2c5d-72c4-a184-a2cf5effa62e",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/nod.png",
+    "masterSha256": "ef8ad94a6a1aa37ba074224720f0568719e9dac516630a0189f99856dcf1a523",
+    "ship": "companion-frames/mote-pagewing/nod-small.webp",
+    "shipSha256": "33bec542f2a5bf628ddd6fd563df47b4ec4819400235b15b08dd76c90dc3e79c",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: a happy nod: the whole character tips forward slightly, eyes closed in two upward-curved smiling arcs, small smile. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddba-2c5d-72c4-a184-a2cf5effa62e",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/talk.png",
+    "masterSha256": "6fcc6ddb81d2de7c2c8640a8c2bc2d520fcc48abda905f0d1bed926df51f6210",
+    "ship": "companion-frames/mote-pagewing/talk.webp",
+    "shipSha256": "8c75080cf9da97117d7975f7138619a4bea961db97d836f83b902b24d49b9692",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: talking: the same pose with a small open rounded mouth, as if saying something. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbb-31c1-77fa-975c-2ea02d762d72",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/talk.png",
+    "masterSha256": "6fcc6ddb81d2de7c2c8640a8c2bc2d520fcc48abda905f0d1bed926df51f6210",
+    "ship": "companion-frames/mote-pagewing/talk-small.webp",
+    "shipSha256": "e04f3d556d586fa3017f0f91f3e04e4e17716a7a276430fb0c56719d11ddb953",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: talking: the same pose with a small open rounded mouth, as if saying something. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbb-31c1-77fa-975c-2ea02d762d72",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/think.png",
+    "masterSha256": "6fd241f091ec4881d27003f7fc2d26167bc9f20138d80c48fb193eecaca6c411",
+    "ship": "companion-frames/mote-pagewing/think.webp",
+    "shipSha256": "47cef58df61cdfc33766f3bd80b7fb4baa678ddf0c9bfb5bdab7b6153191cbaa",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: move both eye dots up and to the left, make the mouth a small flat line, and add one tiny sweat drop beside the head. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddba-e0b4-72a5-8067-404385ca08ad",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote-pagewing/think.png",
+    "masterSha256": "6fd241f091ec4881d27003f7fc2d26167bc9f20138d80c48fb193eecaca6c411",
+    "ship": "companion-frames/mote-pagewing/think-small.webp",
+    "shipSha256": "69f36c244f2f61a1c2b68c813465bfa9144dc1bc353eaab51f4b51ce89f3c008",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot with a green satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: move both eye dots up and to the left, make the mouth a small flat line, and add one tiny sweat drop beside the head. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddba-e0b4-72a5-8067-404385ca08ad",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/blink.png",
+    "masterSha256": "b9fb1b4b8e972bccaca85a9380fe5d25fa2bae1029fb001c6c06acc64e7c2f2a",
+    "ship": "companion-frames/mote/blink.webp",
+    "shipSha256": "036dd78a7e4fda18be086c709db861ed4eb628c9d2d1eac6524a462425b61536",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: close both eyes, drawn as two short gently curved dark lines, as in a blink. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb7-5089-74eb-9305-6b53798d0120",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/blink.png",
+    "masterSha256": "b9fb1b4b8e972bccaca85a9380fe5d25fa2bae1029fb001c6c06acc64e7c2f2a",
+    "ship": "companion-frames/mote/blink-small.webp",
+    "shipSha256": "16e1b75cec9ff85c66c546162b3b68139f35378d886222060ee168dd27e5284a",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: close both eyes, drawn as two short gently curved dark lines, as in a blink. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb7-5089-74eb-9305-6b53798d0120",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/cheer.png",
+    "masterSha256": "24160a62acfcf152de42af1695379151b155b0329d51c49e504e4d4418b4998c",
+    "ship": "companion-frames/mote/cheer.webp",
+    "shipSha256": "89d238a94c81b1477bee8ee30cea0db5b757177dfc7b7d2ac0944fa7f69ba0ee",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: cheering: both wings lifted and spread a little higher, a big open happy smile and light blush marks, still sitting. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb7-d4dc-7302-8e88-0098e69970bb",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/cheer.png",
+    "masterSha256": "24160a62acfcf152de42af1695379151b155b0329d51c49e504e4d4418b4998c",
+    "ship": "companion-frames/mote/cheer-small.webp",
+    "shipSha256": "2ae4a0e51c3622d8d3a4b4087848cb9ad277058807f6635c06a94a652440ee23",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: cheering: both wings lifted and spread a little higher, a big open happy smile and light blush marks, still sitting. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb7-d4dc-7302-8e88-0098e69970bb",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/hop-air.png",
+    "masterSha256": "019db82dcb9ebdb9e7691819b0638ab0d74f0f7ece4caa5cbb572b6c1204c52f",
+    "ship": "companion-frames/mote/hop-air.webp",
+    "shipSha256": "fca77bd176fc36a318b23a5eac615958a6fc9427390b24268f64799677c00dbd",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: stretched a little taller and narrower as at the top of a happy hop, with a joyful open smile; keep it standing in the same place. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb7-d4ba-7772-8411-0f8a96e219d5",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/hop-air.png",
+    "masterSha256": "019db82dcb9ebdb9e7691819b0638ab0d74f0f7ece4caa5cbb572b6c1204c52f",
+    "ship": "companion-frames/mote/hop-air-small.webp",
+    "shipSha256": "26473e5404328e9d11aeb1e25ec669b68c5e9b11c082e9a79ece9a22f4dbcfc5",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: stretched a little taller and narrower as at the top of a happy hop, with a joyful open smile; keep it standing in the same place. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb7-d4ba-7772-8411-0f8a96e219d5",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/hop-crouch.png",
+    "masterSha256": "864727685c17cb508a4ecc303831eb0f0bdaeb151b9970901f937b17c0b04295",
+    "ship": "companion-frames/mote/hop-crouch.webp",
+    "shipSha256": "a4a42bc9fe451fa6280f1e675894c932dcd5424c89aec7e0da281469ca302074",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: squash down a little as if about to hop: slightly shorter and wider, eyes squeezed shut happily. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb7-c644-7322-b773-355d610a4bf0",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/hop-crouch.png",
+    "masterSha256": "864727685c17cb508a4ecc303831eb0f0bdaeb151b9970901f937b17c0b04295",
+    "ship": "companion-frames/mote/hop-crouch-small.webp",
+    "shipSha256": "3ea556fb6f3e23f7d102a42caca4f3b5b34673f71ab6c65d011e29dafb1e4e94",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: squash down a little as if about to hop: slightly shorter and wider, eyes squeezed shut happily. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb7-c644-7322-b773-355d610a4bf0",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/look-board.png",
+    "masterSha256": "cc2af5da9de9051fffa19c9255510d0841b49bb5464b0cd2268e7fa91b863c5a",
+    "ship": "companion-frames/mote/look-board.webp",
+    "shipSha256": "3865d8ea5b3977eac5c130570ebaa6264c51b3c3d97a5293da2773944d18c311",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: turn the eyes up and to the right, as if reading a chalkboard above and to the right, with a small curious open mouth. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb7-50e2-7222-9a53-1eed2c772c85",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/look-board.png",
+    "masterSha256": "cc2af5da9de9051fffa19c9255510d0841b49bb5464b0cd2268e7fa91b863c5a",
+    "ship": "companion-frames/mote/look-board-small.webp",
+    "shipSha256": "67822b7da96fa1f683f758b1dc999720fbd7d2efd5842921e836aee9fa2629a2",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: turn the eyes up and to the right, as if reading a chalkboard above and to the right, with a small curious open mouth. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb7-50e2-7222-9a53-1eed2c772c85",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/look-mat.png",
+    "masterSha256": "0f6c2d3f47c34ea52d102eb5fae51dbdd7baedcc37718529a761d5249da2aa80",
+    "ship": "companion-frames/mote/look-mat.webp",
+    "shipSha256": "e81bbf0d5873934a61bd9a5380e32b5aac26c3b22a64817f5858d1aa25df966d",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: move both eye dots to the lower right, glancing down and to the right at the desk, attentive. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb7-510a-72f3-a35a-2f79c667b353",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/look-mat.png",
+    "masterSha256": "0f6c2d3f47c34ea52d102eb5fae51dbdd7baedcc37718529a761d5249da2aa80",
+    "ship": "companion-frames/mote/look-mat-small.webp",
+    "shipSha256": "6962b624bd207d64edb2bf28dcb5a194150ba4e5f897fd5a4f63b38503988c62",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: move both eye dots to the lower right, glancing down and to the right at the desk, attentive. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb7-510a-72f3-a35a-2f79c667b353",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/nod.png",
+    "masterSha256": "dfad7932eab9cc5694165c28f76ec48ac197d3832551565b0c3e3a65b33bc0d2",
+    "ship": "companion-frames/mote/nod.webp",
+    "shipSha256": "7222cab97839c0fd99401d835870085aedaf0f069dd59c40139956118f14382e",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: a happy nod: the whole character tips forward slightly, eyes closed in two upward-curved smiling arcs, small smile. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb7-520e-70d7-8a43-54f2e3840b56",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/nod.png",
+    "masterSha256": "dfad7932eab9cc5694165c28f76ec48ac197d3832551565b0c3e3a65b33bc0d2",
+    "ship": "companion-frames/mote/nod-small.webp",
+    "shipSha256": "6fde96c237a020425d3dbef63d44321e6364032412910e10708164252a3f0f5e",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: a happy nod: the whole character tips forward slightly, eyes closed in two upward-curved smiling arcs, small smile. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb7-520e-70d7-8a43-54f2e3840b56",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/talk.png",
+    "masterSha256": "0ed4c2b4973e9c2e3c8f37e2bb56d028a8fc7f3fa4ed0a893e9af6dae5bdcbb3",
+    "ship": "companion-frames/mote/talk.webp",
+    "shipSha256": "171732a24ab366b6a05d0c341ad46327c9af3beb240d52530c892d0a1bc6570e",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: talking: the same pose with a small open rounded mouth, as if saying something. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb8-222a-7395-9a8a-8c2a31cd9d1d",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/talk.png",
+    "masterSha256": "0ed4c2b4973e9c2e3c8f37e2bb56d028a8fc7f3fa4ed0a893e9af6dae5bdcbb3",
+    "ship": "companion-frames/mote/talk-small.webp",
+    "shipSha256": "fcd61fffe93197ebc447e6740c4c5e6422b454eb512dee607a8794b3e4001bb9",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: talking: the same pose with a small open rounded mouth, as if saying something. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb8-222a-7395-9a8a-8c2a31cd9d1d",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/think.png",
+    "masterSha256": "4981e843468e730a8378ad1e77c7658144485ecd9e646bb0e86839cdbf37b35c",
+    "ship": "companion-frames/mote/think.webp",
+    "shipSha256": "4cc5033376f54f5b944761d6970969086f125453b6165eeaba0be4b9d2502440",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: move both eye dots up and to the left, make the mouth a small flat line, and add one tiny sweat drop beside the head. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb7-d4b9-76d3-be0e-4dd30e8eab3a",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/mote/think.png",
+    "masterSha256": "4981e843468e730a8378ad1e77c7658144485ecd9e646bb0e86839cdbf37b35c",
+    "ship": "companion-frames/mote/think-small.webp",
+    "shipSha256": "3fdb8775344828068e964ab22366324c00ceb6c57e0aacc402732688b7665ccd",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a fluffy moth mascot in a blue jacket with a brown satchel, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: move both eye dots up and to the left, make the mouth a small flat line, and add one tiny sweat drop beside the head. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb7-d4b9-76d3-be0e-4dd30e8eab3a",
+      "credits": 9
+    }
+  },
+  {
     "master": "companion-frames/pip/blink.png",
     "masterSha256": "b247448e5ea74e2b4626ec27a13a53c10dbff7395599e48ca7224702dc8679bf",
     "ship": "companion-frames/pip/blink.webp",
@@ -275,6 +1360,285 @@
       "model": "nano-banana-pro",
       "prompt": "Edit the reference image, a small eraser-shaped mascot with tiny hands and dark blue feet, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: move both eye dots up and to the left, make the mouth a small flat line, and add one tiny sweat drop beside the head. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
       "meshyTaskId": "01a1ddb6-514d-7677-9a5d-9cf33adb6fa1",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/blink.png",
+    "masterSha256": "60815443cc5fb7dc0f1a5d0b1315d7f1efbe4ea309d911cd221e07464ffdf2c4",
+    "ship": "companion-frames/yun/blink.webp",
+    "shipSha256": "c2f495d94d6be720b0096ca2f8ec0968d62665f8d8b1b49f07aec341d715ac67",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: close both eyes, drawn as two short gently curved dark lines, as in a blink. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbd-bf40-747b-bc16-05b4d7725ba3",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/blink.png",
+    "masterSha256": "60815443cc5fb7dc0f1a5d0b1315d7f1efbe4ea309d911cd221e07464ffdf2c4",
+    "ship": "companion-frames/yun/blink-small.webp",
+    "shipSha256": "71aa8a6cfe8e89d0b4c70e0dfbddba10f24ab66ec25fba0c82e0b016d30a173a",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: close both eyes, drawn as two short gently curved dark lines, as in a blink. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbd-bf40-747b-bc16-05b4d7725ba3",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/cheer.png",
+    "masterSha256": "f150100aeff376d2a585631147fc5179677bcabfcbcaebfe6cc8a7c12ed2d80c",
+    "ship": "companion-frames/yun/cheer.webp",
+    "shipSha256": "7a336cb89990028c8932b67ec26507f154444dd2ff287226a5c7aee40d439a37",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: cheering: the lamb sits up taller on its cloud with a big open happy smile and light blush marks, the cloud puffing up a little. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbe-7801-727c-93f8-829602ef71c1",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/cheer.png",
+    "masterSha256": "f150100aeff376d2a585631147fc5179677bcabfcbcaebfe6cc8a7c12ed2d80c",
+    "ship": "companion-frames/yun/cheer-small.webp",
+    "shipSha256": "bc7f7885e9c846e8ed4fe6d88e91065dadda282f991ad6253e3fd6cd76228aec",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: cheering: the lamb sits up taller on its cloud with a big open happy smile and light blush marks, the cloud puffing up a little. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbe-7801-727c-93f8-829602ef71c1",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/hop-air.png",
+    "masterSha256": "4429f77fd38836906035d4a6353d1150dcf73d338b6384a63b43af74b9d1536c",
+    "ship": "companion-frames/yun/hop-air.webp",
+    "shipSha256": "7b16b72e5b3993b6592196b47842a83e8cb0b9fb86c009ab6b3c72da4f8a43d3",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: stretched a little taller and narrower as at the top of a happy hop, with a joyful open smile; keep it standing in the same place. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbe-761c-7149-bb4d-c14035b7dba5",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/hop-air.png",
+    "masterSha256": "4429f77fd38836906035d4a6353d1150dcf73d338b6384a63b43af74b9d1536c",
+    "ship": "companion-frames/yun/hop-air-small.webp",
+    "shipSha256": "ea41ad04fa4a663826a79900144c4bc165951aa78493736ddf99b9c66792a3ee",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: stretched a little taller and narrower as at the top of a happy hop, with a joyful open smile; keep it standing in the same place. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbe-761c-7149-bb4d-c14035b7dba5",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/hop-crouch.png",
+    "masterSha256": "c0127fa1dd940294d5fe8ec93da4a6b2e87aa56b434ab6428d7faeb581cf0337",
+    "ship": "companion-frames/yun/hop-crouch.webp",
+    "shipSha256": "2036c4b509ef583b5e0294dfcba8200410ac8eebaca70c78a7716689f2d6e654",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: squash down a little as if about to hop: slightly shorter and wider, eyes squeezed shut happily. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbe-34d1-74e7-b434-994e0715c483",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/hop-crouch.png",
+    "masterSha256": "c0127fa1dd940294d5fe8ec93da4a6b2e87aa56b434ab6428d7faeb581cf0337",
+    "ship": "companion-frames/yun/hop-crouch-small.webp",
+    "shipSha256": "0565f93563f836d3383d1b110082f4e773b283036708458e7e426ce065200f9e",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: squash down a little as if about to hop: slightly shorter and wider, eyes squeezed shut happily. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbe-34d1-74e7-b434-994e0715c483",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/look-board.png",
+    "masterSha256": "8d9e4d7750898a0f25200a102fbec11e04ea81ef5538890240d5c60c6be5e5ac",
+    "ship": "companion-frames/yun/look-board.webp",
+    "shipSha256": "e73c5c374d84e2faece552f6611da1f6e606d3cfea6fb1554d22d3468bcd82a8",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: turn the eyes up and to the right, as if reading a chalkboard above and to the right, with a small curious open mouth. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbd-bf79-7029-b86c-39fc8951cf24",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/look-board.png",
+    "masterSha256": "8d9e4d7750898a0f25200a102fbec11e04ea81ef5538890240d5c60c6be5e5ac",
+    "ship": "companion-frames/yun/look-board-small.webp",
+    "shipSha256": "970215641fcbc508147a6ae4f7f4c7021653912c87a5f052c5594ae2a802f65b",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: turn the eyes up and to the right, as if reading a chalkboard above and to the right, with a small curious open mouth. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbd-bf79-7029-b86c-39fc8951cf24",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/look-mat.png",
+    "masterSha256": "2536d594832831fe1103dca4f4b38f92de1ed3dafa8d35edfdb79471fc01cf0f",
+    "ship": "companion-frames/yun/look-mat.webp",
+    "shipSha256": "ea075a2911342eb70a7ffb4e1876a673c300027ca4950ec755fc8dafd65bda10",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: move both eye dots to the lower right, glancing down and to the right at the desk, attentive. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbd-bf41-743a-b023-6fe62ff4a4c4",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/look-mat.png",
+    "masterSha256": "2536d594832831fe1103dca4f4b38f92de1ed3dafa8d35edfdb79471fc01cf0f",
+    "ship": "companion-frames/yun/look-mat-small.webp",
+    "shipSha256": "0539c3f8ded0129c2fa5371708430ea39ffcc13a09f3327b98428fa97c982f68",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: move both eye dots to the lower right, glancing down and to the right at the desk, attentive. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbd-bf41-743a-b023-6fe62ff4a4c4",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/nod.png",
+    "masterSha256": "9035f4ec2db97bfd6b255a8dd0803c45170ec296dcb1923d6a354514bf10f318",
+    "ship": "companion-frames/yun/nod.webp",
+    "shipSha256": "5d8af014f810dc7d17c97d0f7b26ec110bafa8bb88b9f5d91b502d07b978caf4",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: a happy nod: the whole character tips forward slightly, eyes closed in two upward-curved smiling arcs, small smile. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbd-bf6b-713a-9b05-bf99581cea6f",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/nod.png",
+    "masterSha256": "9035f4ec2db97bfd6b255a8dd0803c45170ec296dcb1923d6a354514bf10f318",
+    "ship": "companion-frames/yun/nod-small.webp",
+    "shipSha256": "9790927926464de3db8d39d0566fa73963062112b692ed5806d030457cbcc032",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: a happy nod: the whole character tips forward slightly, eyes closed in two upward-curved smiling arcs, small smile. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbd-bf6b-713a-9b05-bf99581cea6f",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/talk.png",
+    "masterSha256": "104409e88f3a291ab5ffea6b50c7102e985c802802aa1a5d4a9694ec24217742",
+    "ship": "companion-frames/yun/talk.webp",
+    "shipSha256": "63a76562c36581d8942bb72d4f0586c8ae15aaa1869012b1a5a14f25043ccf41",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: talking: the same pose with a small open rounded mouth, as if saying something. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbe-ab56-7273-aa6d-8b7c4a6be94b",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/talk.png",
+    "masterSha256": "104409e88f3a291ab5ffea6b50c7102e985c802802aa1a5d4a9694ec24217742",
+    "ship": "companion-frames/yun/talk-small.webp",
+    "shipSha256": "09f70a32b976961bd0ffb74b64ef641a7e7862ffeb920afe65c8703c3f1d9199",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: talking: the same pose with a small open rounded mouth, as if saying something. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbe-ab56-7273-aa6d-8b7c4a6be94b",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/think.png",
+    "masterSha256": "4df5cadfca979278722651a98c979a8fc5bb7690d21ca9736b3a5f4092fa7058",
+    "ship": "companion-frames/yun/think.webp",
+    "shipSha256": "da880dee59350a7e084f0f187c239b06344939573c3af1ab192cb0cd2fb5719e",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: move both eye dots up and to the left, make the mouth a small flat line, and add one tiny sweat drop beside the head. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbe-7800-7436-9723-2c00e678c66e",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/yun/think.png",
+    "masterSha256": "4df5cadfca979278722651a98c979a8fc5bb7690d21ca9736b3a5f4092fa7058",
+    "ship": "companion-frames/yun/think-small.webp",
+    "shipSha256": "8e1faba43a1d52e6fe2136fe6355a5972526b0f60af62d194288cdd876215cde",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small cloud-lamb mascot curled on a green cloud, with a red scarf, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: move both eye dots up and to the left, make the mouth a small flat line, and add one tiny sweat drop beside the head. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddbe-7800-7436-9723-2c00e678c66e",
       "credits": 9
     }
   },

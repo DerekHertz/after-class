@@ -27,6 +27,8 @@ if (!process.argv.includes("--build-only")) {
       const filePath = resolve(out, `.${path}`);
       if (filePath !== out && !filePath.startsWith(`${out}/`)) return new Response("Not found", { status: 404 });
       const file = Bun.file(filePath);
+      const shipped = /^\/assets\/((?:companion-frames|companions-v3)\/[a-z0-9-]+(?:\/[a-z0-9-]+)?(?:-small)?\.webp)$/.exec(path);
+      if (shipped !== null) return new Response(Bun.file(join(root, "src/app/assets", shipped[1]!)));
       if (path === "/pip" || path === "/pip.html") return new Response(Bun.file(join(out, "pip.html")));
       if (extname(path) && await file.exists()) return new Response(file);
       if (extname(path)) return new Response("Not found", { status: 404 });
