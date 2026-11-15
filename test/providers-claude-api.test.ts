@@ -73,13 +73,14 @@ function fakeClient(script: Script | ((n: number) => Script)): { client: ApiClie
       stream(params, options) {
         const s = next();
         seen.push({ params, signal: options.signal, via: "stream" });
-        let listener: (d: string) => void = () => {};
+        const listeners = { text: (_d: string) => {}, streamEvent: (_d: string) => {} };
         const stream: ApiStream = {
-          on: (_event, l) => {
-            listener = l;
+          on: (event, l) => {
+            listeners[event] = l;
             return stream;
           },
-          finalMessage: () => settle(s, options.signal, (d) => listener(d)),
+          // The first server-sent event, message_start, comes before any text.
+          finalMessage: () => (queueMicrotask(() => listeners.streamEvent("")), settle(s, options.signal, (d) => listeners.text(d))),
           abort: () => {},
         };
         return stream;
