@@ -168,7 +168,42 @@ const PARAM_KIND = {
   captureId: "cap", reviewId: "rvw", topicId: "cpt", evidenceId: "ev", noteId: "note", linkId: "lnk", observationId: "obs", deviceId: "dev",
 } as const satisfies Record<string, IdKind>;
 
-const SECURITY_HEADERS = { "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" } as const;
+/**
+ * HSTS is sent on every response. A browser ignores it on plain HTTP, so the local server and Caddy's own http://
+ * hop are unaffected, and on https://useafterclass.com it pins https for a year. No includeSubDomains and no preload:
+ * the apex serves only this app, and a list entry cannot be taken back quickly.
+ */
+const SECURITY_HEADERS = { "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Strict-Transport-Security": "max-age=31536000" } as const;
+
+const INLINE_SCRIPT = /<script(?![^>]*\bsrc=)(?![^>]*\btype="application\/json")[^>]*>([\s\S]*?)<\/script>/gi;
+
+/** Clerk's documented hosts besides its Frontend API: the bot-protection challenge (Cloudflare Turnstile and Clerk's own), its avatars. */
+const CLERK_CHALLENGE_HOSTS = "https://challenges.cloudflare.com https://*.protect.clerk.com";
+
+/**
+ * The page's Content-Security-Policy. Scripts run only from this origin, from the inline scripts the page itself carries
+ * (each allowed by its hash, computed from the HTML being served, so a script injected into the page is not), and,
+ * in hosted mode, from the Clerk Frontend API host that serves ClerkJS and its UI. Styles allow `unsafe-inline` because
+ * React sets style attributes and Clerk's UI injects styles; style cannot run code. `clerkOrigin` is null locally.
+ */
+export function pageCsp(html: string, clerkOrigin: string | null): string {
+  const hashes = [...html.matchAll(INLINE_SCRIPT)].map((m) => `'sha256-${createHash("sha256").update(m[1]!).digest("base64")}'`);
+  const clerk = clerkOrigin === null ? [] : [clerkOrigin, CLERK_CHALLENGE_HOSTS];
+  return [
+    "default-src 'self'",
+    `script-src ${["'self'", ...hashes, ...clerk].join(" ")}`,
+    `connect-src ${["'self'", ...(clerkOrigin === null ? [] : [clerkOrigin, "https://*.protect.clerk.com:*"])].join(" ")}`,
+    `img-src 'self' blob: data:${clerkOrigin === null ? "" : " https://img.clerk.com"}`,
+    "media-src 'self' blob:",
+    "font-src 'self' data:",
+    "style-src 'self' 'unsafe-inline'",
+    "worker-src 'self' blob:",
+    `frame-src ${clerkOrigin === null ? "'none'" : `'self' ${CLERK_CHALLENGE_HOSTS}`}`,
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+  ].join("; ");
+}
 
 function json(status: number, body: unknown, extra: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...SECURITY_HEADERS, ...extra } });
@@ -237,7 +272,7 @@ function resolveApp(root: string, rest: string): AppTarget {
 export const HASHED_APP_FILE = /-[a-z0-9]{8}\.[a-z0-9]+$/;
 const appFileCacheControl = (path: string) => (HASHED_APP_FILE.test(path) ? "public, max-age=31536000, immutable" : "no-cache");
 
-function serveApp(req: Request, rest: string, opts: ServeOptions, page: (html: string) => string): Response {
+function serveApp(req: Request, rest: string, opts: ServeOptions, gate: Pick<Gate, "page" | "clerkOrigin">): Response {
   if (req.method !== "GET" && req.method !== "HEAD") return failure(405, "method not allowed", { Allow: "GET, HEAD" });
   let root: string;
   try {
@@ -256,7 +291,7 @@ function serveApp(req: Request, rest: string, opts: ServeOptions, page: (html: s
   }
   let html: string;
   try {
-    html = page(readFileSync(indexPath, "utf8"));
+    html = gate.page(readFileSync(indexPath, "utf8"));
   } catch {
     return failure(503, "the review app is not built; run scripts/build-app.ts");
   }
@@ -264,7 +299,7 @@ function serveApp(req: Request, rest: string, opts: ServeOptions, page: (html: s
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
-      "Content-Security-Policy": "frame-ancestors 'none'",
+      "Content-Security-Policy": pageCsp(html, gate.clerkOrigin),
       ...SECURITY_HEADERS,
     },
   });
@@ -685,6 +720,8 @@ type Gate = {
   /** Where GET / redirects; null answers it like any unrouted path. */
   readonly home: string | null;
   page(html: string): string;
+  /** The Clerk Frontend API origin the page loads scripts from; null on the local page. */
+  readonly clerkOrigin: string | null;
   readonly appOrigin: string;
   /** Null locally, where the device routes answer 501. */
   readonly devices: Devices | null;
@@ -705,6 +742,7 @@ function localGate(auth: AuthConfig, modules: ServedModules, healthAnyHost: bool
     app: originOnly,
     home: null,
     page: (html) => injectToken(html, auth.token),
+    clerkOrigin: null,
     appOrigin: `http://127.0.0.1:${auth.port}`,
     devices: null,
   };
@@ -748,6 +786,7 @@ function hostedGate(hosted: HostedAuth, modulesFor: (userId: UserId) => ServedMo
     app: allowAll,
     home: "/app/",
     page: (html) => injectClerk(html, hosted),
+    clerkOrigin: new URL(hosted.clerk.scriptUrl).origin,
     appOrigin: hosted.publicOrigin,
     devices: hosted.devices,
   };
@@ -766,7 +805,7 @@ async function handle(req: Request, opts: ServeOptions, gate: Gate, guard: TurnG
 
   if (path === "/app" || path.startsWith("/app/")) {
     const v = gate.app(req.headers);
-    return v.ok ? serveApp(req, path.slice("/app/".length), opts, gate.page) : failure(v.status, "forbidden");
+    return v.ok ? serveApp(req, path.slice("/app/".length), opts, gate) : failure(v.status, "forbidden");
   }
 
   if (gate.home !== null && req.method === "GET" && path === "/") return new Response(null, { status: 302, headers: { Location: gate.home, ...SECURITY_HEADERS } });

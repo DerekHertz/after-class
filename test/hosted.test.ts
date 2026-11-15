@@ -125,7 +125,12 @@ describe("hosted requests", () => {
     expect(page.body).toContain(
       `<script defer crossorigin="anonymous" data-clerk-ui src="${UI_SCRIPT}"></script><script defer crossorigin="anonymous" data-clerk-publishable-key="${PUBLISHABLE_KEY}" src="${SCRIPT}"></script></head>`,
     );
-    expect(page.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+    const csp = page.headers.get("content-security-policy")!;
+    expect(csp).toContain("script-src 'self' https://clerk.afterclass.test https://challenges.cloudflare.com https://*.protect.clerk.com;");
+    expect(csp).toContain("connect-src 'self' https://clerk.afterclass.test https://*.protect.clerk.com:*;");
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).not.toMatch(/unsafe-eval|script-src[^;]*unsafe-inline/);
+    expect(page.headers.get("strict-transport-security")).toBe("max-age=31536000");
     const asset = await raw(s.port, "/app/main.js", { "Sec-Fetch-Site": "cross-site" });
     expect(asset.status).toBe(200);
   });

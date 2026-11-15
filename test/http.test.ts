@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 import { symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -172,6 +173,20 @@ describe("the review app under /app", () => {
       expect(r.headers.get("cache-control")).toContain("no-store");
       expect(await r.text()).toContain(`<meta name="afterclass-token" content="${TOKEN}"`);
     }
+  });
+
+  test("the page's policy allows its own scripts only by origin or hash, and no Clerk host locally", async () => {
+    const dir = scratchDir("afterclass-app-");
+    const inline = "window.x=1";
+    writeFileSync(join(dir, "index.html"), `<html><head><script type="application/json" id="d">{}</script><script>${inline}</script><script type="module" src="/app/main.js"></script></head></html>`);
+    const { base } = start(dir);
+    const r = await fetch(`${base}/app/`);
+    const csp = r.headers.get("content-security-policy")!;
+    const hash = `'sha256-${createHash("sha256").update(inline).digest("base64")}'`;
+    expect(csp).toContain(`script-src 'self' ${hash};`);
+    expect(csp).not.toContain("clerk");
+    expect(csp).toContain("object-src 'none'");
+    expect(r.headers.get("strict-transport-security")).toBe("max-age=31536000");
   });
 
   test("injects the token even when the page has no placeholder, and escapes it", async () => {
