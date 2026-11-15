@@ -31,19 +31,21 @@ const frame = (name: string, s: number): Frame => ({ kind: "frame", id: ev(name)
 const bundle = { passages: [passage("p1")], frames: [frame("f1", 3)], gaps: [] };
 const otherBundle = { passages: [passage("p1"), passage("p2")], frames: [frame("f1", 3)], gaps: [] };
 const draftOf = (text: string) => ({ text, evidence: [ev("p1")] as unknown as NonEmpty<EvidenceId>, visualDependent: false, assumptions: [] });
+/** What the model answers: it cites the bundle's first passage by its label. */
+const replyOf = (text: string) => ({ ...draftOf(text), evidence: ["p1"] });
 const revisionOf = (text: string, evidence: unknown = bundle): RevisionInput => ({ original: draftOf(text), check: { verdict: "no" as const, p: 0.2 }, evidence: evidence as RevisionInput["evidence"] });
 
-/** What the revision prompt was before the evidence became its own cached block. */
+/** The revision prompt: evidence by label, then the claim. */
 const EXPECTED_PROMPT = [
   "Passages:",
-  `- ${ev("p1")} [1.0s–2.0s] Text of p1.`,
+  "- p1 [1.0s–2.0s] Text of p1.",
   "Frames:",
-  `- ${ev("f1")} at 3.0s (image attached, labelled with this ID)`,
+  "- f1 at 3.0s (image attached, labelled with this ID)",
   "Gaps (missing capture, never to be filled):",
   "- none",
   "",
   "Original claim: Clocks order events.",
-  `Cited: ${ev("p1")}`,
+  "Cited: p1",
   "Visual-dependent: false",
   "Assumptions: none",
   "Check verdict: no (p = 0.20)",
@@ -116,12 +118,12 @@ type Block = { type: string; text?: string; cache_control?: unknown };
 const blocksOf = (s: Sent) => (s.params.messages as { content: Block[] }[])[0]!.content;
 
 describe("the revision's evidence is a cached head", () => {
-  test("the model reads the same text as before, and claude -p is sent that exact string", async () => {
+  test("the model reads the evidence by label, and claude -p is sent that exact string", async () => {
     let seen: ClaudeRequest | undefined;
     const claude: ClaudeCli = {
       structured: (req) => {
         seen = req;
-        return Promise.resolve({ output: draftOf("x"), usage: { model: "m", inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cost: { kind: "unknown", reason: "t" } } }) as never;
+        return Promise.resolve({ output: replyOf("x"), usage: { model: "m", inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cost: { kind: "unknown", reason: "t" } } }) as never;
       },
       streamText: () => Promise.reject(new Error("not used")),
     };
@@ -132,7 +134,7 @@ describe("the revision's evidence is a cached head", () => {
   });
 
   test("the API request puts the images and the evidence first, a breakpoint after the evidence, and the claim after it", async () => {
-    const { client, sent } = manualClient(() => message(JSON.stringify(draftOf("Clocks order events."))));
+    const { client, sent } = manualClient(() => message(JSON.stringify(replyOf("Clocks order events."))));
     const task = reviseTask(createClaudeApi({ apiKey: KEY, maxConcurrent: 2, client }), frameBytes);
     const run = createMemo(testUserDb(), "live", { retryDelayMs: () => 0 }).run(task, revisionOf("Clocks order events."));
     await tick();
@@ -150,7 +152,7 @@ describe("the revision's evidence is a cached head", () => {
   });
 
   test("two revisions of one chunk send a byte-identical prefix, and the second is sent only after the first has begun", async () => {
-    const { client, sent } = manualClient(() => message(JSON.stringify(draftOf("r"))));
+    const { client, sent } = manualClient(() => message(JSON.stringify(replyOf("r"))));
     const task = reviseTask(createClaudeApi({ apiKey: KEY, maxConcurrent: 2, client }), frameBytes);
     const memo = createMemo(testUserDb(), "live", { retryDelayMs: () => 0 });
     const a = memo.run(task, revisionOf("First claim."));
@@ -170,7 +172,7 @@ describe("the revision's evidence is a cached head", () => {
   });
 
   test("a revision of a different chunk does not wait", async () => {
-    const { client, sent } = manualClient(() => message(JSON.stringify(draftOf("r"))));
+    const { client, sent } = manualClient(() => message(JSON.stringify(replyOf("r"))));
     const task = reviseTask(createClaudeApi({ apiKey: KEY, maxConcurrent: 2, client }), frameBytes);
     const memo = createMemo(testUserDb(), "live", { retryDelayMs: () => 0 });
     const runs = [memo.run(task, revisionOf("First claim.")), memo.run(task, revisionOf("Other chunk.", otherBundle))];
@@ -184,7 +186,7 @@ describe("the revision's evidence is a cached head", () => {
   });
 
   test("a first revision that fails before it begins releases its siblings", async () => {
-    const { client, sent } = manualClient((n) => message(JSON.stringify(draftOf("r")), {}, n === 0 ? "refusal" : "end_turn"));
+    const { client, sent } = manualClient((n) => message(JSON.stringify(replyOf("r")), {}, n === 0 ? "refusal" : "end_turn"));
     const task = reviseTask(createClaudeApi({ apiKey: KEY, maxConcurrent: 2, client }), frameBytes);
     const memo = createMemo(testUserDb(), "live", { retryDelayMs: () => 0 });
     const a = memo.run(task, revisionOf("First claim."));
@@ -202,7 +204,7 @@ describe("the revision's evidence is a cached head", () => {
   });
 
   test("a waiting revision that is aborted never sends", async () => {
-    const { client, sent } = manualClient(() => message(JSON.stringify(draftOf("r"))));
+    const { client, sent } = manualClient(() => message(JSON.stringify(replyOf("r"))));
     const claude = createClaudeApi({ apiKey: KEY, maxConcurrent: 2, client });
     const req = (): ClaudeRequest => ({ model: "opus", effort: "high", system: "S", prompt: "tail", cachedPrompt: "head\n\n", images: [], webTools: false, timeoutMs: 5_000 });
     const schema = (await import("zod")).z.object({ text: (await import("zod")).z.string() });
@@ -219,7 +221,7 @@ describe("the revision's evidence is a cached head", () => {
   });
 
   test("a revision aborted before it reaches the gate is cancelled at once and never sends", async () => {
-    const { client, sent } = manualClient(() => message(JSON.stringify(draftOf("r"))));
+    const { client, sent } = manualClient(() => message(JSON.stringify(replyOf("r"))));
     const claude = createClaudeApi({ apiKey: KEY, maxConcurrent: 2, client });
     const req = (): ClaudeRequest => ({ model: "opus", effort: "high", system: "S", prompt: "tail", cachedPrompt: "head\n\n", images: [], webTools: false, timeoutMs: 5_000 });
     const schema = (await import("zod")).z.object({ text: (await import("zod")).z.string() });
@@ -238,7 +240,7 @@ describe("the revision's evidence is a cached head", () => {
 describe("cache tokens are priced and recorded", () => {
   test("a write then a read: the read is priced at 0.05 of input, cache reads are recorded on the usage event, and the spend is lower", async () => {
     const usage = [{ input_tokens: 300, cache_creation_input_tokens: 9_000, cache_creation: { ephemeral_5m_input_tokens: 9_000, ephemeral_1h_input_tokens: 0 }, cache_read_input_tokens: 0 }, { input_tokens: 300, cache_creation_input_tokens: 0, cache_read_input_tokens: 9_000 }];
-    const { client, sent } = manualClient((n) => message(JSON.stringify(draftOf("r")), { output_tokens: 200, ...usage[n]! }));
+    const { client, sent } = manualClient((n) => message(JSON.stringify(replyOf("r")), { output_tokens: 200, ...usage[n]! }));
     const db = testUserDb();
     const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
     const task = reviseTask(createClaudeApi({ apiKey: KEY, maxConcurrent: 2, client }), frameBytes);
@@ -264,7 +266,7 @@ describe("cache tokens are priced and recorded", () => {
 
 describe("a long interpretation is streamed", () => {
   const interpretationInput = { chunkRevisionId: "chr_x", newMaterial: bundle, existingClaims: [], gaps: [] } as never;
-  const OUTPUT = { concepts: [{ label: "Clocks", summary: "s", claims: [draftOf("Clocks order events.")], confusions: [] }], links: [], supersedes: [] };
+  const OUTPUT = { concepts: [{ label: "Clocks", summary: "s", claims: [replyOf("Clocks order events.")], confusions: [] }], links: [], supersedes: [] };
   /** The model writes 21,501 tokens, the larger of the two local interpretations that passed 16,000, and stops at max_tokens if that is less. */
   const WRITES = 21_501;
   const capped = (_n: number, params: Record<string, unknown>) =>
@@ -302,7 +304,7 @@ describe("a long interpretation is streamed", () => {
   });
 
   test("revisions and other short structured calls keep the 16,000 limit", async () => {
-    const { client, sent } = manualClient(() => message(JSON.stringify(draftOf("r"))));
+    const { client, sent } = manualClient(() => message(JSON.stringify(replyOf("r"))));
     const task = reviseTask(createClaudeApi({ apiKey: KEY, maxConcurrent: 2, client }), frameBytes);
     const run = createMemo(testUserDb(), "live", { retryDelayMs: () => 0 }).run(task, revisionOf("x"));
     await tick();

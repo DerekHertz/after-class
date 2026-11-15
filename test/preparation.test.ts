@@ -16,6 +16,7 @@ import type { Check } from "../src/backend/preparation/core";
 import { canonicalInterpretation, canonicalResourceSearch, canonicalRevision, interpretTask } from "../src/backend/preparation/tasks";
 import type { InterpretationInput, InterpretationOutput, ResourceSearchInput, RevisionInput } from "../src/backend/preparation/tasks";
 import { deferred, fail, fakeTask, ok, testUserDb, testSeq, usage } from "./fakes";
+import { ctx } from "./providers-fixtures";
 import type { FakeStep, FakeTask } from "./fakes";
 
 // ───────────────────────────── evidence fixtures ─────────────────────────────
@@ -510,8 +511,9 @@ describe("a claim citing evidence the model was never shown", () => {
     links: [],
     supersedes: [],
   });
-  const good = (text: string, k: number) => ({ text, evidence: [P[k]!.id as string] });
-  const bad = (text: string) => ({ text, evidence: [UNSEEN as string] });
+  /** The model cites by label: the chunk's passages are p1, p2 in order. */
+  const good = (text: string, k: number) => ({ text, evidence: [`p${k + 1}`] });
+  const bad = (text: string) => ({ text, evidence: ["p1", "p999", UNSEEN as string] });
 
   test("one bad claim among three: the two good claims are kept, the bad one is dropped and reported, and it is never assessable", async () => {
     const claude = fakeClaude(() => raw([good("first", 0), bad("ghost"), good("second", 1)]));
@@ -531,7 +533,7 @@ describe("a claim citing evidence the model was never shown", () => {
     const stored = w.memo.inspect(unit.memo_key as MemoKey)!;
     expect(stored.failure).toBeNull();
     expect((stored.output as { dropped: unknown }).dropped).toEqual([
-      { text: "ghost", evidence: [UNSEEN], reason: `cites unknown evidence: ${UNSEEN}` },
+      { text: "ghost", evidence: [P[0]!.id], reason: `cites unknown evidence: p999, ${UNSEEN}` },
     ]);
   });
 
@@ -559,13 +561,50 @@ describe("a claim citing evidence the model was never shown", () => {
     const unit = w.db.sql.query<{ memo_key: string }, []>(`SELECT memo_key FROM prep_inputs WHERE kind = 'interpretation'`).get()!;
     const failure = w.memo.inspect(unit.memo_key as MemoKey)!.failure;
     expect(failure).toMatchObject({ attempts: 2, terminal: true });
-    expect(failure!.lastError).toBe(`ProviderError: claim "ghost one" cites unknown evidence: ${UNSEEN}`);
+    expect(failure!.lastError).toBe(`ProviderError: claim "ghost one" cites unknown evidence: p999, ${UNSEEN}`);
     expect(w.usable(r1.material)).toEqual([]);
 
     answer = () => raw([good("recovered", 0)]);
     w.prep.retry(w.captureId, [r1.id]);
     await w.drain();
     expect(w.prep.prep(r1.id)).toMatchObject({ interpretation: "done", supportedCount: 1 });
+  });
+
+  test("the model reads and cites short labels, never evidence or claim IDs, and what it cites is stored as the IDs", async () => {
+    let prompt = "";
+    const claude = {
+      async structured<O>(req: { prompt: string }, schema: { parse(x: unknown): O }) {
+        prompt = req.prompt;
+        return {
+          output: schema.parse({
+            concepts: [{ label: "A", summary: "s", claims: [{ text: "The board shows it.", evidence: ["p2", "f1"], visualDependent: true, assumptions: [] }], confusions: [{ text: "x", evidence: ["p1"] }] }],
+            links: [{ fromLabel: "A", toLabel: "A", type: "related_to", evidence: ["p2"], rationale: "r" }],
+            supersedes: [{ claimId: "c1", reason: "narrowed" }],
+          }),
+          usage: usage(),
+        };
+      },
+      async streamText() {
+        throw new Error("unused");
+      },
+    } as unknown as ClaudeCli;
+    const earlier = stableId("clm", "earlier");
+    const input: InterpretationInput = {
+      chunkRevisionId: stableId("crv", "x") as ChunkRevisionId,
+      newMaterial: { material: span(0, 20), passages: [P[0]!, P[1]!], frames: [BOARD], gaps: [], ads: [] },
+      existingClaims: [{ id: earlier, text: "An earlier claim." }],
+      gaps: [],
+    };
+    const { output: out } = await interpretTask(claude, () => null).attempt(input, ctx);
+
+    expect(prompt).not.toMatch(/\b(ev|clm)_[a-z2-7]{26}\b/);
+    expect(prompt).toContain("- p1 [0.0s–10.0s] passage 0");
+    expect(prompt).toContain("- f1 at 15.0s");
+    expect(prompt).toContain("- c1: An earlier claim.");
+    expect(out.concepts[0]!.claims[0]!.evidence).toEqual([P[1]!.id, BOARD.id]);
+    expect(out.concepts[0]!.confusions[0]!.evidence).toEqual([P[0]!.id]);
+    expect(out.links[0]!.evidence).toEqual([P[1]!.id]);
+    expect(out.supersedes).toEqual([{ claimId: earlier, reason: "narrowed" }]);
   });
 
   test("a fully valid interpretation takes one call, stores exactly what it did before, and keeps its memo key", async () => {

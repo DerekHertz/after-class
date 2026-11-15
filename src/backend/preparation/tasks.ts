@@ -132,20 +132,29 @@ const resourceSchema = z.object({
 
 type RawDraft = z.infer<typeof draftSchema>;
 
-/** Every ID the model returns must be one it was shown; anything else is a retryable bad output. */
-function knownIds(allowed: ReadonlySet<string>, ids: readonly string[], what: string, usage: UsageReport): EvidenceId[] {
-  const unknown = ids.filter((id) => !allowed.has(id));
+/**
+ * The model reads and cites evidence by short labels (p1, p2, f1), never by evidence ID. An evidence ID is 29 random characters,
+ * about 25 tokens each time the model reads or writes one; a label is about 2. Labels number a bundle's passages and frames in
+ * order, so one bundle always gets the same labels and a chunk's revisions still share their cached head.
+ */
+type Labels = { readonly ids: ReadonlyMap<string, EvidenceId>; readonly of: (id: EvidenceId) => string };
+
+function labelsOf(b: EvidenceBundle): Labels {
+  const ids = new Map<string, EvidenceId>([...b.passages.map((p, n) => [`p${n + 1}`, p.id] as const), ...b.frames.map((f, n) => [`f${n + 1}`, f.id] as const)]);
+  const labels = new Map([...ids].map(([label, id]) => [id, label]));
+  return { ids, of: (id) => labels.get(id) ?? id };
+}
+
+/** Every label the model returns must be one it was shown; anything else is a retryable bad output. */
+function knownIds(labels: Labels, cited: readonly string[], what: string, usage: UsageReport): EvidenceId[] {
+  const unknown = cited.filter((label) => !labels.ids.has(label));
   if (unknown.length > 0) throw new ProviderError(`${what} cites unknown evidence: ${unknown.join(", ")}`, usage, true);
-  return ids as EvidenceId[];
+  return cited.map((label) => labels.ids.get(label)!);
 }
 
-function toDraft(raw: RawDraft, allowed: ReadonlySet<string>, usage: UsageReport): ClaimDraft {
-  const evidence = knownIds(allowed, raw.evidence, `claim "${raw.text}"`, usage);
+function toDraft(raw: RawDraft, labels: Labels, usage: UsageReport): ClaimDraft {
+  const evidence = knownIds(labels, raw.evidence, `claim "${raw.text}"`, usage);
   return { text: raw.text, evidence: evidence as unknown as NonEmpty<EvidenceId>, visualDependent: raw.visualDependent, assumptions: raw.assumptions };
-}
-
-function bundleIds(b: EvidenceBundle): ReadonlySet<string> {
-  return new Set<string>([...b.passages.map((p) => p.id), ...b.frames.map((f) => f.id)]);
 }
 
 // ───────────────────────────── prompts ──────────────────────────────────────
@@ -157,22 +166,23 @@ const EVIDENCE_RULES = `Evidence rules:
 - Anything the claim relies on that the evidence does not state goes in its assumptions list, labelled as an assumption.
 - If a claim depends on what was shown on screen (board work, a diagram, an equation, code), set visualDependent to true and cite at least one frame ID.`;
 
-function describeEvidence(b: EvidenceBundle, gaps: EvidenceBundle["gaps"], bytes: FrameBytes): { readonly text: string; readonly images: ClaudeImage[] } {
+function describeEvidence(b: EvidenceBundle, gaps: EvidenceBundle["gaps"], bytes: FrameBytes): { readonly text: string; readonly images: ClaudeImage[]; readonly labels: Labels } {
+  const labels = labelsOf(b);
   const images: ClaudeImage[] = [];
   const frames = b.frames.map((f) => {
     const jpeg = bytes(f.id);
-    if (jpeg) images.push({ label: f.id, mediaType: "image/jpeg", bytes: jpeg });
-    return `- ${f.id} at ${f.mediaS.toFixed(1)}s${jpeg ? " (image attached, labelled with this ID)" : " (image unavailable; do not cite for visual content)"}`;
+    if (jpeg) images.push({ label: labels.of(f.id), mediaType: "image/jpeg", bytes: jpeg });
+    return `- ${labels.of(f.id)} at ${f.mediaS.toFixed(1)}s${jpeg ? " (image attached, labelled with this ID)" : " (image unavailable; do not cite for visual content)"}`;
   });
   const text = [
     "Passages:",
-    ...b.passages.map((p) => `- ${p.id} [${p.interval.start.toFixed(1)}s–${p.interval.end.toFixed(1)}s] ${p.text}`),
+    ...b.passages.map((p) => `- ${labels.of(p.id)} [${p.interval.start.toFixed(1)}s–${p.interval.end.toFixed(1)}s] ${p.text}`),
     "Frames:",
     ...(frames.length > 0 ? frames : ["- none"]),
     "Gaps (missing capture, never to be filled):",
     ...(gaps.length > 0 ? gaps.map((g) => `- ${g.channel} ${g.reason} [${g.interval.start.toFixed(1)}s–${g.interval.end.toFixed(1)}s]`) : ["- none"]),
   ].join("\n");
-  return { text, images };
+  return { text, images, labels };
 }
 
 function request(system: string, prompt: string, images: readonly ClaudeImage[], opts: { effort: ClaudeRequest["effort"]; webTools: boolean; cachedPrompt?: string; longOutput?: boolean }): ClaudeRequest {
@@ -209,10 +219,11 @@ export function interpretTask(claude: ClaudeCli, frameBytes: FrameBytes): Task<I
       const attemptNo = (tries.get(input) ?? 0) + 1;
       tries.set(input, attemptNo);
       const evidence = describeEvidence(input.newMaterial, input.gaps, frameBytes);
-      const existing = input.existingClaims.length > 0 ? input.existingClaims.map((c) => `- ${c.id}: ${c.text}`).join("\n") : "- none";
-      const prompt = `${evidence.text}\n\nExisting claims:\n${existing}`;
+      const existing = new Map(input.existingClaims.map((c, n) => [`c${n + 1}`, c.id] as const));
+      const existingText = input.existingClaims.length > 0 ? input.existingClaims.map((c, n) => `- c${n + 1}: ${c.text}`).join("\n") : "- none";
+      const prompt = `${evidence.text}\n\nExisting claims:\n${existingText}`;
       const { output, usage } = await claude.structured(request(INTERPRET_SYSTEM, prompt, evidence.images, { effort: "high", webTools: false, longOutput: true }), interpretationSchema, ctx);
-      return { output: toInterpretation(output, bundleIds(input.newMaterial), new Set(input.existingClaims.map((c) => c.id)), usage, attemptNo >= INTERPRET_MAX_ATTEMPTS), usage };
+      return { output: toInterpretation(output, evidence.labels, existing, usage, attemptNo >= INTERPRET_MAX_ATTEMPTS), usage };
     },
     decode: (stored) => {
       const raw = interpretationSchema.parse(stored);
@@ -228,7 +239,7 @@ export function interpretTask(claude: ClaudeCli, frameBytes: FrameBytes): Task<I
  * becomes a Claim, so nothing can assess it, and its citations are never trimmed or swapped for others.
  * If nothing survives the drop, the interpretation fails as it always did.
  */
-function toInterpretation(raw: z.infer<typeof interpretationSchema>, allowed: ReadonlySet<string>, existing: ReadonlySet<string>, usage: UsageReport, dropBad: boolean): InterpretationOutput {
+function toInterpretation(raw: z.infer<typeof interpretationSchema>, labels: Labels, existing: ReadonlyMap<string, ClaimId>, usage: UsageReport, dropBad: boolean): InterpretationOutput {
   const unknownClaims = raw.supersedes.filter((s) => !existing.has(s.claimId));
   if (unknownClaims.length > 0) throw new ProviderError(`supersedes unknown claims: ${unknownClaims.map((s) => s.claimId).join(", ")}`, usage, true);
   const dropped: NonNullable<InterpretationOutput["dropped"]>[number][] = [];
@@ -238,21 +249,22 @@ function toInterpretation(raw: z.infer<typeof interpretationSchema>, allowed: Re
     summary: c.summary,
     claims: c.claims.flatMap((d) => {
       try {
-        return [toDraft(d, allowed, usage)];
+        return [toDraft(d, labels, usage)];
       } catch (err) {
         if (!(dropBad && err instanceof ProviderError)) throw err;
         firstError ??= err;
-        dropped.push({ text: d.text, evidence: d.evidence, reason: `cites unknown evidence: ${d.evidence.filter((id) => !allowed.has(id)).join(", ")}` });
+        const evidence = d.evidence.flatMap((label) => labels.ids.get(label) ?? []);
+        dropped.push({ text: d.text, evidence, reason: `cites unknown evidence: ${d.evidence.filter((label) => !labels.ids.has(label)).join(", ")}` });
         return [];
       }
     }),
-    confusions: c.confusions.map((x) => ({ text: x.text, evidence: knownIds(allowed, x.evidence, "confusion", usage) })),
+    confusions: c.confusions.map((x) => ({ text: x.text, evidence: knownIds(labels, x.evidence, "confusion", usage) })),
   }));
   if (firstError !== null && concepts.every((c) => c.claims.length === 0)) throw firstError;
   return {
     concepts,
-    links: raw.links.map((l) => ({ ...l, evidence: knownIds(allowed, l.evidence, "link", usage) })),
-    supersedes: raw.supersedes.map((s) => ({ claimId: s.claimId as ClaimId, reason: s.reason })),
+    links: raw.links.map((l) => ({ ...l, evidence: knownIds(labels, l.evidence, "link", usage) })),
+    supersedes: raw.supersedes.map((s) => ({ claimId: existing.get(s.claimId)!, reason: s.reason })),
     ...(dropped.length > 0 ? { dropped } : {}),
   };
 }
@@ -278,13 +290,13 @@ export function reviseTask(claude: ClaudeCli, frameBytes: FrameBytes): Task<Revi
       // The evidence leads, so every revision of this chunk shares one cached head. It ends in the blank line the claim block always followed.
       const prompt = [
         `Original claim: ${o.text}`,
-        `Cited: ${o.evidence.join(", ")}`,
+        `Cited: ${o.evidence.map(evidence.labels.of).join(", ")}`,
         `Visual-dependent: ${o.visualDependent}`,
         `Assumptions: ${o.assumptions.length > 0 ? o.assumptions.join("; ") : "none"}`,
         `Check verdict: ${input.check.verdict}${input.check.p === null ? "" : ` (p = ${input.check.p.toFixed(2)})`}`,
       ].join("\n");
       const { output, usage } = await claude.structured(request(REVISE_SYSTEM, prompt, evidence.images, { effort: "high", webTools: false, cachedPrompt: `${evidence.text}\n\n` }), draftSchema, ctx);
-      return { output: toDraft(output, bundleIds(input.evidence), usage), usage };
+      return { output: toDraft(output, evidence.labels, usage), usage };
     },
     decode: (stored) => draftSchema.parse(stored) as unknown as ClaimDraft,
   };

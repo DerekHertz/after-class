@@ -38,8 +38,8 @@ const bundle = { passages: [passage("p1")], frames: [frame("f1", 3), frame("f2",
 const draft = { text: "Clocks order events.", evidence: [ev("f1")], visualDependent: true, assumptions: [] };
 
 const REPLIES = {
-  interpretation: { concepts: [{ label: "Clocks", summary: "s", claims: [draft], confusions: [] }], links: [], supersedes: [] },
-  revision: draft,
+  interpretation: { concepts: [{ label: "Clocks", summary: "s", claims: [{ ...draft, evidence: ["f1"] }], confusions: [] }], links: [], supersedes: [] },
+  revision: { ...draft, evidence: ["f1"] },
   resources: { resources: [{ url: "https://example.org/clocks", title: "Clocks", relevance: "Covers it.", supportingPassages: [] }] },
   diagram: { title: "How do clocks order events?", lines: [{ text: "The board shows the arrow.", evidence: [ev("f1")] }] },
 };
@@ -111,9 +111,11 @@ describe("every Claude task on the Messages API", () => {
         const blocks = content as { type: string; text?: string; source?: { type: string; media_type: string; data: string } }[];
         expect(blocks.filter((x) => x.type === "image").map((x) => x.source)).toEqual(c.images.map((bytes) => ({ type: "base64", media_type: "image/jpeg", data: b64(bytes) })));
         // Each image follows a text block naming its label, and the prompt comes last.
-        expect(blocks[0]).toEqual({ type: "text", text: `Image ${ev("f1")}:` });
+        // Preparation names a frame by its short label; the diagram summary by its evidence ID.
+        const [first, second] = c.purpose === "diagram_summary" ? [ev("f1"), ev("f2")] : ["f1", "f2"];
+        expect(blocks[0]).toEqual({ type: "text", text: `Image ${first}:` });
         expect(blocks[1]!.type).toBe("image");
-        expect(blocks[2]).toEqual({ type: "text", text: `Image ${ev("f2")}:` });
+        expect(blocks[2]).toEqual({ type: "text", text: `Image ${second}:` });
         expect(blocks.at(-1)!.type).toBe("text");
         expect(blocks.filter((x) => x.type === "text").map((x) => x.text).join("")).toContain("image attached");
       }
