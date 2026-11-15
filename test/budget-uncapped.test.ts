@@ -110,6 +110,19 @@ describe("AFTERCLASS_BUDGET_UNCAPPED_USERS", () => {
   test("an id with a space inside is refused, because the typo would silently cap the admin", () => {
     expect(() => resolveUncappedUsers("user_a user_b")).toThrow(/space inside/);
   });
+
+  test("the refusal names the entry's position and never an id", () => {
+    let message = "";
+    try {
+      resolveUncappedUsers("user_ok, user_private_admin user_second_private");
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toContain("entry 2");
+    expect(message).not.toContain("user_private_admin");
+    expect(message).not.toContain("user_second_private");
+    expect(message).not.toContain("user_ok");
+  });
 });
 
 describe("the usage page", () => {

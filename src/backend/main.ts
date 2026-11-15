@@ -313,7 +313,9 @@ export function resolveBudgetLimits(env: Env): BudgetLimits {
  */
 export function resolveUncappedUsers(text: string | undefined): readonly string[] {
   const ids = (text ?? "").split(",").map((id) => id.trim()).filter((id) => id !== "");
-  for (const id of ids) if (/\s/.test(id)) throw new Error(`AFTERCLASS_BUDGET_UNCAPPED_USERS lists Clerk user ids separated by commas, and "${id}" has a space inside`);
+  // The ids are private, so the error names the entry's position, never its value.
+  const bad = ids.findIndex((id) => /\s/.test(id));
+  if (bad !== -1) throw new Error(`AFTERCLASS_BUDGET_UNCAPPED_USERS lists Clerk user ids separated by commas, and entry ${bad + 1} has a space inside`);
   return [...new Set(ids)];
 }
 
