@@ -141,15 +141,19 @@ A release is a `v<major>.<minor>.<patch>` tag on a `master` commit whose `packag
    scripts/release.sh
    ```
 
-   It prints the version `/health` reports and the release tags after it, and picks the newest. Pass a tag, such as `scripts/release.sh v0.1.4`, to pick another. Passing an older tag is a rollback. With no newer tag, it prints the commands to cut the next version.
+   It first asks you to run `aws login` in another terminal when you are not signed in. It then reads which release the server runs through Systems Manager, with an `AWS-RunShellScript` command that prints the digest in `/data/afterclass/current-image` and what the app's `/health` answers on the server. A version in `/health` names the release. Without one, as up to v0.1.4, the release whose `image-digest.txt` names the recorded digest does. The public `/health` is not used for this, because a network filter can block it or answer with its own page. If the read fails, the tool stops before it shows notes, tries or asks anything. When you know which release runs, `scripts/release.sh --live v0.1.4` goes on from that release and marks the base as unverified at the start and at the question.
 
-   It then prints the tag's commit and image digest, and the notes. The notes list each merged PR since the live release and warn when the range changes `infra/`, which needs `terraform apply`, or a database migration. Before `/health` reports a version, the notes assume the base is the release before the tag and say so.
+   It lists the release tags after the live one and picks the newest. Pass a tag, such as `scripts/release.sh v0.1.4`, to pick another. Passing an older tag is a rollback. With no newer tag, it prints the commands to cut the next version.
+
+   It then prints the tag's commit and image digest, and the notes. The notes list each merged PR since the live release and warn when the range changes `infra/`, which needs `terraform apply`, or a database migration. A rollback gets a warning that it runs on a database a newer release may have migrated.
 
    Next it runs that digest on `http://127.0.0.1:8790/app/` in replay mode, with no keys and a throwaway database. Set `AFTERCLASS_TRY_PORT` for another port. Release images are arm64 only, so on an x86 machine it rebuilds the release's `/app` and `/data` on the amd64 Bun base the Dockerfile pins, and prints a `WARNING`. Press Enter when you are done, and it stops the container.
 
-   It prints the warnings again and asks `Deploy v0.1.4 to useafterclass.com? [y/N]`. Only `y` deploys. It then checks for an AWS sign-in and, without one, waits for you to run `aws login` in another terminal. The deploy is `scripts/deploy-beta.sh <tag> <digest>`, with the digest read at the start. If the release names another digest by then, as after a workflow rerun, the try or the deploy refuses and nothing deploys. Last, it waits up to 2 minutes for `/health` to report the new version.
+   It prints the warnings again and asks `Deploy v0.1.4 to useafterclass.com? [y/N]`. Only `y` deploys. The deploy is `scripts/deploy-beta.sh <tag> <digest> <commit>`, with the digest and commit read at the start. If the tag or its release names another commit or digest by then, as after a moved tag or a workflow rerun, the try or the deploy refuses and nothing deploys.
 
-   The tool needs `git`, `bun`, `gh`, `curl`, `docker` and the AWS CLI. Nothing on GitHub or the server starts a deploy. `scripts/deploy-beta.sh` also refuses a tag off `master` or with another `package.json` version, a release without a valid `image-digest.txt` for the tag's commit, and a digest that GHCR does not serve anonymously. It runs the `afterclass-beta-deploy` document on the instance named in `/afterclass-beta/instance_id` and waits up to 15 minutes.
+   After the deploy it reads the server again and fails unless the server runs the new release and digest. Last, it checks `https://useafterclass.com/health` from your machine once. A blocked or rewritten answer prints a `WARNING`, and the deploy stands. Each server read waits up to about 2 minutes, the deploy up to 15 and the public check 10 seconds.
+
+   The tool needs `git`, `bun`, `gh`, `curl`, `docker` and the AWS CLI, and an AWS sign-in that may run `AWS-RunShellScript` and the `afterclass-beta-deploy` document on the instance. Nothing on GitHub or the server starts a deploy. `scripts/deploy-beta.sh` also refuses a tag off `master` or with another `package.json` version, a release without a valid `image-digest.txt` for the tag's commit, and a digest that GHCR does not serve anonymously. It runs the `afterclass-beta-deploy` document on the instance named in `/afterclass-beta/instance_id` and waits up to 15 minutes.
 
 ## Turning on HTTPS
 
