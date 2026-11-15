@@ -360,6 +360,24 @@ describe("validateMove", () => {
 
 /** A fake `claude -p` that replays scripted replies as stream deltas. No process, no network. */
 describe("validateSay: a mismatch asks before it tells (flow: one tentative, source-grounded diagnostic question)", () => {
+  test("accepts one question with abbreviations, decimals, quotes and non-Latin question marks", () => {
+    const d = { kind: "diagnose" } as Parameters<typeof validateSay>[0];
+    for (const q of [
+      "How does your answer fit with Dr. Lee's diagram?",
+      "How does it fit with the first diagram, e.g. the one on the board?",
+      "Is 2.5 the figure the lecturer gives?",
+      'How does that fit with where he says "inputs?"',
+      "\u4F60\u8BF4\u7684\u548C\u8BB2\u5E08\u8BB2\u7684\u6709\u4EC0\u4E48\u5173\u7CFB\uFF1F",
+      "\u0643\u064A\u0641 \u064A\u062A\u0648\u0627\u0641\u0642 \u0647\u0630\u0627 \u0645\u0639 \u0645\u0627 \u0642\u0627\u0644\u0647 \u0627\u0644\u0645\u062D\u0627\u0636\u0631\u061F",
+    ]) expect(validateSay(d, q).ok, q).toBe(true);
+  });
+
+  test("still rejects a recital before the question, in any script", () => {
+    const d = { kind: "diagnose" } as Parameters<typeof validateSay>[0];
+    for (const q of ["The lecture says NADH gives three ATP. How does that fit?", "Lecturer said X! How?", "\u8BB2\u5E08\u8BF4\u4E86\u4E09\u4E2A\u3002\u4F60\u600E\u4E48\u770B\uFF1F", "How? Why?"])
+      expect(validateSay(d, q).ok, q).toBe(false);
+  });
+
   const diagnose: TutorMove = { kind: "diagnose", threadId: thread(1), hypothesis: "h", evidence: [ev(1)] };
 
   test("a pointer to the source and one question passes", () => {
