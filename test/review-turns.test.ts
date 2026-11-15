@@ -171,6 +171,27 @@ describe("turn", () => {
     expect(types(events).at(-1)).toBe("turn_complete");
   });
 
+  test("a diagnostic reply that recites the lecture is held back and repaired, so only the question is heard", async () => {
+    const r = startedRig();
+    const diagnose: TutorMove = { kind: "diagnose", threadId: THREAD, hypothesis: "thinks it ends in the cytoplasm", evidence: [stableId("ev", "passage")] };
+    const withDiagnose: TutorKit = { ...kit, allowedMoves: (state) => (state.openThread ? new Set<TutorMoveKind>(["diagnose", "close_thread"]) : kit.allowedMoves(state, { turns: [], claims: [] })) };
+    let call = 0;
+    const t = tutorHarness(r.db, () => {
+      call++;
+      if (call === 1) return reply(askMain(r.claim), "Question.");
+      if (call === 2) return reply(diagnose, "The lecturer says the carriers go to the electron transport chain, and each NADH makes three ATP while each FADH2 makes two, which is where the energy is released. How does that fit with what you said about the cytoplasm?");
+      return reply(diagnose, "How does what you said fit with where the lecturer follows the carriers?");
+    });
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures }, { tutor: withDiagnose });
+    await collect(reviews.turn(r.reviewId, randomId("turn"), answer("open")));
+    const events = await collect(reviews.turn(r.reviewId, randomId("turn"), answer("the cytoplasm")));
+
+    expect(JSON.stringify(events)).not.toContain("electron transport chain");
+    expect(t.calls[2]!.repairNote).toContain("diagnostic question");
+    expect(events.filter((e) => e.type === "say_delta").map((e) => e.type === "say_delta" && e.text).join("")).toBe("How does what you said fit with where the lecturer follows the carriers?");
+    expect(reviews.view(r.reviewId).turns.filter((x) => x.actor === "tutor").map((x) => x.actor === "tutor" && x.move.kind)).toEqual(["ask_main", "diagnose"]);
+  });
+
   test("R3: a claim that loses its check while the model talks is neither stored nor sent as the move; the repair sees the change", async () => {
     const r = startedRig(undefined, {}, true);
     const t = tutorHarness(r.db, (input) => {

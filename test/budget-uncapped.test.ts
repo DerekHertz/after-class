@@ -44,7 +44,7 @@ describe("uncapped account", () => {
     const t = w.task();
     for (const n of [1, 2, 3]) expect((await w.memoFor(admin).run(t, { n })).kind).toBe("hit");
     expect(t.calls).toHaveLength(3);
-    expect(w.budget.allowance(admin.userId)).toEqual({ usedUsd: expect.closeTo(3 * TUTOR, 9), limitUsd: null, uncapped: true, resetsAtMs: DEC_1, held: null });
+    expect(w.budget.allowance(admin.userId)).toEqual({ usedUsd: expect.closeTo(3 * TUTOR, 9), reservedUsd: 0, limitUsd: null, uncapped: true, resetsAtMs: DEC_1, held: null });
   });
 
   test("its spend does not count toward a friend's total cap", async () => {
@@ -84,7 +84,7 @@ describe("uncapped account", () => {
     const t = w.task();
     for (const n of [1, 2]) expect((await w.memoFor(friend).run(t, { n })).kind).toBe("hit");
     expect(await w.memoFor(friend).run(t, { n: 3 })).toMatchObject({ kind: "held", hold: { reason: "user_budget", resetsAtMs: DEC_1 } });
-    expect(w.budget.allowance(friend.userId)).toEqual({ usedUsd: 2 * TUTOR, limitUsd: 2 * TUTOR, uncapped: false, resetsAtMs: DEC_1, held: { reason: "user_budget", resetsAtMs: DEC_1, usedUp: true } });
+    expect(w.budget.allowance(friend.userId)).toEqual({ usedUsd: 2 * TUTOR, reservedUsd: 0, limitUsd: 2 * TUTOR, uncapped: false, resetsAtMs: DEC_1, held: { reason: "user_budget", resetsAtMs: DEC_1, usedUp: true } });
   });
 
   test("the local user has no Clerk id, so listing the word local does not uncap it", () => {
@@ -126,7 +126,7 @@ describe("AFTERCLASS_BUDGET_UNCAPPED_USERS", () => {
 });
 
 describe("the usage page", () => {
-  const admin = { usedUsd: 1.5, limitUsd: null, uncapped: true, resetsAtMs: DEC_1, held: null } as const;
+  const admin = { usedUsd: 1.5, reservedUsd: 0, limitUsd: null, uncapped: true, resetsAtMs: DEC_1, held: null } as const;
 
   test("labels an uncapped account and says its spend is not in everyone's total", () => {
     expect(allowanceView(admin)!.line).toBe("Uncapped account: $1.50 counted this month, with no cap. It is not counted toward everyone's total.");
@@ -135,7 +135,7 @@ describe("the usage page", () => {
 
   test("a backend that does not send the flag decodes as capped", () => {
     const decoded = usageResponse.parse({ byKind: {}, byPurpose: {}, allowance: { usedUsd: 1, limitUsd: 5, resetsAtMs: DEC_1, held: null } });
-    expect(decoded.allowance).toEqual({ usedUsd: 1, limitUsd: 5, uncapped: false, resetsAtMs: DEC_1, held: null });
+    expect(decoded.allowance).toEqual({ usedUsd: 1, limitUsd: 5, reservedUsd: 0, uncapped: false, resetsAtMs: DEC_1, held: null });
     expect(usageResponse.parse({ byKind: {}, byPurpose: {}, allowance: { ...admin } }).allowance!.uncapped).toBe(true);
   });
 });

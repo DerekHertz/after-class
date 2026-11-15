@@ -558,6 +558,7 @@ const PURPOSES = ["boundary", "frame_change", "claim_check", "interpretation", "
 
 const allowancez = z.object({
   usedUsd: z.number(),
+  reservedUsd: z.number().default(0),
   limitUsd: z.number().nullable(),
   uncapped: z.boolean().default(false),
   resetsAtMs: z.number(),

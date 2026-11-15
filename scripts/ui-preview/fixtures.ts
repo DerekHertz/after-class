@@ -26,7 +26,7 @@ export const ids = {
   chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait"), ordering: id("cpt", "ordering"), earlierCapture: id("cap", "earlier-capture"),
   otherCapture: id("cap", "other-capture"), pendingReview: id("rvw", "pending-review"), unsavedReview: id("rvw", "unsaved-review"),
 };
-export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-split", "capture-processing", "capture-held", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "usage", "usage-held", "usage-uncapped", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
+export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-split", "capture-processing", "capture-held", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "usage", "usage-held", "usage-reserved", "usage-uncapped", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
 export type Scenario = typeof scenarios[number];
 export const scenarioFrom = (search: string): Scenario => scenarios.find(s => s === new URLSearchParams(search).get("scenario")) ?? "review";
 
@@ -267,6 +267,7 @@ export function createFixture(scenario: Scenario): Fixture {
     async deleteEvidence(evidenceIds) { log("evidence.delete"); record = { ...record, unavailableEvidence: evidenceIds.map(id => ({ kind: "deleted", id, deletedAtMs: 1000 })) }; },
     async usage() {
       const held = scenario === "usage-held" || scenario === "capture-held" || scenario === "held-turn";
+      if (scenario === "usage-reserved") return usageSummaryz.parse({ byKind: { estimated: { calls: 12, usd: 0.76 } }, byPurpose: { tutor_turn: { calls: 12, errors: 0, unknownCost: 0 } }, allowance: { usedUsd: 1.1, reservedUsd: 0.34, limitUsd: 5, resetsAtMs: MONTH_END, held: null } });
       if (scenario === "usage-uncapped") return usageSummaryz.parse({ byKind: { estimated: { calls: 22, usd: 11.62 } }, byPurpose: { tutor_turn: { calls: 22, errors: 0, unknownCost: 0 } }, allowance: { usedUsd: 11.62, limitUsd: null, uncapped: true, resetsAtMs: MONTH_END, held: null } });
       if (scenario === "held-turn-used-up") return usageSummaryz.parse({ byKind: {}, byPurpose: {}, allowance: { usedUsd: 5, limitUsd: 5, resetsAtMs: MONTH_END, held: { reason: "user_budget", resetsAtMs: MONTH_END, usedUp: true } } });
       return usageSummaryz.parse(held
