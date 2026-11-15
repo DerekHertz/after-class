@@ -300,7 +300,7 @@ export type FrameEntry = {
    * When the frame's fact arrived (server time), while `nearby` can still grow. Null once it cannot: the watched media has
    * passed the window's far edge with no caption near the frame still half watched, the video played to its end, the viewer
    * moved to another video, or the capture is paused or stopped. Asking while the window is open keys the question on a
-   * caption list about to change. Facts cannot show a YouTube pause or a rewind, so evidence bounds the wait in wall time.
+   * caption list about to change. Facts cannot show a YouTube pause or a rewind, so evidence bounds the wait in elapsed time.
    */
   readonly windowOpenSinceMs: number | null;
 };

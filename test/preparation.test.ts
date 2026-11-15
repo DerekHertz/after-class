@@ -102,7 +102,7 @@ function world(opts: { readonly interpret?: Task<InterpretationInput, Interpreta
       gaps: [],
       ads: [],
     }),
-    frameDemandIn: () => [],
+    pin: () => null,
     lookup: memo.lookup,
     run: (task, input, signal) => memo.run(task, input, { signal }),
     clearFailures: memo.clearFailures,

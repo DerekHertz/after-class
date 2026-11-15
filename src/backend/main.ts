@@ -583,8 +583,8 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       },
     });
     const ledger = createLedger(db, budget);
-    /** Per capture, the earliest pump a waiting frame asked for that has not fired yet. */
-    const wakes = new Map<CaptureId, number>();
+    /** Per capture, the one timer for the earliest pump a waiting frame asked for, on the monotonic clock. */
+    const wakes = new Map<CaptureId, { readonly at: number; readonly timer: ReturnType<typeof setTimeout> }>();
     const lookup: LookupFn = (task, input) => {
       const looked = memo.lookup(task, input);
       read(memoDep(looked.key));
@@ -597,16 +597,19 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       frameChangeKey: (input) => memo.key(tasks.frameChange, input),
       read,
       ...(options.frameHoldMs === undefined ? {} : { frameHoldMs: options.frameHoldMs }),
-      wakeAt(captureId, atMs) {
+      wakeIn(captureId, delayMs) {
+        const at = performance.now() + delayMs;
         const set = wakes.get(captureId);
-        if (set !== undefined && set <= atMs) return;
-        wakes.set(captureId, atMs);
-        setTimeout(() => {
-          if (wakes.get(captureId) === atMs) wakes.delete(captureId);
+        if (set !== undefined && set.at <= at) return;
+        if (set !== undefined) clearTimeout(set.timer);
+        const timer = setTimeout(() => {
+          wakes.delete(captureId);
           if (!alive) return;
           wake(captureId);
           pump();
-        }, Math.max(0, atMs - Date.now())).unref?.();
+        }, delayMs);
+        timer.unref?.();
+        wakes.set(captureId, { at, timer });
       },
       onChange(captureId, keys) {
         // A capture's first upload is the only way a capture enters the working set after boot.
@@ -655,7 +658,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       chunk: segmentation.revision,
       currentChunks: segmentation.current,
       bundle: evidence.bundle,
-      frameDemandIn: evidence.frameDemandIn,
+      pin: evidence.pin,
       lookup,
       run: (task, input, signal) => memo.run(task, input, { signal }),
       clearFailures: memo.clearFailures,

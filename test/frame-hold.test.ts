@@ -9,32 +9,39 @@ import { productFrameChangeTask } from "../src/backend/providers/jev-tasks";
 import { createMemo } from "../src/backend/providers/memo";
 import { initialPlayback, stepPlayback } from "../src/extension/content/capture";
 import type { Verdict } from "../src/shared/domain";
+import type { UserDb } from "../src/backend/db";
 import type { CaptureId } from "../src/shared/ids";
 import { stableId } from "../src/shared/ids";
 import { OTHER, VIDEO, stream } from "./evidence-fixtures";
-import type { FakeTask } from "./fakes";
-import { fakeTask, ok, testUserDb } from "./fakes";
+import type { FakeStep, FakeTask } from "./fakes";
+import { deferred, fakeTask, ok, testUserDb } from "./fakes";
 import { tmpDir } from "./tmp";
 
 const frameCanonical = productFrameChangeTask({} as JevClient).canonicalInput;
-const frameTask = () =>
-  Object.assign(fakeTask({ purpose: "frame_change", answer: () => ok("yes") }), { canonicalInput: frameCanonical }) as unknown as FakeTask<FrameChangeInput, Verdict>;
+type Answer = (input: FrameChangeInput) => FakeStep<Verdict> | Promise<FakeStep<Verdict>>;
+const frameTask = (answer: Answer = () => ok("yes")) =>
+  Object.assign(fakeTask({ purpose: "frame_change", answer: answer as never }), { canonicalInput: frameCanonical }) as unknown as FakeTask<FrameChangeInput, Verdict>;
 
 /** Evidence over a real memo and a counting fake Jev that answers "yes". */
-function world() {
-  const db = testUserDb();
-  const clock = { t: 1_000_000 };
-  const task = frameTask();
+function world(o: { db?: UserDb; clock?: { t: number; mono: number }; answer?: Answer } = {}) {
+  const db = o.db ?? testUserDb();
+  const clock = o.clock ?? { t: 1_000_000, mono: 0 };
+  const task = frameTask(o.answer);
   const memo = createMemo(db, "live");
-  const wakes: { captureId: CaptureId; atMs: number }[] = [];
+  const wakes: { captureId: CaptureId; delayMs: number }[] = [];
   const evidence = createEvidence(db, tmpDir("frame-hold-"), {
     lookupFrameChange: (input) => memo.lookup(task, input),
     runFrameChange: (input, signal) => memo.run(task, input, { signal }),
     frameChangeKey: (input) => memo.key(task, input),
     onChange: () => {},
     now: () => clock.t,
-    wakeAt: (captureId, atMs) => void wakes.push({ captureId, atMs }),
+    monotonic: () => clock.mono,
+    wakeIn: (captureId, delayMs) => void wakes.push({ captureId, delayMs }),
   });
+  const pass = (ms: number) => {
+    clock.t += ms;
+    clock.mono += ms;
+  };
   const s = stream();
   const ingest = () => evidence.ingest({ captureId: s.captureId, facts: s.facts.splice(0) });
   const frame = () => evidence.watchOrder(s.captureId).frameCandidates.find((f) => f.id === stableId("ev", s.captureId, "b"))!;
@@ -44,7 +51,7 @@ function world() {
   };
   const inBundle = () => evidence.bundle(evidence.watchedMaterial(s.captureId)).frames.some((f) => f.id === frame().id);
   const asked = () => task.calls.map((i) => i.nearbyPassages.map((p) => p.text));
-  return { clock, task, memo, wakes, evidence, s, ingest, frame, demand, run, inBundle, asked };
+  return { db, clock, pass, task, memo, wakes, evidence, s, ingest, frame, demand, run, inBundle, asked };
 }
 
 /** Frame "b" at 8 s, watched to 10 s: its caption window reaches 23 s, so it is still open. */
@@ -69,10 +76,10 @@ describe("a frame whose caption window never closes is asked once its wait ends"
     seed(w);
     expect(w.evidence.captureView(w.s.captureId).status.state).toBe("capturing");
     expect(w.demand()).toHaveLength(0);
-    expect(w.wakes.at(-1)).toEqual({ captureId: w.s.captureId, atMs: w.clock.t + FRAME_HOLD_MS });
-    w.clock.t += FRAME_HOLD_MS - 1;
+    expect(w.wakes.at(-1)).toEqual({ captureId: w.s.captureId, delayMs: FRAME_HOLD_MS });
+    w.pass(FRAME_HOLD_MS - 1);
     expect(w.demand()).toHaveLength(0);
-    w.clock.t += 1;
+    w.pass(1);
     expect(w.demand()).toHaveLength(1);
   });
 
@@ -101,7 +108,7 @@ describe("a frame whose caption window never closes is asked once its wait ends"
       const w = world();
       play(w);
       expect(w.demand()).toHaveLength(0);
-      w.clock.t += FRAME_HOLD_MS;
+      w.pass(FRAME_HOLD_MS);
       expect(w.demand()).toHaveLength(1);
     });
   }
@@ -211,11 +218,76 @@ describe("how often a frame is asked", () => {
     expect(w.asked()).toEqual([["last caption"]]);
   });
 
-  test("frameDemandIn asks for the frames of a material whatever their wait", () => {
+  test("a pin asks for the frames of a material whatever their wait", () => {
     const w = world();
     seed(w);
     expect(w.demand()).toHaveLength(0);
-    expect(w.evidence.frameDemandIn(w.evidence.watchedMaterial(w.s.captureId))).toHaveLength(1);
+    const pinned = w.evidence.pin(w.evidence.watchedMaterial(w.s.captureId))!.settle();
+    expect(pinned.kind === "waiting" ? pinned.work : []).toHaveLength(1);
+  });
+});
+
+describe("a server clock that steps back does not stretch a frame's wait", () => {
+  test("while the process runs", () => {
+    const w = world();
+    seed(w);
+    expect(w.demand()).toHaveLength(0);
+    w.clock.t -= 300_000;
+    expect(w.demand()).toHaveLength(0);
+    expect(w.wakes.at(-1)!.delayMs).toBe(FRAME_HOLD_MS);
+    w.pass(FRAME_HOLD_MS);
+    expect(w.demand()).toHaveLength(1);
+  });
+
+  test("after a restart", () => {
+    const w = world();
+    seed(w);
+    const restarted = world({ db: w.db, clock: { t: w.clock.t - 300_000, mono: 0 } });
+    expect(restarted.evidence.frameDemand(w.s.captureId)).toHaveLength(0);
+    expect(restarted.wakes.at(-1)!.delayMs).toBe(FRAME_HOLD_MS);
+    restarted.pass(FRAME_HOLD_MS);
+    expect(restarted.evidence.frameDemand(w.s.captureId)).toHaveLength(1);
+  });
+});
+
+/** Captions every 5 s, watched to 495 s. Frame "b" at 485 s and "c" at 490 s are "no" once caption 99 (495 to 500 s) is near them. */
+function lateLecture(o: { held?: string } = {}) {
+  const gate = deferred<FakeStep<Verdict>>();
+  const s = stream();
+  const id = (name: string) => stableId("ev", s.captureId, name);
+  const answer: Answer = (i) =>
+    i.after.frame.id === (o.held === undefined ? null : id(o.held)) ? gate.promise : ok(i.nearbyPassages.some((p) => p.text === "caption 99") ? "no" : "yes");
+  const play = () => {
+    s.control("start");
+    s.source();
+    s.transcript(Array.from({ length: 120 }, (_, i): [number, number, string] => [i * 5, (i + 1) * 5, `caption ${i}`]));
+    s.span(0, 495);
+    s.frame("a", 1);
+    s.frame("b", 485);
+    s.frame("c", 490);
+    return s.facts.splice(0);
+  };
+  return { gate, s, id, answer, play, playOn: () => [s.span(495, 515)] };
+}
+
+describe("an interpretation that waits for frames only gains frames", () => {
+  test("a frame kept when it pinned stays, and a waiting frame is judged with the captions of that moment", async () => {
+    const l = lateLecture({ held: "c" });
+    const w = world({ answer: l.answer });
+    w.evidence.ingest({ captureId: l.s.captureId, facts: l.play() });
+    const material = w.evidence.watchedMaterial(l.s.captureId);
+    const first = w.evidence.pin(material)!.settle();
+    const asked = (first.kind === "waiting" ? first.work : []).map((x) => x.run(new AbortController().signal));
+    await until(() => w.evidence.bundle(material).frames.length === 2);
+    const pin = w.evidence.pin(material)!;
+    expect(w.evidence.bundle(material).frames.map((f) => f.id)).toEqual([l.id("a"), l.id("b")]);
+    w.evidence.ingest({ captureId: l.s.captureId, facts: l.playOn() });
+    expect(w.evidence.bundle(material).frames.map((f) => f.id)).toEqual([l.id("a")]);
+    expect(pin.settle().kind).toBe("waiting");
+    l.gate.resolve(ok("yes"));
+    await Promise.all(asked);
+    const settled = pin.settle();
+    expect(settled.kind === "ready" ? settled.bundle.frames.map((f) => f.id) : []).toEqual([l.id("a"), l.id("b"), l.id("c")]);
   });
 });
 
@@ -227,7 +299,7 @@ const until = async (done: () => boolean) => {
   }
 };
 
-function tasks() {
+function tasks(answer?: Answer) {
   const boundary = Object.assign(
     fakeTask({
       purpose: "boundary",
@@ -235,7 +307,7 @@ function tasks() {
     }),
     { canonicalInput: (i: { window: { id: string } }) => i.window.id },
   );
-  const frameChange = frameTask();
+  const frameChange = frameTask(answer);
   const interpret = Object.assign(fakeTask({ purpose: "interpretation", provider: "claude", answer: () => ok({ concepts: [], links: [], supersedes: [] }) }), {
     canonicalInput: canonicalInterpretation,
   }) as unknown as FakeTask<InterpretationInput, InterpretationOutput>;
@@ -317,6 +389,68 @@ describe("composition", () => {
       expect(f.preparation.interpret.calls[0]!.newMaterial.frames.some((fr) => fr.id === frameId)).toBe(true);
       expect(f.frameChange.calls).toHaveLength(1);
     } finally {
+      await r.stop();
+    }
+  });
+  test("an interpretation keeps the bundle it waited with when playback moves on", async () => {
+    const l = lateLecture({ held: "c" });
+    const f = tasks(l.answer);
+    const r = await app(f);
+    try {
+      r.modules.evidence.ingest({ captureId: l.s.captureId, facts: l.play() });
+      await until(() => f.frameChange.calls.length === 2);
+      r.modules.evidence.ingest({ captureId: l.s.captureId, facts: l.playOn() });
+      await Bun.sleep(100);
+      expect(f.preparation.interpret.calls).toHaveLength(0);
+      l.gate.resolve(ok("yes"));
+      await until(() => f.preparation.interpret.calls.length === 1);
+      expect(f.preparation.interpret.calls[0]!.newMaterial.frames.map((fr) => fr.id)).toEqual([l.id("a"), l.id("b"), l.id("c")]);
+    } finally {
+      await r.stop();
+    }
+  });
+
+  test("one wake timer per capture, the earliest wait winning", async () => {
+    const realSet = globalThis.setTimeout;
+    const realClear = globalThis.clearTimeout;
+    const pending = new Set<unknown>();
+    const fromMain = () => new Error().stack?.includes("/src/backend/main.ts:") === true;
+    globalThis.setTimeout = ((fn: () => void, ms: number) => {
+      if (!fromMain() || ms < 100) return realSet(fn, ms);
+      const t = realSet(() => {
+        pending.delete(t);
+        fn();
+      }, ms);
+      pending.add(t);
+      return t;
+    }) as typeof setTimeout;
+    globalThis.clearTimeout = ((t: ReturnType<typeof setTimeout>) => {
+      pending.delete(t);
+      realClear(t);
+    }) as typeof clearTimeout;
+    const f = tasks();
+    const r = await app(f, 400);
+    try {
+      const s = stream();
+      s.control("start");
+      s.source();
+      s.span(0, 10);
+      s.frame("a", 1);
+      s.frame("b", 100);
+      r.modules.evidence.ingest({ captureId: s.captureId, facts: s.facts.splice(0) });
+      await Bun.sleep(150);
+      s.frame("c", 8);
+      r.modules.evidence.ingest({ captureId: s.captureId, facts: s.facts.splice(0) });
+      await Bun.sleep(50);
+      expect(pending.size).toBe(1);
+      s.span(100, 101);
+      r.modules.evidence.ingest({ captureId: s.captureId, facts: s.facts.splice(0) });
+      await Bun.sleep(50);
+      expect(pending.size).toBe(1);
+      await until(() => f.frameChange.calls.length === 2);
+    } finally {
+      globalThis.setTimeout = realSet;
+      globalThis.clearTimeout = realClear;
       await r.stop();
     }
   });

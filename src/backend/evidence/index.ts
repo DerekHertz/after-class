@@ -76,11 +76,14 @@ export type EvidenceStore = {
   frameBytes(id: EvidenceId): Uint8Array | null;
   /**
    * Frame-change judgments still needed (frames with teaching "unjudged"), except those still waiting for their caption
-   * window (`FrameEntry.windowOpenSinceMs`, for at most `frameHoldMs`). It asks `wakeAt` for a pump when the first wait ends.
+   * window (`FrameEntry.windowOpenSinceMs`, for at most `frameHoldMs`). It asks `wakeIn` for a pump when the first wait ends.
    */
   frameDemand(captureId: CaptureId): readonly WorkItem[];
-  /** Every judgment the frames inside `material` still need, waiting or not: a reader that freezes the material asks these first. */
-  frameDemandIn(material: Material): readonly WorkItem[];
+  /**
+   * `bundle(material)` as it stands now, kept with the frames inside it that have no verdict yet. Null when every frame has
+   * one. A reader that would freeze the bundle now waits on the pin instead, and gets that bundle plus those frames.
+   */
+  pin(material: Material): FramePin | null;
   /**
    * Called by record.save inside the save transaction: copy cited evidence
    * (passage text + interval, frame file hard-link) into evidence_snapshots.
@@ -137,6 +140,14 @@ function unlinkQuiet(path: string): boolean {
   }
 }
 
+/**
+ * A bundle held while its unanswered frames are asked. `settle` asks each one with the captions it had when pinned, so the
+ * wait only adds frames. Evidence the user deleted since drops out.
+ */
+export type FramePin = {
+  settle(): { readonly kind: "waiting"; readonly work: readonly WorkItem[] } | { readonly kind: "ready"; readonly bundle: EvidenceBundle };
+};
+
 /** 15 s of media at 1x completes a frame's caption window about 20 s after it arrives, span flushes included. */
 export const FRAME_HOLD_MS = 60_000;
 
@@ -154,14 +165,17 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   onChange(captureId: CaptureId | null, changed: readonly Dep[]): void;
   /** Called for each key a read depends on that a write to another capture can change. Absent where nothing listens. */
   read?: ReadDep;
-  /** Clock for received and created timestamps, and for how long a frame waits. Defaults to Date.now. */
+  /** Clock for received and created timestamps. Defaults to Date.now. */
   now?: () => number;
+  /** Clock that never steps back, for how long a frame has waited in this process. Defaults to performance.now. */
+  monotonic?: () => number;
   /** The longest an unanswered frame waits for its caption window. Defaults to FRAME_HOLD_MS. */
   frameHoldMs?: number;
-  /** Asks for a pump of this capture at `atMs`, when a frame stops waiting for its caption window. */
-  wakeAt?(captureId: CaptureId, atMs: number): void;
+  /** Asks for a pump of this capture in `delayMs`, when a frame stops waiting for its caption window. */
+  wakeIn?(captureId: CaptureId, delayMs: number): void;
 }): EvidenceStoreWithProbe {
   const now = deps.now ?? Date.now;
+  const monotonic = deps.monotonic ?? (() => performance.now());
   const frameHoldMs = deps.frameHoldMs ?? FRAME_HOLD_MS;
   const userId = db.userId;
   const abs = (rel: string) => join(dataDir, rel);
@@ -285,12 +299,37 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   }
 
   /** "Uncertain visual → keep the frame." */
+  function teachingOf(input: FrameChangeInput): FrameTeaching {
+    const found = deps.lookupFrameChange(input);
+    if (found.kind === "hit") return found.value === "yes" ? "kept" : found.value === "no" ? "dropped" : "uncertain";
+    return found.kind === "failed" ? "uncertain" : "unjudged";
+  }
+
   function judge(e: FrameEntry): { readonly teaching: FrameTeaching; readonly input: FrameChangeInput | null } {
     if (!e.before) return { teaching: "kept", input: null };
     const input = inputOf(e);
-    const found = deps.lookupFrameChange(input);
-    if (found.kind === "hit") return { teaching: found.value === "yes" ? "kept" : found.value === "no" ? "dropped" : "uncertain", input };
-    return { teaching: found.kind === "failed" ? "uncertain" : "unjudged", input };
+    return { teaching: teachingOf(input), input };
+  }
+
+  const shown = (t: FrameTeaching) => t === "kept" || t === "uncertain";
+  const byMedia = (a: Frame, b: Frame) => (a.sourceId < b.sourceId ? -1 : a.sourceId > b.sourceId ? 1 : a.mediaS - b.mediaS);
+
+  /**
+   * Per waiting frame, when its wait ends on the monotonic clock. The first sight in this process starts it from the fact's
+   * received time, clamped to one hold, so a server clock stepping back cannot stretch it.
+   */
+  const holds = new Map<EvidenceId, number>();
+  function holdLeft(e: FrameEntry, at: number, wall: number): number {
+    if (e.windowOpenSinceMs === null) {
+      holds.delete(e.frame.id);
+      return 0;
+    }
+    let until = holds.get(e.frame.id);
+    if (until === undefined) {
+      until = at + Math.min(frameHoldMs, Math.max(0, e.windowOpenSinceMs + frameHoldMs - wall));
+      holds.set(e.frame.id, until);
+    }
+    return until - at;
   }
 
   const withTeaching = (e: FrameEntry): Frame => ({ ...e.frame, teaching: judge(e).teaching });
@@ -308,6 +347,33 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
       for (const e of p.frames) if (!dead.has(e.frame.id) && !seen.has(e.frame.id) && frameInside(material, e.frame)) seen.set(e.frame.id, e);
     }
     return [...seen.values()];
+  }
+
+  function bundleOf(material: Material): EvidenceBundle {
+    const frames = new Map<EvidenceId, Frame>();
+    for (const e of framesIn(material)) {
+      const frame = withTeaching(e);
+      if (shown(frame.teaching)) frames.set(frame.id, frame);
+    }
+    const dead = deleted();
+    const scope = selectScope(allProjections(), material);
+    const passages = new Map<EvidenceId, Passage>();
+    const ads = new Map<string, AdRecord>();
+    const gaps: Gap[] = [];
+    for (const p of scope) {
+      for (const w of p.passages) {
+        if (!dead.has(w.passage.id) && Material.covers(material, w.passage.sourceId, w.passage.interval)) passages.set(w.passage.id, w.passage);
+      }
+      for (const g of p.gaps) gaps.push(...clipGap(material, g));
+      for (const a of p.ads) if (adInside(material, a)) ads.set(`${a.sourceId}|${a.atContentS}|${a.wallDurationMs}`, a);
+    }
+    return {
+      material,
+      passages: [...passages.values()].sort((a, b) => (a.sourceId < b.sourceId ? -1 : a.sourceId > b.sourceId ? 1 : a.interval.start - b.interval.start)),
+      frames: [...frames.values()].sort(byMedia),
+      gaps: dedupeGaps(gaps),
+      ads: [...ads.values()],
+    };
   }
 
   const frameRow = db.sql.query<{ path: string }, [string, string]>("SELECT path FROM frames WHERE user_id = ? AND evidence_id = ?");
@@ -491,32 +557,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
       };
     },
 
-    bundle(material) {
-      const frames = new Map<EvidenceId, Frame>();
-      for (const e of framesIn(material)) {
-        const frame = withTeaching(e);
-        if (frame.teaching === "kept" || frame.teaching === "uncertain") frames.set(frame.id, frame);
-      }
-      const dead = deleted();
-      const scope = selectScope(allProjections(), material);
-      const passages = new Map<EvidenceId, Passage>();
-      const ads = new Map<string, AdRecord>();
-      const gaps: Gap[] = [];
-      for (const p of scope) {
-        for (const w of p.passages) {
-          if (!dead.has(w.passage.id) && Material.covers(material, w.passage.sourceId, w.passage.interval)) passages.set(w.passage.id, w.passage);
-        }
-        for (const g of p.gaps) gaps.push(...clipGap(material, g));
-        for (const a of p.ads) if (adInside(material, a)) ads.set(`${a.sourceId}|${a.atContentS}|${a.wallDurationMs}`, a);
-      }
-      return {
-        material,
-        passages: [...passages.values()].sort((a, b) => (a.sourceId < b.sourceId ? -1 : a.sourceId > b.sourceId ? 1 : a.interval.start - b.interval.start)),
-        frames: [...frames.values()].sort((a, b) => (a.sourceId < b.sourceId ? -1 : a.sourceId > b.sourceId ? 1 : a.mediaS - b.mediaS)),
-        gaps: dedupeGaps(gaps),
-        ads: [...ads.values()],
-      };
-    },
+    bundle: bundleOf,
 
     get(ids) {
       const dead = deleted();
@@ -543,26 +584,51 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
 
     frameDemand(captureId) {
       const dead = deleted();
-      const at = now();
+      const at = monotonic();
+      const wall = now();
       const items: WorkItem[] = [];
       let wake = Infinity;
       for (const e of projectOwn(captureId).frames) {
-        if (dead.has(e.frame.id)) continue;
-        const { teaching, input } = judge(e);
-        if (teaching !== "unjudged" || input === null) continue;
-        const until = e.windowOpenSinceMs === null ? -Infinity : e.windowOpenSinceMs + frameHoldMs;
-        if (until > at) wake = Math.min(wake, until);
-        else items.push(frameWork(input));
+        const judged = dead.has(e.frame.id) ? null : judge(e);
+        if (judged?.teaching !== "unjudged" || judged.input === null) {
+          holds.delete(e.frame.id);
+          continue;
+        }
+        const left = holdLeft(e, at, wall);
+        if (left > 0) wake = Math.min(wake, left);
+        else items.push(frameWork(judged.input));
       }
-      if (wake !== Infinity) deps.wakeAt?.(captureId, wake);
+      if (wake !== Infinity) deps.wakeIn?.(captureId, wake);
       return items;
     },
 
-    frameDemandIn(material) {
-      return framesIn(material).flatMap((e) => {
+    pin(material) {
+      const unanswered = framesIn(material).flatMap((e) => {
         const { teaching, input } = judge(e);
-        return teaching === "unjudged" && input !== null ? [frameWork(input)] : [];
+        return teaching === "unjudged" && input !== null ? [input] : [];
       });
+      if (unanswered.length === 0) return null;
+      const held = bundleOf(material);
+      return {
+        settle() {
+          const dead = deleted();
+          const work: WorkItem[] = [];
+          const added: Frame[] = [];
+          for (const input of unanswered) {
+            if (dead.has(input.after.frame.id)) continue;
+            const teaching = teachingOf(input);
+            if (teaching === "unjudged") work.push(frameWork(input));
+            else if (shown(teaching)) added.push({ ...input.after.frame, teaching });
+          }
+          if (work.length > 0) return { kind: "waiting", work };
+          const bundle: EvidenceBundle = {
+            ...held,
+            passages: held.passages.filter((p) => !dead.has(p.id)),
+            frames: [...held.frames, ...added].filter((f) => !dead.has(f.id)).sort(byMedia),
+          };
+          return { kind: "ready", bundle };
+        },
+      };
     },
 
     snapshotInTx(ids) {
