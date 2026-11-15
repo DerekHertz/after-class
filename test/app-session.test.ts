@@ -678,3 +678,48 @@ describe("the header actions while a turn settles", () => {
     expect(header({})).not.toContain("disabled");
   });
 });
+
+describe("a page loaded while the backend still runs a turn", () => {
+  const unanswered = (o: Parameters<typeof reviewJson>[0] = {}) => parsedReview({ turns: [tutorAsk, learnerAnswer(2)], ...o });
+  const reply = turnJson(3, "tutor", { move: { kind: "ask_followup", threadId: thr }, say: "Why does that hold?" });
+  const state = (view: ReviewView): SessionState => ({
+    view, loadError: null, live: null, unsent: [], sendError: null, saving: false, saveError: null, savedSummary: null, storageDegraded: false, busy: false,
+  });
+
+  test("it waits and re-reads the review, never resends, and shows the reply once the backend says the turn is over", async () => {
+    let reads = 0;
+    const h = setup({
+      sendTurn: () => { throw new Error("no new call"); },
+      review: () => (reads++ < 3 ? unanswered({ turnInFlight: true }) : parsedReview({ turns: [tutorAsk, learnerAnswer(2), reply] })),
+    });
+    await h.controller.load();
+    expect(h.controller.getState().view?.turnInFlight).toBe(true);
+    for (let i = 0; i < 200 && h.controller.getState().view?.turnInFlight; i++) await Bun.sleep(5);
+    expect(h.controller.getState().view?.turns.map((t) => t.actor)).toEqual(["tutor", "learner", "tutor"]);
+    expect(h.sends).toEqual([]);
+    h.controller.dispose();
+  });
+
+  test("an unreadable review gives the Retry button back instead of waiting for ever", async () => {
+    let reads = 0;
+    const h = setup({
+      sendTurn: () => events(),
+      review: () => { if (reads++ === 0) return unanswered({ turnInFlight: true }); throw new Error("offline"); },
+    });
+    await h.controller.load();
+    for (let i = 0; i < 400 && h.controller.getState().view?.turnInFlight; i++) await Bun.sleep(5);
+    expect(h.controller.getState().view?.turnInFlight).toBe(false);
+    h.controller.dispose();
+  });
+
+  test("a turn that owes a move is not resumed while the backend is still running it", () => {
+    const owing = parsedReview({ turns: [tutorAsk, learnerAnswer(2), turnJson(3, "tutor", { move: { kind: "close_thread", threadId: thr }, say: "Moving on." })], owesMove: true });
+    expect(needsResume(state(owing))).toBe(true);
+    expect(needsResume(state({ ...owing, turnInFlight: true }))).toBe(false);
+  });
+
+  test("the wire schema carries turnInFlight", () => {
+    expect(parsedReview({ turnInFlight: true }).turnInFlight).toBe(true);
+    expect(reviewViewz.safeParse({ ...reviewJson(), turnInFlight: undefined }).success).toBe(false);
+  });
+});

@@ -565,7 +565,7 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
         const view = reviewOf(reviews, reviewId!);
         if (!view) return failure(404, "unknown review", cors);
         const { saved, observations } = savedOf(record, reviewId!);
-        return replyWire("review", { ...view, scope: wireScope(view.scope), observations: [...view.observations, ...observations], saved }, cors);
+        return replyWire("review", { ...view, turnInFlight: guard.inFlight.has(reviewId!), scope: wireScope(view.scope), observations: [...view.observations, ...observations], saved }, cors);
       }
       case "save": {
         if (!record) return null;

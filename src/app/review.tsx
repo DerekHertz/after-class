@@ -51,6 +51,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
   useEffect(() => {
     void controller.load();
+    return () => controller.dispose();
   }, [controller]);
   // Flow D: the learner starts the review from the topic checklist; nothing begins by itself.
   const resume = useMemo(() => resumeOnce(controller), [controller]);
@@ -186,7 +187,9 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const unanswered = unansweredLearnerTurn(view.turns);
   const heading = lectureHeading([...titles.values()]);
   const scopeSeconds = Material.sources(view.scope.material).reduce((sum, id) => sum + Material.get(view.scope.material, id).intervals().reduce((s, i) => s + (i.end - i.start), 0), 0);
-  const canRetry = !streaming && state.live?.status !== "held" && (state.unsent.length > 0 || unanswered !== null || owedLearnerTurn(view) !== null || strandedEndTurn(view) !== null || state.live?.status === "failed");
+  /** The backend is still running a turn this page did not start, so the reply is on its way and Retry would only replay it. */
+  const awaitingReply = view.turnInFlight && !streaming && state.unsent.length === 0;
+  const canRetry = !streaming && !awaitingReply && state.live?.status !== "held" && (state.unsent.length > 0 || unanswered !== null || owedLearnerTurn(view) !== null || strandedEndTurn(view) !== null || state.live?.status === "failed");
 
   const questionMarker = view.state.mainQuestions > 0 ? `Question ${view.state.mainQuestions}` : null;
 
@@ -211,6 +214,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
       </section>
     )}
     {handoff !== "none" && <p ref={startStatus} className="note" role="status" tabIndex={-1}>{canRetry ? "Your review has started, but the tutor's first question has not arrived." : "Your review has started. Waiting for the tutor's first question."}</p>}
+    {awaitingReply && <p className="note" role="status">The tutor is still replying. It will show up here when it is ready.</p>}
     {canRetry && (
       <UndeliveredNote
         unsent={state.unsent.length}
@@ -229,7 +233,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
 
   const deskContent = <Composer
     actions={actions.filter((a) => !["continue", "wrap_up", "pause", "resume", "end"].includes(a))}
-    disabled={held || state.unsent.length > 0}
+    disabled={held || awaitingReply || state.unsent.length > 0}
     sendError={state.sendError}
     speech={speech}
     showSpeak={voice}

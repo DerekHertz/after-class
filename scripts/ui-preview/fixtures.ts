@@ -26,7 +26,7 @@ export const ids = {
   chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait"), ordering: id("cpt", "ordering"), earlierCapture: id("cap", "earlier-capture"),
   otherCapture: id("cap", "other-capture"), pendingReview: id("rvw", "pending-review"), unsavedReview: id("rvw", "unsaved-review"),
 };
-export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-processing", "capture-held", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "usage", "usage-held", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
+export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "reload-unanswered", "reload-in-flight", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-processing", "capture-held", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "usage", "usage-held", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error"] as const;
 export type Scenario = typeof scenarios[number];
 export const scenarioFrom = (search: string): Scenario => scenarios.find(s => s === new URLSearchParams(search).get("scenario")) ?? "review";
 
@@ -83,6 +83,11 @@ export function createFixture(scenario: Scenario): Fixture {
       const help = turn("tutor", turns.length + 1, { move: { kind: "explain", threadId: ids.thread, evidence: [ids.frame, ids.passage] }, say: "The lecture calls this circular wait. Each thread is holding a resource while waiting for the other." });
       turns.push(help);
       turns.push(turn("tutor", turns.length + 1, { move: { kind: "ask_followup", threadId: ids.thread }, say: s === "long-reply" ? longReply : longReplyQuestion }));
+      // A reload after the learner's answer: the tutor's reply is not stored yet. In "reload-in-flight" the backend is still running that turn and stores it a few reads later.
+      if (s.startsWith("reload-")) {
+        turns.pop();
+        turns.push(answer(turns.length + 1, "Neither can continue until the other lets go of its lock."));
+      }
       if (disputes) {
         turns.push(turn("learner", turns.length + 1, { act: { kind: "dispute", text: "I did name circular wait: each thread holds one lock and waits for the other." } }));
         turns.push(turn("tutor", turns.length + 1, { move: { kind: "answer_dispute", threadId: ids.thread, evidence: [ids.passage], settled: false }, say: "Your answer described the waiting but not why neither thread can release its lock, which the lecture names as the condition." }));
@@ -115,7 +120,7 @@ export function createFixture(scenario: Scenario): Fixture {
       state: { reviewId, phase: s === "paused" || s === "home-paused" ? "paused" : s === "save-failure" || s === "saving" || saved ? "ended" : "active", mainQuestions: checklist ? 0 : disputes ? 2 : 1, quickChecks: saved && !disputes ? 1 : 0, fuzzy: saved ? [ids.concept] : [], openThread: checklist || saved ? null : ids.thread, lastLearnerAct: null,
         detour: s === "detour" ? { kind: "proposed", turnId: id("turn", "detour"), topic: "Resource ordering", needsResource: null } : s === "resource-wait" ? { kind: "awaiting_resource", resourceId: id("res", "resource"), topic: "Resource ordering" } : { kind: "none" },
         openDispute: null, corrections: [], activeSeconds: 30, softTargetS: 600, softTargetOffered: false, wrapUpRequested: false },
-      turns, owesMove: false, observations, saved: saved ? "saved" : s === "save-failure" || s === "saving" ? "save_pending" : "unsaved",
+      turns, owesMove: false, turnInFlight: s === "reload-in-flight", observations, saved: saved ? "saved" : s === "save-failure" || s === "saving" ? "save_pending" : "unsaved",
     };
   }
   let view: ReviewView = reviewViewz.parse(reviewJson(ids.review, scenario));
@@ -168,6 +173,7 @@ export function createFixture(scenario: Scenario): Fixture {
   let evidenceAttempts = 0;
   let diagramAttempts = 0;
   let reviewAttempts = 0;
+  let inFlightReads = 0;
   let topicReads = 0;
   const api: AppApi = {
     async review(reviewId) {
@@ -175,6 +181,10 @@ export function createFixture(scenario: Scenario): Fixture {
       if (earlierView !== null && reviewId === earlierView.reviewId) {
         if (scenario === "record-context-error" && reviewAttempts++ === 0) throw new ApiError("Fixture review lookup failed. Retry is available.", 503);
         return earlierView;
+      }
+      if (scenario === "reload-in-flight" && reviewId === view.reviewId && view.turnInFlight && ++inFlightReads > 4) {
+        const reply = { id: id("turn", "reload-reply"), reviewId: view.reviewId, seq: view.turns.length + 1, atMs: (view.turns.length + 1) * 1000, actor: "tutor", threadId: ids.thread, move: { kind: "ask_followup", threadId: ids.thread }, say: longReplyQuestion };
+        view = { ...view, turns: [...view.turns, reviewViewz.shape.turns.parse([reply])[0]!], turnInFlight: false };
       }
       return reviewId === view.reviewId ? view : savedView;
     },
