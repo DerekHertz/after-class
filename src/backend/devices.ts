@@ -106,15 +106,15 @@ export function createDevices(db: Db, options: DevicesOptions = {}): Devices {
    */
   function windowOf(client: string, at: number): { startMs: number; failures: number } {
     for (const [other, w] of attempts) {
-      if (at - w.startMs < windowMs && attempts.size < EXCHANGE_MAX_CLIENTS) break;
+      if (at - w.startMs < windowMs) break;
       attempts.delete(other);
     }
     let w = attempts.get(client);
-    if (w === undefined || at - w.startMs >= windowMs) {
-      w = { startMs: at, failures: 0 };
-      attempts.delete(client);
-      attempts.set(client, w);
-    }
+    if (w !== undefined && at - w.startMs < windowMs) return w;
+    attempts.delete(client);
+    if (attempts.size >= EXCHANGE_MAX_CLIENTS) attempts.delete(attempts.keys().next().value!);
+    w = { startMs: at, failures: 0 };
+    attempts.set(client, w);
     return w;
   }
 

@@ -94,6 +94,8 @@ describe("devices", () => {
     for (let i = 0; i < EXCHANGE_MAX_CLIENTS + 500; i++) devices.exchange("nope", `client-${i}`);
     expect(devices.trackedClients()).toBe(EXCHANGE_MAX_CLIENTS);
     expect(devices.exchange("nope", `client-${EXCHANGE_MAX_CLIENTS + 499}`).kind).toBe("limited");
+    expect(devices.exchange("nope", "client-500").kind).toBe("limited");
+    expect(devices.trackedClients()).toBe(EXCHANGE_MAX_CLIENTS);
     c.ms += 60_000;
     devices.exchange("nope", "late");
     expect(devices.trackedClients()).toBe(1);
