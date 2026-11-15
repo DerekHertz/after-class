@@ -487,6 +487,15 @@ function ndjson(events: AsyncIterable<TurnEvent>, cors: Record<string, string>, 
   return new Response(body, { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store", ...SECURITY_HEADERS, ...cors } });
 }
 
+/** The capture id a request names in its path or query, where `ROUTES[name].capture` says it is. A malformed query is left to the route to refuse with 400. */
+function captureIdOf(name: keyof typeof ROUTES, fromPath: CaptureId | undefined, req: Request): CaptureId | undefined {
+  const source = ROUTES[name].capture;
+  if (source === "path") return fromPath;
+  if (source !== "query") return undefined;
+  const parsed = ROUTES[name].query?.safeParse(Object.fromEntries(new URL(req.url).searchParams));
+  return parsed?.success && typeof parsed.data === "object" && parsed.data !== null && "captureId" in parsed.data ? (parsed.data.captureId as CaptureId) : undefined;
+}
+
 async function mounted(name: string, matched: { readonly params: Record<string, string> }, req: Request, modules: ServedModules, appOrigin: string, cors: Record<string, string>, guard: TurnGuard): Promise<Response | null> {
   const { evidence, reviews, record, preparation, segmentation, voice, diagrams } = modules;
   const captureId = matched.params.captureId as CaptureId | undefined;
@@ -495,9 +504,11 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
   const linkId = matched.params.linkId as LinkId | undefined;
   const observationId = matched.params.observationId as ObservationId | undefined;
   try {
-    // The one ownership check for every capture-scoped route. A capture id the caller does not hold answers 404, whether
-    // nobody holds it or another user does. Ingest is the exception: a device creates a capture by ingesting into a new id.
-    if (name !== "ingest" && captureId !== undefined && !evidence.holdsCapture(captureId)) return failure(404, "unknown capture", cors);
+    // The one ownership check for every route that takes a capture id from its path or query (`Route.capture`). A capture
+    // id the caller does not hold answers 404, whether nobody holds it or another user does. Ingest declares `body`: a
+    // device creates a capture by ingesting into a new id, so it decides for itself.
+    const scoped = captureIdOf(name as keyof typeof ROUTES, captureId, req);
+    if (scoped !== undefined && !evidence.holdsCapture(scoped)) return failure(404, "unknown capture", cors);
     switch (name) {
       case "ingest": {
         const raw = await readJson(req);
@@ -641,7 +652,6 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
       }
       case "evidence": {
         const q = parseQuery("evidence", new URL(req.url)) as { material: Material } | { ids: EvidenceId[] } | { captureId: CaptureId };
-        if ("captureId" in q && !evidence.holdsCapture(q.captureId)) return failure(404, "unknown capture", cors);
         const bundle =
           "material" in q ? evidence.bundle(q.material)
           : "ids" in q ? evidenceByIds(evidence, q.ids)

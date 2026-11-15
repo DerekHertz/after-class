@@ -12,7 +12,7 @@ import type { Segmentation } from "../src/backend/segmentation";
 import type { CaptureId, EvidenceId, UserId } from "../src/shared/ids";
 import { stableId } from "../src/shared/ids";
 import { DAY, JPEG, VIDEO, keyOf, stream } from "./evidence-fixtures";
-import { ROUTES } from "../src/shared/wire";
+import { ROUTES, type Route, type RouteName } from "../src/shared/wire";
 import { CAP, EXT_ID, JSON_HEADERS, TOKEN, bearer, VIDEO as WIRE_VIDEO, fixtureApp, ingest, post, registerCleanup, wireFacts } from "./http-fixtures";
 import { otherUserDb, testDb } from "./fakes";
 import { tmpDir } from "./tmp";
@@ -515,6 +515,8 @@ describe("every capture-scoped route answers 404 for a capture id the caller doe
     for (const s of servers.splice(0)) await s.stop(true);
   });
 
+  const NOTHING = { kind: "nothing_to_review", gaps: [], unverified: [], rewatch: [] } as const;
+
   /** Alice ingested CAP. Bob holds nothing. A third id is held by nobody. The stubs record any call that reaches a module past the boundary. */
   function rig() {
     const { alice, bob } = twoUsers();
@@ -522,8 +524,11 @@ describe("every capture-scoped route answers 404 for a capture id the caller doe
     const reviews = {
       invite: () => (reached.push("invite"), { state: "none" }),
       answerInvite: () => (reached.push("answerInvite"), { state: "later" }),
-      options: () => (reached.push("options"), { kind: "none" }),
-      start: () => (reached.push("start"), { kind: "none" }),
+      options: () => (reached.push("options"), NOTHING),
+      start: () => (reached.push("start"), NOTHING),
+      view: () => {
+        throw new Error("unknown review");
+      },
       heldByAnotherUser: () => false,
     } as unknown as Reviews;
     const preparation = { prep: () => ({ finished: false, supportedCount: 0 }), retry: () => void reached.push("retry") } as unknown as Preparation;
@@ -541,23 +546,45 @@ describe("every capture-scoped route answers 404 for a capture id the caller doe
   }
 
   const NOBODY = stableId("cap", "nobody");
-  type Call = { readonly name: string; readonly path: (id: string) => string; readonly method: "GET" | "POST"; readonly body?: unknown };
+  type Call = { readonly name: RouteName; readonly path: (id: string) => string; readonly method: "GET" | "POST"; readonly body?: unknown; readonly ok: number };
   const CALLS: readonly Call[] = [
-    { name: "captureView", method: "GET", path: (id) => `/captures/${id}` },
-    { name: "answerInvite", method: "POST", path: (id) => `/captures/${id}/invite`, body: { answer: "later" } },
-    { name: "reviewOptions", method: "GET", path: (id) => `/captures/${id}/review-options` },
-    { name: "startReview", method: "POST", path: (id) => `/captures/${id}/reviews`, body: { reviewId: stableId("rvw", "x"), choice: "prepared_only" } },
-    { name: "retryPreparation", method: "POST", path: (id) => `/captures/${id}/retry-preparation`, body: {} },
-    { name: "evidence", method: "GET", path: (id) => `/evidence?captureId=${id}` },
+    { name: "captureView", method: "GET", path: (id) => `/captures/${id}`, ok: 200 },
+    { name: "answerInvite", method: "POST", path: (id) => `/captures/${id}/invite`, body: { answer: "later" }, ok: 200 },
+    { name: "reviewOptions", method: "GET", path: (id) => `/captures/${id}/review-options`, ok: 200 },
+    { name: "startReview", method: "POST", path: (id) => `/captures/${id}/reviews`, body: { reviewId: stableId("rvw", "x"), choice: "prepared_only" }, ok: 200 },
+    { name: "retryPreparation", method: "POST", path: (id) => `/captures/${id}/retry-preparation`, body: {}, ok: 204 },
+    { name: "evidence", method: "GET", path: (id) => `/evidence?captureId=${id}`, ok: 200 },
   ];
   const send = (base: string, c: Call, id: string) =>
     c.method === "GET" ? fetch(`${base}${c.path(id)}`, { headers: bearer }) : post(base, c.path(id), c.body, JSON_HEADERS);
 
-  test("the table above names every route that takes a capture id in its path, plus GET /evidence, whose query may", () => {
-    const scoped = Object.entries(ROUTES)
-      .filter(([, r]) => r.path.includes(":captureId"))
+  /**
+   * Routes that take a capture id from their path or query without saying so in `Route.capture`. Both are read off the
+   * route itself: a `:captureId` path segment, and a query schema that accepts a `captureId`.
+   */
+  function undeclaredCaptureRoutes(routes: Record<string, Route>): string[] {
+    return Object.entries(routes)
+      .filter(([, r]) => {
+        const fromPath = r.path.includes(":captureId");
+        const fromQuery = r.query?.safeParse({ captureId: CAP }).success === true;
+        return (fromPath && r.capture !== "path") || (fromQuery && r.capture !== "query");
+      })
       .map(([name]) => name);
-    expect(CALLS.map((c) => c.name).sort()).toEqual([...scoped, "evidence"].sort());
+  }
+
+  test("every route that takes a capture id from its path or query declares it, and the table below calls each", () => {
+    expect(undeclaredCaptureRoutes(ROUTES)).toEqual([]);
+    const declared = Object.entries(ROUTES)
+      .filter(([, r]) => r.capture === "path" || r.capture === "query")
+      .map(([name]) => name);
+    expect(CALLS.map((c): string => c.name).sort()).toEqual(declared.sort());
+  });
+
+  test("a route added with a capture id in its path or query and no declaration is reported", () => {
+    const stray = { ...ROUTES.evidence, capture: null };
+    expect(undeclaredCaptureRoutes({ ...ROUTES, strayQuery: stray })).toEqual(["strayQuery"]);
+    expect(undeclaredCaptureRoutes({ ...ROUTES, strayPath: { ...ROUTES.captureView, capture: null } })).toEqual(["strayPath"]);
+    expect(undeclaredCaptureRoutes({ ...ROUTES, strayWrong: { ...ROUTES.captureView, capture: "body" } })).toEqual(["strayWrong"]);
   });
 
   for (const c of CALLS) {
@@ -572,7 +599,7 @@ describe("every capture-scoped route answers 404 for a capture id the caller doe
       }
       expect((await send(r.a, c, NOBODY)).status).toBe(404);
       expect(r.reached).toEqual([]);
-      expect((await send(r.a, c, CAP)).status).not.toBe(404);
+      expect((await send(r.a, c, CAP)).status).toBe(c.ok);
     });
   }
 
