@@ -209,7 +209,7 @@ describe("every route that takes an id", () => {
         return { base, headers: (route) => (ROUTES[route].bearer.includes("device") ? device : session) };
       };
       const aliceParty = await as("user_alice");
-      const spare = devices.exchange(devices.createCode(aliceId, "Spare").code);
+      const spare = devices.exchange(devices.createCode(aliceId, "Spare").code, "c");
       if (spare.kind !== "connected") throw new Error("the spare device did not connect");
       await walk(raw, { ...ids, deviceId: spare.deviceId }, aliceParty, await as("user_bob"), "hosted");
     } finally {
