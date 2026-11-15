@@ -29,7 +29,9 @@ export type Health =
   | { readonly kind: "valid"; readonly version: string | null };
 
 /** A short, printable excerpt of an answer, so a filter's HTML page cannot write control characters to the terminal. */
-const excerpt = (text: string): string => JSON.stringify(text.length > 80 ? `${text.slice(0, 80)}...` : text);
+const printable = (text: string): string =>
+  JSON.stringify(text).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+const excerpt = (text: string): string => printable(text.length > 80 ? `${text.slice(0, 80)}...` : text);
 
 /** Valid means exactly the app's answer: a JSON object with ok true and, from v0.1.5 on, a release version. */
 export function parseHealth(body: string): Health {
@@ -43,7 +45,7 @@ export function parseHealth(body: string): Health {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return invalid("not a JSON object");
   const { ok, version, ...rest } = value as Record<string, unknown>;
   if (ok !== true) return invalid("ok is not true");
-  if (Object.keys(rest).length > 0) return invalid(`unexpected field ${JSON.stringify(Object.keys(rest)[0])}`);
+  if (Object.keys(rest).length > 0) return invalid(`unexpected field ${printable(Object.keys(rest)[0]!)}`);
   if (version === undefined) return { kind: "valid", version: null };
   if (typeof version !== "string" || !VERSION.test(version)) return invalid("version is not <major>.<minor>.<patch>");
   return { kind: "valid", version };
@@ -79,11 +81,11 @@ function decode(length: string, base64: string): { readonly ok: true; readonly t
   if (bytes.length !== expected) return { ok: false, why: `has ${bytes.length} bytes, not the ${expected} the server counted` };
   let text: string;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
     return { ok: false, why: "is not UTF-8" };
   }
-  if (/[\p{Cc}]/u.test(text.replace(/\n$/, ""))) return { ok: false, why: "holds a control byte" };
+  if (/[\p{Cc}\p{Cf}]/u.test(text.replace(/\n$/, ""))) return { ok: false, why: "holds a control byte" };
   return { ok: true, text: text.replace(/\n$/, "") };
 }
 

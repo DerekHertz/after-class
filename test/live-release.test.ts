@@ -55,6 +55,13 @@ describe("parseHealth", () => {
     expect(detail).toContain("\\u001b[2J");
     expect([...detail].some((c) => c.charCodeAt(0) < 32)).toBe(false);
   });
+
+  test("escapes C1 and format characters in a field name, which JSON.stringify leaves raw", () => {
+    const health = parseHealth('{"ok":true,"\\u009b2J\\u202e":1}');
+    const detail = health.kind === "invalid" ? health.detail : "";
+    expect(detail).toContain("\\u009b2J\\u202e");
+    expect(/[\p{Cc}\p{Cf}]/u.test(detail)).toBe(false);
+  });
 });
 
 describe("parseProbe", () => {
@@ -91,6 +98,11 @@ describe("parseProbe", () => {
     expect(parseProbe(probeOutput(RUNNING, Buffer.from('{"ok":tru\u0000e}'))).health).toEqual({ kind: "invalid", detail: "the health answer holds a control byte" });
     expect(parseProbe(probeOutput(`${RUNNING}\u0000`, '{"ok":true}')).digest).toBeNull();
     expect(parseProbe(probeOutput(`${RUNNING}\n${"x".repeat(200)}`, '{"ok":true}')).digest).toBeNull();
+  });
+
+  test("rejects a byte order mark, which a UTF-8 decoder would drop, in the health body or the digest file", () => {
+    expect(parseProbe(probeOutput(RUNNING, '﻿{"ok":true,"version":"0.1.0"}')).health).toEqual({ kind: "invalid", detail: "the health answer holds a control byte" });
+    expect(parseProbe(probeOutput(`﻿${RUNNING}`, '{"ok":true}')).digest).toBeNull();
   });
 
   test("rejects a body or file over the size cap before parsing it", () => {
