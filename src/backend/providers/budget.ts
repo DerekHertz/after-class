@@ -50,24 +50,25 @@ import { BUDGET_HOLDS_REVIEW_ID } from "../migrations-budget";
  *   $0.5540 was writing 69,251 tokens at 2 times the input price. A review's first turn now writes them at 1.25 times, but the turn
  *   after a long pause writes them at 2 times again (`tutorCache` in review/tutor.ts), so $0.75 covered that turn on Opus, and
  *   on Sonnet ($0.2770 for the write) with room, before the tutor's own estimate below was set from the Sonnet audit. Interpretation, revision and the diagram summary are not measured on the API.
- *   Tutor turn: reserved at its own worst case, passed by the adapter as `estimateUsd` (`streamWorstCaseUsd` in providers/claude-api.ts, which is
- *   `worstCaseUsd` on the request as sent). A flat figure cannot be right: the context has no ceiling and the model's rates differ by
- *   2 times, so one figure is too low for a turn that writes a long lecture on Opus and too high for a warm Sonnet turn. The
- *   request is priced as `worstCaseUsd` prices it (a byte counts as a token, plus REQUEST_OVERHEAD_TOKENS, plus the whole output limit)
- *   with two facts the tutor knows: its output limit is TUTOR_MAX_OUTPUT_TOKENS (8,000, review/tutor.ts), and its cache state
- *   (`tutorCache.peek`). A turn that writes the system block (a review's first, or the one after a long pause) prices every byte as a
- *   write at the lifetime it asks for: 5 minutes (1.25 times) for a first turn, 1 hour (2 times) after a long pause. A turn that finds
- *   the block warm prices the system block at the cache read rate and only the prompt, which changes each turn, as a write. That is the
- *   one assumption that is not a bound: a block evicted early is written again, and the settlement then exceeds the reservation by at most
- *   the system bytes times (write rate - read rate), once. Everything else settles at or under the reservation, so a turn admitted under
- *   a cap cannot take the month past it, and four concurrent turns hold four worst cases.
+ *   Tutor turn: reserved at an estimate of its own worst case, passed by the adapter as `estimateUsd` (`streamEstimateUsd` in providers/claude-api.ts,
+ *   which is `estimateRequestUsd` on the request as sent). A flat figure cannot be right: the context has no ceiling and the model's rates
+ *   differ by 2 times, so one figure is too low for a turn that writes a long lecture on Opus and too high for a short Sonnet one. The
+ *   request is priced as `estimateRequestUsd` prices it (a byte counts as a token, plus REQUEST_OVERHEAD_TOKENS, plus the whole output limit,
+ *   TUTOR_MAX_OUTPUT_TOKENS = 8,000 in review/tutor.ts) with every input token written to the cache at the lifetime the request sends,
+ *   5 minutes (1.25 times) or, after a long pause, 1 hour (2 times). The lifetime is decided once, in `call`, right before `admit`, and
+ *   the same value prices the reservation and goes in the request (`tutorCache.decide`), so the two cannot disagree. No warm cache is
+ *   assumed: a read is cheaper than a write, but nothing here can know an entry is alive (a rejected or failed request starts nothing, an
+ *   entry can be evicted early), so a reservation that counted one could settle above itself. The price is that a warm turn reserves
+ *   what a first turn does. The "bytes are tokens" step is an estimate, not a proven bound: it holds for ordinary text (the audit measured
+ *   0.5 tokens per byte) but was not shown for every input on the current models. Four concurrent turns hold four estimates.
  *   For the Fable audit's lecture (docs/trail/fable-e2e-2026-11-14-data.json; the system block of its 12 turns was 49,844 bytes, the
- *   prompts 1,317 to 7,483 bytes) on Sonnet: a first turn reserves $0.2181, the turn after a long pause $0.3257, a warm turn $0.1139 to
- *   $0.1313 at the 5 minute and 1 hour rate; on Opus $0.4363, $0.6514 and $0.2279 to $0.2626. The measured turns spent $0.0126 to
- *   $0.0241, so a warm Sonnet turn is admitted at $4.85 of $5 (and to $4.87 on this lecture), a first turn from $4.78. A tutor request that
- *   does not pass an estimate (the `claude -p` adapter) reserves ESTIMATE_USD.tutor_turn, about the warm Sonnet figure on the audit's lecture, which is
- *   also what the usage page's "held" asks about.
- *   Priced as `worstCaseUsd` prices a call (all of max_tokens spent, every input token a 1 hour cache write), a structured call
+ *   prompts 1,317 to 7,483 bytes) on Sonnet: a first turn reserves $0.2181 and is refused above $4.7819 of a $5 cap, a later turn within 5
+ *   minutes $0.2181 to $0.2336 (refused above $4.7664) and a turn after a long pause $0.3010 to $0.3257 (refused above $4.6743); on Opus
+ *   $0.4363 (first, refused above $4.5637), $0.4363 to $0.4671 and $0.6021 to $0.6514. The measured turns spent $0.0126 to $0.0241. The
+ *   old $0.75 refused from $4.25. A `claude -p` tutor turn reserves its estimate at the 1 hour rate (the CLI's cache lifetime is not
+ *   known) but the CLI cannot enforce the 8,000 output limit or bound its context, so what it settles at can exceed it, uncapped; the
+ *   usage page's "held" asks about ESTIMATE_USD.tutor_turn, an advisory figure that does not gate a request.
+ *   Priced as `estimateRequestUsd` prices a call (all of max_tokens spent, every input token a 1 hour cache write), a structured call
  *   with 50,000 input tokens comes to $0.75 at max_tokens 16,000. Interpretation streams with max_tokens 32,000 (STREAM_MAX_TOKENS), so
  *   the same formula gives 32,000 x $20 per million (Opus) = $0.64 plus (50,000 + 4,096 allowance) x $8 per million (1 hour write) =
  *   $0.432768, $1.072768, reserved as $1.08. Resource search adds up to 5 web searches at $0.01 per call and up to 3

@@ -10,7 +10,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages";
 import { LOCAL_USER, ensureLocalUser, openDb } from "../src/backend/db";
 import type { ApiClient } from "../src/backend/providers/claude-api";
-import { ApiCallError, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, worstCaseUsd } from "../src/backend/providers/claude-api";
+import { ApiCallError, STREAM_MAX_TOKENS, STRUCTURED_MAX_TOKENS, estimateRequestUsd } from "../src/backend/providers/claude-api";
 import { ProviderError } from "../src/backend/providers/memo";
 import { Spend, allowedFromPrompt, fitsUnderCap, isCost, loadCalls, main, parseArgs, reservationUsd } from "../scripts/experiments/api-tutor-replay";
 import type { Results } from "../scripts/experiments/api-tutor-replay";
@@ -303,7 +303,7 @@ describe("a live run on a fake client", () => {
     // The first call is cheap in the cap's terms to begin with and then reports 20000 output tokens, $0.40.
     const path = fixtureDb(seeds);
     const out = join(dir(), "out");
-    const worst = worstCaseUsd("claude-opus-5-5", Buffer.byteLength(SYSTEM) + Buffer.byteLength(TUTOR_PROMPT), STREAM_MAX_TOKENS, 0)!;
+    const worst = estimateRequestUsd("claude-opus-5-5", Buffer.byteLength(SYSTEM) + Buffer.byteLength(TUTOR_PROMPT), STREAM_MAX_TOKENS, 0)!;
     const cap = worst + 0.1;
     const api = fakeApi([{ text: `{"kind":"wrap_up"}\nok`, input: 0, output: 20_000 }, { text: "never" }, { text: "never" }]);
     const { code, logs } = await run(["--db", path, "--since", "2026-11-11", "--out", out, "--cap-usd", String(cap)], api.client);
@@ -334,7 +334,7 @@ describe("a live run on a fake client", () => {
   test("a call that fails without usage is counted at its worst case, so the cap still holds", async () => {
     const path = fixtureDb(seeds);
     const out = join(dir(), "out");
-    const worst = worstCaseUsd("claude-opus-5-5", Buffer.byteLength(SYSTEM) + Buffer.byteLength(TUTOR_PROMPT), STREAM_MAX_TOKENS, 0)!;
+    const worst = estimateRequestUsd("claude-opus-5-5", Buffer.byteLength(SYSTEM) + Buffer.byteLength(TUTOR_PROMPT), STREAM_MAX_TOKENS, 0)!;
     const api = fakeApi([{ text: "", fail: new TypeError("socket") }, { text: "never" }]);
     await run(["--db", path, "--since", "2026-11-11", "--out", out, "--cap-usd", String(worst * 1.5)], api.client);
     expect(api.calls()).toBe(1);
@@ -408,7 +408,7 @@ describe("the spend cap is an upper bound", () => {
 
   test("a wrap-up is reserved for its serialized schema too", () => {
     const call = { key: "w", purpose: "wrap_up" as const, version: "v", atMs: T0, system: "a", prompt: "b", effort: "medium" as const, inputBytes: 2, cliNotionalUsd: null, cliAttempts: 0 };
-    expect(reservationUsd("opus", call)).toBeGreaterThan(worstCaseUsd("claude-opus-5-5", 2, STRUCTURED_MAX_TOKENS, 0)! + 0.001);
+    expect(reservationUsd("opus", call)).toBeGreaterThan(estimateRequestUsd("claude-opus-5-5", 2, STRUCTURED_MAX_TOKENS, 0)! + 0.001);
   });
 
   test("a response that costs more than its reservation stops the run at once and says so plainly", async () => {
@@ -538,7 +538,7 @@ describe("failed calls and the cap", () => {
   ];
   const headers = new Headers();
   const body = { type: "error", error: { type: "x", message: "invalid x-api-key" } };
-  const worstTutor = worstCaseUsd("claude-opus-5-5", Buffer.byteLength(SYSTEM) + Buffer.byteLength(TUTOR_PROMPT), STREAM_MAX_TOKENS, 0)!;
+  const worstTutor = estimateRequestUsd("claude-opus-5-5", Buffer.byteLength(SYSTEM) + Buffer.byteLength(TUTOR_PROMPT), STREAM_MAX_TOKENS, 0)!;
   const results = (out: string) => JSON.parse(readFileSync(join(out, "results.json"), "utf8")) as Results;
   const ok = { text: `{"kind":"wrap_up"}\nok`, input: 10, output: 10 };
 
@@ -660,7 +660,7 @@ describe("usage the API sends that is not a measurement", () => {
     { key: "t2", purpose: "tutor_turn", atMs: T0 + 1000 },
     { key: "t3", purpose: "tutor_turn", atMs: T0 + 2000 },
   ];
-  const worstTutor = worstCaseUsd("claude-opus-5-5", Buffer.byteLength(SYSTEM) + Buffer.byteLength(TUTOR_PROMPT), STREAM_MAX_TOKENS, 0)!;
+  const worstTutor = estimateRequestUsd("claude-opus-5-5", Buffer.byteLength(SYSTEM) + Buffer.byteLength(TUTOR_PROMPT), STREAM_MAX_TOKENS, 0)!;
   const results = (out: string) => JSON.parse(readFileSync(join(out, "results.json"), "utf8")) as Results;
   const ok = { text: `{"kind":"wrap_up"}\nok`, input: 10, output: 10 };
   const argv = (out: string, cap: string) => ["--db", fixtureDb(seeds), "--since", "2026-11-11", "--out", out, "--cap-usd", cap];
