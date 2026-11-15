@@ -17,7 +17,7 @@
  */
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 
 const REPO = resolve(import.meta.dir, "..");
 const MASTERS = join(REPO, "art/masters");
@@ -54,11 +54,27 @@ export function outputsFor(master: string, size: { readonly width: number; reado
     // The small sheet serves every place a companion is drawn at 120 CSS px or less (scene.css, front-row.css phone layout).
     return [{ ship: webp(master) }, { ship: webp(master, "-small"), width: Math.round((size.width * COMPANION_CELL.small) / COMPANION_CELL.large), drawn: { height: 120 } }];
   }
+  // One gesture frame of a companion: a single cell, shipped at both sheet sizes. The stage that draws them is #222.
+  if (master.startsWith("companion-frames/")) {
+    if (size.width !== COMPANION_CELL.large || size.height !== COMPANION_CELL.large) throw new Error(`${master} is ${size.width}x${size.height}; a companion frame is one ${COMPANION_CELL.large} px cell`);
+    return [{ ship: webp(master) }, { ship: webp(master, "-small"), width: COMPANION_CELL.small, drawn: { height: 120 } }];
+  }
   if (master.startsWith("front-row/") || master.startsWith("room-objects/")) return [{ ship: webp(master) }];
   throw new Error(`art/masters/${master} has no rule in scripts/build-art.ts. Say how it is drawn, so it ships at that size.`);
 }
 
-export type ArtEntry = { readonly master: string; readonly masterSha256: string; readonly ship: string; readonly shipSha256: string; readonly width: number; readonly height: number; readonly undoUpscale?: number; readonly drawn?: ArtOutput["drawn"] };
+export type ArtEntry = { readonly master: string; readonly masterSha256: string; readonly ship: string; readonly shipSha256: string; readonly width: number; readonly height: number; readonly undoUpscale?: number; readonly drawn?: ArtOutput["drawn"]; readonly provenance?: Provenance };
+
+/** Where a generated master came from, read from the provenance.json beside it. */
+export type Provenance = { readonly model: string; readonly prompt: string; readonly meshyTaskId: string; readonly credits: number };
+
+/** The provenance of a master that has a provenance.json in its folder naming it by file stem. */
+function provenanceOf(path: string): Provenance | undefined {
+  let file: { model: string; frames: Record<string, { prompt: string; meshy_task_id: string; credits: number }> };
+  try { file = JSON.parse(readFileSync(join(dirname(path), "provenance.json"), "utf8")); } catch { return undefined; }
+  const frame = file.frames[basename(path, ".png")];
+  return frame === undefined ? undefined : { model: file.model, prompt: frame.prompt, meshyTaskId: frame.meshy_task_id, credits: frame.credits };
+}
 
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
@@ -88,12 +104,13 @@ export async function buildArt(): Promise<ArtEntry[]> {
     const master = relative(MASTERS, path).split("\\").join("/");
     const bytes = readFileSync(path);
     const size = await new Bun.Image(bytes).metadata();
+    const provenance = provenanceOf(path);
     for (const out of outputsFor(master, size)) {
       const made = await encode(bytes, out, size);
       const target = join(SHIPPED, out.ship);
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, made.bytes);
-      entries.push({ master, masterSha256: sha256(bytes), ship: out.ship, shipSha256: sha256(made.bytes), width: made.width, height: made.height, ...(out.undoUpscale === undefined ? {} : { undoUpscale: out.undoUpscale }), ...(out.drawn === undefined ? {} : { drawn: out.drawn }) });
+      entries.push({ master, masterSha256: sha256(bytes), ship: out.ship, shipSha256: sha256(made.bytes), width: made.width, height: made.height, ...(out.undoUpscale === undefined ? {} : { undoUpscale: out.undoUpscale }), ...(out.drawn === undefined ? {} : { drawn: out.drawn }), ...(provenance === undefined ? {} : { provenance }) });
     }
   }
   writeFileSync(MANIFEST, `${JSON.stringify(entries, null, 2)}\n`);

@@ -1,5 +1,284 @@
 [
   {
+    "master": "companion-frames/pip/blink.png",
+    "masterSha256": "b247448e5ea74e2b4626ec27a13a53c10dbff7395599e48ca7224702dc8679bf",
+    "ship": "companion-frames/pip/blink.webp",
+    "shipSha256": "f76277cbe8a4b5301bad14957fe39386c1edb1ca25b3533d3ad0a9a434ed4313",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: close both eyes, drawn as two short gently curved dark lines, as in a blink. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1dd81-415f-76d4-bc41-06afc005f3c9",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/blink.png",
+    "masterSha256": "b247448e5ea74e2b4626ec27a13a53c10dbff7395599e48ca7224702dc8679bf",
+    "ship": "companion-frames/pip/blink-small.webp",
+    "shipSha256": "1211866ae7488f75e15962dc0bd3f4c2d80af3e3d6192d43c2270c681b93c681",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: close both eyes, drawn as two short gently curved dark lines, as in a blink. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1dd81-415f-76d4-bc41-06afc005f3c9",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/cheer.png",
+    "masterSha256": "8d774cd017099a178fd8c4c3e955a7b438261047dc9839e3efb3b74617957a14",
+    "ship": "companion-frames/pip/cheer.webp",
+    "shipSha256": "467e274ed504187ead666e1d1ca4951c5fb74d4e9d1125b486f9cba25c1bf81a",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: cheering: both small hands raised up beside the head, a big open happy smile and light blush marks, still sitting. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1dd81-4160-741b-9bf5-a1f5f203462b",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/cheer.png",
+    "masterSha256": "8d774cd017099a178fd8c4c3e955a7b438261047dc9839e3efb3b74617957a14",
+    "ship": "companion-frames/pip/cheer-small.webp",
+    "shipSha256": "3db0043fe50ddc9c6fa6a33d746fff7ff801fc1c875b919d470bd6cd56111fb0",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: cheering: both small hands raised up beside the head, a big open happy smile and light blush marks, still sitting. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1dd81-4160-741b-9bf5-a1f5f203462b",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/hop-air.png",
+    "masterSha256": "684c08f34612d27a78ebc74dda1a68f50534c2ea878193d3c1c2b9157d1d23bb",
+    "ship": "companion-frames/pip/hop-air.webp",
+    "shipSha256": "6a9e1af0b33f94ebe269c755b6133d4ca76fc7fb3f530e3f4ef5cf780f04f63c",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small eraser-shaped mascot with tiny hands and dark blue feet, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: stretched a little taller and narrower as at the top of a happy hop, with a joyful open smile; keep it standing in the same place. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb6-514d-7676-99ed-536dc6da5866",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/hop-air.png",
+    "masterSha256": "684c08f34612d27a78ebc74dda1a68f50534c2ea878193d3c1c2b9157d1d23bb",
+    "ship": "companion-frames/pip/hop-air-small.webp",
+    "shipSha256": "6e66be92af89fde090af5869cbd52cbb56dfc26ad9a4f907cf13914b13cc1993",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small eraser-shaped mascot with tiny hands and dark blue feet, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: stretched a little taller and narrower as at the top of a happy hop, with a joyful open smile; keep it standing in the same place. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb6-514d-7676-99ed-536dc6da5866",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/hop-crouch.png",
+    "masterSha256": "7302cb6d896800bca7cba5c6d03c79f32e463f60f6e189de430cea6f1f0af31f",
+    "ship": "companion-frames/pip/hop-crouch.webp",
+    "shipSha256": "4811eb38163f414714eca49355bb98630d9e7246f583ffad6251b11c7c24f0d0",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small eraser-shaped mascot with tiny hands and dark blue feet, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: squash down a little as if about to hop: slightly shorter and wider, eyes squeezed shut happily. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb6-514b-75d2-a95a-5cd785bf4413",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/hop-crouch.png",
+    "masterSha256": "7302cb6d896800bca7cba5c6d03c79f32e463f60f6e189de430cea6f1f0af31f",
+    "ship": "companion-frames/pip/hop-crouch-small.webp",
+    "shipSha256": "6e6efc6d250d7217e3e04935cd83a859190866290f613af4d0c80de0e2a4aad5",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small eraser-shaped mascot with tiny hands and dark blue feet, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: squash down a little as if about to hop: slightly shorter and wider, eyes squeezed shut happily. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb6-514b-75d2-a95a-5cd785bf4413",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/look-board.png",
+    "masterSha256": "2e2b6fcf9d475a615982faf5c3166fa54f8f2606a920f8087a771d572df6e13b",
+    "ship": "companion-frames/pip/look-board.webp",
+    "shipSha256": "2480fe9db3929fff7a5e419f540d6f07d2d98099144136d207f75cddab7f5318",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: turn the eyes up and to the right, as if reading a chalkboard above and to the right, with a small curious open mouth. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1dd81-415f-70c3-9cb4-7413ee3d2621",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/look-board.png",
+    "masterSha256": "2e2b6fcf9d475a615982faf5c3166fa54f8f2606a920f8087a771d572df6e13b",
+    "ship": "companion-frames/pip/look-board-small.webp",
+    "shipSha256": "0b8ff2c1db6d5b912e05a91c338a88a33832ce2ebed34ab5fee9bfd0dbecca5d",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: turn the eyes up and to the right, as if reading a chalkboard above and to the right, with a small curious open mouth. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1dd81-415f-70c3-9cb4-7413ee3d2621",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/look-mat.png",
+    "masterSha256": "aa45e9a9330c7871c14b813be5381b0a8ca7da6892578ec308e6d810d550150c",
+    "ship": "companion-frames/pip/look-mat.webp",
+    "shipSha256": "d1bdc3adf07f2c103ff926cac23c15157a1d53084514fe498ef14856324c4436",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small eraser-shaped mascot with tiny hands and dark blue feet, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: move both eye dots to the lower right, glancing down and to the right at the desk, attentive. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb6-5148-7298-a47b-a766270d9a8a",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/look-mat.png",
+    "masterSha256": "aa45e9a9330c7871c14b813be5381b0a8ca7da6892578ec308e6d810d550150c",
+    "ship": "companion-frames/pip/look-mat-small.webp",
+    "shipSha256": "beed7ea1fbd433d5ecc1d68d0ea57e2af858da600bf748b2d5395e22332aaea6",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small eraser-shaped mascot with tiny hands and dark blue feet, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: move both eye dots to the lower right, glancing down and to the right at the desk, attentive. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb6-5148-7298-a47b-a766270d9a8a",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/nod.png",
+    "masterSha256": "80be9ee223f38dc9168b47cfd8e6b2dd9c7995e0a7eedcbe53a1165a55032960",
+    "ship": "companion-frames/pip/nod.webp",
+    "shipSha256": "4e6b4acbf2b03595380deaab930432043e5fe78060b2e7f7174312112f018919",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: a happy nod: the whole character tips forward slightly, eyes closed in two upward-curved smiling arcs, small smile. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1dd81-4160-7413-acea-c090c8c91281",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/nod.png",
+    "masterSha256": "80be9ee223f38dc9168b47cfd8e6b2dd9c7995e0a7eedcbe53a1165a55032960",
+    "ship": "companion-frames/pip/nod-small.webp",
+    "shipSha256": "de70dc9d50cbfdaa96980e7ecdfe63a9e17951d9453185095a538d4e68d011a6",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: a happy nod: the whole character tips forward slightly, eyes closed in two upward-curved smiling arcs, small smile. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1dd81-4160-7413-acea-c090c8c91281",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/talk.png",
+    "masterSha256": "a99ef5769ecf7bb10ad198e0b5150f0b781f66e477d0fdd6e28cfe327daccb82",
+    "ship": "companion-frames/pip/talk.webp",
+    "shipSha256": "53a733020ba48b8b14428d3842b75bf4c9b4ae7bb9202c8a016a0767fb6befbe",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small eraser-shaped mascot with tiny hands and dark blue feet, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: talking: the same pose with a small open rounded mouth, as if saying something. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb6-8309-7039-9ae0-d9ac91fedd33",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/talk.png",
+    "masterSha256": "a99ef5769ecf7bb10ad198e0b5150f0b781f66e477d0fdd6e28cfe327daccb82",
+    "ship": "companion-frames/pip/talk-small.webp",
+    "shipSha256": "ce3212c615a8c99f6a86af89df9eadd7aac255e8b93a8eab0b7b1bb306a4606e",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small eraser-shaped mascot with tiny hands and dark blue feet, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: talking: the same pose with a small open rounded mouth, as if saying something. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb6-8309-7039-9ae0-d9ac91fedd33",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/think.png",
+    "masterSha256": "97829814c6a1c78607484dba93f19d37f3849579668e606d34cb8c919a1c05e3",
+    "ship": "companion-frames/pip/think.webp",
+    "shipSha256": "c900d64aa62555e87c8ffe49ce74c6776ca09df953da2a8620a966ed7ccba6e7",
+    "width": 724,
+    "height": 724,
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small eraser-shaped mascot with tiny hands and dark blue feet, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: move both eye dots up and to the left, make the mouth a small flat line, and add one tiny sweat drop beside the head. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb6-514d-7677-9a5d-9cf33adb6fa1",
+      "credits": 9
+    }
+  },
+  {
+    "master": "companion-frames/pip/think.png",
+    "masterSha256": "97829814c6a1c78607484dba93f19d37f3849579668e606d34cb8c919a1c05e3",
+    "ship": "companion-frames/pip/think-small.webp",
+    "shipSha256": "e90d8faa849ee699bd5875a557a87ee00179a0711e7f0aec99fb7deab56e541f",
+    "width": 362,
+    "height": 362,
+    "drawn": {
+      "height": 120
+    },
+    "provenance": {
+      "model": "nano-banana-pro",
+      "prompt": "Edit the reference image, a small eraser-shaped mascot with tiny hands and dark blue feet, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: move both eye dots up and to the left, make the mouth a small flat line, and add one tiny sweat drop beside the head. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+      "meshyTaskId": "01a1ddb6-514d-7677-9a5d-9cf33adb6fa1",
+      "credits": 9
+    }
+  },
+  {
     "master": "companions-v3/lumi.png",
     "masterSha256": "1c45af43207fd4ef1e8dbab1669c05990d3dee2dad0d389b8006ecfcf90c99dc",
     "ship": "companions-v3/lumi.webp",
