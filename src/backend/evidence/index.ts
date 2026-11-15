@@ -437,8 +437,8 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   /**
    * What the user's rows hold on disk, in bytes. Text is measured as a BLOB because SQLite's LENGTH of TEXT counts characters. A
    * snapshot's frame is a hard link to the frame row's file until raw expiry deletes that row, so it is charged only once no
-   * frame row has its evidence id. That holds because an id with a snapshot never gets a new frame row: a frame row and a snapshot
-   * with one id always share a file.
+   * frame row has its evidence id. That holds because a frame row for an id that has a snapshot is created as a hard link to the
+   * snapshot's file: a frame row and a snapshot with one id always share a file.
    */
   const storedBytes = db.sql.query<{ n: number }, [string, string, string, string]>(
     `SELECT (SELECT COALESCE(SUM(bytes), 0) FROM frames WHERE user_id = ?)
@@ -480,7 +480,10 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
       }
 
       const dead = deleted();
-      const frames = new Map<number, { readonly id: EvidenceId; readonly path: string; readonly stored: boolean; readonly jpeg: boolean; readonly bytes: Uint8Array }>();
+      const frames = new Map<
+        number,
+        { readonly id: EvidenceId; readonly path: string; readonly stored: boolean; readonly jpeg: boolean; readonly bytes: Uint8Array; readonly linkFrom: string | null; readonly size: number }
+      >();
       const claimed = new Set<EvidenceId>();
       for (const f of fresh) {
         if (f.kind !== "frame") continue;
@@ -489,11 +492,14 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
         const path = join("frames", userId, sourceId, `${id}.jpg`);
         const decoded = new Uint8Array(Buffer.from(f.jpegBase64, "base64"));
         const jpeg = isFrameJpeg(decoded, f.width, f.height);
-        // A resent frameId keeps the first bytes: the file is written only for an id with no frame or snapshot yet. After raw expiry a
-        // snapshot still holds the first bytes, and a second file for the id would sit on disk uncharged beside it.
-        const stored = jpeg && !dead.has(id) && !claimed.has(id) && frameOf(id) === null && snapshotOf(id) === null;
+        // A resent frameId keeps the first bytes. An id with a frame row writes nothing. An id whose raw frame expired but whose snapshot
+        // remains gets its frame row back pointing at the snapshot's file, linked rather than rewritten, so the retained bytes stay the
+        // only copy and the frame is visible to every consumer of frame rows.
+        const stored = jpeg && !dead.has(id) && !claimed.has(id) && frameOf(id) === null;
+        const snap = stored ? snapshotOf(id) : null;
+        const linkFrom = snap?.frame_path != null && existsSync(abs(snap.frame_path)) ? snap.frame_path : null;
         if (stored) claimed.add(id);
-        frames.set(f.clientSeq, { id, path, stored, jpeg, bytes: decoded });
+        frames.set(f.clientSeq, { id, path, stored, jpeg, bytes: decoded, linkFrom, size: linkFrom === null ? decoded.length : statSync(abs(linkFrom)).size });
       }
 
       const bodies = new Map<number, string>();
@@ -509,7 +515,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
         bodies.set(f.clientSeq, json);
         incoming += Buffer.byteLength(json, "utf8");
         const frame = frames.get(f.clientSeq);
-        if (frame?.stored) incoming += frame.bytes.length;
+        if (frame?.stored && frame.linkFrom === null) incoming += frame.bytes.length;
       }
       // A batch with nothing new is a heartbeat: it answers the ack and writes nothing, not even the capture's ownership row, so it is
       // not metered. Every batch that does write is, before any file is written.
@@ -520,7 +526,20 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
       if (limits.minFreeBytes > 0 && limits.freeBytes() - incoming < limits.minFreeBytes) {
         throw new IngestRefused("disk", "the server is low on disk space; retry later");
       }
-      for (const frame of frames.values()) if (frame.stored) writeAtomic(abs(frame.path), frame.bytes);
+      for (const frame of frames.values()) {
+        if (!frame.stored) continue;
+        if (frame.linkFrom === null) {
+          writeAtomic(abs(frame.path), frame.bytes);
+          continue;
+        }
+        mkdirSync(dirname(abs(frame.path)), { recursive: true });
+        if (existsSync(abs(frame.path))) continue;
+        try {
+          linkSync(abs(frame.linkFrom), abs(frame.path));
+        } catch {
+          copyFileSync(abs(frame.linkFrom), abs(frame.path));
+        }
+      }
 
       const at = now();
       db.tx(() => {
@@ -532,7 +551,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
           insertFact.run(userId, seq, captureId, f.clientSeq, f.wallMs, f.kind, bodies.get(f.clientSeq)!, at);
           const frame = frames.get(f.clientSeq);
           if (f.kind === "frame" && frame?.stored) {
-            insertFrame.run(userId, frame.id, captureId, stableId("src", "youtube", f.videoId), f.frameId, f.mediaS, f.width, f.height, frame.path, seq, frame.bytes.length);
+            insertFrame.run(userId, frame.id, captureId, stableId("src", "youtube", f.videoId), f.frameId, f.mediaS, f.width, f.height, frame.path, seq, frame.size);
           }
         }
       });

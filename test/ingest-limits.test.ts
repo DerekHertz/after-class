@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createEvidence } from "../src/backend/evidence";
 import { IngestRefused, resolveIngestLimits } from "../src/backend/evidence/ingest-limits";
@@ -223,31 +223,88 @@ describe("a cited snapshot keeps its charge after raw expiry", () => {
     expect(() => h.evidence.ingest({ captureId: next.captureId, facts: next.facts })).toThrow(IngestRefused);
   });
 
-  test("re-uploading an id whose raw frame expired reuses the retained file, so the quota still holds", () => {
+  /** One cited frame per id, snapshotted, then raw-expired: only the snapshots and their files are left. */
+  const expiredCitedFrames = (ids: readonly string[], maxUserBytes: number, runFrameChange?: Parameters<typeof harness>[0] extends infer O ? (O extends { runFrameChange?: infer R } ? R : never) : never) => {
     const clock = { t: 1_000_000 };
-    const h = harness({ clock, limits: roomy({ maxUserBytes: 100_000 }) });
+    const h = harness({ clock, limits: roomy({ maxUserBytes }), ...(runFrameChange ? { runFrameChange } : {}) });
     const s = stream();
     s.control("start");
     s.source();
-    s.span(0, 10);
-    s.frame("f1", 3, { jpeg: b64(headerJpeg(640, 360, 60_000)) });
+    s.span(0, 40);
+    ids.forEach((id, i) => s.frame(id, i + 1, { jpeg: b64(headerJpeg(640, 360, 60_000)) }));
     h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
-    const frame = stableId("ev", s.captureId, "f1");
-    h.evidence.snapshotInTx([frame]);
-    h.db.sql.run("INSERT INTO note_evidence (user_id, note_id, evidence_id) VALUES (?, ?, ?)", [h.db.userId, stableId("note", "cites"), frame]);
+    const evidenceIds = ids.map((id) => stableId("ev", s.captureId, id));
+    h.evidence.snapshotInTx(evidenceIds);
+    for (const id of evidenceIds) h.db.sql.run("INSERT INTO note_evidence (user_id, note_id, evidence_id) VALUES (?, ?, ?)", [h.db.userId, stableId("note", "cites"), id]);
     h.evidence.sweepExpired(clock.t + 31 * 86_400_000, 30);
+    clock.t += 31 * 86_400_000;
     expect(count(h, "frames")).toBe(0);
+    const resend = () => {
+      ids.forEach((id, i) => s.frame(id, i + 1, { jpeg: b64(headerJpeg(640, 360, 2_000)) }));
+      return h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    };
+    return { h, s, clock, evidenceIds, resend };
+  };
+  const inodes = (dir: string) => new Set([...new Bun.Glob("**/*.jpg").scanSync({ cwd: dir })].map((f) => statSync(join(dir, f)).ino));
+  const deleteCitingNote = (h: ReturnType<typeof harness>, at: number) =>
+    h.db.sql.run("INSERT INTO note_deletions (user_id, note_id, deleted_ms) VALUES (?, ?, ?)", [h.db.userId, stableId("note", "cites"), at]);
 
-    s.frame("f1", 3, { jpeg: b64(headerJpeg(640, 360, 2_000)) });
-    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
-    expect(count(h, "frames")).toBe(0);
-    const files = [...new Bun.Glob("**/*.jpg").scanSync({ cwd: h.dir })];
-    expect(files).toHaveLength(1);
+  test("re-uploading an id whose raw frame expired links the retained file, so the quota still holds", () => {
+    const { h, evidenceIds, resend } = expiredCitedFrames(["f1"], 100_000);
+    resend();
+    expect(count(h, "frames")).toBe(1);
+    expect(inodes(h.dir).size).toBe(1);
+    expect(h.evidence.frameBytes(evidenceIds[0]!)).toHaveLength(headerJpeg(640, 360, 60_000).length);
 
     const next = stream();
     next.control("start");
     next.frame("g1", 1, { jpeg: b64(headerJpeg(640, 360, 60_000)) });
     expect(() => h.evidence.ingest({ captureId: next.captureId, facts: next.facts })).toThrow(IngestRefused);
+  });
+
+  test("a re-uploaded frame backed by a snapshot is in the watch order, the bundle and the export", () => {
+    const { h, s, evidenceIds, resend } = expiredCitedFrames(["f1"], 1024 * MIB);
+    resend();
+    expect(h.evidence.watchOrder(s.captureId).frameCandidates.map((c) => c.id)).toEqual(evidenceIds);
+    expect(h.evidence.bundle(h.evidence.watchedMaterial(s.captureId)).frames.map((f) => f.id)).toEqual(evidenceIds);
+    expect(h.evidence.captureBundle(s.captureId).frames.map((f) => f.file)).not.toContain(null);
+  });
+
+  test("two re-uploaded frames backed by snapshots still produce a frame-change job that reads both", async () => {
+    const seen: { before: number; after: number }[] = [];
+    const { h, s, resend } = expiredCitedFrames(["f1", "f2"], 1024 * MIB, async (input) => {
+      seen.push({ before: input.before?.bytes().length ?? 0, after: input.after.bytes().length });
+    });
+    resend();
+    const work = h.evidence.frameDemand(s.captureId);
+    expect(work).toHaveLength(1);
+    await work[0]!.run(new AbortController().signal);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.before).toBeGreaterThan(0);
+    expect(seen[0]!.after).toBeGreaterThan(0);
+  });
+
+  test("the retained bytes survive snapshot expiry after the citing note is deleted", () => {
+    const { h, s, clock, evidenceIds, resend } = expiredCitedFrames(["f1"], 1024 * MIB);
+    resend();
+    deleteCitingNote(h, clock.t);
+    h.evidence.sweepExpired(clock.t, 30);
+    expect(count(h, "evidence_snapshots")).toBe(0);
+    expect(count(h, "frames")).toBe(1);
+    expect(h.evidence.frameBytes(evidenceIds[0]!)).not.toBeNull();
+    expect(h.evidence.watchOrder(s.captureId).frameCandidates).toHaveLength(1);
+  });
+
+  test("the retained bytes survive snapshot expiry while an unsaved review holds the capture", () => {
+    const { h, s, clock, evidenceIds, resend } = expiredCitedFrames(["f1"], 1024 * MIB);
+    resend();
+    h.db.sql.run("INSERT INTO reviews (id, user_id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES ('rvw_new', ?, ?, 'prepared_only', '{}', ?, ?)", [
+      h.db.userId, s.captureId, h.db.nextSeq(), clock.t,
+    ]);
+    deleteCitingNote(h, clock.t);
+    clock.t += 31 * 86_400_000;
+    h.evidence.sweepExpired(clock.t, 30);
+    expect(h.evidence.frameBytes(evidenceIds[0]!)).not.toBeNull();
   });
 
   test("while the raw frame still exists, its hard-linked snapshot is not charged twice", () => {

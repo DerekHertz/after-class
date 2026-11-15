@@ -25,7 +25,7 @@ export const JPEG = Buffer.from(JPEG_BYTES).toString("base64");
 /** Scripted frame-change answers keyed by the `after` frame id. A frame with no entry is unjudged. */
 type Script = Map<EvidenceId, Lookup<Verdict>>;
 
-export function harness(opts: { clock?: { t: number }; limits?: IngestLimits } = {}) {
+export function harness(opts: { clock?: { t: number }; limits?: IngestLimits; runFrameChange?: (input: FrameChangeInput) => Promise<unknown> } = {}) {
   const dir = tmpDir("afterclass-evidence-");
   const db = testUserDb();
   const script: Script = new Map();
@@ -33,7 +33,7 @@ export function harness(opts: { clock?: { t: number }; limits?: IngestLimits } =
   const clock = opts.clock ?? { t: 1_000_000 };
   const evidence = createEvidence(db, dir, {
     lookupFrameChange: (input) => script.get(input.after.frame.id) ?? { kind: "missing", key: keyOf(input) },
-    runFrameChange: async () => undefined,
+    runFrameChange: async (input) => void (await opts.runFrameChange?.(input)),
     frameChangeKey: keyOf,
     onChange: () => void changes.n++,
     now: () => clock.t,
