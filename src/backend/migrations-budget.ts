@@ -38,19 +38,20 @@ BEGIN SELECT RAISE(ABORT, 'budget holds are never deleted'); END;`,
 
 
 /**
- * Which review a request finished past the caps, so a review can pass them only a bounded number of times (budget.ts). Null for
- * every other request, including a wrap-up held to the caps like any call. Written with the hold and never changed after.
+ * Which review a request was for, so the wrap-up that finishes a review can pass the caps only for a review that has paid tutoring
+ * in it, and only a bounded number of times (budget.ts). Null for a request no review asked for. Written with the hold and never
+ * changed after.
  */
-export const BUDGET_HOLDS_FINISHES: Migration = {
-  id: "006-budget-holds-finishes-review",
+export const BUDGET_HOLDS_REVIEW: Migration = {
+  id: "006-budget-holds-review",
   sql: `
-ALTER TABLE budget_holds ADD COLUMN finishes_review TEXT;
-CREATE INDEX budget_holds_by_review ON budget_holds (user_id, finishes_review) WHERE finishes_review IS NOT NULL;
+ALTER TABLE budget_holds ADD COLUMN review_id TEXT;
+CREATE INDEX budget_holds_by_review ON budget_holds (user_id, review_id, purpose) WHERE review_id IS NOT NULL;
 DROP TRIGGER budget_holds_settle_once;
 CREATE TRIGGER budget_holds_settle_once BEFORE UPDATE ON budget_holds
 WHEN OLD.settled_micros IS NOT NULL OR (NEW.settled_micros IS NULL AND NEW.priced_micros IS NULL)
   OR (OLD.priced_micros IS NOT NULL AND NEW.priced_micros IS NOT OLD.priced_micros) OR NEW.id IS NOT OLD.id OR NEW.user_id IS NOT OLD.user_id
   OR NEW.period IS NOT OLD.period OR NEW.purpose IS NOT OLD.purpose OR NEW.memo_key IS NOT OLD.memo_key
-  OR NEW.reserved_micros IS NOT OLD.reserved_micros OR NEW.reserved_ms IS NOT OLD.reserved_ms OR NEW.finishes_review IS NOT OLD.finishes_review
+  OR NEW.reserved_micros IS NOT OLD.reserved_micros OR NEW.reserved_ms IS NOT OLD.reserved_ms OR NEW.review_id IS NOT OLD.review_id
 BEGIN SELECT RAISE(ABORT, 'a budget hold is priced at most once, settled once, and is otherwise never changed'); END;`,
 };

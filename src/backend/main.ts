@@ -85,7 +85,7 @@ import { createPreparation } from "./preparation";
 import type { Preparation } from "./preparation";
 import { interpretTask, resourceSearchTask, reviseTask } from "./preparation/tasks";
 import type { FrameBytes, PreparationTasks } from "./preparation/tasks";
-import { createReviews, wrapUpRun } from "./review";
+import { createReviews } from "./review";
 import type { Reviews } from "./review";
 import { tutorCache, tutorTask, wrapUpTask } from "./review/tutor";
 import type { TutorCache, TutorInput, TutorModel, TutorOutput, WrapUpInput, WrapUpOutput } from "./review/tutor";
@@ -692,7 +692,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       concepts: preparation.concepts,
       bundle: evidence.bundle,
       watchedSeconds: (captureId) => evidence.captureView(captureId).watchedSeconds,
-      runTutor: (input, streamTo, signal, onRetry) => memo.run(tasks.tutor, input, { signal, streamTo, onRetry }),
+      runTutor: (input, streamTo, signal, onRetry) => memo.run(tasks.tutor, input, { signal, streamTo, onRetry, review: input.state.reviewId }),
       clearFailures: memo.clearFailures,
       runWrapUp: (input) => memo.run(tasks.wrapUp, input),
       endedInTx: (reviewId) => record.markEndedInTx(reviewId),
@@ -717,7 +717,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
         // A terminal failure stored before this request began answered an earlier save, so this retry clears it and asks once more.
         // A failure this request produced is returned as is. A hit is never cleared.
         const asOf = db.nextSeq();
-        const run = wrapUpRun(reviewId, turns);
+        const run = { review: reviewId };
         let result = await memo.run(tasks.wrapUp, input, run);
         if (result.kind === "failed" && result.atSeq < asOf) {
           memo.clearFailures([result.key]);
