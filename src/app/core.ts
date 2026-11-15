@@ -18,6 +18,11 @@ export function captureStatusLabel(s: CaptureStatus): string {
   return s.reason === "video_ended" ? "Capture stopped: the video ended" : "Capture stopped";
 }
 
+/** What the lecture page says Later does. After capture stops there is no next boundary, so it promises no invitation. */
+export function laterNote(s: CaptureStatus | null): string {
+  return s?.state === "stopped" ? "Keeps preparing. Capture has stopped, so no new invitation will come." : "Keeps preparing; you will be invited again at the next boundary.";
+}
+
 // ───────────────────────────── Time ─────────────────────────────────────────
 
 export function formatClock(seconds: number): string {

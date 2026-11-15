@@ -26,7 +26,7 @@ import type { ConnectReply, IngestAck } from "../../shared/wire";
 import { backend } from "./backend";
 import {
   FLUSH_TIMEOUT_MS, acceptsConnectSender, acceptsFact, badgeFor, closingSpanGap, connectionOf, isConnectMessage, isStaleRest, isStoredConnection, isWatchUrl, mayUpload,
-  playbackRecovered, safeReviewUrl, transition,
+  observeMessage, playbackRecovered, safeReviewUrl, transition,
 } from "./control";
 import type {
   Connection, ConnectionRequest, ControlEvent, DeadLetterSummary, FromContent, OptionsRequest, PopupRequest, StoredConnection, TabCaptureState, ToContent,
@@ -283,7 +283,7 @@ async function applyEventNow(tabId: number, event: ControlEvent): Promise<TabCap
     await saveTabs(tabs);
     const saved = tabs[tabId]!;
     renderBadge(tabId, saved);
-    post(tabId, { type: "observe", on: saved.state === "capturing", captureId: saved.captureId });
+    post(tabId, observeMessage(saved));
     if (fact) void flusher.flush(saved.captureId);
     return saved;
   });
@@ -307,13 +307,17 @@ chrome.runtime.onConnect.addListener((port) => {
     if (ports.get(tabId) === port) ports.delete(tabId);
   });
   port.onMessage.addListener((msg: FromContent) => void onContentMessage(tabId, msg));
-  void readState(tabId).then((s) => post(tabId, { type: "observe", on: s?.state === "capturing", captureId: s?.captureId ?? null }));
+  void readState(tabId).then((s) => post(tabId, observeMessage(s)));
 });
 
 async function onContentMessage(tabId: number, msg: FromContent): Promise<void> {
   if ("type" in msg) {
     if (msg.type === "flushed") {
       for (const wake of Array.from(flushWaiters.get(tabId) ?? [])) wake();
+      return;
+    }
+    if (msg.type === "resume") {
+      await applyEvent(tabId, { kind: "resume" });
       return;
     }
     await applyEvent(tabId, msg.type === "idle" || msg.type === "video_ended" ? { kind: msg.type, captureId: msg.captureId } : { kind: msg.type });
@@ -431,7 +435,7 @@ async function handlePopup(req: PopupRequest): Promise<WorkerResponse> {
     case "retry_observe": {
       await ensureContentScript(req.tabId);
       const state = await readState(req.tabId);
-      post(req.tabId, { type: "observe", on: state?.state === "capturing", captureId: state?.captureId ?? null });
+      post(req.tabId, observeMessage(state));
       return { state };
     }
   }

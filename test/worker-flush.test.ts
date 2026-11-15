@@ -196,7 +196,22 @@ describe("worker to content messages", () => {
     const before = p.posted.length;
     const r = await sendPopup(c, { type: "retry_observe", tabId: 1 });
     expect(r.error).toBeUndefined();
-    expect(p.posted.slice(before)).toEqual([{ type: "observe", on: true, captureId: r.state.captureId }]);
+    expect(p.posted.slice(before)).toEqual([{ type: "observe", on: true, captureId: r.state.captureId, paused: false }]);
+  });
+});
+
+describe("the paused sign's messages", () => {
+  test("a paused capture tells the page it is paused, and the page's Resume resumes it", async () => {
+    const { c, p } = await capturing();
+    answeringFlush(p);
+    const lastObserve = () => p.posted.filter((m) => m.type === "observe").at(-1);
+    feed(p, { type: "idle", captureId: await captureIdOf(c) });
+    await wait(50);
+    expect(lastObserve()).toMatchObject({ on: false, paused: true });
+    feed(p, { type: "resume" });
+    await wait(50);
+    expect(lastObserve()).toMatchObject({ on: true, paused: false });
+    expect((await sendPopup(c, { type: "status", tabId: 1 })).state.state).toBe("capturing");
   });
 });
 

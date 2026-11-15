@@ -44,12 +44,20 @@ export type PopupRequest =
  * before the pause or stop fact does.
  */
 export type ToContent =
-  | { readonly type: "observe"; readonly on: boolean; readonly captureId: CaptureId | null }
+  | { readonly type: "observe"; readonly on: boolean; readonly captureId: CaptureId | null; readonly paused: boolean }
   | { readonly type: "read_transcript" }
   | { readonly type: "flush" };
 
-/** Content script to worker, besides fact bodies. Same port, so a `flushed` always follows the spans sent before it. */
-export type FromContent = CaptureFactBody | ContentSignal | { readonly type: "flushed" };
+/**
+ * Content script to worker, besides fact bodies. Same port, so a `flushed` always follows the spans sent before it.
+ * `resume` is the Resume button on the page's paused sign; it is the learner's own click, as in the popup.
+ */
+export type FromContent = CaptureFactBody | ContentSignal | { readonly type: "flushed" | "resume" };
+
+/** What the content script is told about a tab: whether to observe, and whether capture is paused so the page can say so. */
+export function observeMessage(state: TabCaptureState | null): ToContent {
+  return { type: "observe", on: state?.state === "capturing", captureId: state?.captureId ?? null, paused: state?.state === "paused" };
+}
 
 /** How long the worker waits for the content script's closing span before pausing without it. */
 export const FLUSH_TIMEOUT_MS = 1000;

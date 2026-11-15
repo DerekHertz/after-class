@@ -39,6 +39,7 @@ function rig(over: Partial<ContentDeps> = {}) {
   const transcriptCalls: string[] = [];
   let nav: Parameters<ContentDeps["watchNavigation"]>[0] | null = null;
   const trackers: { tracker: PlaybackTracker; disposed: boolean }[] = [];
+  const sign = { visible: false, resume: () => {} };
 
   const deps: ContentDeps = {
     connect: () => port,
@@ -59,12 +60,14 @@ function rig(over: Partial<ContentDeps> = {}) {
     },
     createSampler: () => ({ setObserving() {}, dispose() {} }),
     watchNavigation: (h) => ((nav = h), () => {}),
+    pausedSign: { show: (onResume) => ((sign.visible = true), (sign.resume = onResume)), hide: () => (sign.visible = false) },
     ...over,
   };
   startContent(deps);
 
   return {
     posted,
+    sign,
     transcriptCalls,
     trackers,
     deliver: (m: ToContent) => listeners.forEach((f) => f(m)),
@@ -86,7 +89,7 @@ function rig(over: Partial<ContentDeps> = {}) {
   };
 }
 
-const observe = (on: boolean, captureId: string | null) => ({ type: "observe", on, captureId }) as unknown as ToContent;
+const observe = (on: boolean, captureId: string | null, paused = false) => ({ type: "observe", on, captureId, paused }) as unknown as ToContent;
 
 describe("the transcript is read once per capture and video", () => {
   test("Stop then Start on the same video reads it again for the new capture", async () => {
@@ -315,5 +318,37 @@ describe("a finished video and a playlist", () => {
     r.tick(20, 600);
     r.tick(20, 600);
     expect(signals(r)).toEqual([{ type: "video_ended", captureId: CAP_A }]);
+  });
+});
+
+describe("the paused sign", () => {
+  test("shows while capture is paused on a watch page, and Resume asks the worker to resume", () => {
+    const r = rig();
+    r.nav().onWatchPage(VID);
+    r.deliver(observe(true, CAP_A));
+    expect(r.sign.visible).toBe(false);
+    r.deliver(observe(false, CAP_A, true));
+    expect(r.sign.visible).toBe(true);
+    r.sign.resume();
+    expect(r.posted).toContainEqual({ type: "resume" });
+    r.deliver(observe(true, CAP_A));
+    expect(r.sign.visible).toBe(false);
+  });
+
+  test("is not shown when the tab is not on a watch page, and is removed on leaving one", () => {
+    const r = rig();
+    r.deliver(observe(false, CAP_A, true));
+    expect(r.sign.visible).toBe(false);
+    r.nav().onWatchPage(VID);
+    expect(r.sign.visible).toBe(true);
+    r.nav().onLeftWatchPage();
+    expect(r.sign.visible).toBe(false);
+  });
+
+  test("a stopped capture shows nothing", () => {
+    const r = rig();
+    r.nav().onWatchPage(VID);
+    r.deliver(observe(false, CAP_A, false));
+    expect(r.sign.visible).toBe(false);
   });
 });
