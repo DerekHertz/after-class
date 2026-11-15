@@ -20,7 +20,7 @@
  * them. An act the backend would reject is refused before it is stored.
  */
 import { z } from "zod";
-import type { LearnerAct, ReviewView } from "../shared/domain";
+import type { LearnerAct, ReviewView, TurnEvent } from "../shared/domain";
 import type { ReviewId, TurnId } from "../shared/ids";
 import { randomId } from "../shared/ids";
 import { learnerAct } from "../shared/wire";
@@ -80,6 +80,8 @@ export type ControllerDeps = {
   /** How often to re-read a review whose turn is still running on the backend. */
   readonly inFlightPollMs?: number;
   readonly timers?: PollTimers;
+  /** Called with each event of a streamed tutor turn as it arrives. */
+  readonly onTurnEvent?: (event: TurnEvent) => void;
 };
 
 export const IN_FLIGHT_POLL_MS = 1000;
@@ -225,6 +227,7 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
     let wrappedUp = false;
     try {
       for await (const event of api.sendTurn(reviewId, turnId, act)) {
+        deps.onTurnEvent?.(event);
         if (event.type === "move" && event.move.kind === "wrap_up") wrappedUp = true;
         if (event.type === "learner_turn_stored") {
           await unsent.remove(turnId);

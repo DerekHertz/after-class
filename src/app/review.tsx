@@ -3,11 +3,12 @@ import { useCallback, useEffect, useLayoutEffect, useId, useMemo, useRef, useSta
 import type { Ref } from "react";
 import { Material } from "../shared/time";
 import type { ConceptId, EvidenceId, ReviewId } from "../shared/ids";
-import type { Concept } from "../shared/domain";
+import type { Concept, TurnEvent } from "../shared/domain";
 import type { AppApi } from "./api";
 import { useAppearance, useSceneActivity } from "./appearance";
 import { FrontRowScene, reserveNavSpace } from "./front-row";
-import { reactToCompanion } from "./companion-reaction";
+import { react } from "./room/reaction-store";
+import { inputFromTurnEvent } from "./room/reactions";
 import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
 import { ACTION_LABEL, END_CONFIRM_TEXT, composerActions, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow, softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, strandedEndTurn, selectedEvidenceIds, shouldSubmitAnswer, questionScrollTop, } from "./core";
@@ -28,6 +29,11 @@ export type ReviewDeps = { readonly api: AppApi; readonly speaker: Speaker; read
  * field lies on the desk. The lecture folio and the review notebook are picked up over the room, one at a time, only
  * when the learner asks; the response field stays mounted underneath, so a draft survives.
  */
+function reactToTurnEvent(event: TurnEvent) {
+  const input = inputFromTurnEvent(event);
+  if (input !== null) react(input);
+}
+
 export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewDeps & { readonly reviewId: ReviewId }) {
   const { appearance, voice, activity } = useAppearance();
   const board = useRef<HTMLElement>(null);
@@ -47,7 +53,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const [handoff, setHandoff] = useState<StartHandoff>("none");
   const startStatus = useRef<HTMLParagraphElement>(null);
   const questionLine = useRef<HTMLLIElement>(null);
-  const controller = useMemo(() => createReviewController({ api, reviewId, speaker, unsent }), [api, reviewId, speaker, unsent]);
+  const controller = useMemo(() => createReviewController({ api, reviewId, speaker, unsent, onTurnEvent: reactToTurnEvent }), [api, reviewId, speaker, unsent]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
   useEffect(() => {
     void controller.load();
@@ -75,12 +81,14 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     const page = objectPage.current;
     if (inspecting === "history" && followHistory.current && page) page.scrollTop = page.scrollHeight;
   }, [inspecting, state.view?.turns.length]);
+  const saved = state.savedSummary !== null;
+  useEffect(() => { if (saved) react({ type: "review_saved" }); }, [saved]);
   useSceneActivity(state.saving ? "saving" : listening ? "listening" : state.view?.state.phase === "paused" ? "paused" : state.live?.status === "streaming" ? "waiting" : "idle");
 
   /** Picks up an object. Switching from one object to the other keeps the control that picked up the first. */
   function inspect(object: RoomObject, origin: HTMLElement | null) {
     if (inspecting === null) pickedUpFrom.current = origin;
-    if (object === "source" && inspecting !== "source") reactToCompanion("draw");
+    if (object === "source" && inspecting !== "source") react({ type: "source_opened" });
     if (object === "history") followHistory.current = true;
     setInspecting(object);
   }
