@@ -3,7 +3,8 @@
 # Mechanical only: each grounded frame is translated straight down or up so the lowest opaque row of its body sits on idle's.
 # Airborne frames (hop-air) are copied as drawn and keep their measured offset in provenance.json for the stage to place.
 # Nothing is redrawn. The script refuses a frame whose alpha is not binary, whose canvas is not the master's cell, or that has
-# a speck (a separate opaque island that is not listed in ISLANDS below).
+# a speck (a separate opaque island that is not listed in ISLANDS below). A refused frame is not written and is listed under
+# "rejected" in provenance.json with its reason, for a person to decide.
 import json
 import os
 import sys
@@ -16,7 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "../../../.."))
 CELL = 724
 AIRBORNE = {"hop-air"}
-ISLANDS = {"think": 1}  # the sweat drop is meant to be its own island
+ISLANDS = {"pip": {"think": 1}}  # Pip's sweat drop is meant to be its own island. No other companion has one.
 
 
 def body_bottom(alpha):
@@ -34,13 +35,20 @@ def main(who):
     master = np.array(Image.open(os.path.join(ROOT, record["master"])))
     ground, _ = body_bottom(np.array(Image.open(os.path.join(src, "idle.png")))[..., 3] > 128)
     result = {"companion": who, "master": record["master"], "cell": CELL, "model": record["model"], "groundRow": ground, "frames": {}}
+    rejected = {}
     for name, info in record["frames"].items():
         img = np.array(Image.open(os.path.join(src, f"{name}.png")).convert("RGBA"))
-        assert img.shape == (CELL, CELL, 4), f"{name}: {img.shape}"
         alpha = img[..., 3]
-        assert set(np.unique(alpha)) <= {0, 255}, f"{name}: alpha is not binary"
-        bottom, islands = body_bottom(alpha > 0)
-        assert islands == 1 + ISLANDS.get(name, 0), f"{name}: {islands} separate islands"
+        reason = None
+        if img.shape != (CELL, CELL, 4): reason = f"canvas is {img.shape}"
+        elif not set(np.unique(alpha)) <= {0, 255}: reason = "alpha is not binary"
+        else:
+            bottom, islands = body_bottom(alpha > 0)
+            if islands != 1 + ISLANDS.get(who, {}).get(name, 0): reason = f"{islands} separate islands"
+        if reason:
+            rejected[name] = reason
+            print(name, "REJECTED:", reason)
+            continue
         dy = 0 if name in AIRBORNE else ground - bottom
         if dy:
             moved = np.zeros_like(img)
@@ -51,6 +59,7 @@ def main(who):
         Image.fromarray(img).save(os.path.join(out, f"{name}.png"), optimize=True)
         result["frames"][name] = {**info, "shiftY": dy, "airborne": name in AIRBORNE, "bodyBottomRow": bottom + dy}
         print(name, "shiftY", dy, "body bottom", bottom + dy)
+    if rejected: result["rejected"] = rejected
     json.dump(result, open(os.path.join(out, "provenance.json"), "w"), indent=1)
     open(os.path.join(out, "provenance.json"), "a").write("\n")
 

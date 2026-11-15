@@ -1,0 +1,84 @@
+{
+ "companion": "lumi",
+ "master": "art/masters/companions-v3/lumi.png",
+ "cell": 724,
+ "model": "nano-banana-pro",
+ "groundRow": 646,
+ "frames": {
+  "blink": {
+   "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: close both eyes, drawn as two short gently curved dark lines, as in a blink. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddbb-fba3-75cc-9afd-b41a00f4e34a",
+   "credits": 9,
+   "changed_vs_idle": 0.012,
+   "shiftY": 0,
+   "airborne": false,
+   "bodyBottomRow": 646
+  },
+  "look-board": {
+   "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: turn the eyes up and to the right, as if reading a chalkboard above and to the right, with a small curious open mouth. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddbb-fb84-74ff-832c-38503dea95aa",
+   "credits": 9,
+   "changed_vs_idle": 0.02,
+   "shiftY": 0,
+   "airborne": false,
+   "bodyBottomRow": 646
+  },
+  "look-mat": {
+   "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: move both eye dots to the lower right, glancing down and to the right at the desk, attentive. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddbb-fba4-70e0-b4a7-6901cd6cee85",
+   "credits": 9,
+   "changed_vs_idle": 0.021,
+   "shiftY": 0,
+   "airborne": false,
+   "bodyBottomRow": 646
+  },
+  "nod": {
+   "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: a clear happy nod: redraw the lamp shade tilted about 20 degrees further forward and down so its face points at the desk, the shade lower than now, eyes closed in two upward-curved smiling arcs; the base stays where it is. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddc2-22ed-71fb-a804-a5f9269157b6",
+   "credits": 9,
+   "changed_vs_idle": 0.012,
+   "shiftY": 0,
+   "airborne": false,
+   "bodyBottomRow": 646
+  },
+  "hop-crouch": {
+   "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: crouched low before a hop: redraw the two arm segments folded much more sharply so the shade sits clearly lower, close above the base, eyes squeezed shut happily; the base stays where it is. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddc2-22ef-76a5-bf3b-b4e17f37e443",
+   "credits": 9,
+   "changed_vs_idle": 0.013,
+   "shiftY": 0,
+   "airborne": false,
+   "bodyBottomRow": 646
+  },
+  "hop-air": {
+   "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: stretched up at the top of a happy hop: redraw the two arm segments almost straight and upright so the shade sits clearly higher than now, joyful open smile; the base stays where it is. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddc2-22ec-709a-91e7-d0c853badeaf",
+   "credits": 9,
+   "changed_vs_idle": 0.015,
+   "shiftY": 0,
+   "airborne": true,
+   "bodyBottomRow": 646
+  },
+  "think": {
+   "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: thinking: the shade tilts slightly to the left, eyes look up and to the left, the mouth is a small flat line, one tiny sweat drop beside the shade. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddbc-b301-70f3-90f1-29556b445b60",
+   "credits": 9,
+   "changed_vs_idle": 0.021,
+   "shiftY": 0,
+   "airborne": false,
+   "bodyBottomRow": 646
+  },
+  "talk": {
+   "prompt": "Edit the reference image, a friendly brass desk-lamp mascot whose lamp shade is its face, a painted pixel-art-style mascot on a flat magenta background. Make ONLY this change: talking: the same pose with a small open rounded mouth, as if saying something. Keep everything else exactly the same: the same character, the same soft painted HD pixel-art style and resolution, the same dark outlines, colours, shading and highlights, the same size and position in the frame, and the same flat solid magenta #ff00ff background. No text, no extra objects, no shadow.",
+   "meshy_task_id": "01a1ddbc-fb5a-7277-8dfb-5944346fa749",
+   "credits": 9,
+   "changed_vs_idle": 0.012,
+   "shiftY": 0,
+   "airborne": false,
+   "bodyBottomRow": 646
+  }
+ },
+ "rejected": {
+  "cheer": "10 separate islands"
+ }
+}
