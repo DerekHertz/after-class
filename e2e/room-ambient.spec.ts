@@ -64,7 +64,7 @@ test.describe("with motion on", () => {
     });
   }
 
-  test("each step copies the room's still art in at most one picture per run between specks", async ({ page }) => {
+  test("each step copies the room's still art in at most one picture per run between live draws", async ({ page }) => {
     await watchCanvas(page);
     for (const scene of scenes) {
       await openRoom(page, scene);
@@ -74,9 +74,9 @@ test.describe("with motion on", () => {
       const later = await counts(page);
       const steps = later.clears - first.clears;
       expect(steps).toBeGreaterThan(5);
-      // The rooms' painted layers fall into at most four runs between their depths of specks. Painted picture by picture,
-      // a step would make some thirty drawImage calls, nine for each nine-slice.
-      expect((later.drawImage - first.drawImage) / steps).toBeLessThanOrEqual(4);
+      // The rooms' painted layers fall into at most four runs between their depths of specks, and the companion is one more
+      // picture. Painted picture by picture, a step would make some thirty drawImage calls, nine for each nine-slice.
+      expect((later.drawImage - first.drawImage) / steps).toBeLessThanOrEqual(5);
     }
   });
 
@@ -91,7 +91,8 @@ test.describe("with motion on", () => {
         return window.setTimeout(() => callback(performance.now()), 0);
       };
     });
-    await openRoom(page, "last-desk");
+    // The companion stays hidden: its blinks may change the room between two steps.
+    await openRoom(page, "last-desk", { visible: false });
     await page.waitForTimeout(2000);
     const steps = await page.evaluate((fps) => (window as unknown as { frames: number[] }).frames.map((at) => Math.floor((at / 1000) * fps)), AMBIENT_FPS);
     const moving = steps.slice(2);

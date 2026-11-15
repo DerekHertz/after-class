@@ -3,19 +3,27 @@ import type { SceneId } from "../appearance";
 import { layoutRoom } from "./layout";
 import type { Composition, Rect, Size } from "./layout";
 import { buildScene } from "./scene";
-import type { Draw, DrawList, PictureDraw, Specks } from "./scene";
+import type { CompanionDraw, Draw, DrawList, PictureDraw, Specks } from "./scene";
+import { restsFrom } from "./companion";
+import type { CompanionCue, Idle } from "./companion";
 import { pieces } from "./paint";
 import { ROOM_LAYER_ART } from "./art";
 import type { Scale } from "./paint";
 
 /**
  * The canvas behind the room's text and controls. It paints the draw list of `scene` at the window's device pixels and
- * repaints only when the room, its size or a decoded picture changes, or while the list says something moves, which it does
- * only when `motion` is on (room/motion.ts). Until every
+ * repaints only when the room, its size or a decoded picture changes, or while the list says something moves. Until every
  * picture of a room has decoded it keeps the room it last finished, or stays empty so the page's backdrop shows through.
  * Its `data-stage` attribute says which, and front-row.css holds the room's words back only while it is `waiting`.
+ * `companion` draws the companion in front of the room, animated only while `motion` is on (room/motion.ts). The frame it
+ * last drew is the canvas's `data-companion` attribute.
  */
-export function RoomStage({ scene, composition, motion }: { readonly scene: SceneId; readonly composition: Composition; readonly motion: boolean }) {
+export function RoomStage({ scene, composition, motion, companion }: {
+  readonly scene: SceneId;
+  readonly composition: Composition;
+  readonly motion: boolean;
+  readonly companion: CompanionCue | null;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<Stage | null>(null);
   useLayoutEffect(() => {
@@ -30,7 +38,14 @@ export function RoomStage({ scene, composition, motion }: { readonly scene: Scen
     stageRef.current = stage;
     return () => { stage.stop(); stageRef.current = null; };
   }, []);
-  useLayoutEffect(() => { stageRef.current?.show(scene, composition, motion); }, [scene, composition, motion]);
+  // The cue is rebuilt from its fields so a render that changes none of them, as typing in the answer does, never repaints.
+  const { id, activity } = companion ?? {};
+  const gesture = companion?.gesture?.name;
+  const at = companion?.gesture?.at;
+  useLayoutEffect(() => {
+    const cue = id === undefined || activity === undefined ? null : { id, activity, gesture: gesture === undefined || at === undefined ? null : { name: gesture, at } };
+    stageRef.current?.show({ scene, composition, motion, companion: cue });
+  }, [scene, composition, motion, id, activity, gesture, at]);
   return <canvas ref={canvasRef} className="front-row-canvas" aria-hidden="true" />;
 }
 
@@ -41,7 +56,7 @@ export function RoomStage({ scene, composition, motion }: { readonly scene: Scen
 type StageState = "waiting" | "painted" | "off";
 const setState = (canvas: HTMLCanvasElement, state: StageState) => { canvas.dataset.stage = state; };
 
-type Wanted = { readonly scene: SceneId; readonly composition: Composition; readonly motion: boolean };
+type Wanted = { readonly scene: SceneId; readonly composition: Composition; readonly motion: boolean; readonly companion: CompanionCue | null };
 /** The canvas's box: its size in CSS pixels and the device pixels of its backing store. */
 type Box = { readonly css: Size; readonly device: Size };
 
@@ -52,6 +67,8 @@ class Stage {
   private frame: number | null = null;
   /** Waits out the time until the list's `next`, so a room that changes a few times a second does not wake every frame. */
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** Idle blinks count from when the stage started or the last gesture ended, at intervals drawn from a seed of its own. */
+  private idle: Idle = { since: performance.now(), seed: Math.floor(Math.random() * 2 ** 32) };
   /** Set when a change arrived while the tab was hidden, so the stage paints it once the tab shows again. */
   private stale = false;
   /** The pictures this stage waits on, so it stops waiting on those of a room it no longer shows. */
@@ -82,8 +99,9 @@ class Stage {
     this.paint();
   };
 
-  show(scene: SceneId, composition: Composition, motion: boolean): void {
-    this.wanted = { scene, composition, motion };
+  show(wanted: Wanted): void {
+    if (wanted.companion !== null) this.idle = { ...this.idle, since: Math.max(this.idle.since, restsFrom(wanted.companion)) };
+    this.wanted = wanted;
     this.paint();
   }
 
@@ -141,20 +159,32 @@ class Stage {
       return;
     }
     const now = wanted.motion ? performance.now() : null;
-    const list = (scene: SceneId) => buildScene(scene, layoutRoom(scene, box.css, wanted.composition), now);
+    const companion = wanted.companion === null ? null : { cue: wanted.companion, idle: this.idle, ratio: scaleOf(box).y };
+    const list = (scene: SceneId) => buildScene(scene, layoutRoom(scene, box.css, wanted.composition), now, companion);
     let drawn: DrawList | null = list(wanted.scene);
     if (this.decoded(drawn)) this.shown = wanted.scene;
     else drawn = this.shown === null ? null : list(this.shown);
     if (drawn !== null && !this.decoded(drawn)) drawn = null;
+    let companionFrame: string | undefined;
+    const painted = (drawn?.draws ?? []).flatMap((draw): Draw[] => {
+      if (draw.kind !== "companion") return [draw];
+      const shown = this.companion(draw);
+      companionFrame = shown?.frame;
+      return shown === null ? [] : [shown];
+    });
     const { context } = this;
     context.setTransform(1, 0, 0, 1, 0, 0);
     if (drawn?.next == null) {
       this.moving = null;
       context.clearRect(0, 0, box.device.width, box.device.height);
-      if (drawn !== null) for (const draw of drawn.draws) paintDraw(context, draw, scaleOf(box));
-    } else this.paintMoving(drawn.draws, box);
+      for (const draw of painted) paintDraw(context, draw, scaleOf(box));
+    } else this.paintMoving(painted, box);
+    if (companionFrame === undefined) delete this.canvas.dataset.companion;
+    else this.canvas.dataset.companion = companionFrame;
     setState(this.canvas, drawn === null ? "waiting" : "painted");
+    for (const src of drawn?.ahead ?? []) picture(src);
     if (drawn?.next != null) {
+      // Rounded up, since a timer truncates its delay to whole milliseconds and would wake just before the change, paint the same frame and wait again.
       this.timer = setTimeout(() => { this.timer = null; this.frame = requestAnimationFrame(this.paint); }, Math.max(0, Math.ceil(drawn.next - performance.now())));
     }
   };
@@ -201,6 +231,19 @@ class Stage {
       else context.drawImage(layer.canvas, 0, 0);
     }
     if (damage !== null) context.restore();
+  }
+
+  /** What to paint for the companion: its frame once decoded, else its stand-in once that is, else nothing. Repaints on decode. */
+  private companion(draw: CompanionDraw): CompanionDraw | null {
+    for (let candidate: CompanionDraw | null = draw; candidate !== null; candidate = candidate.standIn) {
+      const entry = picture(candidate.src);
+      if (entry.state === "decoded") return candidate;
+      if (entry.state === "pending") {
+        entry.waiting.add(this.paint);
+        this.awaited.add(entry);
+      }
+    }
+    return null;
   }
 
   /**
@@ -295,8 +338,16 @@ function runs(draws: readonly Draw[]): readonly (LiveDraw | readonly PictureDraw
 function liveBoxes(draw: LiveDraw, scale: Scale): readonly DeviceBox[] {
   switch (draw.kind) {
     case "specks": return draw.rects.map((rect) => deviceBox(rect, scale));
+    case "companion": {
+      const { image } = pictures.get(draw.src)!;
+      const shadow = companionShadow(scale);
+      return pieces(draw, { width: image.naturalWidth, height: image.naturalHeight }, scale).map(({ dx, dy, dw, dh }) => ({ x: dx, y: dy, width: dw, height: dh + shadow }));
+    }
   }
 }
+
+/** The drop shadow the companion had as a CSS filter: 4 CSS pixels straight down, unblurred, at a quarter black. */
+const companionShadow = (scale: Scale) => Math.round(4 * scale.y);
 
 /** A rect of the stage in whole device pixels, at least one each way, so a speck is never smeared across two. */
 function deviceBox({ left, top, width, height }: Rect, scale: Scale): DeviceBox {
@@ -322,9 +373,11 @@ function paintDraw(context: CanvasRenderingContext2D, draw: Draw, scale: Scale):
   const smooth = draw.kind === "image" && draw.sampling === "smooth";
   context.imageSmoothingEnabled = smooth;
   if (smooth) context.imageSmoothingQuality = "medium";
+  if (draw.kind === "companion") Object.assign(context, { shadowColor: "#00000040", shadowOffsetY: companionShadow(scale) });
   for (const { sx, sy, sw, sh, dx, dy, dw, dh } of pieces(draw, { width: image.naturalWidth, height: image.naturalHeight }, scale)) {
     context.drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh);
   }
+  if (draw.kind === "companion") Object.assign(context, { shadowColor: "transparent", shadowOffsetY: 0 });
 }
 
 /** Fills each speck on whole device pixels. */

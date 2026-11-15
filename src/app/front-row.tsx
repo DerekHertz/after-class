@@ -3,7 +3,7 @@ import { flushSync } from "react-dom";
 import type { CSSProperties, ReactNode, Ref, RefObject } from "react";
 import type { Appearance, CompanionActivity, SceneId } from "./appearance";
 import { COMPANION_STATUS, Companion } from "./companion";
-import { clearReaction } from "./room/reaction-store";
+import { clearReaction, useReaction } from "./room/reaction-store";
 import { sourceButtonLabel } from "./room-object";
 import type { RoomObject } from "./room-object";
 import { layoutRoom } from "./room/layout";
@@ -70,6 +70,10 @@ export function FrontRowScene({ scene, layout, appearance, activity, boardRef }:
   const size = useContentSize(sceneRef);
   const composition = useFullRoom() ? "full" : "compact";
   const motion = useMotion(appearance.motion, composition);
+  const reaction = useReaction();
+  const companion = appearance.visible && composition === "full"
+    ? { id: appearance.companion, activity, gesture: reaction === null ? null : { name: reaction.gesture, at: reaction.at } }
+    : null;
   const placed = size === null ? null : layoutRoom(scene, size, composition);
   const full = placed?.composition === "full" ? placed : null;
   useEffect(() => { clearReaction(); }, [scene, appearance.companion, appearance.visible]);
@@ -77,7 +81,7 @@ export function FrontRowScene({ scene, layout, appearance, activity, boardRef }:
     <div ref={sceneRef} className="front-row-scene" data-room={scene} data-board-tone={room.board.tone} data-mat-tone={room.mat.tone} data-mat-actions={room.mat.actions} data-board-align={room.board.align} data-phase={layout.kind}>
       {/* The room's painted layers on one canvas, with every control placed over them from room/layout.ts. */}
       <div className="front-row-stage" style={full ? stageStyle(full) : undefined}>
-        <RoomStage scene={scene} composition={composition} motion={motion} />
+        <RoomStage scene={scene} composition={composition} motion={motion} companion={companion} />
         {layout.kind === "setup" ? layout.form : <>
           <ScrollArea area="board" label={room.surfaceName} areaRef={boardRef}>{layout.board}</ScrollArea>
           <ScrollArea area="desk" label="Your desk">{layout.desk}</ScrollArea>

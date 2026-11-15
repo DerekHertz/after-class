@@ -3,6 +3,7 @@ import type { SceneId } from "../src/app/appearance";
 import { AMBIENT, AMBIENT_FPS, LIGHT, shaftRows, speckPositions } from "../src/app/room/ambient";
 import { layoutRoom } from "../src/app/room/layout";
 import type { FullRoomLayout, Rect } from "../src/app/room/layout";
+import { companionAt } from "../src/app/room/companion";
 import { motionOn } from "../src/app/room/motion";
 import { FRONT_ROW_ROOMS, ROOM_ART } from "../src/app/room/rooms";
 import { buildScene } from "../src/app/room/scene";
@@ -151,5 +152,21 @@ describe("ambient life on the draw list", () => {
     const lit = (now: number | null) => specksOf(buildScene("last-desk", layout, now).draws).some((s) => s.color === LIGHT["last-desk"][0]!.color);
     expect(lit(T)).toBe(true);
     expect(lit(null)).toBe(false);
+  });
+
+  test("with the companion in the room, the list asks for whichever comes first, its next step or the companion's", () => {
+    const layout = fullLayout("last-desk");
+    const companion = { cue: { id: "lumi", activity: "idle", gesture: { name: "nod", at: T } }, idle: { since: 0, seed: 7 }, ratio: 1 } as const;
+    const firsts = new Set<string>();
+    for (let now = T; now < T + 3000; now += 7) {
+      const both = buildScene("last-desk", layout, now, companion);
+      const specksNext = buildScene("last-desk", layout, now).next!;
+      const companionNext = companionAt(companion.cue, companion.idle, now).next ?? Infinity;
+      expect(both.next).toBe(Math.min(specksNext, companionNext));
+      firsts.add(companionNext < specksNext ? "companion" : "specks");
+      expect(specksOf(both.draws).length).toBeGreaterThan(0);
+      expect(both.draws.at(-1)).toMatchObject({ kind: "companion" });
+    }
+    expect([...firsts].sort()).toEqual(["companion", "specks"]);
   });
 });

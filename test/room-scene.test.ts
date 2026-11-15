@@ -9,7 +9,7 @@ import { ROOM_LAYER_ART } from "../src/app/room/art";
 import { FRONT_ROW_ROOMS } from "../src/app/room/rooms";
 
 const rooms = Object.keys(FRONT_ROW_ROOMS) as SceneId[];
-const isPicture = (draw: Draw): draw is PictureDraw => draw.kind !== "specks";
+const isPicture = (draw: Draw): draw is PictureDraw => draw.kind === "image" || draw.kind === "nine-slice";
 const full = (scene: SceneId, window: Size) => {
   const list = buildScene(scene, layoutRoom(scene, window, "full"));
   return { ...list, draws: list.draws.filter(isPicture) };
@@ -28,7 +28,7 @@ describe("the stage's draw list", () => {
     for (const scene of rooms) {
       const { draws } = full(scene, { width: 1920, height: 1080 });
       expect(draws.filter((d) => d.kind === "nine-slice").map(named).sort()).toEqual(["board", "desk", "mat"].map((l) => named({ src: ROOM_LAYER_ART[scene][l as "board"] } as PictureDraw)).sort());
-      expect(draws.every((d) => d.kind === "nine-slice" || d.sampling === "pixelated")).toBe(true);
+      expect(draws.every((d) => d.kind !== "image" || d.sampling === "pixelated")).toBe(true);
     }
   });
 
@@ -43,7 +43,7 @@ describe("the stage's draw list", () => {
     }
   });
 
-  test("a still room asks the stage for no other frame", () => {
+  test("a room without a companion is still, so no list asks the stage for another frame", () => {
     for (const scene of rooms) for (const composition of ["full", "compact"] as const) {
       expect(buildScene(scene, layoutRoom(scene, { width: 1440, height: 900 }, composition)).next).toBeNull();
     }
@@ -83,7 +83,7 @@ describe("the stage snaps a box at the window's device pixel ratio, where a real
   // emulation lays out at one pixel per CSS pixel and scales the result, so it cannot settle these. Each sits on a rounding
   // edge that one wrong rule would cross: rounding to 1/64 px instead of truncating, ending at the snapped start + size, or
   // snapping in CSS pixels before scaling.
-  const cases: readonly { kind: PictureDraw["kind"]; start: number; size: number; scale: number; chrome: readonly [number, number] }[] = [
+  const cases: readonly { kind: "image" | "nine-slice"; start: number; size: number; scale: number; chrome: readonly [number, number] }[] = [
     { kind: "image", start: 10.496, size: 20, scale: 1, chrome: [10, 30] },
     { kind: "image", start: 10.51, size: 20.99, scale: 1, chrome: [11, 31] },
     { kind: "nine-slice", start: 10.01, size: 20.48, scale: 1, chrome: [10, 30] },
