@@ -437,7 +437,8 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   /**
    * What the user's rows hold on disk, in bytes. Text is measured as a BLOB because SQLite's LENGTH of TEXT counts characters. A
    * snapshot's frame is a hard link to the frame row's file until raw expiry deletes that row, so it is charged only once no
-   * frame row has its evidence id.
+   * frame row has its evidence id. That holds because an id with a snapshot never gets a new frame row: a frame row and a snapshot
+   * with one id always share a file.
    */
   const storedBytes = db.sql.query<{ n: number }, [string, string, string, string]>(
     `SELECT (SELECT COALESCE(SUM(bytes), 0) FROM frames WHERE user_id = ?)
@@ -488,8 +489,9 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
         const path = join("frames", userId, sourceId, `${id}.jpg`);
         const decoded = new Uint8Array(Buffer.from(f.jpegBase64, "base64"));
         const jpeg = isFrameJpeg(decoded, f.width, f.height);
-        // A resent frameId keeps the first bytes: the file is written only for an id with no row yet.
-        const stored = jpeg && !dead.has(id) && !claimed.has(id) && frameOf(id) === null;
+        // A resent frameId keeps the first bytes: the file is written only for an id with no frame or snapshot yet. After raw expiry a
+        // snapshot still holds the first bytes, and a second file for the id would sit on disk uncharged beside it.
+        const stored = jpeg && !dead.has(id) && !claimed.has(id) && frameOf(id) === null && snapshotOf(id) === null;
         if (stored) claimed.add(id);
         frames.set(f.clientSeq, { id, path, stored, jpeg, bytes: decoded });
       }

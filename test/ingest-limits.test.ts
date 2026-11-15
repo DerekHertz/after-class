@@ -223,6 +223,33 @@ describe("a cited snapshot keeps its charge after raw expiry", () => {
     expect(() => h.evidence.ingest({ captureId: next.captureId, facts: next.facts })).toThrow(IngestRefused);
   });
 
+  test("re-uploading an id whose raw frame expired reuses the retained file, so the quota still holds", () => {
+    const clock = { t: 1_000_000 };
+    const h = harness({ clock, limits: roomy({ maxUserBytes: 100_000 }) });
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.span(0, 10);
+    s.frame("f1", 3, { jpeg: b64(headerJpeg(640, 360, 60_000)) });
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    const frame = stableId("ev", s.captureId, "f1");
+    h.evidence.snapshotInTx([frame]);
+    h.db.sql.run("INSERT INTO note_evidence (user_id, note_id, evidence_id) VALUES (?, ?, ?)", [h.db.userId, stableId("note", "cites"), frame]);
+    h.evidence.sweepExpired(clock.t + 31 * 86_400_000, 30);
+    expect(count(h, "frames")).toBe(0);
+
+    s.frame("f1", 3, { jpeg: b64(headerJpeg(640, 360, 2_000)) });
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(count(h, "frames")).toBe(0);
+    const files = [...new Bun.Glob("**/*.jpg").scanSync({ cwd: h.dir })];
+    expect(files).toHaveLength(1);
+
+    const next = stream();
+    next.control("start");
+    next.frame("g1", 1, { jpeg: b64(headerJpeg(640, 360, 60_000)) });
+    expect(() => h.evidence.ingest({ captureId: next.captureId, facts: next.facts })).toThrow(IngestRefused);
+  });
+
   test("while the raw frame still exists, its hard-linked snapshot is not charged twice", () => {
     const h = harness({ limits: roomy({ maxUserBytes: 100_000 }) });
     const s = stream();
