@@ -475,6 +475,21 @@ describe("Jev spend", () => {
     expect(settledMicros(w.db)).toEqual([1260]);
   });
 
+  test("an implausible token count is recorded as unknown and still settles, while a valid input count beside it is priced", async () => {
+    const cases: [unknown, unknown, string, number][] = [
+      [1e30, 3, "unknown", ESTIMATE_USD.frame_change * 1_000_000],
+      [1.5, 3, "unknown", ESTIMATE_USD.frame_change * 1_000_000],
+      [30_000, 1e30, "estimated", 1260],
+    ];
+    for (const [input_tokens, output_tokens, kind, micros] of cases) {
+      const w = world({ userUsd: 5, totalUsd: 50 });
+      const task = frameChangeTask(createJevClient({ apiKey: "k", fetch: scriptedFetch(() => json({ model: "jev-1.13.0", answers: { teaching_change: { type: "noul", noul: 0.2 } }, usage: { input_tokens, output_tokens } })).fetch }));
+      await w.memo.run(task, pair);
+      expect(w.db.sql.query<{ cost_kind: string }, []>("SELECT cost_kind FROM usage_events").all(), String(input_tokens)).toEqual([{ cost_kind: kind }]);
+      expect(settledMicros(w.db), String(input_tokens)).toEqual([micros]);
+    }
+  });
+
   test("a settled amount is never below the cost recorded for it, down to a response of 11 tokens", async () => {
     for (const [tokens, micros] of [[5364, 226], [11, 1], [0, 0]] as const) {
       const w = world({ userUsd: 5, totalUsd: 50 });

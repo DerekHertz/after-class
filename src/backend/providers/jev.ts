@@ -182,7 +182,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 function billedUsage(body: unknown, requested: string): UsageReport | null {
   if (!isRecord(body)) return null;
   const usage = isRecord(body.usage) ? body.usage : {};
-  const count = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
+  const count = (v: unknown): number | null => (Number.isSafeInteger(v) && (v as number) >= 0 && (v as number) <= MAX_PRICED_TOKENS ? (v as number) : null);
   const inputTokens = count(usage.input_tokens);
   const model = body.model === undefined || body.model === null ? requested : typeof body.model === "string" ? body.model : null;
   return {
