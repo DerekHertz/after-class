@@ -37,6 +37,30 @@ describe("the room's turn-event hook", () => {
     expect(seen).toEqual(["learner_turn_stored"]);
   });
 
+  test("a dispose while the unsent store is still writing silences the old review: no hook event, no speech, no send", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const seen: string[] = [];
+    const h = setup({
+      sendTurn: ({ turnId }) => events({ type: "learner_turn_stored", turnId }, moveEvent, sentence("Old review."), { type: "turn_complete", turnId }),
+      onTurnEvent: (e) => void seen.push(e.type),
+    });
+    const put = h.unsent.put.bind(h.unsent);
+    h.unsent.put = async (row) => {
+      await gate;
+      return put(row);
+    };
+    const sending = h.controller.send(answer);
+    await Promise.resolve();
+    h.controller.dispose();
+    release();
+    await sending;
+    expect(seen).toEqual([]);
+    expect(h.spoken).toEqual([]);
+    expect(h.sends).toEqual([]);
+    expect(h.saves()).toBe(0);
+  });
+
   test("the review's wiring reads only an event's type and a move's kind, never an assessment", async () => {
     const reads: (string | symbol)[] = [];
     const spy = <T extends object>(target: T): T => new Proxy(target, { get(t, key, receiver) { reads.push(key); return Reflect.get(t, key, receiver); } });
