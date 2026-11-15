@@ -25,6 +25,7 @@ import type {
 import { Material } from "../../shared/time";
 import { asSeq } from "../db";
 import type { UserDb } from "../db";
+import { PAID_TUTOR_HOLD } from "../providers/budget";
 import type { Memo, RunResult } from "../providers/memo";
 import { MAX_MAIN_QUESTIONS, allowedMoves, askedClaims, parseMoveHeader, reviewState, settledCorrections, validateMove, tutorOwesMove, waitsForLearner } from "./tutor";
 import type { TutorInput, TutorOutput, WrapUpInput, WrapUpOutput } from "./tutor";
@@ -131,6 +132,21 @@ const NOTHING_TO_ASK_LINE = "Every statement I prepared for this part was withdr
 export const MAX_MOVES_PER_TURN = 4;
 const NON_TERMINAL = new Set(["awaiting_check", "awaiting_revision", "awaiting_recheck"]);
 
+/**
+ * Reviews one learner may start in a day that hold no paid tutoring (`PAID_TUTOR_HOLD`: a tutor turn the caps admitted and
+ * charged, whatever its move). Far above a mis-click, so a learner never meets it (#244).
+ */
+export const UNTUTORED_REVIEWS_PER_DAY = 20;
+const DAY_MS = 86_400_000;
+
+/** Thrown by `start` when the learner has started too many reviews that got no tutoring. The message is for the learner. */
+export class ReviewLimitError extends Error {
+  constructor() {
+    super("You have started a lot of reviews today that never reached a question from the tutor. Work through the reviews you have started, or try again tomorrow.");
+    this.name = "ReviewLimitError";
+  }
+}
+
 export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOptions = {}): Reviews {
   const softTargetS = config.softTargetS ?? 600;
   const timeInviteGapS = config.timeInviteGapS ?? 900;
@@ -146,6 +162,10 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     insertAnswer: db.sql.query("INSERT INTO invite_answers (seq, user_id, capture_id, answer, watched_s, at_ms) VALUES (?, ?, ?, ?, ?, ?)"),
     review: db.sql.query<ReviewRow, [string, string]>(`SELECT ${REVIEW_COLUMNS} FROM reviews WHERE user_id = ? AND id = ?`),
     reviewHeldByOther: db.sql.query<{ n: number }, [string, string]>("SELECT 1 AS n FROM reviews WHERE id = ? AND user_id <> ?"),
+    untutoredSince: db.sql.query<{ n: number }, [string, number]>(
+      `SELECT COUNT(*) AS n FROM reviews r WHERE r.user_id = ? AND r.started_ms >= ?
+         AND NOT EXISTS (SELECT 1 FROM budget_holds h WHERE h.user_id = r.user_id AND h.review_id = r.id AND ${PAID_TUTOR_HOLD})`,
+    ),
     reviewsOf: db.sql.query<ReviewRow, [string, string]>(`SELECT ${REVIEW_COLUMNS} FROM reviews WHERE user_id = ? AND capture_id = ?`),
     insertReview: db.sql.query("INSERT INTO reviews (id, user_id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, ?, ?, ?, ?, ?)"),
     turns: db.sql.query<TurnRow, [string, string]>(
@@ -298,6 +318,8 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     return db.tx((): StartResult => {
       // The id is the row's key across users, so another user's review would collide on insert; refuse it before anything else runs.
       if (heldByAnotherUser(reviewId)) throw new RangeError(`review ${reviewId} belongs to another user`);
+      // A review id is minted by the client, so without this one learner could start, end and restart reviews without limit (#244).
+      if (q.untutoredSince.get(userId, Math.round(now()) - DAY_MS)!.n >= UNTUTORED_REVIEWS_PER_DAY) throw new ReviewLimitError();
       let cands = candidates(captureId);
       let dropped = 0;
       if (choice === "stop_early") {
