@@ -37,7 +37,14 @@ export type Piece = {
 export function pieces(draw: PictureDraw | CompanionDraw, natural: Size, scale: Scale): readonly Piece[] {
   const box = snap(draw, scale);
   const { width: w, height: h } = natural;
-  if (draw.kind === "image") return [{ sx: 0, sy: 0, sw: w, sh: h, dx: box.left, dy: box.top, dw: box.right - box.left, dh: box.bottom - box.top }];
+  if (draw.kind === "image") {
+    // A clipped picture keeps the whole picture's mapping from device pixels to its own, so each pixel lands where it would.
+    const part = draw.clip === undefined ? box : snap({ rect: draw.clip, kind: "image" }, scale);
+    const [left, right, top, bottom] = [Math.max(box.left, part.left), Math.min(box.right, part.right), Math.max(box.top, part.top), Math.min(box.bottom, part.bottom)];
+    if (right <= left || bottom <= top) return [];
+    const [kx, ky] = [w / (box.right - box.left), h / (box.bottom - box.top)];
+    return [{ sx: (left - box.left) * kx, sy: (top - box.top) * ky, sw: (right - left) * kx, sh: (bottom - top) * ky, dx: left, dy: top, dw: right - left, dh: bottom - top }];
+  }
   if (draw.kind === "companion") {
     const sw = w / draw.columns;
     return [{ sx: sw * draw.column, sy: 0, sw, sh: h, dx: box.left, dy: box.top, dw: box.right - box.left, dh: box.bottom - box.top }];
@@ -74,7 +81,7 @@ function snapSpan(start: number, size: number, scale: number, image: boolean): r
   return [from, image ? Math.min(to, from + round(length)) : to];
 }
 
-function snap({ rect, kind }: PictureDraw | CompanionDraw, s: Scale) {
+function snap({ rect, kind }: Pick<PictureDraw | CompanionDraw, "rect" | "kind">, s: Scale) {
   const [left, right] = snapSpan(rect.left, rect.width, s.x, kind !== "nine-slice");
   const [top, bottom] = snapSpan(rect.top, rect.height, s.y, kind !== "nine-slice");
   return { left, right, top, bottom };

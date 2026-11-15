@@ -32,12 +32,15 @@ describe("the stage's draw list", () => {
     }
   });
 
-  test("a window wider than the frame first draws the room's background over all of it, shaded in the bands beside the frame", () => {
+  test("a window wider than the frame first draws the room's background, covering the window, in the bands beside the frame, and shades the bands last", () => {
     const window = { width: 3440, height: 1440 };
     const layout = layoutRoom("last-desk", window, "full");
     if (layout.composition !== "full" || layout.layers.backdrop === null) throw new Error("a 3440x1440 window has bands");
-    const [cover, shade, background] = buildScene("last-desk", layout).draws;
-    expect(cover).toEqual({ kind: "image", src: ROOM_LAYER_ART["last-desk"].background, rect: layout.layers.backdrop.cover, sampling: "pixelated" });
+    const { draws } = buildScene("last-desk", layout);
+    const [left, right, background] = draws;
+    const shade = draws.at(-1);
+    const cover = { kind: "image", src: ROOM_LAYER_ART["last-desk"].background, rect: layout.layers.backdrop.cover, sampling: "pixelated" } as const;
+    expect([left, right]).toEqual(layout.layers.backdrop.bands.map((clip) => ({ ...cover, clip })));
     expect(shade).toMatchObject({ kind: "specks", rects: layout.layers.backdrop.bands });
     expect(background).toMatchObject({ kind: "image", rect: layout.layers.background });
     expect(buildScene("last-desk", layoutRoom("last-desk", { width: 1920, height: 1080 }, "full")).draws[0]).toMatchObject({ rect: { left: 0, top: expect.any(Number), width: 1920 } });
@@ -109,6 +112,16 @@ describe("the stage snaps a box at the window's device pixel ratio, where a real
     { kind: "image", start: 10.34, size: 20.66, scale: 1.5, chrome: [16, 46] },
     { kind: "nine-slice", start: 10.01, size: 20.33, scale: 1.5, chrome: [15, 45] },
   ];
+  test("a clipped image draws only its part inside the clip, each pixel where the whole image puts it", () => {
+    const rect = { left: -50, top: -20, width: 400, height: 200 };
+    const whole: PictureDraw = { kind: "image", src: "", rect, sampling: "pixelated" };
+    const [all] = pieces(whole, { width: 200, height: 100 }, { x: 1.5, y: 1.5 });
+    expect(pieces({ ...whole, clip: { left: 0, top: 0, width: 30, height: 120 } }, { width: 200, height: 100 }, { x: 1.5, y: 1.5 })).toEqual([{
+      dx: 0, dy: 0, dw: 45, dh: 180, sx: (0 - all!.dx) * 200 / all!.dw, sy: (0 - all!.dy) * 100 / all!.dh, sw: 45 * 200 / all!.dw, sh: 180 * 100 / all!.dh,
+    }]);
+    expect(pieces({ ...whole, clip: { left: 400, top: 0, width: 30, height: 30 } }, { width: 200, height: 100 }, { x: 1.5, y: 1.5 })).toEqual([]);
+  });
+
   const none = { top: 0, right: 0, bottom: 0, left: 0 };
   for (const { kind, start, size, scale, chrome } of cases) {
     test(`${kind === "image" ? "an image" : "a nine-slice"} from ${start} CSS px, ${size} wide, at ${scale}x covers device pixels ${chrome[0]} to ${chrome[1]}`, () => {
