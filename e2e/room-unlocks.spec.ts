@@ -131,6 +131,27 @@ test.describe("the Your room panel follows the saved record", () => {
     await expect(understood(page)).toHaveText(String(before - 1));
   });
 
+  test("while a correction's read is out, the panel shows the last counts as updating, never as current", async ({ page }, info) => {
+    test.skip(info.project.name !== "desktop", "the copy is the same at every size");
+    await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene: "last-desk" } });
+    await page.goto("/?scenario=review-record-slow&clean=1");
+    await expect(page.locator(".front-row-canvas[data-stage=painted]")).toBeAttached();
+    const panel = page.getByRole("region", { name: "Your room" });
+    await page.getByRole("button", { name: "Your room" }).click();
+    const before = Number(await understood(page).innerText());
+    await page.getByRole("button", { name: "Your room" }).click();
+    await correctFirstObservation(page, (dialog) => dialog.getByRole("heading", { name: "My notebook" }));
+    await page.getByRole("button", { name: "Your room" }).click();
+    await expect(panel.getByRole("status")).toHaveText("Updating from your saved reviews. These counts were read before your latest change.");
+    await expect(panel).not.toContainText("Counted from your saved reviews.");
+    await expect(understood(page)).toHaveText(String(before));
+    await page.screenshot({ path: "test-results/226-panel-refreshing.png" });
+    await page.locator(".fixture-toolbar").getByRole("button", { name: "Finish pending fixture operation", includeHidden: true }).evaluate((button: HTMLButtonElement) => button.click());
+    await expect(panel).toContainText("Counted from your saved reviews.");
+    await expect(panel.getByRole("status")).toHaveCount(0);
+    await expect(understood(page)).toHaveText(String(before - 1));
+  });
+
   test("a record that cannot be read again says its counts may be out of date and reads again on Retry", async ({ page }, info) => {
     test.skip(info.project.name !== "desktop", "the copy is the same at every size");
     await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene: "last-desk" } });

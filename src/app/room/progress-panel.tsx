@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import type { Rect } from "./layout";
 import { slotIds } from "./progress";
 import type { Count, Progress, RoomId, UnlockId } from "./progress";
+import type { Freshness, RoomStanding } from "./room-record";
 import { UNLOCK_ART } from "./unlocks";
 
 /** One line of the panel: what a count counts, as progress.ts words it, and the count. */
@@ -23,20 +24,28 @@ export function progressRows(progress: Progress, room: RoomId, art: Readonly<Par
   } as const;
 }
 
+/** What the panel says above the counts, for each freshness. Only `current` says they are counted from the saved reviews. */
+const NOTICE = {
+  current: "Counted from your saved reviews.",
+  refreshing: "Updating from your saved reviews. These counts were read before your latest change.",
+  stale: "These counts may be out of date. Your saved reviews could not be read again, so the room keeps what it last read.",
+} as const satisfies Record<Freshness, string>;
+
 /**
  * "Your room": a button that opens the learner's counts from their saved reviews. Full rooms place it at `rect`, the desk's
  * corner around the companion, so it never covers the board or Your thinking. A phone stacks it below the desk.
  */
-export function ProgressPanel({ progress, room, rect, retry = null }: { readonly progress: Progress; readonly room: RoomId; readonly rect: Rect | undefined; readonly retry?: (() => void) | null }) {
+export function ProgressPanel({ standing: { freshness, progress }, room, rect, retry }: { readonly standing: NonNullable<RoomStanding>; readonly room: RoomId; readonly rect: Rect | undefined; readonly retry: () => void }) {
   const [open, setOpen] = useState(false);
   const body = useId();
-  const staleId = useId();
+  const noticeId = useId();
   const toggle = useRef<HTMLButtonElement>(null);
   const { main, effort } = progressRows(progress, room);
   const style: CSSProperties | undefined = rect && { left: rect.left, top: rect.top, width: rect.width, maxHeight: rect.height };
+  const busy = freshness === "refreshing";
   return (
     <section
-      className="room-progress" aria-label="Your room" data-open={open} style={style}
+      className="room-progress" aria-label="Your room" data-open={open} data-freshness={freshness} style={style}
       onKeyDown={(event) => {
         if (event.key !== "Escape" || !open) return;
         event.stopPropagation();
@@ -44,15 +53,13 @@ export function ProgressPanel({ progress, room, rect, retry = null }: { readonly
         toggle.current?.focus();
       }}
     >
-      <button ref={toggle} type="button" aria-expanded={open} aria-controls={body} aria-describedby={retry === null ? undefined : staleId} onClick={() => setOpen(!open)}>Your room</button>
+      <button ref={toggle} type="button" aria-expanded={open} aria-controls={body} aria-describedby={freshness === "current" ? undefined : noticeId} onClick={() => setOpen(!open)}>Your room</button>
       <div id={body} className="room-progress-body" hidden={!open}>
-        {retry === null ? <p>Counted from your saved reviews.</p> : (
-          <p id={staleId} className="room-progress-stale" role="alert">
-            These counts may be out of date. Your saved reviews could not be read again, so no objects are shown in the room until they can. <button type="button" onClick={retry}>Retry</button>
-          </p>
-        )}
-        <dl>{main.map(({ key, label, value }) => <div key={key} data-count={key}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
-        <dl className="room-progress-effort">{effort.map(({ key, label, value }) => <div key={key} data-count={key}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+        {freshness === "current" ? <p>{NOTICE.current}</p>
+          : freshness === "refreshing" ? <p id={noticeId} className="room-progress-notice" role="status">{NOTICE.refreshing}</p>
+          : <p id={noticeId} className="room-progress-notice" role="alert">{NOTICE.stale} <button type="button" onClick={retry}>Retry</button></p>}
+        <dl aria-busy={busy || undefined}>{main.map(({ key, label, value }) => <div key={key} data-count={key}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+        <dl className="room-progress-effort" aria-busy={busy || undefined}>{effort.map(({ key, label, value }) => <div key={key} data-count={key}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
       </div>
     </section>
   );

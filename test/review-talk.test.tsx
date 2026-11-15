@@ -15,7 +15,7 @@ const quiet: SpeechInput = { supported: true, start() {}, stop() {} };
 describe("the review scene", () => {
   test("renders the board content it is given, ahead of the desk, with the earlier lines one tap away", () => {
     const html = renderToStaticMarkup(createElement(FrontRowScene, {
-      scene: "last-desk", appearance: { companion: "mote", visible: true, motion: "system" }, activity: "idle", progress: null,
+      scene: "last-desk", appearance: { companion: "mote", visible: true, motion: "system" }, activity: "idle", standing: null, retry() {},
       layout: { kind: "review", board: createElement("section", { className: "current-exchange" }, "Why does the cache miss?"), desk: "Your answer", objects: { cited: 0, open() {} } },
     }));
     expect(html).toContain("Why does the cache miss?");

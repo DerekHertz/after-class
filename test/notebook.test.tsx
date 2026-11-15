@@ -224,7 +224,7 @@ describe("the rendered notebook", () => {
   test("the room's notebook and the full page mount the same notebook, with no variant", () => {
     const room = readFileSync(new URL("../src/app/review.tsx", import.meta.url), "utf8");
     const page = readFileSync(new URL("../src/app/main.tsx", import.meta.url), "utf8");
-    expect(room).toContain("<RecordScreen api={notebookApi} reviewId={null} />");
+    expect(room).toContain("<RecordScreen api={room.api} reviewId={null} />");
     expect(page).toMatch(/<RecordScreen api=\{api\} reviewId=\{[^}]+\} \/>/);
     expect(room).not.toContain("indexed");
   });

@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
+import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SceneId } from "../src/app/appearance";
 import { layoutRoom } from "../src/app/room/layout";
@@ -9,12 +11,16 @@ import type { PictureState } from "../src/app/room/paint";
 import { ProgressPanel, progressRows } from "../src/app/room/progress-panel";
 import { onRecordChange } from "../src/app/api";
 import type { AppApi } from "../src/app/api";
-import { ROOM_IDS, deriveProgress, drawnUnlocks, slotIds, standing } from "../src/app/room/progress";
+import { ROOM_IDS, deriveProgress, slotIds } from "../src/app/room/progress";
+import { drawnUnlocks, roomRecord } from "../src/app/room/room-record";
+import type { RoomRecord } from "../src/app/room/room-record";
+import { RecordScreen } from "../src/app/record";
+import { SavedNotes } from "../src/app/review";
 import type { UnlockId } from "../src/app/room/progress";
 import { buildScene } from "../src/app/room/scene";
 import type { Draw } from "../src/app/room/scene";
 import { UNLOCK_ART, UNLOCK_SLOTS } from "../src/app/room/unlocks";
-import type { Observation, RecordedStatus } from "../src/shared/domain";
+import type { Observation, RecordView, RecordedStatus } from "../src/shared/domain";
 import { stableId } from "../src/shared/ids";
 
 const rooms = ROOM_IDS as readonly SceneId[];
@@ -175,7 +181,7 @@ describe("the Your room panel", () => {
   });
 
   test("it starts closed behind one labelled button, with effort set apart from what counts as understood", () => {
-    const html = renderToStaticMarkup(createElement(ProgressPanel, { progress: twoOpen, room: "study-bench", rect: undefined }));
+    const html = renderToStaticMarkup(createElement(ProgressPanel, { standing: { freshness: "current", progress: twoOpen }, room: "study-bench", rect: undefined, retry: () => {} }));
     expect(html).toMatch(/<button[^>]*aria-expanded="false"[^>]*>Your room<\/button>/);
     expect(html).toMatch(/class="room-progress-body" hidden=""/);
     expect(html).toContain("<dt>Topics explained on your own</dt><dd>6</dd>");
@@ -219,32 +225,100 @@ describe("the room reads the saved record again after any change made to it in t
   });
 });
 
-describe("counts from a record that could not be read again are not shown as current", () => {
-  const record = { observations: Array.from({ length: 3 }, () => obs("independent")) };
+describe("the room's counts say how current they are, and its objects change only on a good read", () => {
+  /** An api whose record reads wait until the test answers them, each with the record as it was when asked, and whose changes succeed at once. */
+  function heldReads(observations: readonly Observation[]) {
+    const pending: { resolve: () => void; reject: (e: Error) => void }[] = [];
+    let saved = observations;
+    const api = {
+      record: () => new Promise<RecordView>((resolve, reject) => {
+        const asked = saved;
+        pending.push({ resolve: () => resolve({ observations: asked } as unknown as RecordView), reject });
+      }),
+      overrideObservation: async (_: unknown, status: RecordedStatus) => { saved = [saved[0]!, saved[1]!, { ...saved[2]!, status }]; },
+    } as unknown as AppApi;
+    const settle = async () => { for (let i = 0; i < 3; i++) await Promise.resolve(); };
+    return {
+      api,
+      answer: async () => { pending.shift()!.resolve(); await settle(); },
+      answerLatest: async () => { pending.pop()!.resolve(); await settle(); },
+      fail: async () => { pending.shift()!.reject(new Error("down")); await settle(); },
+      outstanding: () => pending.length,
+    };
+  }
+  const three = () => Array.from({ length: 3 }, () => obs("independent"));
+  const panel = (room: RoomRecord) => renderToStaticMarkup(createElement(ProgressPanel, { standing: room.getState()!, room: "last-desk", rect: undefined, retry: room.read }));
+  const seen = (room: RoomRecord) => {
+    const state = room.getState()!;
+    return [state.freshness, state.progress.understood.value, drawnUnlocks(state, "last-desk")];
+  };
 
-  test("a failed read keeps the last counts but marks them stale; a good read does not", () => {
-    expect(standing({ data: null, error: null })).toBeNull();
-    expect(standing({ data: null, error: "down" })).toBeNull();
-    expect(standing({ data: record, error: null })?.stale).toBe(false);
-    const stale = standing({ data: record, error: "down" })!;
-    expect([stale.stale, stale.progress.understood.value]).toEqual([true, 3]);
+  test("a correction whose read is slow shows the last counts as updating, never as current, then the new counts", async () => {
+    const held = heldReads(three());
+    const room = roomRecord(held.api);
+    room.read();
+    expect(room.getState()).toBeNull();
+    await held.answer();
+    expect(seen(room)).toEqual(["current", 3, ["last-desk/1"]]);
+    expect(panel(room)).toContain("Counted from your saved reviews.");
+
+    await room.api.overrideObservation("obs" as never, "after_help");
+    expect(held.outstanding()).toBe(1);
+    expect(seen(room)).toEqual(["refreshing", 3, ["last-desk/1"]]);
+    const updating = panel(room);
+    expect(updating).toMatch(/role="status"[^>]*>Updating from your saved reviews\. These counts were read before your latest change\.</);
+    expect(updating).toMatch(/aria-describedby="([^"]+)"[\s\S]*id="\1"/);
+    expect(updating).toContain('aria-busy="true"');
+    expect(updating).not.toContain("Counted from your saved reviews.");
+
+    await held.answer();
+    expect(seen(room)).toEqual(["current", 2, []]);
+    expect(panel(room)).toContain("Counted from your saved reviews.");
   });
 
-  test("no object is drawn from stale counts, and the same counts draw it once current", () => {
-    const { progress } = standing({ data: record, error: null })!;
-    expect(drawnUnlocks(progress, "last-desk", true)).toEqual([]);
-    expect(drawnUnlocks(progress, "last-desk", false)).toEqual(["last-desk/1"]);
-    expect(drawnUnlocks(null, "last-desk", false)).toEqual([]);
+  test("a read that fails keeps the last counts and objects but says so, and Retry reads again", async () => {
+    const held = heldReads(three());
+    const room = roomRecord(held.api);
+    room.read();
+    await held.answer();
+    await room.api.overrideObservation("obs" as never, "after_help");
+    await held.fail();
+    expect(seen(room)).toEqual(["stale", 3, ["last-desk/1"]]);
+    const stale = panel(room);
+    expect(stale).toMatch(/role="alert"[^>]*>These counts may be out of date\. Your saved reviews could not be read again, so the room keeps what it last read\. <button type="button">Retry<\/button>/);
+    expect(stale).toMatch(/aria-describedby="([^"]+)"[\s\S]*id="\1"/);
+    expect(stale).not.toContain("Counted from your saved reviews.");
+
+    room.read();
+    expect(seen(room)).toEqual(["stale", 3, ["last-desk/1"]]);
+    await held.answer();
+    expect(seen(room)).toEqual(["current", 2, []]);
   });
 
-  test("the panel says the counts may be out of date and offers a retry, and says so to a screen reader", () => {
-    const html = renderToStaticMarkup(createElement(ProgressPanel, { progress: twoOpen, room: "study-bench", rect: undefined, retry: () => {} }));
-    expect(html).toContain("These counts may be out of date.");
-    expect(html).toMatch(/<button type="button">Retry<\/button>/);
-    expect(html).toMatch(/aria-describedby="([^"]+)"[\s\S]*id="\1"/);
-    expect(html).not.toContain("Counted from your saved reviews.");
-    const current = renderToStaticMarkup(createElement(ProgressPanel, { progress: twoOpen, room: "study-bench", rect: undefined }));
-    expect(current).toContain("Counted from your saved reviews.");
-    expect(current).not.toContain("out of date");
+  test("only the latest read's answer counts, so an older answer arriving late never brings back old counts", async () => {
+    const held = heldReads(three());
+    const room = roomRecord(held.api);
+    room.read();
+    await room.api.overrideObservation("obs" as never, "after_help");
+    await held.answerLatest();
+    expect(seen(room)).toEqual(["current", 2, []]);
+    await held.answer();
+    expect(seen(room)).toEqual(["current", 2, []]);
+  });
+
+  test("Saved notes in the review edits the record through the room, so a correction there reads the counts again", async () => {
+    const held = heldReads(three());
+    const room = roomRecord(held.api);
+    const dialog = SavedNotes({ room, close: () => {} });
+    const notebook = (dialog.props as { children: ReactElement<{ api: AppApi }>[] }).children.find((child) => child.type === RecordScreen)!;
+    expect(notebook.props.api).toBe(room.api);
+    room.read();
+    await held.answer();
+    await notebook.props.api.overrideObservation("obs" as never, "after_help");
+    expect(room.getState()?.freshness).toBe("refreshing");
+
+    const review = readFileSync(new URL("../src/app/review.tsx", import.meta.url), "utf8");
+    expect(review).toContain("<SavedNotes room={room} close={closeNotebook} />");
+    expect(review).toContain("standing={roomStanding} retry={room.read}");
   });
 });
