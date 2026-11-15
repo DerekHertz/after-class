@@ -5,7 +5,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createBudget, ESTIMATE_USD, periodEndMs } from "../src/backend/providers/budget";
 import type { Budget, BudgetLimits } from "../src/backend/providers/budget";
-import { createJevClient } from "../src/backend/providers/jev";
+import { createJevClient, jevCost } from "../src/backend/providers/jev";
 import { frameChangeTask } from "../src/backend/providers/jev-tasks";
 import { createMemo, ProviderError } from "../src/backend/providers/memo";
 import type { Memo, Task } from "../src/backend/providers/memo";
@@ -438,7 +438,7 @@ describe("Jev spend", () => {
     expect(events.filter((e) => e.cost_kind === "estimated" && e.cost_usd === 0)).toHaveLength(1);
     expect(events.some((e) => e.cost_kind === "unknown")).toBe(false);
     expect(w.db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM budget_holds WHERE settled_micros IS NULL").get()!.n).toBe(0);
-    const priced = tokens.reduce((a, t) => a + (t * 0.042) / 1_000_000, 0);
+    const priced = tokens.reduce((a, t) => a + Math.ceil((t * 42) / 1000) / 1_000_000, 0);
     expect(sum(w.db, "cost_usd")).toBeCloseTo(priced, 9);
     expect(used(w.budget, w.db)).toBeCloseTo(sum(w.db, "cost_usd"), 5);
     expect(sum(w.db, "settled_micros") / 1_000_000).toBe(used(w.budget, w.db));
@@ -484,5 +484,68 @@ describe("Jev spend", () => {
       expect(settled).toBe(micros);
       expect(settled! / 1_000_000).toBeGreaterThanOrEqual(recorded);
     }
+  });
+
+  test("an envelope-invalid reply is not memoised, though its answers are valid", async () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    const answers = { teaching_change: { type: "noul", noul: 0.2 } };
+    for (const body of [{ model: "jev-1.13.0", answers, usage: { input_tokens: "bad" } }, { model: 3, answers, usage: { input_tokens: 30_000 } }]) {
+      const task = frameChangeTask(createJevClient({ apiKey: "k", fetch: scriptedFetch(() => json(body)).fetch }));
+      expect((await w.memo.run(task, { before: withBytes(frame("a")), after: withBytes(frame("b")), nearbyPassages: [] })).kind).toBe("failed");
+    }
+    expect(w.db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM memo").get()!.n).toBe(0);
+  });
+
+  test("input tokens settle at their price when output_tokens is malformed, and on an HTTP 500 that carries usage", async () => {
+    for (const [status, body] of [
+      [200, { model: "jev-1.13.0", answers: { teaching_change: { type: "noul", noul: 0.2 } }, usage: { input_tokens: 30_000, output_tokens: "bad" } }],
+      [500, { message: "boom", usage: { input_tokens: 30_000 } }],
+    ] as const) {
+      const w = world({ userUsd: 5, totalUsd: 50 });
+      const task = frameChangeTask(createJevClient({ apiKey: "k", fetch: scriptedFetch(() => json(body, status)).fetch }));
+      await w.memo.run(task, { before: withBytes(frame("a")), after: withBytes(frame("b")), nearbyPassages: [] });
+      const settled = settledMicros(w.db);
+      expect(settled.length).toBeGreaterThan(0);
+      expect(settled.every((m) => m === 1260)).toBe(true);
+    }
+  });
+
+  test("a settlement is the exact price rounded up, for 1,500 tokens and for every count from 0 to 3,000", async () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    await w.memo.run(jevTask(1500), pair);
+    expect(settledMicros(w.db)).toEqual([63]);
+    const w2 = world({ userUsd: null, totalUsd: null });
+    for (let t = 0; t <= 3000; t++) {
+      const c = jevCost("jev-1.13.0", t);
+      const ticket = w2.budget.reserve(w2.db.userId, "frame_change", `k${t}` as never);
+      if (ticket.kind !== "reserved" || c.kind === "unknown") throw new Error("not reserved or priced");
+      w2.budget.settle(ticket.reservation, c);
+    }
+    const all = settledMicros(w2.db);
+    expect(all).toHaveLength(3001);
+    expect(all.every((settled, t) => settled * 1000 >= t * 42 && settled * 1000 < t * 42 + 1000)).toBe(true);
+  });
+
+  test("any other cost (Claude's floats) settles at the next micro above it, and a whole number of micros stays itself", () => {
+    const w = world({ userUsd: null, totalUsd: null });
+    const settle = (usd: number) => {
+      const t = w.budget.reserve(w.db.userId, "frame_change", `k${usd}` as never);
+      if (t.kind !== "reserved") throw new Error("held");
+      w.budget.settle(t.reservation, { kind: "notional", usd, basis: "claude_subscription" });
+      return settledMicros(w.db).at(-1);
+    };
+    expect(settle(0.00006300000000000001)).toBe(64);
+    expect(settle(0.0000631)).toBe(64);
+    expect(settle(0.000063)).toBe(63);
+    expect(settle(0.0421)).toBe(42_100);
+  });
+
+  test("a cap is never rounded up: $0.0004991 refuses a $0.0005 reservation, and a cap of exactly $0.0005 admits it", () => {
+    const hold = (cap: number) => {
+      const w = world({ userUsd: null, totalUsd: cap });
+      return w.budget.reserve(w.db.userId, "frame_change", "k" as never).kind;
+    };
+    expect(hold(0.0004991)).toBe("held");
+    expect(hold(0.0005)).toBe("reserved");
   });
 });

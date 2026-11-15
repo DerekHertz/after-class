@@ -34,7 +34,7 @@ describe("Jev client", () => {
       inputTokens: 1234,
       outputTokens: 5,
       cacheReadTokens: null,
-      cost: { kind: "estimated", usd: (1234 * 0.042) / 1_000_000, basis: JEV_COST_BASIS },
+      cost: { kind: "estimated", usd: 52 / 1_000_000, basis: JEV_COST_BASIS },
     });
   });
 
@@ -46,6 +46,38 @@ describe("Jev client", () => {
     const b = await createJevClient({ apiKey: "k", fetch: other.fetch }).ask(noulReq(), NEVER);
     expect(b.usage.cost).toEqual({ kind: "unknown", reason: "no published price for model jev-9.9.9" });
     expect(jevCost("toString", 10).kind).toBe("unknown");
+  });
+
+  test("a reply whose envelope is malformed is refused, even when its answers are valid, and its readable input tokens are still priced", async () => {
+    const answers = { q: { type: "noul", noul: 0.5 } };
+    const cases: [string, unknown, number | null][] = [
+      ["input_tokens is a string", { model: "jev-1.13.0", answers, usage: { input_tokens: "bad", output_tokens: 1 } }, null],
+      ["model is a number", { model: 3, answers, usage: { input_tokens: 30_000, output_tokens: 1 } }, 30_000],
+      ["usage is a string", { model: "jev-1.13.0", answers, usage: "x" }, null],
+      ["input_tokens is negative", { model: "jev-1.13.0", answers, usage: { input_tokens: -5 } }, null],
+    ];
+    for (const [name, body, tokens] of cases) {
+      const err = await createJevClient({ apiKey: "k", fetch: scriptedFetch(() => json(body)).fetch }).ask(noulReq(), NEVER).catch((e) => e);
+      expect(err, name).toBeInstanceOf(ProviderError);
+      expect(err.message, name).toContain("did not match the expected shape");
+      expect(err.usage?.inputTokens ?? null, name).toBe(tokens === 30_000 ? 30_000 : null);
+    }
+  });
+
+  test("valid input tokens are priced when output_tokens is malformed, and on a non-2xx reply that carries usage", async () => {
+    const answers = { q: { type: "noul", noul: 0.5 } };
+    const bad = await createJevClient({ apiKey: "k", fetch: scriptedFetch(() => json({ model: "jev-1.13.0", answers, usage: { input_tokens: 30_000, output_tokens: "bad" } })).fetch }).ask(noulReq(), NEVER).catch((e) => e);
+    expect(bad).toBeInstanceOf(ProviderError);
+    expect(bad.usage).toMatchObject({ inputTokens: 30_000, outputTokens: null, cost: { kind: "estimated", usd: 1260 / 1_000_000 } });
+    const priced: unknown[] = [];
+    const http500 = await createJevClient({ apiKey: "k", fetch: scriptedFetch(() => json({ message: "boom", usage: { input_tokens: 30_000 } }, 500)).fetch })
+      .ask(noulReq({ model: "jev-1.13.0" }), NEVER, { priced: (c) => priced.push(c) })
+      .catch((e) => e);
+    expect(http500.usage).toMatchObject({ inputTokens: 30_000, cost: { kind: "estimated", usd: 1260 / 1_000_000 } });
+    expect(http500.retryable).toBe(true);
+    expect(priced).toHaveLength(1);
+    const noUsage = await createJevClient({ apiKey: "k", fetch: scriptedFetch(() => json({ message: "boom" }, 500)).fetch }).ask(noulReq(), NEVER).catch((e) => e);
+    expect(noUsage.usage).toBeNull();
   });
 
   test("both listed models price at $0.042 per million input tokens", () => {
