@@ -166,7 +166,7 @@ export function createIdbOutbox(factory: IDBFactory = indexedDB, name = "aftercl
 // ───────────────────────────── Batching ─────────────────────────────────────
 
 export const BATCH_MAX_FACTS = 500;
-export const BATCH_MAX_BYTES = 8 * 1024 * 1024;
+export const BATCH_MAX_BYTES = 4 * 1024 * 1024;
 
 function approxBytes(f: StoredFact): number {
   const b = f.body;
@@ -175,7 +175,7 @@ function approxBytes(f: StoredFact): number {
   return 512;
 }
 
-/** ≤ 500 facts and ≤ 8 MiB (frames counted by bytes); always at least one, so an oversized frame still goes alone. */
+/** ≤ 500 facts and ≤ 4 MiB (frames counted by bytes); always at least one, so an oversized frame still goes alone. */
 export function selectBatch(facts: readonly StoredFact[]): readonly StoredFact[] {
   const out: StoredFact[] = [];
   let bytes = 0;
@@ -207,6 +207,8 @@ export function isIngestAck(v: unknown): v is IngestAck {
 /** Auth and validation failures need a human or a fix; outages and overload are retried. */
 export function classifyStatus(status: number): { readonly retryable: boolean; readonly error: string; readonly rejected?: boolean } {
   if (status === 401 || status === 403) return { retryable: false, error: `pairing token rejected (HTTP ${status}): check the token in After Class options` };
+  // The account is over its storage limit. Retrying cannot help, so the facts stay in the outbox and the popup says why.
+  if (status === 507) return { retryable: false, error: "storage limit reached on the server, so this capture is not being saved" };
   if (status === 408 || status === 429 || status >= 500) return { retryable: true, error: `backend error (HTTP ${status})` };
   return { retryable: false, error: `backend rejected the batch (HTTP ${status})`, rejected: status === 400 || status === 413 || status === 422 };
 }

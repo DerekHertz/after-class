@@ -20,6 +20,7 @@
  */
 import { copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { FRAME_BOUNDS, MAX_FRAME_BYTES } from "../../shared/domain";
 import { stableId } from "../../shared/ids";
 import type { CaptureId, EvidenceId, MemoKey, SourceId, TranscriptRevId } from "../../shared/ids";
 import type {
@@ -35,6 +36,9 @@ import type { Dep, ReadDep } from "../deps";
 import type { WorkItem } from "../scheduler";
 import type { Lookup } from "../providers/memo";
 import type { FrameChangeInput } from "../providers/jev-tasks";
+import { IngestRefused, defaultIngestLimits } from "./ingest-limits";
+import type { IngestLimits } from "./ingest-limits";
+import { jpegSize } from "./jpeg";
 import { adInside, bundleToJson, clipGap, dedupeGaps, foldCapture, frameInside, selectScope, sourceIdOf } from "./core";
 import type { EvidenceBundleJson, FrameEntry, Projection, StoredFact } from "./core";
 
@@ -122,7 +126,6 @@ type SnapshotRow = {
 };
 
 const DAY_MS = 86_400_000;
-const JPEG_MAGIC = [0xff, 0xd8, 0xff];
 
 function writeAtomic(path: string, bytes: Uint8Array): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -151,7 +154,14 @@ export type FramePin = {
 /** 15 s of media at 1x completes a frame's caption window about 20 s after it arrives, span flushes included. */
 export const FRAME_HOLD_MS = 60_000;
 
-const isJpeg = (b: Uint8Array) => b.length > JPEG_MAGIC.length && JPEG_MAGIC.every((m, i) => b[i] === m);
+/** A frame is its JPEG header agreeing with the size its fact declares, and both inside the bounds the extension samples to. */
+function isFrameJpeg(bytes: Uint8Array, width: number, height: number): boolean {
+  const size = jpegSize(bytes);
+  if (size === null || size.width !== width || size.height !== height) return false;
+  const long = Math.max(width, height);
+  const short = Math.min(width, height);
+  return bytes.length <= MAX_FRAME_BYTES && long <= FRAME_BOUNDS.maxLongSide && short >= FRAME_BOUNDS.minShortSide;
+}
 
 export function createEvidence(db: UserDb, dataDir: string, deps: {
   /** Frame.teaching derives from this lookup: yes→kept, no→dropped, uncertain/failed→uncertain (kept). */
@@ -173,10 +183,13 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   frameHoldMs?: number;
   /** Asks for a pump of this capture in `delayMs`, when a frame stops waiting for its caption window. */
   wakeIn?(captureId: CaptureId, delayMs: number): void;
+  /** Per-user quota and the disk floor an ingest must stay inside. Defaults to `defaultIngestLimits(dataDir)`. */
+  limits?: IngestLimits;
 }): EvidenceStoreWithProbe {
   const now = deps.now ?? Date.now;
   const monotonic = deps.monotonic ?? (() => performance.now());
   const frameHoldMs = deps.frameHoldMs ?? FRAME_HOLD_MS;
+  const limits = deps.limits ?? defaultIngestLimits(dataDir);
   const userId = db.userId;
   const abs = (rel: string) => join(dataDir, rel);
   const read: ReadDep = deps.read ?? (() => {});
@@ -418,8 +431,11 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
     "INSERT INTO capture_facts (user_id, seq, capture_id, client_seq, wall_ms, kind, body_json, received_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const insertFrame = db.sql.query(
-    `INSERT INTO frames (user_id, evidence_id, capture_id, source_id, frame_id, media_s, width, height, path, seq)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+    `INSERT INTO frames (user_id, evidence_id, capture_id, source_id, frame_id, media_s, width, height, path, seq, bytes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+  );
+  const storedBytes = db.sql.query<{ n: number }, [string, string]>(
+    "SELECT (SELECT COALESCE(SUM(bytes), 0) FROM frames WHERE user_id = ?) + (SELECT COALESCE(SUM(LENGTH(body_json)), 0) FROM capture_facts WHERE user_id = ?) AS n",
   );
   const otherOwner = db.sql.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM capture_owners WHERE capture_id = ? AND user_id <> ?");
   const claimCapture = db.sql.query("INSERT INTO capture_owners (capture_id, user_id, claimed_ms) VALUES (?, ?, ?) ON CONFLICT DO NOTHING");
@@ -454,7 +470,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
       }
 
       const dead = deleted();
-      const frames = new Map<number, { readonly id: EvidenceId; readonly path: string; readonly stored: boolean; readonly jpeg: boolean }>();
+      const frames = new Map<number, { readonly id: EvidenceId; readonly path: string; readonly stored: boolean; readonly jpeg: boolean; readonly bytes: Uint8Array }>();
       const claimed = new Set<EvidenceId>();
       for (const f of fresh) {
         if (f.kind !== "frame") continue;
@@ -462,15 +478,38 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
         const id = stableId("ev", captureId, f.frameId);
         const path = join("frames", userId, sourceId, `${id}.jpg`);
         const decoded = new Uint8Array(Buffer.from(f.jpegBase64, "base64"));
-        const jpeg = isJpeg(decoded);
+        const jpeg = isFrameJpeg(decoded, f.width, f.height);
         // A resent frameId keeps the first bytes: the file is written only for an id with no row yet.
         const stored = jpeg && !dead.has(id) && !claimed.has(id) && frameOf(id) === null;
-        if (stored) {
-          claimed.add(id);
-          writeAtomic(abs(path), decoded);
-        }
-        frames.set(f.clientSeq, { id, path, stored, jpeg });
+        if (stored) claimed.add(id);
+        frames.set(f.clientSeq, { id, path, stored, jpeg, bytes: decoded });
       }
+
+      const bodies = new Map<number, string>();
+      let incoming = 0;
+      for (const f of fresh) {
+        const body: Record<string, unknown> = { ...f };
+        delete body.captureId;
+        delete body.clientSeq;
+        delete body.wallMs;
+        delete body.jpegBase64;
+        if (f.kind === "frame") body.jpegOk = frames.get(f.clientSeq)!.jpeg;
+        const json = JSON.stringify(body);
+        bodies.set(f.clientSeq, json);
+        incoming += json.length;
+        const frame = frames.get(f.clientSeq);
+        if (frame?.stored) incoming += frame.bytes.length;
+      }
+      // Before any file is written, and only for a batch that adds something: a heartbeat still refreshes the ack of a user at quota.
+      if (incoming > 0) {
+        if (limits.maxUserBytes > 0 && storedBytes.get(userId, userId)!.n + incoming > limits.maxUserBytes) {
+          throw new IngestRefused("quota", `this account has reached its ${Math.floor(limits.maxUserBytes / 1048576)} MiB storage limit`);
+        }
+        if (limits.minFreeBytes > 0 && limits.freeBytes() - incoming < limits.minFreeBytes) {
+          throw new IngestRefused("disk", "the server is low on disk space; retry later");
+        }
+      }
+      for (const frame of frames.values()) if (frame.stored) writeAtomic(abs(frame.path), frame.bytes);
 
       const at = now();
       db.tx(() => {
@@ -478,17 +517,11 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
         claimCapture.run(captureId, userId, at);
         if (store.capturedByAnotherUser(captureId)) throw new RangeError(`ingest: capture ${captureId} belongs to another user`);
         for (const f of fresh) {
-          const body: Record<string, unknown> = { ...f };
-          delete body.captureId;
-          delete body.clientSeq;
-          delete body.wallMs;
-          delete body.jpegBase64;
-          if (f.kind === "frame") body.jpegOk = frames.get(f.clientSeq)!.jpeg;
           const seq = db.nextSeq();
-          insertFact.run(userId, seq, captureId, f.clientSeq, f.wallMs, f.kind, JSON.stringify(body), at);
+          insertFact.run(userId, seq, captureId, f.clientSeq, f.wallMs, f.kind, bodies.get(f.clientSeq)!, at);
           const frame = frames.get(f.clientSeq);
           if (f.kind === "frame" && frame?.stored) {
-            insertFrame.run(userId, frame.id, captureId, stableId("src", "youtube", f.videoId), f.frameId, f.mediaS, f.width, f.height, frame.path, seq);
+            insertFrame.run(userId, frame.id, captureId, stableId("src", "youtube", f.videoId), f.frameId, f.mediaS, f.width, f.height, frame.path, seq, frame.bytes.length);
           }
         }
       });

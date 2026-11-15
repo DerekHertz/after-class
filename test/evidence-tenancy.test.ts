@@ -380,7 +380,7 @@ describe("the evidence routes with a second user", () => {
 });
 
 describe("a database from before evidence got user_id", () => {
-  const OLD = { ...MIGRATIONS, evidence: MIGRATIONS.evidence.filter((m) => m.id !== "003-user-id" && m.id !== "004-capture-owners"), review: MIGRATIONS.review.filter((m) => m.id !== "002-user-id"), record: MIGRATIONS.record.filter((m) => m.id !== "004-user-id") };
+  const OLD = { ...MIGRATIONS, evidence: MIGRATIONS.evidence.filter((m) => m.id !== "003-user-id" && m.id !== "004-capture-owners" && m.id !== "005-frame-bytes"), review: MIGRATIONS.review.filter((m) => m.id !== "002-user-id"), record: MIGRATIONS.record.filter((m) => m.id !== "004-user-id") };
   const CAPTURE = stableId("cap", "old");
   const FRAME = stableId("ev", CAPTURE, "f1");
   const CITED = stableId("ev", "cited");

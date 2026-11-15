@@ -9,7 +9,7 @@
  * A `Material` crosses JSON as `Material.canonical` rows (`encodeMaterial` / `decodeMaterial`).
  */
 import { z } from "zod";
-import { FRAME_BOUNDS } from "./domain";
+import { FRAME_BOUNDS, MAX_FRAME_BASE64_CHARS } from "./domain";
 import type {
   Allowance, BudgetHold, CaptureFact, CaptureView, Claim, ClaimDraft, DetourState, DiagramSummary, TopicDiagram, EvidenceBundle, Frame, FrozenScope, InviteAnswer, InviteState, LearnerAct,
   LinkDecision, Note, Observation, ObservationStatus, Passage, RecordView, ReviewOptions, ReviewView, SaveResult, Seq, StartChoice,
@@ -74,7 +74,7 @@ const wireFact = z.discriminatedUnion("kind", [
       kind: z.literal("frame"), videoId, frameId: z.string().min(1).max(64), mediaS,
       width: framePx, height: framePx,
       trigger: z.enum(["change_settled", "keyframe", "first"]), diff: z.number(),
-      jpegBase64: z.string().min(1).max(8 * 1024 * 1024),
+      jpegBase64: z.string().min(1).max(MAX_FRAME_BASE64_CHARS),
     }),
   factBase.extend({
     kind: z.literal("channel"), channel: z.enum(["transcript", "frames", "playback"]),

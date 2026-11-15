@@ -11,6 +11,7 @@ import { AD_WINDOW_SLACK_S, adCandidates, buildReport, parseBundle } from "../sc
 import type { PerfInput, ProbeInputs, SpotInput } from "../scripts/probe-report";
 import { tmpDir } from "./tmp";
 import { exportCapture, sampleExport } from "../scripts/probe-export";
+import { JPEG_BYTES } from "./jpeg-fixture";
 
 const SRC = "src_a";
 
@@ -314,7 +315,7 @@ describe("probe-export sampling", () => {
 });
 
 describe("probe-export on a data dir", () => {
-  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]).toString("base64");
+  const JPEG = Buffer.from(JPEG_BYTES).toString("base64");
   const VIDEO = "aaaaaaaaaaa";
 
   function fabricate(): string {
