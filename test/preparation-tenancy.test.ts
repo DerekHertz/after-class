@@ -54,14 +54,14 @@ const checkCanonical = (i: ClaimSupportInput): IdPart => ({
 });
 
 /** One user's preparation over the lecture every user watches. `interpret` and `search` are that user's scripted answers. */
-function preparationOf(db: UserDb, script: { interpret: Answer<InterpretationOutput>; search?: (i: ResourceSearchInput) => FakeStep<readonly ResourceConnection[]> }) {
+function preparationOf(db: UserDb, script: { interpret: Answer<InterpretationOutput>; check?: Check; search?: (i: ResourceSearchInput) => FakeStep<readonly ResourceConnection[]> }) {
   const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
   const revisions = new Map<ChunkRevisionId, ChunkRevision>();
   const latest = new Map<number, ChunkRevision>();
   const tasks = {
     interpret: scripted("interpretation", "claude", canonicalInterpretation, () => script.interpret()),
     revise: scripted<RevisionInput, ClaimDraft>("claim_revision", "claude", canonicalRevision, (i) => ok(i.original)),
-    checkClaim: scripted<ClaimSupportInput, Check>("claim_check", "jev", checkCanonical, () => ok({ verdict: "yes", p: 0.9 })),
+    checkClaim: scripted<ClaimSupportInput, Check>("claim_check", "jev", checkCanonical, () => ok(script.check ?? { verdict: "yes", p: 0.9 })),
     searchResources: scripted<ResourceSearchInput, readonly ResourceConnection[]>("resource_search", "claude", canonicalResourceSearch, (i) => script.search?.(i) ?? ok([])),
   };
   const prep = createPreparation(db, {
@@ -212,6 +212,24 @@ describe("two users watch one lecture in one database", () => {
     expect(wb.texts(rb)).toEqual(["a pivot is a nonzero entry"]);
     expect(rowsOf(a, "claim_index", a.userId)).toBe(0);
     expect(rowsOf(a, "claim_index", b.userId)).toBe(1);
+  });
+
+  test("a frozen revision input is per user: a second user's different claim check is not dropped by the first's", async () => {
+    const a = testUserDb();
+    const b = otherUserDb(a);
+    const wa = preparationOf(a, { interpret: () => ok(output(POINTS)), check: { verdict: "no", p: 0.2 } });
+    const wb = preparationOf(b, { interpret: () => ok(output(POINTS)), check: { verdict: "uncertain", p: 0.5 } });
+    const ra = wa.close(0, 20);
+    wb.close(0, 20);
+    await wa.drain();
+    await wb.drain();
+
+    expect(wa.tasks.revise.calls.map((c) => c.check)).toEqual([{ verdict: "no", p: 0.2 }]);
+    expect(wb.tasks.revise.calls.map((c) => c.check)).toEqual([{ verdict: "uncertain", p: 0.5 }]);
+    const frozen = (db: UserDb) => db.sql.query<{ input_json: string }, [string]>("SELECT input_json FROM prep_inputs WHERE user_id = ? AND kind = 'revision'").all(db.userId).map((r) => JSON.parse(r.input_json));
+    expect(frozen(a)).toEqual([{ check: { verdict: "no", p: 0.2 } }]);
+    expect(frozen(b)).toEqual([{ check: { verdict: "uncertain", p: 0.5 } }]);
+    expect(wa.prep.prep(ra.id).claims).toHaveLength(1);
   });
 
   test("prep_inputs.memo_key resolves through the same user's memo only", async () => {
