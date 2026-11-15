@@ -6,7 +6,7 @@ import type { ReviewOptions, StartChoice, UsageSummary } from "../shared/domain"
 import type { AppApi } from "./api";
 import { usePrefetchReviewArt } from "./art-prefetch";
 import { captureStatusLabel, coveredLines, earlierReviewsNote, formatClock, inspectBundle, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
-import type { EarlierReview, OptionsScreen, ScopeSummary, SourceTitles, StartOffer } from "./core";
+import type { OptionsScreen, ScopeSummary, SourceTitles, StartOffer } from "./core";
 import { ReviewRow } from "./home";
 import type { LectureReview } from "./home";
 import { usePolled } from "./poll";
@@ -158,25 +158,25 @@ export async function checkAgain(
   hooks.reload();
 }
 
-/**
- * The reviews already started on this capture, each with the watched time its scope froze. Both reads already exist: the
- * lecture list names the reviews and a review's view carries its scope. A scope that cannot be read leaves its time unknown.
- */
-export async function loadEarlierReviews(api: Pick<AppApi, "lectures" | "review">, captureId: CaptureId): Promise<readonly EarlierReview<LectureReview>[]> {
-  const lecture = (await api.lectures()).lectures.find((l) => l.captureId === captureId);
-  const reviews = [...(lecture?.reviews ?? [])].sort((a, b) => a.startedMs - b.startedMs);
-  return Promise.all(reviews.map(async (review) => ({ review, material: await api.review(review.reviewId).then((v) => v.scope.material, () => null) })));
+/** The rows of this capture's reviews, from the lecture list. Which of them the next review leaves out is the options' `heldBack`, not decided here. */
+export async function loadLectureReviews(api: Pick<AppApi, "lectures">, captureId: CaptureId): Promise<readonly LectureReview[]> {
+  return (await api.lectures()).lectures.find((l) => l.captureId === captureId)?.reviews ?? [];
 }
 
-/** Tells the learner that part of the lecture is already in a review, how long it is, and how to open that review. */
-export function EarlierReviews({ earlier, titles }: { readonly earlier: readonly EarlierReview<LectureReview>[]; readonly titles: SourceTitles }) {
-  const note = earlierReviewsNote(earlier);
+/**
+ * Tells the learner that part of the lecture is held by a review already started, how long it is, and how to open that review.
+ * The note comes from the options alone. The rows need the lecture list, so when it cannot load the page says so and offers a retry.
+ */
+export function EarlierReviews({ options, reviews, titles }: { readonly options: ReviewOptions; readonly reviews: { readonly data: readonly LectureReview[] | null; readonly error: string | null; readonly reload: () => void }; readonly titles: SourceTitles }) {
+  const note = earlierReviewsNote(options.heldBack, options.kind);
   if (note === null) return null;
+  const rows = options.heldBack.flatMap((h) => (reviews.data ?? []).filter((r) => r.reviewId === h.reviewId).map((review) => ({ review, covered: coveredLines(h.material, titles) })));
   return (
     <section className="note earlier-reviews" aria-labelledby="earlier-reviews-heading">
       <h2 id="earlier-reviews-heading">{note.heading}</h2>
       <p>{note.body}</p>
-      <ul>{earlier.map((e) => <ReviewRow key={e.review.reviewId} review={e.review} covered={e.material === null ? [] : coveredLines(e.material, titles)} />)}</ul>
+      <ul>{rows.map((r) => <ReviewRow key={r.review.reviewId} review={r.review} covered={r.covered} />)}</ul>
+      <ErrorNote error={reviews.error === null ? null : `The earlier reviews could not be listed. ${reviews.error}`} retry={reviews.reload} />
     </section>
   );
 }
@@ -184,8 +184,8 @@ export function EarlierReviews({ earlier, titles }: { readonly earlier: readonly
 export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readonly captureId: CaptureId }) {
   usePrefetchReviewArt();
   const capture = useAsync(useCallback(() => api.captureView(captureId), [api, captureId]));
-  // Read once on arrival: a review started from this page navigates away, so the list cannot go stale here.
-  const earlier = useAsync(useCallback(() => loadEarlierReviews(api, captureId), [api, captureId]));
+  // Read once on arrival, only for the rows the note links to: a review started from this page navigates away, so the list cannot go stale here.
+  const reviews = useAsync(useCallback(() => loadLectureReviews(api, captureId), [api, captureId]));
   const options = usePolled(useCallback(() => api.reviewOptions(captureId), [api, captureId]), isProcessing, POLL_MS);
   // A budget that holds back new model calls holds back preparation too. Read again while it does, so the note goes when it lifts.
   const usage = usePolled(useCallback(() => api.usage(), [api]), isHeld, POLL_MS);
@@ -254,7 +254,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
           {formatClock(capture.data.capture.watchedSeconds)} watched · captions {capture.data.capture.transcript.replaceAll("_", " ")}
         </p>
       )}
-      {earlier.data !== null && <EarlierReviews earlier={earlier.data} titles={titles} />}
+      {options.data !== null && <EarlierReviews options={options.data} reviews={reviews} titles={titles} />}
       <ErrorNote error={options.error} retry={options.reload} />
       <ErrorNote error={startError} />
       {options.data === null && options.error === null && <p className="page-loading" role="status">Looking for prepared lecture material...</p>}

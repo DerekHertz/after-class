@@ -5,7 +5,7 @@ import type { Reviews, TutorKit } from "../src/backend/review";
 import { MAX_MOVES_PER_TURN, createReviews } from "../src/backend/review";
 import type { TutorOutput } from "../src/backend/review/tutor";
 import { nextThreadId, tutorOwesMove, tutorRequest, waitsForLearner } from "../src/backend/review/tutor";
-import type { LearnerAct, Turn, TurnEvent, TutorMove, TutorMoveKind } from "../src/shared/domain";
+import type { LearnerAct, ReviewOptions, Turn, TurnEvent, TutorMove, TutorMoveKind } from "../src/shared/domain";
 import type { ReviewId } from "../src/shared/ids";
 import { randomId, stableId } from "../src/shared/ids";
 import { Material } from "../src/shared/time";
@@ -401,6 +401,41 @@ describe("which earlier reviews use up material", () => {
     r.clock.advance(1000);
     const second = started(r.reviews.start(r.capture, "prepared_only", randomId("rvw")));
     expect(r.reviews.list(r.capture).map((x) => x.reviewId)).toEqual([second.reviewId, r.reviewId]);
+  });
+});
+
+describe("what the options say an earlier review keeps (heldBack)", () => {
+  const endingScript: Script = () => reply({ kind: "wrap_up" }, "Done.");
+  const kept = (opts: ReviewOptions) => opts.heldBack.map((h) => [h.reviewId, Material.canonical(h.material)]);
+
+  test("an active review holding everything is named with its material, while the options have nothing to review", () => {
+    const r = startedRig(endingScript);
+    const opts = r.reviews.options(r.capture);
+    expect(opts.kind).toBe("nothing_to_review");
+    expect(kept(opts)).toEqual([[r.reviewId, Material.canonical(r.scope.material)]]);
+  });
+
+  test("an ended review nobody answered keeps nothing, because its material is offered again", async () => {
+    const r = startedRig(endingScript);
+    await collect(r.reviews.turn(r.reviewId, randomId("turn"), { kind: "end" }));
+    const opts = r.reviews.options(r.capture);
+    expect(opts.kind).toBe("ready");
+    expect(opts.heldBack).toEqual([]);
+  });
+
+  test("an answered review keeps what the next review leaves out, and not what a revised section brings back", async () => {
+    const r = startedRig(endingScript);
+    await collect(r.reviews.turn(r.reviewId, randomId("turn"), answer()));
+    await collect(r.reviews.turn(r.reviewId, randomId("turn"), { kind: "end" }));
+    r.world.close(1, 300, 600);
+    r.world.claim(2, 310, 320);
+    expect(kept(r.reviews.options(r.capture))).toEqual([[r.reviewId, Material.canonical(r.scope.material)]]);
+    // The first section is revised to run longer, so it is offered whole again, over the answered review's scope.
+    r.world.close(0, 0, 400);
+    r.world.claim(3, 350, 360);
+    const opts = r.reviews.options(r.capture);
+    expect(opts.kind).toBe("ready");
+    expect(opts.heldBack).toEqual([]);
   });
 });
 

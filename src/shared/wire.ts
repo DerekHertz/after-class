@@ -351,16 +351,19 @@ const scopePreviewz = z.object({
   partial: z.array(partialReasonz),
 });
 
+const heldBackz = z.array(z.object({ reviewId: idOf("rvw"), material: materialWire }));
+
 const nothingToReviewz = z.object({
   kind: z.literal("nothing_to_review"),
+  heldBack: heldBackz,
   gaps: z.array(gapz),
   unverified: z.array(claimz),
   rewatch: z.array(z.object({ sourceId: idOf("src"), interval: intervalz })),
 });
 
 export const reviewOptionsResponse = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("ready"), scope: scopePreviewz }),
-  z.object({ kind: z.literal("processing"), readyNow: scopePreviewz.nullable(), pendingChunks: z.number(), estimateS: z.number().nullable() }),
+  z.object({ kind: z.literal("ready"), scope: scopePreviewz, heldBack: heldBackz }),
+  z.object({ kind: z.literal("processing"), readyNow: scopePreviewz.nullable(), pendingChunks: z.number(), estimateS: z.number().nullable(), heldBack: heldBackz }),
   nothingToReviewz,
 ]) satisfies z.ZodType<ReviewOptions>;
 

@@ -364,10 +364,17 @@ export type ScopePreview = {
   readonly partial: readonly PartialReason[];
 };
 
+/**
+ * Watched time that a review already holds and that a new review will not offer again, for each such review. It is what
+ * the backend excluded from this answer's scope, so an ended review with no response (offered again) and time that a
+ * revised section brings back into scope are not in it.
+ */
+export type HeldBack = readonly { readonly reviewId: ReviewId; readonly material: Material }[];
+
 export type ReviewOptions =
-  | { readonly kind: "ready"; readonly scope: ScopePreview }
-  | { readonly kind: "processing"; readonly readyNow: ScopePreview | null; readonly pendingChunks: number; readonly estimateS: number | null }
-  | { readonly kind: "nothing_to_review"; readonly gaps: readonly Gap[]; readonly unverified: readonly Claim[]; readonly rewatch: readonly { readonly sourceId: SourceId; readonly interval: Interval }[] };
+  | { readonly kind: "ready"; readonly scope: ScopePreview; readonly heldBack: HeldBack }
+  | { readonly kind: "processing"; readonly readyNow: ScopePreview | null; readonly pendingChunks: number; readonly estimateS: number | null; readonly heldBack: HeldBack }
+  | { readonly kind: "nothing_to_review"; readonly gaps: readonly Gap[]; readonly unverified: readonly Claim[]; readonly rewatch: readonly { readonly sourceId: SourceId; readonly interval: Interval }[]; readonly heldBack: HeldBack };
 
 /** "prepared_only": start on what's ready, other chunks keep preparing. "stop_early": cancel pending in-scope work first. */
 export type StartChoice = "prepared_only" | "stop_early";

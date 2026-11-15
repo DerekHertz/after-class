@@ -51,8 +51,8 @@ describe("createApi", () => {
   test("sends the bearer token and parses review options of every kind", async () => {
     const bodies = [
       READY,
-      { kind: "processing", readyNow: null, pendingChunks: 2, estimateS: null },
-      { kind: "nothing_to_review", gaps: [gapJson], unverified: [claimJson("unverified")], rewatch: [{ sourceId: src, interval: { start: 120, end: 180 } }] },
+      { kind: "processing", heldBack: [], readyNow: null, pendingChunks: 2, estimateS: null },
+      { kind: "nothing_to_review", heldBack: [], gaps: [gapJson], unverified: [claimJson("unverified")], rewatch: [{ sourceId: src, interval: { start: 120, end: 180 } }] },
     ];
     const { calls, fetchFn } = fakeFetch(() => json(bodies.shift()));
     const api = createApi("tok", { fetch: fetchFn });

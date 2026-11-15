@@ -19,7 +19,7 @@
 import { stableId } from "../../shared/ids";
 import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, ConceptId, EvidenceId, ReviewId, ThreadId, TurnId } from "../../shared/ids";
 import type {
-  AssessableClaim, BudgetHold, ChunkPrep, ChunkRevision, Claim, CodeNotice, Concept, Correction, EvidenceBundle, FrozenScope, InviteAnswer, InviteState,
+  AssessableClaim, BudgetHold, ChunkPrep, ChunkRevision, Claim, CodeNotice, Concept, Correction, EvidenceBundle, FrozenScope, HeldBack, InviteAnswer, InviteState,
   LearnerAct, ReviewOptions, ReviewView, ScopePreview, Seq, StartChoice, StartResult, Turn, TurnEvent, TutorMove,
 } from "../../shared/domain";
 import { Material } from "../../shared/time";
@@ -250,13 +250,24 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
    * skip or an "I don't know"). An ended review with no response, such as one ended by a mis-click, used up nothing,
    * so its material is offered again. R7 is about a started review's own frozen scope, which this never touches.
    */
-  function reviewedMaterial(captureId: CaptureId): Material {
+  function holding(captureId: CaptureId): readonly { readonly reviewId: ReviewId; readonly material: Material }[] {
     const counts = (r: ReviewRow): boolean => {
       const turns = loadTurns(r.id as ReviewId);
       const responded = turns.some((t) => t.actor === "learner" && (t.act.kind === "answer" || t.act.kind === "skip" || t.act.kind === "dont_know"));
       return responded || kit.reviewState(r.id as ReviewId, turns, [], softTargetS, now()).phase !== "ended";
     };
-    return q.reviewsOf.all(userId, captureId).filter(counts).reduce((m, r) => Material.union(m, decodeScope(r.scope_json).scope.material), Material.empty);
+    return q.reviewsOf.all(userId, captureId).filter(counts).map((r) => ({ reviewId: r.id as ReviewId, material: decodeScope(r.scope_json).scope.material }));
+  }
+
+  const reviewedMaterial = (captureId: CaptureId): Material => holding(captureId).reduce((m, r) => Material.union(m, r.material), Material.empty);
+
+  /**
+   * What the learner is told an earlier review keeps: each holding review's material that this answer's candidates do not
+   * offer. A revised section that grew back over a held scope is offered whole, so the overlap is not kept from it.
+   */
+  function heldBack(cands: Candidates, captureId: CaptureId): HeldBack {
+    const offered = cands.reduce((m, c) => Material.union(m, c.rev.material), Material.empty);
+    return holding(captureId).map((r) => ({ reviewId: r.reviewId, material: Material.subtract(r.material, offered) })).filter((r) => Material.duration(r.material) > 0);
   }
 
   function candidates(captureId: CaptureId) {
@@ -272,6 +283,7 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     const unsupported = cands.filter((c) => c.prep.finished && c.prep.supportedCount === 0);
     return {
       kind: "nothing_to_review",
+      heldBack: heldBack(cands, captureId),
       gaps,
       unverified: deps.claimsIn(captureId, material).filter((c) => c.status === "unverified"),
       rewatch: [
@@ -306,9 +318,9 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     const scope = asOf > 0 ? freezeScope(cands, (m) => deps.assessableIn(captureId, m), gapsOf, asSeq(asOf)) : null;
     const pending = cands.filter((c) => !c.prep.finished).length;
     if (pending > 0) {
-      return { kind: "processing", readyNow: scope && preview(captureId, scope), pendingChunks: pending, estimateS: config.estimateS?.(pending) ?? null };
+      return { kind: "processing", readyNow: scope && preview(captureId, scope), pendingChunks: pending, estimateS: config.estimateS?.(pending) ?? null, heldBack: heldBack(cands, captureId) };
     }
-    return scope ? { kind: "ready", scope: preview(captureId, scope) } : nothingToReview(cands, captureId);
+    return scope ? { kind: "ready", scope: preview(captureId, scope), heldBack: heldBack(cands, captureId) } : nothingToReview(cands, captureId);
   }
 
   function start(captureId: CaptureId, choice: StartChoice, reviewId: ReviewId): StartResult {
