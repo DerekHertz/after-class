@@ -5,7 +5,7 @@ import { canonicalJson, stableId } from "../../shared/ids";
 import type { ConceptId, EvidenceId, IdPart, ReviewId, ThreadId } from "../../shared/ids";
 import type { AssessableClaim, NonEmpty, Note, NoteSegment, Observation, SubjectLinkSuggestion, Turn } from "../../shared/domain";
 import type { WrapUpOutput } from "../review/tutor";
-import { attributeTurns, moveThreads, threadFacts } from "../review/clamp";
+import { attributeTurns, moveThreads, STOCK_CLOSINGS, threadFacts } from "../review/clamp";
 
 export type RecordBundle = {
   readonly hash: string;
@@ -72,7 +72,7 @@ export function buildBundle(reviewId: ReviewId, turns: readonly Turn[], claims: 
   for (const th of threads) for (const c of conceptsOf(th.claims)) if (!concepts.includes(c)) concepts.push(c);
 
   const closingTurn = ordered.findLast((t) => t.actor === "tutor" && t.move.kind === "wrap_up");
-  const closing: NoteSegment[] = closingTurn?.actor === "tutor" && closingTurn.say.trim() !== "" ? [{ author: "tutor", text: closingTurn.say, turnId: closingTurn.id, evidence: [] }] : [];
+  const closing: NoteSegment[] = closingTurn?.actor === "tutor" && closingTurn.say.trim() !== "" && !STOCK_CLOSINGS.has(closingTurn.say.trim()) ? [{ author: "tutor", text: closingTurn.say, turnId: closingTurn.id, evidence: [] }] : [];
 
   const notes = concepts.map((conceptId): Omit<Note, "userEdit"> => {
     const threadIds = new Set(observations.filter((o) => o.conceptIds.includes(conceptId)).map((o) => o.threadId));
@@ -88,7 +88,7 @@ export function buildBundle(reviewId: ReviewId, turns: readonly Turn[], claims: 
     const tutor: NoteSegment[] = wrapUp.notes
       .filter((n) => n.conceptId === conceptId)
       .map((n) => ({ author: "tutor", text: n.tutorSummary, turnId: null, evidence: sortedUnique(n.evidence.filter((id) => known.has(id))) as EvidenceId[] }));
-    const generated = [...source, ...learner, ...tutor, ...closing];
+    const generated = [...source, ...learner, ...tutor, ...(threadIds.size > 0 ? closing : [])];
     return {
       id: stableId("note", reviewId, conceptId),
       reviewId,

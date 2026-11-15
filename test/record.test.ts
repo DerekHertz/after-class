@@ -8,6 +8,7 @@ import { createRecord } from "../src/backend/record";
 import { LOCAL_USER, ensureLocalUser, scopeDb } from "../src/backend/db";
 import type { Db } from "../src/backend/db";
 import { testDb, testSeq } from "./fakes";
+import { NOTHING_TO_ASK_LINE, WRAP_UP_LINE } from "../src/backend/review/clamp";
 
 const REVIEW = stableId("rvw", "review-1") as ReviewId;
 const CAPTURE = stableId("cap", "capture-1") as CaptureId;
@@ -365,6 +366,17 @@ describe("the learning record", () => {
     await silent.record.save(REVIEW);
     const statuses = (v: typeof view) => v.observations.map((o) => [o.threadId, o.status]);
     expect(statuses(view)).toEqual(statuses(silent.record.view({ reviewId: REVIEW })));
+  });
+
+  test("a closing line code speaks itself teaches nothing, so no note keeps it", async () => {
+    for (const stock of [WRAP_UP_LINE, NOTHING_TO_ASK_LINE]) {
+      const l = finishedReview();
+      l.turns.pop();
+      l.tutor({ kind: "wrap_up" }, stock);
+      const h = harness({ turns: l.turns });
+      await h.record.save(REVIEW);
+      for (const note of h.record.view({ reviewId: REVIEW }).notes) expect(note.generated.map((s) => s.text)).not.toContain(stock);
+    }
   });
 
   test("observations are clamped at read: the skipped thread is not_assessed whatever was proposed", async () => {

@@ -29,6 +29,7 @@ import { PAID_TUTOR_HOLD } from "../providers/budget";
 import type { Memo, RunResult } from "../providers/memo";
 import { MAX_MAIN_QUESTIONS, allowedMoves, askedClaims, parseMoveHeader, reviewState, settledCorrections, validateMove, validateSay, tutorOwesMove, waitsForLearner } from "./tutor";
 import type { TutorInput, TutorOutput } from "./tutor";
+import { NOTHING_TO_ASK_LINE, WRAP_UP_LINE } from "./clamp";
 import {
   corrections as deriveCorrections, decodeScope, encodeScope, foldInvites, freezeScope, takeSentences, unreviewed, usableInScope,
 } from "./core";
@@ -130,8 +131,6 @@ type Attempt =
 type Settled = { readonly ok: true; readonly lookup: RunResult<TutorOutput> } | { readonly ok: false; readonly error: string };
 
 const CLOSE_THREAD_LINE = "Let's leave that question there and move on.";
-const WRAP_UP_LINE = "Let's wrap up here.";
-const NOTHING_TO_ASK_LINE = "Every statement I prepared for this part was withdrawn after checking against the lecture, so there's nothing left I can fairly ask you about. Let's wrap up here.";
 /** One request may hold several tutor moves (a correction, then the next question); never more than this, so it cannot loop. */
 export const MAX_MOVES_PER_TURN = 4;
 const NON_TERMINAL = new Set(["awaiting_check", "awaiting_revision", "awaiting_recheck"]);
