@@ -1,5 +1,5 @@
 import type { Size } from "./layout";
-import type { Draw } from "./scene";
+import type { CompanionDraw, PictureDraw } from "./scene";
 
 /** Device pixels per CSS pixel on each axis. */
 export type Scale = { readonly x: number; readonly y: number };
@@ -14,7 +14,7 @@ export type Piece = {
  * The `drawImage` calls that paint `draw` from a picture of `natural` size at `scale`, on the device pixels Chrome painted
  * the same layer on when CSS drew it, so the canvas keeps the room's pixels.
  */
-export function pieces(draw: Draw, natural: Size, scale: Scale): readonly Piece[] {
+export function pieces(draw: PictureDraw | CompanionDraw, natural: Size, scale: Scale): readonly Piece[] {
   const box = snap(draw, scale);
   const { width: w, height: h } = natural;
   if (draw.kind === "image") return [{ sx: 0, sy: 0, sw: w, sh: h, dx: box.left, dy: box.top, dw: box.right - box.left, dh: box.bottom - box.top }];
@@ -54,7 +54,7 @@ function snapSpan(start: number, size: number, scale: number, image: boolean): r
   return [from, image ? Math.min(to, from + round(length)) : to];
 }
 
-function snap({ rect, kind }: Draw, s: Scale) {
+function snap({ rect, kind }: PictureDraw | CompanionDraw, s: Scale) {
   const [left, right] = snapSpan(rect.left, rect.width, s.x, kind !== "nine-slice");
   const [top, bottom] = snapSpan(rect.top, rect.height, s.y, kind !== "nine-slice");
   return { left, right, top, bottom };

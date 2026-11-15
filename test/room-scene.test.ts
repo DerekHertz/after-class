@@ -4,13 +4,17 @@ import { layoutRoom } from "../src/app/room/layout";
 import type { Size } from "../src/app/room/layout";
 import { pieces } from "../src/app/room/paint";
 import { buildScene } from "../src/app/room/scene";
-import type { Draw } from "../src/app/room/scene";
+import type { Draw, PictureDraw } from "../src/app/room/scene";
 import { ROOM_LAYER_ART } from "../src/app/room/art";
 import { FRONT_ROW_ROOMS } from "../src/app/room/rooms";
 
 const rooms = Object.keys(FRONT_ROW_ROOMS) as SceneId[];
-const full = (scene: SceneId, window: Size) => buildScene(scene, layoutRoom(scene, window, "full"));
-const named = (draw: Draw) => draw.src.split("/").pop()!.replace(/\.webp$/, "");
+const isPicture = (draw: Draw): draw is PictureDraw => draw.kind === "image" || draw.kind === "nine-slice";
+const full = (scene: SceneId, window: Size) => {
+  const list = buildScene(scene, layoutRoom(scene, window, "full"));
+  return { ...list, draws: list.draws.filter(isPicture) };
+};
+const named = (draw: PictureDraw) => draw.src.split("/").pop()!.replace(/\.webp$/, "");
 
 describe("the stage's draw list", () => {
   test("a full room paints its layers back to front, as the CSS stacked them", () => {
@@ -23,7 +27,7 @@ describe("the stage's draw list", () => {
   test("a full room draws every layer pixelated, and the board, desk and mat as nine-slices of their files", () => {
     for (const scene of rooms) {
       const { draws } = full(scene, { width: 1920, height: 1080 });
-      expect(draws.filter((d) => d.kind === "nine-slice").map(named).sort()).toEqual(["board", "desk", "mat"].map((l) => named({ src: ROOM_LAYER_ART[scene][l as "board"] } as Draw)).sort());
+      expect(draws.filter((d) => d.kind === "nine-slice").map(named).sort()).toEqual(["board", "desk", "mat"].map((l) => named({ src: ROOM_LAYER_ART[scene][l as "board"] } as PictureDraw)).sort());
       expect(draws.every((d) => d.kind !== "image" || d.sampling === "pixelated")).toBe(true);
     }
   });
@@ -32,7 +36,7 @@ describe("the stage's draw list", () => {
     for (const scene of rooms) {
       const list = buildScene(scene, layoutRoom(scene, { width: 390, height: 844 }, "compact"));
       expect(list.draws).toHaveLength(1);
-      const [bg] = list.draws;
+      const [bg] = list.draws.filter(isPicture);
       expect(bg).toMatchObject({ kind: "image", sampling: "smooth", src: ROOM_LAYER_ART[scene].background });
       const { left, top, width, height } = bg!.rect;
       expect({ scene, covers: top <= 0 && left <= 0 && left + width >= 390 - 1e-9 && top + height >= 844 - 1e-9 }).toEqual({ scene, covers: true });
@@ -98,7 +102,7 @@ describe("the stage snaps a box at the window's device pixel ratio, where a real
   for (const { kind, start, size, scale, chrome } of cases) {
     test(`${kind === "image" ? "an image" : "a nine-slice"} from ${start} CSS px, ${size} wide, at ${scale}x covers device pixels ${chrome[0]} to ${chrome[1]}`, () => {
       const rect = { left: start, top: start, width: size, height: size };
-      const draw: Draw = kind === "image" ? { kind, src: "", rect, sampling: "pixelated" } : { kind, src: "", rect, slice: none, border: none };
+      const draw: PictureDraw = kind === "image" ? { kind, src: "", rect, sampling: "pixelated" } : { kind, src: "", rect, slice: none, border: none };
       const [piece] = pieces(draw, { width: 8, height: 8 }, { x: scale, y: scale });
       expect([piece!.dx, piece!.dx + piece!.dw, piece!.dy, piece!.dy + piece!.dh]).toEqual([...chrome, ...chrome]);
     });
