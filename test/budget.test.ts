@@ -575,8 +575,7 @@ describe("Jev spend", () => {
   });
 });
 
-// #236: a reservation is an estimate of the call, not its worst case. $0.75 for a tutor turn that costs $0.01 to $0.13 refused a learner
-// from $4.25 of their $5.
+// #236: the flat figure a tutor request reserves when its adapter passes no estimate. The request-sensitive reservation is in tutor-reservation.test.ts.
 describe("the tutor turn reservation", () => {
   // The Fable end-to-end audit of 2026-11-14 (docs/trail/fable-e2e-2026-11-14-data.json), Sonnet: the dearest turn is the one that writes
   // the system block, 31,241 input tokens, written at the 1 hour rate in the worst case (the turn after a long pause). 2,000 output tokens

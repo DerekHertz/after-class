@@ -26,7 +26,7 @@ import type {
 import { Material, contains } from "../../shared/time";
 import { ProviderError } from "../providers/memo";
 import type { Task } from "../providers/memo";
-import type { CacheTtl, ClaudeCli, ClaudeRequest } from "../providers/claude";
+import type { CacheState, CacheTtl, ClaudeCli, ClaudeRequest } from "../providers/claude";
 import type { UserDb } from "../db";
 import { attributeTurns, moveThreads, quickCheckThreads } from "./clamp";
 import { detourTracker } from "./detour";
@@ -616,7 +616,16 @@ export function tutorPrompt(input: TutorInput): string {
  */
 export type TutorModel = "opus" | "sonnet";
 
-const TUTOR_REQUEST = { effort: "medium", images: [], webTools: false, timeoutMs: 120_000 } as const;
+/**
+ * The most output tokens a tutor turn may spend, thinking included. A turn is a move header and a few sentences: the 12 turns of the
+ * Fable audit (docs/trail/fable-e2e-2026-11-14-data.json, Sonnet, effort medium) spent 149 to 505 output tokens, thinking included.
+ * 8,000 is about 16 times the most any of them used, so a long answer or a long think still fits, and a quarter of the 32,000 the
+ * API call allowed before, which is what the budget reserved at its worst. A turn that spends all 8,000 stops with max_tokens, which the
+ * adapter records as a failed attempt (the memo stores no turn and the attempt is paid for), and the learner retries it like any other failed turn.
+ */
+export const TUTOR_MAX_OUTPUT_TOKENS = 8_000;
+
+const TUTOR_REQUEST = { effort: "medium", images: [], webTools: false, timeoutMs: 120_000, maxOutputTokens: TUTOR_MAX_OUTPUT_TOKENS } as const;
 
 /**
  * A 5 minute cache entry lives 5 minutes from the start of the request that last wrote or read it. A tutor request that starts
@@ -633,7 +642,21 @@ export const LONG_PAUSE_MS = 4.5 * 60_000;
  * it is sent, so a request the budget held is not a start, and one sent that then failed is. Each start is stored in tutor_cache
  * with the review's lifetime, so a restarted process makes the same choice.
  */
-export type TutorCache = { start(reviewId: ReviewId): CacheTtl };
+export type TutorCache = {
+  start(reviewId: ReviewId): CacheTtl;
+  /**
+   * What `start` would answer for this review a moment from now, and whether an earlier request's block is still cached, recording
+   * nothing. It looks `PEEK_MARGIN_MS` ahead, so the admission that reads it and the start right after never disagree to the
+   * budget's disadvantage: a block close to lapsing is called cold, and a request close to the long-pause line asks for 1 hour.
+   */
+  peek(reviewId: ReviewId): CacheState;
+};
+
+/** How far `peek` looks ahead of the clock, for the time between the admission and the request's start. */
+export const PEEK_MARGIN_MS = 1_000;
+
+/** How long a 1 hour entry lives, less what the 5 minute entry's 30 seconds of margin covers. */
+const HOUR_LIFETIME_MS = 60 * 60_000 - 30_000;
 
 export function tutorCache(db: UserDb, now: () => number = Date.now): TutorCache {
   const start = db.sql.query<{ ttl: CacheTtl }, [string, string, number, number]>(
@@ -643,7 +666,17 @@ export function tutorCache(db: UserDb, now: () => number = Date.now): TutorCache
        last_start_ms = MAX(last_start_ms, ?3)
      RETURNING ttl`,
   );
-  return { start: (reviewId) => start.get(db.userId, reviewId, Math.round(now()), LONG_PAUSE_MS)!.ttl };
+  const last = db.sql.query<{ last_start_ms: number; ttl: CacheTtl }, [string, string]>(`SELECT last_start_ms, ttl FROM tutor_cache WHERE user_id = ? AND review_id = ?`);
+  return {
+    start: (reviewId) => start.get(db.userId, reviewId, Math.round(now()), LONG_PAUSE_MS)!.ttl,
+    peek: (reviewId) => {
+      const row = last.get(db.userId, reviewId);
+      if (row === null) return { ttl: "5m", warm: false };
+      const age = Math.round(now()) + PEEK_MARGIN_MS - row.last_start_ms;
+      const ttl: CacheTtl = row.ttl === "1h" || age > LONG_PAUSE_MS ? "1h" : "5m";
+      return { ttl, warm: age <= (row.ttl === "1h" ? HOUR_LIFETIME_MS : LONG_PAUSE_MS) };
+    },
+  };
 }
 
 /** The system prompt is TUTOR_SYSTEM plus the review's stable material, the prompt only what changes per turn. */
@@ -669,7 +702,7 @@ export function tutorTask(claude: ClaudeCli, cache: TutorCache, model: TutorMode
     },
     async attempt(input, ctx) {
       const { text, usage } = await claude.streamText(
-        { ...tutorRequest(input, model), cacheTtl: () => cache.start(input.state.reviewId) },
+        { ...tutorRequest(input, model), cacheTtl: () => cache.start(input.state.reviewId), cacheState: () => cache.peek(input.state.reviewId) },
         ctx.streamTo ?? (() => {}),
         ctx,
       );

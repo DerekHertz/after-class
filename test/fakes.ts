@@ -16,7 +16,10 @@ import type { AttemptContext, Task, UsageReport } from "../src/backend/providers
 import type { TutorCache } from "../src/backend/review/tutor";
 
 /** For a tutor task whose adapter is a fake that never asks for a cache lifetime. */
-export const UNASKED_CACHE: TutorCache = { start: () => { throw new Error("this fake adapter never asks for a cache lifetime"); } };
+export const UNASKED_CACHE: TutorCache = {
+  start: () => { throw new Error("this fake adapter never asks for a cache lifetime"); },
+  peek: () => { throw new Error("this fake adapter never asks for a cache state"); },
+};
 
 export function testDb(): Db {
   return openDb(":memory:");

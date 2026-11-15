@@ -66,9 +66,22 @@ export type ClaudeRequest = {
    * admits it and right before it is sent, so a held request never asks. `claude -p` has no such control and never asks.
    */
   readonly cacheTtl?: () => CacheTtl;
+  /**
+   * The most output tokens, thinking included, the Messages API may spend on a streamed turn. STREAM_MAX_TOKENS when absent. The
+   * budget reserves for it, so a request that needs little sets it low. `claude -p` has no such control and ignores it.
+   */
+  readonly maxOutputTokens?: number;
+  /**
+   * How the system block's cache stands for this request, read without recording a start, so the reservation can price what the
+   * request could cost. Asked after the queue, right before `admit`. A request that gives none is priced as a cold 1 hour write.
+   */
+  readonly cacheState?: () => CacheState;
 };
 
 export type CacheTtl = "5m" | "1h";
+
+/** `ttl`: the lifetime the request will ask for. `warm`: an earlier request of the review wrote or refreshed the block and it has not lapsed. */
+export type CacheState = { readonly ttl: CacheTtl; readonly warm: boolean };
 
 /** The user turn the model reads: the cached head, then the rest. */
 export const promptOf = (req: ClaudeRequest): string => (req.cachedPrompt ?? "") + req.prompt;

@@ -50,17 +50,23 @@ import { BUDGET_HOLDS_REVIEW_ID } from "../migrations-budget";
  *   $0.5540 was writing 69,251 tokens at 2 times the input price. A review's first turn now writes them at 1.25 times, but the turn
  *   after a long pause writes them at 2 times again (`tutorCache` in review/tutor.ts), so $0.75 covered that turn on Opus, and
  *   on Sonnet ($0.2770 for the write) with room, before the tutor's own estimate below was set from the Sonnet audit. Interpretation, revision and the diagram summary are not measured on the API.
- *   Tutor turn: reserved at $0.15. The tutor runs on Sonnet unless AFTERCLASS_TUTOR_MODEL=opus, and the Fable end-to-end audit of 2026-11-14
- *   measured it (docs/trail/fable-e2e-2026-11-14-data.json, 12 turns of one review on Sonnet): a first turn of 31,241 input tokens with
- *   149 output, later turns reading 29,604 from the cache with at most 505 output tokens, $0.0126 to $0.0241 each at list price. The
- *   turn that decides a reservation is the one that writes the system block, because it is the dearest: the first turn of a review, or
- *   the one after a long pause (`tutorCache`), which writes at the 1 hour rate. 31,241 tokens x $2 x 2 per million = $0.1250 plus 2,000
- *   output tokens (four times the most a measured turn spent) x $10 per million = $0.02, $0.145, reserved as $0.15. The old $0.75 was
- *   `worstCaseUsd` at 16,000 output tokens on 50,000 input, which no tutor turn comes near, and it refused a learner a turn costing
- *   $0.02 once they had used $4.25 of $5. At $0.15 that is $4.85. A longer lecture can cost more: experiment 8's 69,251-token context
- *   is $0.28 plus output on Sonnet, so its first turn settles about $0.15 above its reservation. That overrun is the one the header
- *   allows, it happens once per review (or per long pause), and the settlement then counts it. On Opus the same turn settles at
- *   twice these figures. Later turns cost a tenth of it, so the reservation is mostly slack on them, but only until it is settled.
+ *   Tutor turn: reserved at its own worst case, passed by the adapter as `estimateUsd` (`streamWorstCaseUsd` in providers/claude-api.ts, which is
+ *   `worstCaseUsd` on the request as sent). A flat figure cannot be right: the context has no ceiling and the model's rates differ by
+ *   2 times, so one figure is too low for a turn that writes a long lecture on Opus and too high for a warm Sonnet turn. The
+ *   request is priced as `worstCaseUsd` prices it (a byte counts as a token, plus REQUEST_OVERHEAD_TOKENS, plus the whole output limit)
+ *   with two facts the tutor knows: its output limit is TUTOR_MAX_OUTPUT_TOKENS (8,000, review/tutor.ts), and its cache state
+ *   (`tutorCache.peek`). A turn that writes the system block (a review's first, or the one after a long pause) prices every byte as a
+ *   write at the lifetime it asks for: 5 minutes (1.25 times) for a first turn, 1 hour (2 times) after a long pause. A turn that finds
+ *   the block warm prices the system block at the cache read rate and only the prompt, which changes each turn, as a write. That is the
+ *   one assumption that is not a bound: a block evicted early is written again, and the settlement then exceeds the reservation by at most
+ *   the system bytes times (write rate - read rate), once. Everything else settles at or under the reservation, so a turn admitted under
+ *   a cap cannot take the month past it, and four concurrent turns hold four worst cases.
+ *   For the Fable audit's lecture (docs/trail/fable-e2e-2026-11-14-data.json; the system block of its 12 turns was 49,844 bytes, the
+ *   prompts 1,317 to 7,483 bytes) on Sonnet: a first turn reserves $0.2181, the turn after a long pause $0.3257, a warm turn $0.1139 to
+ *   $0.1313 at the 5 minute and 1 hour rate; on Opus $0.4363, $0.6514 and $0.2279 to $0.2626. The measured turns spent $0.0126 to
+ *   $0.0241, so a warm Sonnet turn is admitted at $4.85 of $5 (and to $4.87 on this lecture), a first turn from $4.78. A tutor request that
+ *   does not pass an estimate (the `claude -p` adapter) reserves ESTIMATE_USD.tutor_turn, about the warm Sonnet figure on the audit's lecture, which is
+ *   also what the usage page's "held" asks about.
  *   Priced as `worstCaseUsd` prices a call (all of max_tokens spent, every input token a 1 hour cache write), a structured call
  *   with 50,000 input tokens comes to $0.75 at max_tokens 16,000. Interpretation streams with max_tokens 32,000 (STREAM_MAX_TOKENS), so
  *   the same formula gives 32,000 x $20 per million (Opus) = $0.64 plus (50,000 + 4,096 allowance) x $8 per million (1 hour write) =
@@ -121,8 +127,11 @@ export type Reservation = { readonly id: string; readonly micros: number };
 export type Admission = { readonly kind: "reserved"; readonly reservation: Reservation } | { readonly kind: "held"; readonly hold: BudgetHold };
 
 export type Budget = {
-  /** `review`: the review the request is for. A wrap-up of a review with paid tutoring may pass the caps (see the header). Anything else is capped. */
-  reserve(userId: UserId, purpose: Purpose, key: MemoKey, review?: string): Admission;
+  /**
+   * `review`: the review the request is for. A wrap-up of a review with paid tutoring may pass the caps (see the header). Anything else is capped.
+   * `estimateUsd`: this request's own estimate, which replaces the purpose's flat `ESTIMATE_USD` when the adapter can price the request it is sending.
+   */
+  reserve(userId: UserId, purpose: Purpose, key: MemoKey, review?: string, estimateUsd?: number): Admission;
   /** Record a request's known cost the moment it is read, so it counts before the attempt settles. An unknown cost changes nothing. */
   price(reservation: Reservation, cost: Cost): void;
   /** Run it inside the transaction that records the attempt's usage event. */
@@ -220,10 +229,10 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
   }
 
   return {
-    reserve(userId, purpose, key, review) {
+    reserve(userId, purpose, key, review, estimateUsd) {
       return db.sql.transaction((): Admission => {
         const at = now();
-        const micros = costMicros(ESTIMATE_USD[purpose]);
+        const micros = costMicros(estimateUsd ?? ESTIMATE_USD[purpose]);
         const finishes = purpose === "wrap_up" && review !== undefined && q.paidTutoringOf.get(userId, review, userId, review) !== null && q.wrapUpsOf.get(userId, review)!.n < WRAP_UPS_PER_REVIEW;
         const hold = holdFor(userId, at, purpose, micros, finishes);
         if (hold !== null) return { kind: "held", hold };

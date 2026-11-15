@@ -42,8 +42,8 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { ParseableMessageCreateParams as MessageStreamParams } from "@anthropic-ai/sdk";
 import type { ContentBlockParam, JSONOutputFormat, Message, MessageCreateParamsNonStreaming, MessageParam, TextBlockParam, ToolUnion } from "@anthropic-ai/sdk/resources/messages";
 import type { z } from "zod";
-import { abortError, createLimiter } from "./claude";
-import type { CacheTtl, ClaudeCli, ClaudeRequest } from "./claude";
+import { abortError, createLimiter, promptOf } from "./claude";
+import type { CacheState, CacheTtl, ClaudeCli, ClaudeRequest } from "./claude";
 import { createHash } from "node:crypto";
 import { BudgetHeld, ProviderError } from "./memo";
 import type { Admitted, SendContext, UsageReport } from "./memo";
@@ -120,15 +120,37 @@ export const REQUEST_OVERHEAD_TOKENS = 4_096;
  *   2. Everything the request adds around that text is covered by REQUEST_OVERHEAD_TOKENS: role and message framing, the
  *      cache_control marker, and the instruction text the API adds to the prompt for structured output. This is an
  *      allowance chosen to be generous, not a measured figure, which is why the runner also checks each finished call.
- *   3. Every one of those tokens costs the most any input token can: a write to the 1 hour cache.
+ *   3. Every one of those tokens costs the most any input token can: a write to the 1 hour cache. A caller that knows the lifetime the
+ *      request will ask for passes `cache`: its tokens are then written at that lifetime's rate, and `readBytes` of them, the system block
+ *      of a review whose earlier turn wrote it and whose entry has not lapsed, are read at the cache read rate. That one assumption is
+ *      not a bound: an entry that was evicted early is written again, so the settlement can exceed the figure by at most
+ *      `readBytes` x (write rate - read rate), once.
  *   4. The call spends its whole `max_tokens` on output. Thinking tokens are output tokens and are inside that limit.
  *   5. Nothing else is billed: the request has no tools or web search, and the client makes no retry of its own (maxRetries 0).
  *      This holds for the tutor turn and the wrap-up, the only calls the replay runner makes. A request with web tools can add
  *      searches, which this bound does not include.
  * Prices are the table's. This is a bound on the estimate the table produces, not on Derek's invoice.
  */
-export function worstCaseUsd(model: string, inputBytes: number, maxTokens: number, schemaBytes: number): number | null {
-  return priceUsage(model, { fresh: 0, creation5m: 0, creation1h: inputBytes + schemaBytes + REQUEST_OVERHEAD_TOKENS, read: 0, output: maxTokens });
+export function worstCaseUsd(model: string, inputBytes: number, maxTokens: number, schemaBytes: number, cache?: { readonly ttl: CacheTtl; readonly readBytes: number }): number | null {
+  const read = cache?.readBytes ?? 0;
+  const written = inputBytes - read + schemaBytes + REQUEST_OVERHEAD_TOKENS;
+  const oneHour = cache === undefined || cache.ttl === "1h";
+  return priceUsage(model, { fresh: 0, creation5m: oneHour ? 0 : written, creation1h: oneHour ? written : 0, read, output: maxTokens });
+}
+
+const byteLength = (s: string): number => new TextEncoder().encode(s).length;
+
+/** What a streamed request's output may be, thinking included, when it does not say. */
+export const maxOutputOf = (req: ClaudeRequest): number => req.maxOutputTokens ?? STREAM_MAX_TOKENS;
+
+/**
+ * `worstCaseUsd` for the streamed request `req` as it will be sent: its own system block and user turn, its own output limit, and the
+ * cache state it reports. The budget reserves this for a tutor turn instead of one flat figure, so the reservation follows the size of
+ * the lecture and the model. A tutor turn sends no images, tools or schema.
+ */
+export function streamWorstCaseUsd(model: string, req: ClaudeRequest, state: CacheState | undefined = req.cacheState?.()): number | null {
+  const systemBytes = byteLength(req.system);
+  return worstCaseUsd(model, systemBytes + byteLength(promptOf(req)), maxOutputOf(req), 0, state === undefined ? undefined : { ttl: state.ttl, readBytes: state.warm ? systemBytes : 0 });
 }
 
 /** The `output_config.format` a structured call sends, shared so the runner reserves for exactly the schema that goes on the wire. */
@@ -557,14 +579,14 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
    * is sent, so a request that waited in the queue meets the stop switch as it is when it leaves. A refusal is thrown as it is.
    * The system block is built after the admission, because its cache lifetime is asked only of a request that will be sent.
    */
-  async function call(req: ClaudeRequest, send: SendContext, work: (callSignal: AbortSignal, began: () => void, system: TextBlockParam[]) => Promise<unknown>): Promise<Untrusted> {
+  async function call(req: ClaudeRequest, send: SendContext, work: (callSignal: AbortSignal, began: () => void, system: TextBlockParam[]) => Promise<unknown>, estimate?: () => number | null): Promise<Untrusted> {
     const signal = send.signal;
     const release = await limiter.acquire(signal);
     let admitted: Admitted;
     let system: TextBlockParam[];
     try {
       signal.throwIfAborted();
-      admitted = send.admit();
+      admitted = send.admit(estimate?.() ?? undefined);
       // One stable block, so a review's lecture context is read from cache on its later turns.
       system = [{ type: "text", text: req.system, cache_control: { type: "ephemeral", ttl: req.cacheTtl?.() ?? "5m" } }];
     } catch (err) {
@@ -774,7 +796,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
       const sink = redactingSink(opts.apiKey, onText);
       const response = await call(req, send, async (callSignal, began, system) => {
         const stream = client.messages.stream(
-          { model, max_tokens: STREAM_MAX_TOKENS, system, messages: messagesFor(system), ...(tools ? { tools } : {}), output_config: { effort: req.effort } },
+          { model, max_tokens: maxOutputOf(req), system, messages: messagesFor(system), ...(tools ? { tools } : {}), output_config: { effort: req.effort } },
           { signal: callSignal },
         );
         stream.on("text", (delta) => {
@@ -782,7 +804,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
           sink.push(delta);
         });
         return stream.finalMessage();
-      });
+      }, () => streamWorstCaseUsd(model, req));
       const { parsed: reply, usage } = settle(response);
       sink.flush();
       return { text: reply.text, usage };

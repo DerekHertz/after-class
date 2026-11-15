@@ -82,8 +82,11 @@ export type Admitted = { priced(cost: Cost): void };
 /** What an adapter needs to send paid requests: the abort signal, and `admit`, called immediately before each request is sent. */
 export type SendContext = {
   readonly signal: AbortSignal;
-  /** Throws `BudgetHeld` when the request must not be sent. */
-  admit(): Admitted;
+  /**
+   * Throws `BudgetHeld` when the request must not be sent. `estimateUsd`: what this request could cost, for a purpose whose size varies
+   * with the request. The budget reserves it in place of the purpose's flat estimate.
+   */
+  admit(estimateUsd?: number): Admitted;
 };
 
 /** A context with no budget, for scripts and tests that call an adapter directly. */
@@ -332,8 +335,8 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
     while (true) {
       if (signal.aborted) return { kind: "missing", key };
       const tickets: Ticket[] = [];
-      const admit = (): Admitted => {
-        const admission = budget?.reserve(userId, task.purpose, key, review ?? undefined) ?? null;
+      const admit = (estimateUsd?: number): Admitted => {
+        const admission = budget?.reserve(userId, task.purpose, key, review ?? undefined, estimateUsd) ?? null;
         if (admission?.kind === "held") throw new BudgetHeld(admission.hold, null);
         const ticket: Ticket = { reservation: admission?.reservation ?? null, cost: null };
         tickets.push(ticket);
