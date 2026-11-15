@@ -61,6 +61,7 @@ import type { Ledger } from "./providers/ledger";
 import type { Memo } from "./providers/memo";
 import type { Voice } from "./providers/elevenlabs";
 import type { Diagrams } from "./diagram";
+import { PUBLIC_CSP, publicPage as publicPageHtml } from "./landing";
 
 export type Modules = {
   readonly evidence: EvidenceStore;
@@ -740,7 +741,7 @@ type Gate = {
   caller(headers: Headers, route: RouteName): Promise<(Allowed & { readonly served: Served }) | Denied>;
   health(headers: Headers): Allowed | Denied;
   app(headers: Headers): Allowed | Denied;
-  /** Where GET / redirects; null answers it like any unrouted path. */
+  /** The sign-in page the public pages link to; null serves no public pages, so GET / answers like any unrouted path. */
   readonly home: string | null;
   page(html: string): string;
   /** The Clerk Frontend API origin the page loads scripts from; null on the local page. */
@@ -831,7 +832,14 @@ async function handle(req: Request, peer: string | null, opts: ServeOptions, gat
     return v.ok ? serveApp(req, path.slice("/app/".length), opts, gate) : failure(v.status, "forbidden");
   }
 
-  if (gate.home !== null && req.method === "GET" && path === "/") return new Response(null, { status: 302, headers: { Location: gate.home, ...SECURITY_HEADERS } });
+  const publicPage = path === "/" ? "landing" : path === "/privacy" ? "privacy" : null;
+  if (gate.home !== null && publicPage !== null) {
+    if (req.method !== "GET" && req.method !== "HEAD") return failure(405, "method not allowed", { Allow: "GET, HEAD" });
+    const html = publicPageHtml(publicPage, gate.appOrigin, gate.home, opts.appDir);
+    return new Response(req.method === "HEAD" ? null : html, {
+      headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache", "Content-Security-Policy": PUBLIC_CSP, ...SECURITY_HEADERS },
+    });
+  }
 
   // Bun normalises `..` out of req.url before we see it, so a traversal aimed past /app/ arrives as an unrouted path;
   // answering 404 before the token check keeps it a 404 (and reveals nothing: ROUTES is public).
