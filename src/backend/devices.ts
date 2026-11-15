@@ -41,7 +41,8 @@ CREATE TABLE connect_codes (
 export const CONNECT_CODE_TTL_MS = 2 * 60 * 1000;
 export const EXCHANGE_WINDOW_MS = 60 * 1000;
 export const EXCHANGE_MAX_FAILURES = 20;
-const PRUNE_AT = 1024;
+/** Clients tracked at once. Past it the oldest window is dropped, which only resets that client's count: codes are 256-bit, so the throttle is defense in depth. */
+export const EXCHANGE_MAX_CLIENTS = 10_000;
 /** A device's last use is written at most this often, so an ingest every few seconds is not also a write every few seconds. */
 const LAST_USED_GRANULARITY_MS = 60 * 1000;
 
@@ -62,6 +63,8 @@ export type Devices = {
   createCode(userId: UserId, label: string): { readonly code: string; readonly expiresMs: number };
   /** `client` is the caller's network address (see `clientAddress`): wrong codes are counted per client, so one client's guesses cannot lock another out. */
   exchange(code: string, client: string): Exchange;
+  /** How many clients the connect-code throttle is tracking, which EXCHANGE_MAX_CLIENTS bounds. */
+  trackedClients(): number;
   /** The user's devices that are not revoked, oldest first. */
   list(userId: UserId): DeviceView[];
   /** False when the user has no such device, revoked or not; revoking a revoked device is true and changes nothing. */
@@ -97,12 +100,19 @@ export function createDevices(db: Db, options: DevicesOptions = {}): Devices {
   );
   const touch = db.sql.query("UPDATE devices SET last_used_ms = ? WHERE id = ?");
 
-  /** The client's current window, opened fresh when the last one has ended. Ended windows of other clients are dropped once the table is large, so it stays bounded by the attempts of one window. */
+  /**
+   * The client's current window, opened fresh when the last one has ended. A window is reinserted when it opens, so the map
+   * stays in start order: ended windows are dropped from the front, and past EXCHANGE_MAX_CLIENTS the oldest window goes first.
+   */
   function windowOf(client: string, at: number): { startMs: number; failures: number } {
-    if (attempts.size >= PRUNE_AT) for (const [other, w] of attempts) if (at - w.startMs >= windowMs) attempts.delete(other);
+    for (const [other, w] of attempts) {
+      if (at - w.startMs < windowMs && attempts.size < EXCHANGE_MAX_CLIENTS) break;
+      attempts.delete(other);
+    }
     let w = attempts.get(client);
     if (w === undefined || at - w.startMs >= windowMs) {
       w = { startMs: at, failures: 0 };
+      attempts.delete(client);
       attempts.set(client, w);
     }
     return w;
@@ -119,6 +129,8 @@ export function createDevices(db: Db, options: DevicesOptions = {}): Devices {
       });
       return { code, expiresMs };
     },
+
+    trackedClients: () => attempts.size,
 
     exchange(code, client) {
       const at = now();

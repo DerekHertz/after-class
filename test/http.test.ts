@@ -125,6 +125,7 @@ describe("health and the API", () => {
     expect(ok.headers.get("access-control-allow-origin")).toBe(origin);
     expect(ok.headers.get("access-control-allow-headers")?.toLowerCase()).toContain("authorization");
     expect(ok.headers.get("access-control-allow-origin")).not.toBe("*");
+    expect(ok.headers.get("strict-transport-security")).toBe("max-age=31536000");
     const bad = await fetch(`${base}/ingest`, { method: "OPTIONS", headers: { Origin: PAGE, "Access-Control-Request-Method": "POST" } });
     expect(bad.status).toBe(403);
     expect(bad.headers.get("access-control-allow-origin")).toBeNull();

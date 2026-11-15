@@ -193,7 +193,7 @@ export function pageCsp(html: string, clerkOrigin: string | null): string {
   return [
     "default-src 'self'",
     `script-src ${["'self'", ...hashes, ...clerk].join(" ")}`,
-    `connect-src ${["'self'", ...(clerkOrigin === null ? [] : [clerkOrigin, "https://*.protect.clerk.com:*"])].join(" ")}`,
+    `connect-src ${["'self'", ...(clerkOrigin === null ? [] : [clerkOrigin, "https://*.protect.clerk.com:*", "https://clerk-telemetry.com"])].join(" ")}`,
     `img-src 'self' blob: data:${clerkOrigin === null ? "" : " https://img.clerk.com"}`,
     "media-src 'self' blob:",
     "font-src 'self' data:",
@@ -322,6 +322,7 @@ function preflight(req: Request, gate: Gate): Response {
       "Access-Control-Allow-Headers": "Authorization, Content-Type",
       "Access-Control-Max-Age": "600",
       Vary: "Origin",
+      ...SECURITY_HEADERS,
     },
   });
 }

@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { createClerkVerifier } from "../src/backend/clerk";
 import { userForIdentity } from "../src/backend/db";
 import type { Db } from "../src/backend/db";
-import { CONNECT_CODE_TTL_MS, clientAddress, createDevices, isDeviceToken } from "../src/backend/devices";
+import { CONNECT_CODE_TTL_MS, EXCHANGE_MAX_CLIENTS, clientAddress, createDevices, isDeviceToken } from "../src/backend/devices";
 import type { Devices } from "../src/backend/devices";
 import { bearerAllowed, serve } from "../src/backend/http";
 import { clerkUsers, hostedCallers } from "../src/backend/main";
@@ -84,6 +84,21 @@ describe("devices", () => {
     for (const wrong of ["nope", "nope again", "and again"]) devices.exchange(wrong, "198.51.100.1");
     expect(devices.exchange("nope", "198.51.100.1").kind).toBe("limited");
     expect(devices.exchange(code, "203.0.113.9").kind).toBe("connected");
+  });
+
+  test("the throttle tracks a bounded number of clients and drops ended windows without scanning the rest", () => {
+    const db = testDb();
+    const [alice] = users(db);
+    const c = clock();
+    const devices = createDevices(db, { now: c.now, maxFailures: 1, windowMs: 60_000 });
+    for (let i = 0; i < EXCHANGE_MAX_CLIENTS + 500; i++) devices.exchange("nope", `client-${i}`);
+    expect(devices.trackedClients()).toBe(EXCHANGE_MAX_CLIENTS);
+    expect(devices.exchange("nope", `client-${EXCHANGE_MAX_CLIENTS + 499}`).kind).toBe("limited");
+    c.ms += 60_000;
+    devices.exchange("nope", "late");
+    expect(devices.trackedClients()).toBe(1);
+    const { code } = devices.createCode(alice, "Chrome");
+    expect(devices.exchange(code, "late-2").kind).toBe("connected");
   });
 
   test("the address is the last forwarded entry when the peer is the proxy, and the peer itself otherwise", () => {

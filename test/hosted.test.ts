@@ -127,7 +127,7 @@ describe("hosted requests", () => {
     );
     const csp = page.headers.get("content-security-policy")!;
     expect(csp).toContain("script-src 'self' https://clerk.afterclass.test https://challenges.cloudflare.com https://*.protect.clerk.com;");
-    expect(csp).toContain("connect-src 'self' https://clerk.afterclass.test https://*.protect.clerk.com:*;");
+    expect(csp).toContain("connect-src 'self' https://clerk.afterclass.test https://*.protect.clerk.com:* https://clerk-telemetry.com;");
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).not.toMatch(/unsafe-eval|script-src[^;]*unsafe-inline/);
     expect(page.headers.get("strict-transport-security")).toBe("max-age=31536000");
