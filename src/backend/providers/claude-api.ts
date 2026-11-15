@@ -498,6 +498,8 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
     pending: new Map<string, Promise<void>>(),
     /** Resolves to the handle the first request opens, or to null for a request that waited on another's. */
     async enter(key: string, signal: AbortSignal): Promise<{ readonly open: () => void } | null> {
+      // A request cancelled before it arrives must not wait on, or become, the first request.
+      if (signal.aborted) throw abortError();
       const ahead = this.pending.get(key);
       if (ahead === undefined) {
         let release!: () => void;

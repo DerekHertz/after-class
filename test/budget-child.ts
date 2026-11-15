@@ -9,7 +9,7 @@
  */
 import { existsSync, writeFileSync } from "node:fs";
 import { LOCAL_USER, openDb, scopeDb } from "../src/backend/db";
-import { createBudget } from "../src/backend/providers/budget";
+import { createBudget, ESTIMATE_USD } from "../src/backend/providers/budget";
 import { createMemo } from "../src/backend/providers/memo";
 import type { MemoKey } from "../src/shared/ids";
 import { fakeTask } from "./fakes";
@@ -48,7 +48,7 @@ if (mode === "crash") {
     waitFor(`${other}.in`, GRACE_MS);
     return Date.UTC(2026, 10, 10, 12);
   };
-  const budget = createBudget(db, { limits: { userUsd: 0.75, totalUsd: 50 }, stopped: () => false, now });
+  const budget = createBudget(db, { limits: { userUsd: ESTIMATE_USD.interpretation, totalUsd: 50 }, stopped: () => false, now });
   writeFileSync(`${me}.begin`, "");
   console.log(budget.reserve(LOCAL_USER, "tutor_turn", `key_${me}` as MemoKey).kind);
 }

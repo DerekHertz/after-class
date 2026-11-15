@@ -80,7 +80,7 @@ function fakeClient(script: Script | ((n: number) => Script)): { client: ApiClie
             return stream;
           },
           // The first server-sent event, message_start, comes before any text.
-          finalMessage: () => (queueMicrotask(() => listeners.streamEvent("")), settle(s, options.signal, (d) => listeners.text(d))),
+          finalMessage: () => (listeners.streamEvent(""), settle(s, options.signal, (d) => listeners.text(d))),
           abort: () => {},
         };
         return stream;

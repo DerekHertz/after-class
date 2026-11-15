@@ -2,7 +2,8 @@
  * A chunk's evidence is cached across its claim revisions, and a long interpretation is streamed so it is not cut at 16,000 output
  * tokens. Every test uses a fake client, so none makes a live call.
  */
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import Anthropic from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages";
 import { stableId } from "../src/shared/ids";
 import { media } from "../src/shared/time";
@@ -59,8 +60,18 @@ function message(text: string, usage: Record<string, unknown> = {}, stop = "end_
 type Sent = { readonly params: Record<string, unknown>; readonly via: "stream" | "create"; readonly signal: AbortSignal; begin(): void; finish(): void };
 
 /** A client whose streams begin and finish only when the test says so, so the order of two requests is the test's to set. */
+const live: Sent[][] = [];
+/** A failed assertion must not leave a stream open, so each test's streams are begun and finished when it ends. */
+afterEach(() => {
+  for (const sent of live.splice(0)) for (const s of sent) {
+      s.begin();
+      s.finish();
+    }
+});
+
 function manualClient(reply: (n: number, params: Record<string, unknown>) => Message): { client: ApiClient; sent: Sent[] } {
   const sent: Sent[] = [];
+  live.push(sent);
   const client: ApiClient = {
     messages: {
       stream(params, options) {
@@ -75,7 +86,17 @@ function manualClient(reply: (n: number, params: Record<string, unknown>) => Mes
             if (event === "streamEvent") onEvent = l;
             return stream;
           },
-          finalMessage: () => finished.then(() => reply(n, p)),
+          // Like the SDK, a stream rejects when its request is aborted.
+          finalMessage: () =>
+            new Promise<Message>((resolve, reject) => {
+              const aborted = () => reject(new Anthropic.APIUserAbortError());
+              if (options.signal.aborted) return aborted();
+              options.signal.addEventListener("abort", aborted, { once: true });
+              void finished.then(() => {
+                options.signal.removeEventListener("abort", aborted);
+                resolve(reply(n, p));
+              });
+            }),
           abort: () => {},
         };
         return stream;
@@ -195,6 +216,22 @@ describe("the revision's evidence is a cached head", () => {
     await expect(second).rejects.toThrow();
     expect(sent).toHaveLength(1);
     sent[0]!.finish();
+  });
+
+  test("a revision aborted before it reaches the gate is cancelled at once and never sends", async () => {
+    const { client, sent } = manualClient(() => message(JSON.stringify(draftOf("r"))));
+    const claude = createClaudeApi({ apiKey: KEY, maxConcurrent: 2, client });
+    const req = (): ClaudeRequest => ({ model: "opus", effort: "high", system: "S", prompt: "tail", cachedPrompt: "head\n\n", images: [], webTools: false, timeoutMs: 5_000 });
+    const schema = (await import("zod")).z.object({ text: (await import("zod")).z.string() });
+    const first = claude.structured(req(), schema, OPEN);
+    first.catch(() => {});
+    await tick();
+    const ctl = new AbortController();
+    ctl.abort();
+    const late = Symbol("still waiting");
+    const outcome = await Promise.race([claude.structured(req(), schema, { signal: ctl.signal, admit: OPEN.admit }).then(() => "resolved", () => "rejected"), new Promise((r) => setTimeout(() => r(late), 200))]);
+    expect(outcome).toBe("rejected");
+    expect(sent).toHaveLength(1);
   });
 });
 
