@@ -196,8 +196,11 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
   const spent = "COALESCE(SUM(COALESCE(settled_micros, priced_micros, reserved_micros)), 0) AS used FROM budget_holds";
   const q = {
     userUsed: db.sql.query<{ used: number }, [string, string]>(`SELECT ${spent} WHERE period = ? AND user_id = ?`),
-    userReserved: db.sql.query<{ held: number }, [string, string]>(
-      `SELECT COALESCE(SUM(COALESCE(priced_micros, reserved_micros)), 0) AS held FROM budget_holds WHERE period = ? AND user_id = ? AND settled_micros IS NULL`,
+    /** Used and still reserved, read in one statement so the reserved part is always a subset of what used counts. */
+    userUsedAndReserved: db.sql.query<{ used: number; held: number }, [string, string]>(
+      `SELECT COALESCE(SUM(COALESCE(settled_micros, priced_micros, reserved_micros)), 0) AS used,
+              COALESCE(SUM(CASE WHEN settled_micros IS NULL THEN COALESCE(priced_micros, reserved_micros) ELSE 0 END), 0) AS held
+       FROM budget_holds WHERE period = ? AND user_id = ?`,
     ),
     totalUsed: db.sql.query<{ used: number }, [string, string]>(`SELECT ${spent} WHERE period = ? AND user_id NOT IN (${UNCAPPED_USERS})`),
     isUncapped: db.sql.query<{ n: number }, [string, string]>(`SELECT 1 AS n FROM users WHERE id = ? AND id IN (${UNCAPPED_USERS})`),
@@ -271,9 +274,10 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
     allowance(userId) {
       const at = now();
       const uncapped = q.isUncapped.get(userId, uncappedJson) !== null;
+      const both = q.userUsedAndReserved.get(periodOf(at), userId)!;
       return {
-        usedUsd: q.userUsed.get(periodOf(at), userId)!.used / MICROS,
-        reservedUsd: q.userReserved.get(periodOf(at), userId)!.held / MICROS,
+        usedUsd: both.used / MICROS,
+        reservedUsd: both.held / MICROS,
         limitUsd: uncapped ? null : opts.limits.userUsd,
         uncapped,
         resetsAtMs: periodEndMs(at),

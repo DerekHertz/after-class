@@ -811,7 +811,8 @@ const dollars = (usd: number): string => (usd > 0 && usd < 0.005 ? "<$0.01" : `$
  */
 export function allowanceView(a: Allowance | null): { readonly line: string; readonly reserved: string | null; readonly held: string | null } | null {
   if (a === null) return null;
-  const settled = Math.max(0, a.usedUsd - a.reservedUsd);
+  // Subtract in whole micro-dollars, so starting a reservation never moves the rounded settled figure.
+  const settled = Math.max(0, Math.round(a.usedUsd * 1_000_000) - Math.round(a.reservedUsd * 1_000_000)) / 1_000_000;
   const line = a.uncapped
     ? `Uncapped account: ${dollars(settled)} counted this month, with no cap. It is not counted toward everyone's total.`
     : a.limitUsd === null

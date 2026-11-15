@@ -439,6 +439,21 @@ describe("what the learner sees", () => {
     expect(usageResponse.parse({ byKind: {}, byPurpose: {}, allowance: { usedUsd: 1, limitUsd: 5, resetsAtMs: DEC_1, held: null } }).allowance!.reservedUsd).toBe(0);
   });
 
+  test("starting a reservation never moves the rounded settled figure", () => {
+    const settled = { usedUsd: 0.025, reservedUsd: 0, limitUsd: 5, uncapped: false, resetsAtMs: DEC_1, held: null } as const;
+    expect(allowanceView(settled)!.line).toStartWith("$0.03 of your");
+    expect(allowanceView({ ...settled, usedUsd: 0.175, reservedUsd: 0.15 })!.line).toStartWith("$0.03 of your");
+  });
+
+  test("used and reserved come from one read, so reserved is never more than used", async () => {
+    const w = world({ userUsd: 5, totalUsd: 50 });
+    const r = w.budget.reserve(w.db.userId, "tutor_turn", crypto.randomUUID() as MemoKey);
+    expect(r.kind).toBe("reserved");
+    const a = w.budget.allowance(w.db.userId);
+    expect(a.reservedUsd).toBeGreaterThan(0);
+    expect(a.reservedUsd).toBeLessThanOrEqual(a.usedUsd);
+  });
+
   test("the wire carries turn_held and the allowance, and an older backend's usage without one decodes as no budget", () => {
     expect(tutorStreamEvent.parse({ type: "turn_held", hold: { reason: "stopped" } })).toEqual({ type: "turn_held", hold: { reason: "stopped" } });
     const held = { type: "turn_held", hold: { reason: "user_budget", resetsAtMs: DEC_1, usedUp: false } } as const;

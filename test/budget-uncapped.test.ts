@@ -44,7 +44,7 @@ describe("uncapped account", () => {
     const t = w.task();
     for (const n of [1, 2, 3]) expect((await w.memoFor(admin).run(t, { n })).kind).toBe("hit");
     expect(t.calls).toHaveLength(3);
-    expect(w.budget.allowance(admin.userId)).toEqual({ usedUsd: 0.45, reservedUsd: 0, limitUsd: null, uncapped: true, resetsAtMs: DEC_1, held: null });
+    expect(w.budget.allowance(admin.userId)).toEqual({ usedUsd: expect.closeTo(3 * TUTOR, 9), reservedUsd: 0, limitUsd: null, uncapped: true, resetsAtMs: DEC_1, held: null });
   });
 
   test("its spend does not count toward a friend's total cap", async () => {
