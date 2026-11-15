@@ -316,19 +316,14 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
 
   /**
    * Per waiting frame, when its wait ends on the monotonic clock. The first sight in this process starts it from the fact's
-   * received time, clamped to one hold, so a server clock stepping back cannot stretch it.
+   * received time, clamped to one hold, so a server clock stepping back cannot stretch it. Kept per capture and rebuilt from the
+   * frames still waiting on each demand, so a deleted or expired frame leaves nothing behind.
    */
-  const holds = new Map<EvidenceId, number>();
-  function holdLeft(e: FrameEntry, at: number, wall: number): number {
-    if (e.windowOpenSinceMs === null) {
-      holds.delete(e.frame.id);
-      return 0;
-    }
-    let until = holds.get(e.frame.id);
-    if (until === undefined) {
-      until = at + Math.min(frameHoldMs, Math.max(0, e.windowOpenSinceMs + frameHoldMs - wall));
-      holds.set(e.frame.id, until);
-    }
+  const holds = new Map<CaptureId, Map<EvidenceId, number>>();
+  function holdLeft(e: FrameEntry, at: number, wall: number, prev: ReadonlyMap<EvidenceId, number>, next: Map<EvidenceId, number>): number {
+    if (e.windowOpenSinceMs === null) return 0;
+    const until = prev.get(e.frame.id) ?? at + Math.min(frameHoldMs, Math.max(0, e.windowOpenSinceMs + frameHoldMs - wall));
+    next.set(e.frame.id, until);
     return until - at;
   }
 
@@ -588,16 +583,17 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
       const wall = now();
       const items: WorkItem[] = [];
       let wake = Infinity;
+      const prev = holds.get(captureId) ?? new Map<EvidenceId, number>();
+      const next = new Map<EvidenceId, number>();
       for (const e of projectOwn(captureId).frames) {
         const judged = dead.has(e.frame.id) ? null : judge(e);
-        if (judged?.teaching !== "unjudged" || judged.input === null) {
-          holds.delete(e.frame.id);
-          continue;
-        }
-        const left = holdLeft(e, at, wall);
+        if (judged?.teaching !== "unjudged" || judged.input === null) continue;
+        const left = holdLeft(e, at, wall, prev, next);
         if (left > 0) wake = Math.min(wake, left);
         else items.push(frameWork(judged.input));
       }
+      if (next.size > 0) holds.set(captureId, next);
+      else holds.delete(captureId);
       if (wake !== Infinity) deps.wakeIn?.(captureId, wake);
       return items;
     },
@@ -710,6 +706,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
           )
           .all(userId, cutoff);
         for (const { capture_id } of expired) {
+          holds.delete(capture_id as CaptureId);
           for (const r of db.sql.query<{ path: string }, [string, string]>("DELETE FROM frames WHERE user_id = ? AND capture_id = ? RETURNING path").all(userId, capture_id)) {
             files.push(r.path);
             framesDeleted++;
