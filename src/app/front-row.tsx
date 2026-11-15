@@ -82,6 +82,7 @@ export function FrontRowScene({ scene, layout, appearance, activity, standing, r
     : null;
   const placed = size === null ? null : layoutRoom(scene, size, composition);
   const full = placed?.composition === "full" ? placed : null;
+  useRoomScale(full);
   useEffect(() => { clearReaction(); }, [scene, appearance.companion, appearance.visible]);
   return (
     <div ref={sceneRef} className="front-row-scene" data-room={scene} data-board-tone={room.board.tone} data-mat-tone={room.mat.tone} data-mat-actions={room.mat.actions} data-board-align={room.board.align} data-phase={layout.kind}>
@@ -119,6 +120,21 @@ function stageStyle({ u, window, text }: FullRoomLayout): CSSProperties {
     "--fr-board-text": sides(text.board, `max(${text.board.top}px, var(--fr-nav-reserve))`),
     "--fr-desk-text": sides(text.desk, `${text.desk.top}px`),
   };
+}
+
+/**
+ * Sizes the page's text and controls with the room, through the root font size every rem in front-row.css follows, and
+ * keeps the masthead and the review's navigation over the frame on a window wider than it, through `--fr-band`.
+ */
+function useRoomScale(full: FullRoomLayout | null): void {
+  const type = full?.type ?? 1;
+  const band = full?.frame.left ?? 0;
+  useLayoutEffect(() => {
+    const root = document.documentElement.style;
+    if (type !== 1) root.fontSize = `${type * 100}%`;
+    if (band > 0) root.setProperty("--fr-band", `${band}px`);
+    return () => { root.removeProperty("font-size"); root.removeProperty("--fr-band"); };
+  }, [type, band]);
 }
 
 /** The scene's content box, which is the window the room is laid out in. It is applied before the frame that changed it paints. */

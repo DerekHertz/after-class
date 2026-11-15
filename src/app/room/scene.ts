@@ -50,7 +50,10 @@ export type CompanionScene = { readonly cue: CompanionCue; readonly idle: Idle; 
  * Depths of the room's own layers, as front-row.css stacked them. Each extra carries its own depth in rooms.ts: 1 behind the
  * board, 3 on it, 6 in front of the desk.
  */
-const DEPTH = { background: 0, board: 2, desk: 5, mat: 6 } as const;
+const DEPTH = { backdrop: -1, background: 0, board: 2, desk: 5, mat: 6 } as const;
+
+/** The shade over the backdrop beside a wide window's frame, so the bands read as outside the room. */
+const BAND_SHADE = { color: "#0b0f1a", alpha: 0.62 } as const;
 
 /**
  * The draw list of `scene` laid out as `layout`. Layers of equal depth keep the order they are listed in, the mat last, and
@@ -67,10 +70,14 @@ export function buildScene(
     return { draws: [{ kind: "image", src: art.background, rect: layout.layers.background, sampling: "smooth" }], next: null };
   }
   const room = FRONT_ROW_ROOMS[scene];
-  const { background, board, desk, mat, extras, unlocks } = layout.layers;
+  const { backdrop, background, board, desk, mat, extras, unlocks } = layout.layers;
   const extraArt: Readonly<Record<string, string>> = art.extras;
   const nineSlice = (src: string, layer: NineSliceLayer, slice: Edges): Draw => ({ kind: "nine-slice", src, rect: layer.rect, slice, border: layer.border });
   const layered: { readonly z: number; readonly draw: Draw }[] = [
+    ...(backdrop === null ? [] : [
+      { z: DEPTH.backdrop, draw: { kind: "image", src: art.background, rect: backdrop.cover, sampling: "pixelated" } as const },
+      { z: DEPTH.backdrop, draw: { kind: "specks", color: BAND_SHADE.color, alpha: BAND_SHADE.alpha, rects: backdrop.bands } as const },
+    ]),
     { z: DEPTH.background, draw: { kind: "image", src: art.background, rect: background, sampling: "pixelated" } },
     { z: DEPTH.board, draw: nineSlice(art.board, board, room.board.art.slice) },
     { z: DEPTH.desk, draw: nineSlice(art.desk, desk, room.desk.art.slice) },

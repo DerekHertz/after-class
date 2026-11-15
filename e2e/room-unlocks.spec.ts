@@ -34,7 +34,7 @@ async function controls(page: Page): Promise<Record<string, Rect>> {
 }
 
 test.describe("unlock slots keep clear of the room's controls", () => {
-  for (const size of [{ width: 1440, height: 900 }, { width: 1000, height: 700 }, { width: 1920, height: 1080 }]) test.describe(`at ${size.width}x${size.height}`, () => {
+  for (const size of [{ width: 1440, height: 900 }, { width: 1000, height: 700 }, { width: 1920, height: 1080 }, { width: 2560, height: 1290 }, { width: 3440, height: 1440 }, { width: 3840, height: 2160 }, { width: 5120, height: 1440 }]) test.describe(`at ${size.width}x${size.height}`, () => {
     test.use({ viewport: size });
     for (const scene of scenes) {
       test(scene, async ({ page }, info) => {

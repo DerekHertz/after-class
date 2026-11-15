@@ -295,9 +295,9 @@
    follows). The scene clips overflow rather than hiding it, so it is never a scroll container that focus or a resize could
    offset; only the board and desk scroll. */
 @media (min-width: 900px) and (min-height: 560px) {
-  .scene-shell:has(.front-row) .scene-masthead { position: absolute; inset: 0 0 auto; pointer-events: none; }
+  .scene-shell:has(.front-row) .scene-masthead { position: absolute; inset: 0 var(--fr-band, 0px) auto; pointer-events: none; }
   .scene-shell:has(.front-row) .scene-masthead > * { pointer-events: auto; }
-  .scene-shell .front-row .front-row-bar { position: absolute; z-index: 9; top: 8px; left: calc(12px + 13rem); right: calc(12px + 14rem); pointer-events: none; }
+  .scene-shell .front-row .front-row-bar { position: absolute; z-index: 9; top: 8px; left: calc(var(--fr-band, 0px) + 12px + 13rem); right: calc(var(--fr-band, 0px) + 12px + 14rem); pointer-events: none; }
   .front-row .front-row-bar > * { pointer-events: auto; }
   .scene-shell .front-row .front-row-notices { position: absolute; z-index: 8; top: var(--fr-nav-reserve); left: 50%; translate: -50% 0; width: min(46rem, calc(100% - 32px)); max-height: calc(100dvh - var(--fr-nav-reserve) - 16px); overflow: auto; overscroll-behavior: contain; }
   .front-row-scene { height: 100dvh; overflow: clip; container-type: size; }
@@ -334,13 +334,13 @@
 
 /* Wide windows, signed in: the review's navigation also leaves room for Sign out beside the picker. */
 @media (min-width: 1360px) and (min-height: 560px) {
-  .scene-shell:has(.scene-masthead > .sign-out) .front-row .front-row-bar { right: calc(20px + 21rem); }
+  .scene-shell:has(.scene-masthead > .sign-out) .front-row .front-row-bar { right: calc(var(--fr-band, 0px) + 20px + 21rem); }
 }
 
 /* Mid-width windows: the review's navigation takes a second row under the masthead chips. */
 @media (min-width: 900px) and (max-width: 1359px) and (min-height: 560px) {
   .scene-shell .review.front-row { --fr-nav-reserve: 120px; }
-  .scene-shell .front-row .front-row-bar { top: 60px; left: 12px; right: 12px; }
+  .scene-shell .front-row .front-row-bar { top: 60px; left: calc(var(--fr-band, 0px) + 12px); right: calc(var(--fr-band, 0px) + 12px); }
 }
 
 /* Phone and small windows: the room is recomposed, not shrunk. The background fills the page behind everything, and the board,

@@ -94,6 +94,11 @@ export type FrontRowRoom = {
  */
 export const ROOM_ART = {
   plate: { width: 1586, height: 992 },
+  /**
+   * The widest the room is composed, as width over height. Up to it the room is one scale (room/layout.ts). A wider window
+   * shows the room at this aspect, centred, with the backdrop dimmed in the bands either side.
+   */
+  maxAspect: 16 / 9,
   /** The desk hides this much of the background's bottom, so a tall window need not magnify the background. */
   deskCovers: 170,
   /** The desk's far edge above the window's bottom. */

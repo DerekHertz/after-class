@@ -28,13 +28,26 @@ const placed = (layout: FullRoomLayout): Record<string, Rect> => ({
 });
 
 describe("the room fits every desktop window", () => {
-  test("the background covers the window down to the desk, and the desk spans the window and runs past its bottom", () => {
+  test("the background covers the frame down to the desk, and the desk spans the frame and runs past its bottom", () => {
     for (const scene of rooms) for (const window of windows) {
-      const { background: bg, desk } = full(scene, window).layers;
-      expect({ scene, window, covers: bg.left <= EPS && bg.top <= EPS && right(bg) >= window.width - EPS && bottom(bg) >= desk.rect.top })
+      const { frame, layers: { background: bg, desk } } = full(scene, window);
+      expect({ scene, window, covers: bg.left <= frame.left + EPS && bg.top <= EPS && right(bg) >= right(frame) - EPS && bottom(bg) >= desk.rect.top })
         .toEqual({ scene, window, covers: true });
-      expect({ scene, window, desk: desk.rect.left === 0 && desk.rect.width === window.width && bottom(desk.rect) >= window.height })
+      expect({ scene, window, desk: Math.abs(desk.rect.left - frame.left) < EPS && Math.abs(desk.rect.width - frame.width) < EPS && bottom(desk.rect) >= window.height })
         .toEqual({ scene, window, desk: true });
+    }
+  });
+
+  test("the frame is the whole window up to the widest aspect, and beyond it a centred box of that aspect with the backdrop either side", () => {
+    for (const scene of rooms) for (const window of windows) {
+      const { frame, layers: { backdrop } } = full(scene, window);
+      const wide = window.width > window.height * ROOM_ART.maxAspect;
+      const width = wide ? window.height * ROOM_ART.maxAspect : window.width;
+      const centred = Math.abs(frame.left - (window.width - width) / 2) < EPS && Math.abs(frame.width - width) < EPS && frame.top === 0 && frame.height === window.height;
+      const covers = backdrop === null ? !wide
+        : wide && backdrop.cover.left <= EPS && backdrop.cover.top <= EPS && right(backdrop.cover) >= window.width - EPS && bottom(backdrop.cover) >= window.height - EPS
+          && Math.abs(right(backdrop.bands[0]) - frame.left) < EPS && Math.abs(backdrop.bands[1].left - right(frame)) < EPS;
+      expect({ scene, window, centred, covers }).toEqual({ scene, window, centred: true, covers: true });
     }
   });
 
@@ -92,6 +105,61 @@ describe("the room scales with the window", () => {
     expect(layout.layers.board.border.top / layout.u).toBeCloseTo(44, 9);
     expect(layout.layers.desk.border.left / layout.u).toBeCloseTo(150, 9);
     expect(layout.layers.mat.border.right / layout.u).toBeCloseTo(30, 9);
+  });
+});
+
+describe("a large or wide window shows the same room, larger", () => {
+  /** Screens the room is checked on, in CSS pixels, with the owner's 3840x2160 monitor at 150 percent first (its browser window, and full screen). */
+  const large: Size[] = [
+    { width: 2560, height: 1290 }, { width: 2560, height: 1340 }, { width: 1366, height: 768 }, { width: 1440, height: 900 }, { width: 1920, height: 1080 },
+    { width: 1920, height: 1200 }, { width: 2560, height: 1440 }, { width: 2560, height: 1600 }, { width: 3440, height: 1440 }, { width: 3840, height: 2160 },
+    { width: 5120, height: 1440 },
+  ];
+  const aspect = (r: Rect) => r.width / r.height;
+  const surfaces = (layout: FullRoomLayout) => ({ board: aspect(layout.layers.board.rect), desk: aspect(layout.layers.desk.rect), mat: aspect(layout.layers.mat.rect) });
+
+  test("the whole composition is one scale: the background, the desk, the surfaces and every object", () => {
+    for (const scene of rooms) for (const window of large) {
+      const { u, layers: { background } } = full(scene, window);
+      const one = Math.abs(background.width / ROOM_ART.plate.width - u) < EPS && Math.abs(background.height / ROOM_ART.plate.height - u) < EPS;
+      expect({ scene, window, one }).toEqual({ scene, window, one: true });
+    }
+  });
+
+  test("no nine-slice is drawn wider than it is in the widest frame", () => {
+    for (const scene of rooms) {
+      const widest = surfaces(full(scene, { width: 1920, height: 1080 }));
+      for (const window of large) {
+        const got = surfaces(full(scene, window));
+        const wider = (Object.keys(widest) as (keyof typeof widest)[]).filter((name) => got[name] > widest[name] + EPS);
+        expect({ scene, window, wider }).toEqual({ scene, window, wider: [] });
+      }
+    }
+  });
+
+  test("a window wider than the frame lays out the frame-wide room, moved to the centre", () => {
+    const rects = (layout: FullRoomLayout, dx: number) => [
+      layout.frame, layout.layers.background, layout.layers.board.rect, layout.layers.desk.rect, layout.layers.mat.rect, layout.text.board, layout.text.desk,
+      layout.companion.box, layout.objects.source, layout.objects.history, layout.progress,
+      ...layout.layers.extras.map((extra) => extra.rect), ...layout.layers.unlocks.map((slot) => slot.rect),
+    ].map((r) => [r.left - dx, r.top, r.width, r.height]);
+    for (const scene of rooms) for (const window of large.filter(({ width, height }) => width > height * ROOM_ART.maxAspect)) {
+      const width = window.height * ROOM_ART.maxAspect;
+      const wide = rects(full(scene, window), (window.width - width) / 2);
+      const framed = rects(full(scene, { width, height: window.height }), 0);
+      const same = wide.every((r, i) => r.every((x, j) => Math.abs(x - framed[i]![j]!) < 1e-6));
+      expect({ scene, window, same }).toEqual({ scene, window, same: true });
+    }
+  });
+
+  test("text and controls grow with the room from 1440x900, where their sizes were set, up to three times", () => {
+    const type = (width: number, height: number) => full("last-desk", { width, height }).type;
+    expect(type(1440, 900)).toBeCloseTo(1, 9);
+    expect(type(1366, 768)).toBe(1);
+    expect(type(2880, 1800)).toBeCloseTo(2, 9);
+    expect(type(2560, 1290)).toBeCloseTo(full("last-desk", { width: 2560, height: 1290 }).u / (1440 / ROOM_ART.plate.width), 9);
+    expect(type(3440, 1440)).toBeCloseTo(type(2560, 1440), 9);
+    expect(type(7680, 4320)).toBe(3);
   });
 });
 

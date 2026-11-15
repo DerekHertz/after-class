@@ -32,6 +32,17 @@ describe("the stage's draw list", () => {
     }
   });
 
+  test("a window wider than the frame first draws the room's background over all of it, shaded in the bands beside the frame", () => {
+    const window = { width: 3440, height: 1440 };
+    const layout = layoutRoom("last-desk", window, "full");
+    if (layout.composition !== "full" || layout.layers.backdrop === null) throw new Error("a 3440x1440 window has bands");
+    const [cover, shade, background] = buildScene("last-desk", layout).draws;
+    expect(cover).toEqual({ kind: "image", src: ROOM_LAYER_ART["last-desk"].background, rect: layout.layers.backdrop.cover, sampling: "pixelated" });
+    expect(shade).toMatchObject({ kind: "specks", rects: layout.layers.backdrop.bands });
+    expect(background).toMatchObject({ kind: "image", rect: layout.layers.background });
+    expect(buildScene("last-desk", layoutRoom("last-desk", { width: 1920, height: 1080 }, "full")).draws[0]).toMatchObject({ rect: { left: 0, top: expect.any(Number), width: 1920 } });
+  });
+
   test("a phone draws only the background, smooth, covering the window", () => {
     for (const scene of rooms) {
       const list = buildScene(scene, layoutRoom(scene, { width: 390, height: 844 }, "compact"));

@@ -22,8 +22,17 @@ export type UnlockLayer = { readonly id: UnlockId; readonly rect: Rect; readonly
 export type FullRoomLayout = {
   readonly composition: "full";
   readonly window: Size;
+  /**
+   * The part of the window the room is composed in: all of it, or on a window wider than `ROOM_ART.maxAspect` a box of that
+   * aspect, full height and centred. Every layer below lies in it, at one scale. The bands either side show the backdrop.
+   */
+  readonly frame: Rect;
   readonly u: number;
+  /** How much larger than at 1440x900 the room's text and controls are drawn, so they keep their share of the room. */
+  readonly type: number;
   readonly layers: {
+    /** On a window wider than the frame: the background covering the whole window, and the two bands beside the frame it shows in, dimmed. */
+    readonly backdrop: { readonly cover: Rect; readonly bands: readonly [Rect, Rect] } | null;
     readonly background: Rect;
     readonly board: NineSliceLayer;
     readonly desk: NineSliceLayer;
@@ -49,20 +58,30 @@ export type CompactRoomLayout = { readonly composition: "compact"; readonly wind
 export type RoomLayout = FullRoomLayout | CompactRoomLayout;
 export type Composition = RoomLayout["composition"];
 
+/** `u` at 1440x900, where the room's text sizes were set: `type` is 1 there and grows with `u` up to `TYPE_MAX`. */
+const TYPE_REF = 1440 / ROOM_ART.plate.width;
+const TYPE_MAX = 3;
+
 /**
- * Where everything in `scene` goes in a window of `window` CSS pixels. Two scales apply, both screen pixels per plate
- * pixel. `b` makes the background cover the window's width and reach down behind the desk. `u` sizes everything else, and
- * is the smaller of `b` and `u0`, so a tall or very wide window does not magnify the desk and the objects.
+ * Where everything in `scene` goes in a window of `window` CSS pixels. The room is composed in `frame`, which caps its
+ * aspect at `ROOM_ART.maxAspect`, so a wide window shows the same room larger with bands either side rather than a
+ * wider board and desk. Two scales apply in the frame, both screen pixels per plate pixel. `b` makes the background cover
+ * the frame's width and reach down behind the desk. `u` sizes everything else, and is the smaller of `b` and `u0`, so a
+ * tall window does not magnify the desk and the objects. From an aspect of 1.1 up to the cap, `u0` never binds below `b`, so
+ * the frame is one scale.
  */
 export function layoutRoom(scene: SceneId, window: Size, composition: Composition): RoomLayout {
   const room: FrontRowRoom = FRONT_ROW_ROOMS[scene];
-  const { width: W, height: H } = window;
   const { plate } = ROOM_ART;
   if (composition === "compact") {
+    const { width: W, height: H } = window;
     const cover = Math.max(W / plate.width, H / plate.height);
     const [width, height] = [cover * plate.width, cover * plate.height];
     return { composition, window, layers: { background: { left: (W - width) * parseFloat(room.phoneArtX) / 100, top: 0, width, height } } };
   }
+  const H = window.height;
+  const W = Math.min(window.width, H * ROOM_ART.maxAspect);
+  const x0 = (window.width - W) / 2;
   const u0 = Math.min(1.12 * H / plate.height, 1.25 * W / plate.width);
   const b = Math.max(W / plate.width, (H - u0 * ROOM_ART.deskCovers) / plate.height);
   const u = Math.min(b, u0);
@@ -101,23 +120,34 @@ export function layoutRoom(scene: SceneId, window: Size, composition: Compositio
     return { left: along(x, frame.left, frame.width, width), top: along(y, frame.top, frame.height, height), width, height };
   };
 
+  const at = (rect: Rect): Rect => ({ ...rect, left: x0 + rect.left });
   return {
-    composition, window, u,
+    composition, window, frame: { left: x0, top: 0, width: W, height: H }, u, type: Math.min(TYPE_MAX, Math.max(1, u / TYPE_REF)),
     layers: {
-      background,
-      board: { rect: board, border: scaled(room.board.art.slice, u) },
-      desk: { rect: { left: 0, top: deskTop, width: W, height: u * room.desk.art.size.height }, border: scaled(room.desk.art.slice, u) },
-      mat: { rect: mat, border: scaled(room.mat.art.slice, u) },
-      extras: room.extras.map((extra) => ({ name: extra.name, z: extra.z, rect: place(extra.place, u * extra.width, u * extra.height) })),
-      unlocks: UNLOCK_SLOTS[scene].map((slot) => ({ id: slot.id, z: slot.z, rect: place(slot.place, u * slot.width, u * slot.height) })),
+      backdrop: x0 > 0 ? backdrop(window, x0) : null,
+      background: at(background),
+      board: { rect: at(board), border: scaled(room.board.art.slice, u) },
+      desk: { rect: at({ left: 0, top: deskTop, width: W, height: u * room.desk.art.size.height }), border: scaled(room.desk.art.slice, u) },
+      mat: { rect: at(mat), border: scaled(room.mat.art.slice, u) },
+      extras: room.extras.map((extra) => ({ name: extra.name, z: extra.z, rect: at(place(extra.place, u * extra.width, u * extra.height)) })),
+      unlocks: UNLOCK_SLOTS[scene].map((slot) => ({ id: slot.id, z: slot.z, rect: at(place(slot.place, u * slot.width, u * slot.height)) })),
     },
     text: {
-      board: inset(board, room.board.art, { x: ROOM_ART.boardTextPad, y: ROOM_ART.boardTextPad }, u),
-      desk: inset(mat, room.mat.art, ROOM_ART.matTextPad, u),
+      board: at(inset(board, room.board.art, { x: ROOM_ART.boardTextPad, y: ROOM_ART.boardTextPad }, u)),
+      desk: at(inset(mat, room.mat.art, ROOM_ART.matTextPad, u)),
     },
-    companion: { box: { left: side, top: H - u * room.companionBottom - buddy, width: buddy, height: buddy } },
-    objects: { source, history },
-    progress: { left: side, top: matTop, width: mat.left - 2 * side, height: H - side - matTop },
+    companion: { box: at({ left: side, top: H - u * room.companionBottom - buddy, width: buddy, height: buddy }) },
+    objects: { source: at(source), history: at(history) },
+    progress: at({ left: side, top: matTop, width: mat.left - 2 * side, height: H - side - matTop }),
+  };
+}
+
+function backdrop({ width, height }: Size, band: number): NonNullable<FullRoomLayout["layers"]["backdrop"]> {
+  const { plate } = ROOM_ART;
+  const cover = width / plate.width;
+  return {
+    cover: { left: 0, top: (height - cover * plate.height) / 2, width, height: cover * plate.height },
+    bands: [{ left: 0, top: 0, width: band, height }, { left: width - band, top: 0, width: band, height }],
   };
 }
 
