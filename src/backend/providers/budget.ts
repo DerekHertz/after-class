@@ -24,13 +24,21 @@
  * request after it is refused. So the cap can be passed by at most the overrun of the requests already sent when it is reached.
  *
  * Derek, 2026-11-13, on a learner who reaches a cap mid-review: "i think it should be allowed to finish". So the wrap-up
- * that saves a review is never held by either cap. The stop switch still holds it, and it still reserves, settles and
- * counts toward the month like any other call, so a finished review can take a month past its cap by one wrap-up.
+ * that saves a review is not held by either cap when the review holds tutoring the caps admitted and charged. The stop switch
+ * still holds it, and it still reserves, settles and counts toward the month like any other call, so a finished review can take
+ * a month past its cap by one wrap-up. The fact that makes a review real is a paid tutor request, not a learner act: every
+ * request names the review it is for (`review`), its hold records it, and `PAID_TUTOR_HOLD` says which holds are tutoring that
+ * counts (a tutor turn of any move, a hint or an explanation included, admitted under the caps and charged). Starting a review,
+ * answering in it and ending it cost nothing, so none of them can open the exemption. Once a user is capped no new tutor request
+ * is admitted, so a capped user cannot mint a review that qualifies: each uncapped wrap-up is paid for by a capped tutor turn,
+ * and one review passes the caps for at most `WRAP_UPS_PER_REVIEW` wrap-up requests. A wrap-up that names no review, whose review
+ * has no paid tutoring, or that has used up its requests is capped like any other call.
  */
 import { stableId } from "../../shared/ids";
 import type { MemoKey, UserId } from "../../shared/ids";
 import type { Allowance, BudgetHold, Cost, Purpose } from "../../shared/domain";
 import type { Db } from "../db";
+import { BUDGET_HOLDS_REVIEW_ID } from "../migrations-budget";
 
 /**
  * What one request reserves, in USD. A settlement replaces it with the recorded cost, so for a priced call it only decides
@@ -70,8 +78,19 @@ export const ESTIMATE_USD: Readonly<Record<Purpose, number>> = {
 /** The call the usage page's "held" asks about: a learner's next tutor turn. */
 const PROBE: Purpose = "tutor_turn";
 
-/** Calls neither cap holds: finishing a review (see the header). */
-const UNCAPPED: ReadonlySet<Purpose> = new Set<Purpose>(["wrap_up"]);
+/**
+ * Wrap-up requests one review may send (see the header). The wrap-up task makes up to 3 attempts per run and a failed save is
+ * retried once with a new run, so 6 lets a real review finish after one failed save and no more.
+ */
+export const WRAP_UPS_PER_REVIEW = 6;
+
+/** SQL over `budget_holds h`: a hold that is tutoring the learner got, admitted by the caps (a hold exists only when they admitted it) and charged. */
+/*
+ * A review started before migration 006 has holds with no review id, so its paid tutoring cannot be tied to it. Such a review counts
+ * as tutored when it has a stored tutor turn and the user paid for a tutor request between its start and the upgrade. The set is
+ * closed at the upgrade, and each still passes the caps at most WRAP_UPS_PER_REVIEW times.
+ */
+export const PAID_TUTOR_HOLD = "h.purpose = 'tutor_turn' AND h.settled_micros > 0";
 
 export type BudgetLimits = {
   /** Per user per month. Null: no per-user cap. */
@@ -91,7 +110,8 @@ export type Reservation = { readonly id: string; readonly micros: number };
 export type Admission = { readonly kind: "reserved"; readonly reservation: Reservation } | { readonly kind: "held"; readonly hold: BudgetHold };
 
 export type Budget = {
-  reserve(userId: UserId, purpose: Purpose, key: MemoKey): Admission;
+  /** `review`: the review the request is for. A wrap-up of a review with paid tutoring may pass the caps (see the header). Anything else is capped. */
+  reserve(userId: UserId, purpose: Purpose, key: MemoKey, review?: string): Admission;
   /** Record a request's known cost the moment it is read, so it counts before the attempt settles. An unknown cost changes nothing. */
   price(reservation: Reservation, cost: Cost): void;
   /** Run it inside the transaction that records the attempt's usage event. */
@@ -143,7 +163,19 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
   const q = {
     userUsed: db.sql.query<{ used: number }, [string, string]>(`SELECT ${spent} WHERE period = ? AND user_id = ?`),
     totalUsed: db.sql.query<{ used: number }, [string]>(`SELECT ${spent} WHERE period = ?`),
-    insert: db.sql.query(`INSERT INTO budget_holds (id, user_id, period, purpose, memo_key, reserved_micros, reserved_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`),
+    insert: db.sql.query(`INSERT INTO budget_holds (id, user_id, period, purpose, memo_key, reserved_micros, reserved_ms, review_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+    wrapUpsOf: db.sql.query<{ n: number }, [string, string]>(`SELECT COUNT(*) AS n FROM budget_holds WHERE user_id = ? AND review_id = ? AND purpose = 'wrap_up'`),
+    paidTutoringOf: db.sql.query<{ n: number }, [string, string, string, string]>(
+      `SELECT 1 AS n FROM budget_holds h WHERE h.user_id = ? AND h.review_id = ? AND ${PAID_TUTOR_HOLD}
+       UNION ALL
+       SELECT 1 AS n FROM reviews r
+       WHERE r.user_id = ? AND r.id = ?
+         AND r.started_ms < (SELECT applied_ms FROM schema_migrations WHERE id = '${BUDGET_HOLDS_REVIEW_ID}')
+         AND EXISTS (SELECT 1 FROM review_turns t WHERE t.review_id = r.id AND t.actor = 'tutor')
+         AND EXISTS (SELECT 1 FROM budget_holds h WHERE h.user_id = r.user_id AND h.review_id IS NULL AND ${PAID_TUTOR_HOLD}
+                     AND h.reserved_ms >= r.started_ms AND h.reserved_ms < (SELECT applied_ms FROM schema_migrations WHERE id = '${BUDGET_HOLDS_REVIEW_ID}'))
+       LIMIT 1`,
+    ),
     price: db.sql.query(`UPDATE budget_holds SET priced_micros = ? WHERE id = ? AND settled_micros IS NULL`),
     settle: db.sql.query(`UPDATE budget_holds SET settled_micros = ?, settled_ms = ? WHERE id = ? AND settled_micros IS NULL`),
     interrupted: db.sql.query<{ user_id: string; memo_key: string; provider: string; model: string; purpose: string; started: number; next: number }, []>(
@@ -160,9 +192,9 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
   };
 
   /** Why an attempt for `purpose` that would add `micros` to this month is refused, or null when it may start. */
-  function holdFor(userId: UserId, atMs: number, purpose: Purpose, micros: number): BudgetHold | null {
+  function holdFor(userId: UserId, atMs: number, purpose: Purpose, micros: number, exempt = false): BudgetHold | null {
     if (opts.stopped()) return { reason: "stopped" };
-    if (UNCAPPED.has(purpose)) return null;
+    if (exempt) return null;
     const period = periodOf(atMs);
     const resetsAtMs = periodEndMs(atMs);
     if (userCap !== null) {
@@ -177,14 +209,15 @@ export function createBudget(db: Db, opts: BudgetOptions): Budget {
   }
 
   return {
-    reserve(userId, purpose, key) {
+    reserve(userId, purpose, key, review) {
       return db.sql.transaction((): Admission => {
         const at = now();
         const micros = costMicros(ESTIMATE_USD[purpose]);
-        const hold = holdFor(userId, at, purpose, micros);
+        const finishes = purpose === "wrap_up" && review !== undefined && q.paidTutoringOf.get(userId, review, userId, review) !== null && q.wrapUpsOf.get(userId, review)!.n < WRAP_UPS_PER_REVIEW;
+        const hold = holdFor(userId, at, purpose, micros, finishes);
         if (hold !== null) return { kind: "held", hold };
         const id = `hold_${crypto.randomUUID()}`;
-        q.insert.run(id, userId, periodOf(at), purpose, key, micros, Math.round(at));
+        q.insert.run(id, userId, periodOf(at), purpose, key, micros, Math.round(at), review ?? null);
         return { kind: "reserved", reservation: { id, micros } };
       }).immediate();
     },

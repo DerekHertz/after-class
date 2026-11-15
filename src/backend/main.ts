@@ -695,7 +695,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       concepts: preparation.concepts,
       bundle: evidence.bundle,
       watchedSeconds: (captureId) => evidence.captureView(captureId).watchedSeconds,
-      runTutor: (input, streamTo, signal, onRetry) => memo.run(tasks.tutor, input, { signal, streamTo, onRetry }),
+      runTutor: (input, streamTo, signal, onRetry) => memo.run(tasks.tutor, input, { signal, streamTo, onRetry, review: input.state.reviewId }),
       clearFailures: memo.clearFailures,
       runWrapUp: (input) => memo.run(tasks.wrapUp, input),
       endedInTx: (reviewId) => record.markEndedInTx(reviewId),
@@ -720,10 +720,11 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
         // A terminal failure stored before this request began answered an earlier save, so this retry clears it and asks once more.
         // A failure this request produced is returned as is. A hit is never cleared.
         const asOf = db.nextSeq();
-        let result = await memo.run(tasks.wrapUp, input);
+        const run = { review: reviewId };
+        let result = await memo.run(tasks.wrapUp, input, run);
         if (result.kind === "failed" && result.atSeq < asOf) {
           memo.clearFailures([result.key]);
-          result = await memo.run(tasks.wrapUp, input);
+          result = await memo.run(tasks.wrapUp, input, run);
         }
         if (result.kind === "hit") return result.value;
         throw new Error(result.kind === "failed" ? `wrap-up failed: ${result.lastError}` : result.kind === "held" ? heldMessage(result.hold) : `wrap-up ${result.kind}`);

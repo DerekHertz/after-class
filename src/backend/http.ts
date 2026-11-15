@@ -53,6 +53,7 @@ import type { Devices } from "./devices";
 import type { EvidenceStore, EvidenceStoreWithProbe } from "./evidence";
 import { IngestRefused } from "./evidence/ingest-limits";
 import type { Preparation } from "./preparation";
+import { ReviewLimitError } from "./review";
 import type { Reviews } from "./review";
 import type { LearningRecord } from "./record";
 import type { Segmentation } from "./segmentation";
@@ -549,7 +550,12 @@ async function mounted(name: string, matched: { readonly params: Record<string, 
         if (reviews.heldByAnotherUser(body.reviewId)) return failure(404, "unknown review", cors);
         const existing = reviewOf(reviews, body.reviewId);
         if (existing && existing.captureId !== captureId) return failure(409, "that review belongs to another capture", cors);
-        return replyWire("startReview", wireStart(reviews.start(captureId!, body.choice, body.reviewId)), cors);
+        try {
+          return replyWire("startReview", wireStart(reviews.start(captureId!, body.choice, body.reviewId)), cors);
+        } catch (e) {
+          if (e instanceof ReviewLimitError) return failure(429, e.message, cors);
+          throw e;
+        }
       }
       case "sendTurn": {
         const { turnId, act } = parseTurnRequest(await readJson(req));
