@@ -68,6 +68,8 @@ export type EvidenceStore = {
   captures(): readonly CaptureId[];
   /** The server sequence of the capture's first fact: a strict order of when captures began, which later uploads never move. */
   captureFirstSeq(captureId: CaptureId): number | null;
+  /** True when this user owns the capture id: it ingested into it first, and the claim outlives the facts. Every capture-scoped route other than ingest answers 404 unless this holds. */
+  holdsCapture(captureId: CaptureId): boolean;
   /** True when another user owns this capture id, which they keep after its facts expire. The HTTP layer answers 404, as for an id that is not the caller's. */
   capturedByAnotherUser(captureId: CaptureId): boolean;
   /**
@@ -450,6 +452,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
              WHERE s.user_id = ? AND NOT EXISTS (SELECT 1 FROM frames f WHERE f.user_id = s.user_id AND f.evidence_id = s.evidence_id)) AS n`,
   );
   const otherOwner = db.sql.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM capture_owners WHERE capture_id = ? AND user_id <> ?");
+  const ownerOf = db.sql.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM capture_owners WHERE capture_id = ? AND user_id = ?");
   const claimCapture = db.sql.query("INSERT INTO capture_owners (capture_id, user_id, claimed_ms) VALUES (?, ?, ?) ON CONFLICT DO NOTHING");
 
   const pathInUse = db.sql.query<{ n: number }, [string, string]>(
@@ -583,6 +586,8 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
         .filter((r) => (JSON.parse(r.body_json) as { action?: string }).action !== "stop")
         .map((r) => r.capture_id as CaptureId);
     },
+
+    holdsCapture: (captureId) => ownerOf.get(captureId, userId)!.n > 0,
 
     capturedByAnotherUser: (captureId) => otherOwner.get(captureId, userId)!.n > 0,
 

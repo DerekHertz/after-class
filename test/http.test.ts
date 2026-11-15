@@ -401,19 +401,18 @@ describe("POST /ingest", () => {
 });
 
 describe("GET /captures/:id and the invite answer", () => {
-  test("GET /captures/:id answers capture and invite in the route's schema, empty for a capture with no facts", async () => {
+  test("GET /captures/:id answers 404 for a capture id nobody has ingested into, then capture and invite in the route's schema", async () => {
     const { base } = start();
-    const empty = await fetch(`${base}/captures/${CAP}`, { headers: bearer });
-    expect(empty.status).toBe(200);
-    expect(await empty.json()).toMatchObject({ capture: { captureId: CAP, sources: [], watchedSeconds: 0 }, invite: { state: "none" } });
+    expect((await fetch(`${base}/captures/${CAP}`, { headers: bearer })).status).toBe(404);
     await ingest(base, wireFacts(0, 4));
     const body = captureResponse.parse(await (await fetch(`${base}/captures/${CAP}`, { headers: bearer })).json());
-    expect(body).toMatchObject({ capture: { watchedSeconds: 10, sources: [{ videoId: VIDEO }] } });
+    expect(body).toMatchObject({ capture: { watchedSeconds: 10, sources: [{ videoId: VIDEO }] }, invite: { state: "none" } });
     expect((await fetch(`${base}/captures/${CAP}`)).status).toBe(401);
   });
 
   test("POST /captures/:id/invite answers the new InviteState and rejects an answer that is not one", async () => {
     const { base, invite } = start();
+    await ingest(base, wireFacts(0, 2));
     const r = await post(base, `/captures/${CAP}/invite`, { answer: "later" });
     expect(r.status).toBe(200);
     expect(await r.json()).toEqual({ state: "later" });
@@ -447,6 +446,7 @@ describe("POST /captures/:id/retry-preparation", () => {
     expect((await post(rig.base, `/captures/${rig.capture}/retry-preparation`, {}, { "Content-Type": "application/json" })).status).toBe(401);
     expect(rig.retries).toEqual([]);
     const bare = start();
+    await ingest(bare.base, wireFacts(0, 2));
     expect((await post(bare.base, `/captures/${CAP}/retry-preparation`, {})).status).toBe(501);
     expect((await post(bare.base, `/reviews/${stableId("rvw", "x")}/save`, {})).status).toBe(501);
   });

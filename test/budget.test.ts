@@ -151,14 +151,17 @@ describe("caps", () => {
   test("Derek: \"i think it should be allowed to finish\". The wrap-up passes both caps and still counts, but the stop switch holds it", async () => {
     const w = world({ userUsd: TUTOR, totalUsd: TUTOR });
     const t = claudeTask("tutor_turn", () => ok("x", { usage: usage(UNKNOWN) }));
-    expect((await w.memo.run(t, { n: 1 })).kind).toBe("hit");
-    expect(await w.memo.run(t, { n: 2 })).toMatchObject({ kind: "held", hold: { reason: "user_budget" } });
+    const review = randomId("rvw");
+    expect((await w.memo.run(t, { n: 1 }, { review })).kind).toBe("hit");
+    expect(await w.memo.run(t, { n: 2 }, { review })).toMatchObject({ kind: "held", hold: { reason: "user_budget" } });
     const wrapUp = claudeTask("wrap_up", () => ok("saved", { usage: usage(UNKNOWN) }));
-    expect((await w.memo.run(wrapUp, { n: 1 })).kind).toBe("hit");
+    // A wrap-up that names no review is capped like any call (#244). One whose review has paid tutoring passes (test/wrap-up-bound.test.ts bounds it).
+    expect(await w.memo.run(wrapUp, { n: 0 })).toMatchObject({ kind: "held", hold: { reason: "user_budget" } });
+    expect((await w.memo.run(wrapUp, { n: 1 }, { review })).kind).toBe("hit");
     expect(used(w.budget, w.db)).toBe(TUTOR + ESTIMATE_USD.wrap_up);
     expect(w.db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM usage_events WHERE purpose = 'wrap_up'").get()!.n).toBe(1);
     w.stop(true);
-    expect(await w.memo.run(wrapUp, { n: 2 })).toMatchObject({ kind: "held", hold: { reason: "stopped" } });
+    expect(await w.memo.run(wrapUp, { n: 2 }, { review })).toMatchObject({ kind: "held", hold: { reason: "stopped" } });
     expect(wrapUp.calls).toEqual([{ n: 1 }]);
   });
 
@@ -381,13 +384,16 @@ describe("what the learner sees", () => {
     const w = world({ userUsd: 5, totalUsd: 50 });
     const spend = (db: UserDb, usd: number) => w.memoFor(db).run(claudeTask("claim_revision", () => ok("x", { usage: usage({ kind: "measured", usd }) })), { n: usd });
     const [someLeft, spentAll, bystander] = [w.db, otherUserDb(w.db, "spent-all"), otherUserDb(w.db, "bystander")];
+    const finisher = otherUserDb(w.db, "finisher");
+    const finishes = randomId("rvw");
+    await w.memoFor(finisher).run(claudeTask("tutor_turn", () => ok("x", { usage: usage({ kind: "measured", usd: 0.01 }) })), { n: 0 }, { review: finishes });
     await spend(someLeft, 4.5);
     await spend(spentAll, 5);
     expect(w.budget.allowance(someLeft.userId).held).toEqual({ reason: "user_budget", resetsAtMs: DEC_1, usedUp: false });
     expect(w.budget.allowance(spentAll.userId).held).toEqual({ reason: "user_budget", resetsAtMs: DEC_1, usedUp: true });
     for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) await spend(otherUserDb(w.db, `spender-${n}`), 5);
-    // A wrap-up passes the caps, so it can bring the month to $49.75 and then to exactly $50.
-    const wrapUp = (n: number) => w.memoFor(otherUserDb(w.db, "finisher")).run(claudeTask("wrap_up", () => ok("x", { usage: usage({ kind: "measured", usd: 0.25 }) })), { n });
+    // A wrap-up passes the caps, so it can bring the month past $49.5 to $49.76 and then to $50.01.
+    const wrapUp = (n: number) => w.memoFor(finisher).run(claudeTask("wrap_up", () => ok("x", { usage: usage({ kind: "measured", usd: 0.25 }) })), { n }, { review: finishes });
     await wrapUp(1);
     expect(w.budget.allowance(bystander.userId)).toMatchObject({ usedUsd: 0, held: { reason: "total_budget", resetsAtMs: DEC_1, usedUp: false } });
     await wrapUp(2);

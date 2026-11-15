@@ -60,8 +60,6 @@ export type Segmentation = {
   history(chunkId: ChunkId): readonly ChunkRevision[];
   /** Inspectability: window inputs, judgments, route per window (PRD acceptance 2). */
   trace(captureId: CaptureId): readonly WindowTrace[];
-  /** True when another user holds chunks of this capture and this user holds none: the caller's id is another user's. */
-  heldByAnotherUser(captureId: CaptureId): boolean;
 };
 
 type Row = {
@@ -106,7 +104,6 @@ export function createSegmentation(db: UserDb, deps: {
   const byCapture = db.sql.query<Row, [string, CaptureId]>(`SELECT ${COLUMNS} FROM chunk_revisions WHERE user_id = ? AND capture_id = ? ORDER BY ordinal, revision_no`);
   const byChunk = db.sql.query<Row, [string, ChunkId]>(`SELECT ${COLUMNS} FROM chunk_revisions WHERE user_id = ? AND chunk_id = ? ORDER BY revision_no`);
   const byId = db.sql.query<Row, [string, ChunkRevisionId]>(`SELECT ${COLUMNS} FROM chunk_revisions WHERE user_id = ? AND id = ?`);
-  const otherHolds = db.sql.query<{ n: number }, [string, CaptureId]>("SELECT 1 AS n FROM chunk_revisions WHERE user_id <> ? AND capture_id = ? LIMIT 1");
 
   const latestPerChunk = (captureId: CaptureId): ChunkRevision[] => {
     const latest = new Map<ChunkId, ChunkRevision>();
@@ -150,8 +147,6 @@ export function createSegmentation(db: UserDb, deps: {
     history(chunkId) {
       return byChunk.all(userId, chunkId).map(fromRow);
     },
-
-    heldByAnotherUser: (captureId) => byCapture.all(userId, captureId).length === 0 && otherHolds.get(userId, captureId) !== null,
 
     trace(captureId) {
       const { looked, judged, plan } = derive(captureId);
