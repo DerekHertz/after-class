@@ -77,6 +77,20 @@ describe("ambient life on the draw list", () => {
     expect(at(start + step + 1)).not.toBe(at(start + 1));
   });
 
+  test("every step has the same draws in the same order, even when a layer has no speck in view", () => {
+    for (const scene of rooms) {
+      const layout = fullLayout(scene);
+      const shape = (ms: number) => buildScene(scene, layout, ms).draws.map((d) => (d.kind === "specks" ? d.color : d.kind));
+      const first = shape(0);
+      const empty = new Set<string>();
+      for (let ms = 0; ms < 20_000; ms += 1000 / AMBIENT_FPS) {
+        expect(shape(ms)).toEqual(first);
+        for (const specks of specksOf(buildScene(scene, layout, ms).draws)) if (specks.rects.length === 0) empty.add(specks.color);
+      }
+      if (scene === "study-bench") expect(empty.size).toBeGreaterThan(0);
+    }
+  });
+
   test("specks sit on whole plate pixels and stay inside their region", () => {
     for (const scene of rooms) {
       AMBIENT[scene].forEach((layer, index) => {

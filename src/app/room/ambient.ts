@@ -150,11 +150,12 @@ export function ambientDraws(scene: SceneId, layout: FullRoomLayout, now: number
     const { alpha, rows } = shaftRows(shaft, seconds);
     return specks(DEPTH_Z[shaft.depth], shaft.color, alpha, rows.map(onStage));
   });
-  const motes = AMBIENT[scene].flatMap((layer, index) => {
+  // A layer with no speck in view stays in the list, so the stage's runs of still pictures keep their bounds at every step.
+  const motes = AMBIENT[scene].map((layer, index) => {
     const rects = speckPositions(layer, index, seconds)
       .map(({ x, y }) => onStage({ x, y, ...layer.size }))
       .filter((rect) => !(layer.clearOfBoard && overlaps(rect, board.rect)));
-    return rects.length === 0 ? [] : [specks(DEPTH_Z[layer.depth], layer.color, layer.alpha, rects)];
+    return specks(DEPTH_Z[layer.depth], layer.color, layer.alpha, rects);
   });
   return { draws: [...light, ...motes], next: ((step + 1) / AMBIENT_FPS) * 1000 };
 }
