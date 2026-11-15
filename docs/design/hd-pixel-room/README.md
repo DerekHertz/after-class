@@ -33,7 +33,7 @@ Study Bench uses its own window mask and catches the light on the bench. Project
 ## Frontend rules
 
 - The [appearance provider](../../../src/app/appearance.tsx) keeps room, companion and detail independent, with a default for older preferences. Switching artwork never remounts the session or clears drafts.
-- The [scene shell](../../../src/app/scene.tsx) and [room tools](../../../src/app/room-tools.tsx) render one stage for the active room. Decoration is hidden from assistive technology and ignores the pointer. Stage and hotspots scale together. Thumbnails are stills, and only the active room's assets load.
+- The [scene shell](../../../src/app/scene.tsx) and room tools (`src/app/room-tools.tsx`, since removed) render one stage for the active room. Decoration is hidden from assistive technology and ignores the pointer. Stage and hotspots scale together. Thumbnails are stills, and only the active room's assets load.
 - The [companion renderer](../../../src/app/companion.tsx) plays one gesture per card draw or notebook open, keyboard included, separate from listening, waiting and saving status. The learner keeps focus and can hide the companion.
 - Playback uses cropped stepped sprite sheets and a masked shadow layer, with the still as first render and fallback. Ambient playback pauses in a hidden tab. Under reduced motion the resting art shows and the card, notebook or status text carries the action.
 - Before rollout, check a full loop with the pointer parked, the loop seam and pane edges, one reaction per keyboard action, a narrow viewport, reduced motion, a hidden companion, a room switch mid-draft, a return from a background tab and missing animation assets.
