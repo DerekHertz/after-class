@@ -1,0 +1,8 @@
+# Rejected art experiments, kept local (see README "Art: what was tried").
+/pilot/
+/meshy-test/
+/gen-pixel/
+/mockup/snapped/
+/mockup/mock-snapped.html
+# Raw Meshy downloads; each companion's provenance.json records prompt, task id and credits.
+/painted/gen/
