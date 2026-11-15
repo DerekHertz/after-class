@@ -448,30 +448,36 @@ function ScopeBundle({ api, view, titles, onSource }: { readonly api: AppApi; re
 }
 
 export function EndConfirm({ id, disabled, onConfirm, onCancel }: { readonly id: string; readonly disabled: boolean; readonly onConfirm: () => void; readonly onCancel: () => void }) {
-  const panel = useRef<HTMLSpanElement>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
   const keep = useRef<HTMLButtonElement>(null);
-  useLayoutEffect(() => {
-    const el = panel.current;
-    if (el === null) return;
-    const fit = () => {
-      el.dataset.placement = "below";
-      el.style.maxHeight = "";
-      const room = window.innerHeight - el.getBoundingClientRect().top - 8;
-      if (room < Math.min(el.scrollHeight, 160)) el.dataset.placement = "top";
-      else el.style.maxHeight = `${room}px`;
-    };
-    fit();
-    window.addEventListener("resize", fit);
-    return () => window.removeEventListener("resize", fit);
+  // showModal() puts the dialog in the top layer, makes the page behind it inert and contains focus.
+  useEffect(() => {
+    const el = dialog.current;
+    if (el === null || el.open) return;
+    el.showModal();
+    keep.current?.focus();
   }, []);
-  useEffect(() => { keep.current?.focus(); }, []);
+  // Escape and every other way the browser closes the dialog end up here, so the flow state follows the dialog.
   return (
-    <span ref={panel} id={id} className="actions end-confirm" role="alertdialog" aria-labelledby={`${id}-title`} aria-describedby={`${id}-text`}>
-      <span id={`${id}-title`} className="visually-hidden">Finish and save this review?</span>
-      <span id={`${id}-text`}>{END_CONFIRM_TEXT}</span>
-      <button type="button" data-action="end-confirm" disabled={disabled} onClick={onConfirm}>{ACTION_LABEL.end}</button>
-      <button ref={keep} type="button" data-action="end-cancel" onClick={onCancel}>Keep reviewing</button>
-    </span>
+    <dialog
+      ref={dialog}
+      id={id}
+      className="end-confirm"
+      role="alertdialog"
+      aria-labelledby={`${id}-title`}
+      aria-describedby={`${id}-text`}
+      onClose={onCancel}
+      onClick={(e) => { if (e.target === e.currentTarget) dialog.current?.close(); }}
+    >
+      <div className="end-confirm-body">
+        <span id={`${id}-title`} className="visually-hidden">Finish and save this review?</span>
+        <span id={`${id}-text`}>{END_CONFIRM_TEXT}</span>
+        <div className="end-confirm-actions">
+          <button type="button" data-action="end-confirm" disabled={disabled} onClick={onConfirm}>{ACTION_LABEL.end}</button>
+          <button ref={keep} type="button" data-action="end-cancel" onClick={() => dialog.current?.close()}>Keep reviewing</button>
+        </div>
+      </div>
+    </dialog>
   );
 }
 
@@ -491,20 +497,6 @@ function Actions({ ids, disabled, send }: { readonly ids: readonly ActionId[]; r
   };
   const finish = () => root.current?.querySelector<HTMLElement>('[data-action="end"]') ?? null;
   const confirming = endStep === "confirming";
-  useEffect(() => {
-    if (!confirming) return;
-    const dismiss = () => setEndStep("idle");
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { dismiss(); finish()?.focus(); } };
-    const onPointer = (e: PointerEvent) => {
-      const target = e.target as Node;
-      if (document.getElementById(panelId)?.contains(target) || finish()?.contains(target)) return;
-      dismiss();
-      setTimeout(() => { if (document.activeElement === document.body) finish()?.focus(); }, 0);
-    };
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("pointerdown", onPointer);
-    return () => { document.removeEventListener("keydown", onKey); document.removeEventListener("pointerdown", onPointer); };
-  }, [confirming, panelId]);
   return (
     <span ref={root} className="actions">
       {ids.map((id) => <button key={id} type="button" data-action={id} disabled={disabled} {...(id === "end" ? { "aria-expanded": confirming, "aria-controls": panelId } : {})} onClick={() => (id === "end" ? step("press_end") : send(id))}>{ACTION_LABEL[id]}</button>)}
