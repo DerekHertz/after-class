@@ -50,8 +50,8 @@ function rig(over: Partial<ContentDeps> = {}) {
       transcriptCalls.push(id);
       return { kind: "transcript_unavailable", videoId: id, reason: "no_captions" };
     },
-    createTracker: (found, emit, id, dur) => {
-      const tracker = createPlaybackTracker(found.video, found.player, emit, id, dur, env);
+    createTracker: (found, emit, id, dur, signal) => {
+      const tracker = createPlaybackTracker(found.video, found.player, emit, id, dur, env, signal);
       const entry = { tracker, disposed: false };
       trackers.push(entry);
       return { setObserving: (on) => tracker.setObserving(on), dispose: () => ((entry.disposed = true), tracker.dispose()) };
@@ -277,5 +277,42 @@ describe("observers", () => {
     expect(make(["ad-showing"], 600)()).toBe(true);
     video.duration = 15;
     expect(make([], 600)()).toBe(true);
+  });
+});
+
+describe("a finished video and a playlist", () => {
+  const signals = (r: ReturnType<typeof rig>) => r.posted.filter((m) => "type" in m && (m.type === "video_ended" || m.type === "idle"));
+
+  test("the next video of a playlist starting before the grace ends keeps the capture going", async () => {
+    const r = rig();
+    r.deliver(observe(true, CAP_A));
+    await wait();
+    r.tick(1, 599);
+    r.video.ended = true;
+    r.video.paused = true;
+    r.fire("ended");
+    r.tick(10, 600);
+    r.setUrlId(VID2);
+    r.setStreamId(VID2);
+    r.nav().onWatchPage(VID2);
+    r.video.ended = false;
+    r.video.paused = false;
+    r.tick(1, 0);
+    r.tick(60, 60);
+    r.tick(60, 120);
+    expect(signals(r)).toEqual([]);
+  });
+
+  test("a last video left finished asks the worker to stop", async () => {
+    const r = rig();
+    r.deliver(observe(true, CAP_A));
+    await wait();
+    r.tick(1, 599);
+    r.video.ended = true;
+    r.video.paused = true;
+    r.fire("ended");
+    r.tick(20, 600);
+    r.tick(20, 600);
+    expect(signals(r)).toEqual([{ type: "video_ended" }]);
   });
 });

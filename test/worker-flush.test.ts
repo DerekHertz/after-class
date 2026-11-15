@@ -42,6 +42,28 @@ describe("the closing span", () => {
     expect(stored(env)).toEqual(["control:start", "span", "span", "control:pause"]);
   });
 
+  test("a video_ended signal from the page stops the capture after the closing span, as Stop does", async () => {
+    const { env, c, p } = await capturing();
+    answeringFlush(p);
+    feed(p, { type: "video_ended" } as never);
+    await wait(120);
+    expect(stored(env)).toEqual(["control:start", "span", "span", "control:stop"]);
+    expect(await sendPopup(c, { type: "status", tabId: 1 })).toMatchObject({ state: { state: "stopped", pauseReason: "video_ended" } });
+  });
+
+  test("an idle signal pauses the capture after the closing span, and the learner's Resume brings it back", async () => {
+    const { env, c, p } = await capturing();
+    answeringFlush(p);
+    feed(p, { type: "idle" } as never);
+    await wait(120);
+    expect(stored(env)).toEqual(["control:start", "span", "span", "control:pause"]);
+    const paused = await sendPopup(c, { type: "status", tabId: 1 });
+    expect(paused.state).toMatchObject({ state: "paused", pauseReason: "idle" });
+    expect((await sendPopup(c, { type: "resume", tabId: 1 })).state.state).toBe("capturing");
+    await wait(80);
+    expect(stored(env)).toEqual(["control:start", "span", "span", "control:pause", "control:resume"]);
+  });
+
   test("a content script that never answers delays the pause by about a second, and the lost seconds are logged as a gap", async () => {
     const { env, c } = await capturing();
     const started = Date.now();

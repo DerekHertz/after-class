@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { AppApi } from "../src/app/api";
 import { ApiError } from "../src/app/api";
 import { OptionsView, checkAgain } from "../src/app/capture";
-import { availableActions, conversationLines, coveredLines, currentEvidenceIds, estimateText, formatClock, groupGaps, inspectBundle, lectureHeading, liveText, noteView, observationRow, optionsScreen, parseRoute, partialLines, reduceLive, routePath, softTargetPrompt, startLive, strandedEndTurn, toAct, unansweredLearnerTurn, usageRows } from "../src/app/core";
+import { availableActions, captureStatusLabel, conversationLines, coveredLines, currentEvidenceIds, estimateText, formatClock, groupGaps, inspectBundle, lectureHeading, liveText, noteView, observationRow, optionsScreen, parseRoute, partialLines, reduceLive, routePath, softTargetPrompt, startLive, strandedEndTurn, toAct, unansweredLearnerTurn, usageRows } from "../src/app/core";
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { UsageTable } from "../src/app/record";
 import { BundleInspector, EvidencePane } from "../src/app/ui";
@@ -386,5 +386,15 @@ describe("routes and clocks", () => {
 
   test("formatClock", () => {
     expect([formatClock(0), formatClock(75), formatClock(3725), formatClock(-4)]).toEqual(["0:00", "1:15", "1:02:05", "0:00"]);
+  });
+});
+
+describe("captureStatusLabel", () => {
+  test("a capture the page paused or stopped on its own says why; the learner's own pause and stop do not", () => {
+    expect(captureStatusLabel({ state: "capturing" })).toBe("Capturing");
+    expect(captureStatusLabel({ state: "paused", reason: "user" })).toBe("Capture paused");
+    expect(captureStatusLabel({ state: "paused", reason: "idle" })).toBe("Capture paused: nothing was playing for a while");
+    expect(captureStatusLabel({ state: "stopped" })).toBe("Capture stopped");
+    expect(captureStatusLabel({ state: "stopped", reason: "video_ended" })).toBe("Capture stopped: the video ended");
   });
 });

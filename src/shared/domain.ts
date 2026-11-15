@@ -28,7 +28,8 @@ export type NonEmpty<T> = readonly [T, ...T[]];
 // ───────────────────────────── Capture facts (owner: extension) ─────────────
 
 export type CaptureControl = "start" | "pause" | "resume" | "stop";
-export type ControlReason = "user" | "left_watch_page" | "returned_to_watch_page" | "tab_closed";
+/** `idle` pauses and `video_ended` stops a capture the learner left running; the page signals both (flow B, 2026-11-14). */
+export type ControlReason = "user" | "left_watch_page" | "returned_to_watch_page" | "tab_closed" | "idle" | "video_ended";
 export type TranscriptOrigin = "panel" | "caption_intercept" | "asr";
 export type Channel = "transcript" | "frames" | "playback";
 
@@ -154,7 +155,7 @@ export type EvidenceBundle = {
 export type CaptureStatus =
   | { readonly state: "capturing" }
   | { readonly state: "paused"; readonly reason: ControlReason }
-  | { readonly state: "stopped" };
+  | { readonly state: "stopped"; readonly reason?: "video_ended" | undefined };
 
 export type ChannelHealth = { readonly channel: Channel; readonly health: "ok" | "failed" | "stalled" | "unknown"; readonly detail: string };
 

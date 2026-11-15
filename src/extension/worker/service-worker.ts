@@ -259,7 +259,7 @@ function applyEvent(tabId: number, event: ControlEvent): Promise<TabCaptureState
  */
 async function applyEventNow(tabId: number, event: ControlEvent): Promise<TabCaptureState | null> {
   let gap: string | null = null;
-  if (event.kind === "pause" || event.kind === "stop" || event.kind === "left_watch_page" || event.kind === "tab_closed") {
+  if (event.kind === "pause" || event.kind === "stop" || event.kind === "left_watch_page" || event.kind === "tab_closed" || event.kind === "idle" || event.kind === "video_ended") {
     if ((await readState(tabId))?.state === "capturing") gap = event.kind === "tab_closed" ? "the tab was closed" : await requestFlush(tabId);
   }
   return serialized(async () => {

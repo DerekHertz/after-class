@@ -16,7 +16,40 @@ export type Emit = (fact: CaptureFactBody) => void;
 /** Messages SW → content. */
 export type ControlMessage = { readonly type: "observe"; readonly on: boolean } | { readonly type: "read_transcript" };
 /** Messages content → SW, besides fact bodies. */
-export type ContentSignal = { readonly type: "left_watch_page" } | { readonly type: "returned_to_watch_page"; readonly videoId: string };
+export type ContentSignal =
+  | { readonly type: "left_watch_page" }
+  | { readonly type: "returned_to_watch_page"; readonly videoId: string }
+  | RestSignal;
+
+/** The player has been at rest long enough that capture should pause (`idle`) or stop (`video_ended`). */
+export type RestSignal = { readonly type: "idle" } | { readonly type: "video_ended" };
+
+/**
+ * How long nothing may play before the page asks the worker to pause. Derek has not chosen this number; it is his to change.
+ * Measured on the player, so a learner who paused the video and a tab left on a finished video both count.
+ */
+export const IDLE_PAUSE_MS = 10 * 60 * 1000;
+/**
+ * How long a finished video may sit before the page asks the worker to stop. An autoplay countdown or a playlist
+ * starts the next video well inside this, and that playing cancels it, so a capture across several videos goes on.
+ */
+export const VIDEO_END_GRACE_MS = 30 * 1000;
+
+/** Since when the player has had nothing playing, and why. Null while something plays. */
+export type RestState = { readonly kind: "ended" | "paused"; readonly sinceMs: number } | null;
+
+/**
+ * Pure. Something is playing when the video is neither paused nor ended (an ad counts: the learner is still watching).
+ * A signal repeats every threshold while the rest lasts, so one lost on its way is sent again; the worker ignores a repeat.
+ */
+export function stepRest(st: RestState, s: Pick<PlaybackSample, "wallMs" | "paused" | "ended">): { readonly state: RestState; readonly signal: RestSignal | null } {
+  if (!s.paused && !s.ended) return { state: null, signal: null };
+  const kind = s.ended ? "ended" : "paused";
+  const since = st !== null && st.kind === kind ? st.sinceMs : s.wallMs;
+  const limit = kind === "ended" ? VIDEO_END_GRACE_MS : IDLE_PAUSE_MS;
+  if (s.wallMs - since < limit) return { state: { kind, sinceMs: since }, signal: null };
+  return { state: { kind, sinceMs: s.wallMs }, signal: { type: kind === "ended" ? "video_ended" : "idle" } };
+}
 
 export type PlaybackTracker = {
   setObserving(on: boolean): void;
@@ -289,8 +322,10 @@ export function createPlaybackTracker(
   videoId: () => string,
   sourceDurationS: () => number | null,
   env: PlaybackEnv = browserPlaybackEnv,
+  signal: (s: RestSignal) => void = () => {},
 ): PlaybackTracker {
   let st = initialPlayback;
+  let rest: RestState = null;
   const run = (ev: PlaybackEvent) => {
     const r = stepPlayback(st, ev);
     st = r.state;
@@ -309,7 +344,12 @@ export function createPlaybackTracker(
     ad: isAdShowing(readAdSignals(player, video, sourceDurationS())),
   });
   const tick = () => {
-    if (st.observing) run({ type: "tick", s: sample() });
+    if (!st.observing) return;
+    const s = sample();
+    run({ type: "tick", s });
+    const r = stepRest(rest, s);
+    rest = r.state;
+    if (r.signal !== null) signal(r.signal);
   };
   const reset = () => run({ type: "reset" });
 
@@ -328,6 +368,7 @@ export function createPlaybackTracker(
   const setObserving = (on: boolean) => {
     if (on === st.observing) return;
     if (on) {
+      rest = null;
       run({ type: "observing", on: true, wallMs: env.now() });
       stopInterval = env.every(1000, tick);
       tick();

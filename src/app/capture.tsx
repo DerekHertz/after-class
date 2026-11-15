@@ -5,7 +5,7 @@ import type { CaptureId, ReviewId } from "../shared/ids";
 import type { ReviewOptions, StartChoice, UsageSummary } from "../shared/domain";
 import type { AppApi } from "./api";
 import { usePrefetchReviewArt } from "./art-prefetch";
-import { formatClock, inspectBundle, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
+import { captureStatusLabel, formatClock, inspectBundle, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
 import type { OptionsScreen, ScopeSummary, SourceTitles, StartOffer } from "./core";
 import { usePolled } from "./poll";
 import { objectFrame } from "./room-object";
@@ -223,7 +223,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
       <ErrorNote error={capture.error} retry={capture.reload} />
       {capture.data && (
         <p className="capture-summary">
-          {summaryTitle(capture.data.capture.sources.map((s) => s.title))} · capture {capture.data.capture.status.state} ·{" "}
+          {summaryTitle(capture.data.capture.sources.map((s) => s.title))} · {captureStatusLabel(capture.data.capture.status)} ·{" "}
           {formatClock(capture.data.capture.watchedSeconds)} watched · captions {capture.data.capture.transcript.replaceAll("_", " ")}
         </p>
       )}

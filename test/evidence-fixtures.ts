@@ -59,7 +59,7 @@ export function stream(captureId: CaptureId = randomId("cap")) {
     });
   return {
     captureId, facts, push, span,
-    control: (action: "start" | "pause" | "resume" | "stop", reason: "user" | "left_watch_page" = "user") => push({ kind: "control", action, reason }),
+    control: (action: "start" | "pause" | "resume" | "stop", reason: "user" | "left_watch_page" | "video_ended" = "user") => push({ kind: "control", action, reason }),
     source: (o: { video?: string; durationS?: number | null } = {}) =>
       push({ kind: "source", videoId: o.video ?? VIDEO, title: "Lecture", channelName: "Prof", url: "https://www.youtube.com/watch?v=x", durationS: o.durationS === undefined ? 600 : o.durationS }),
     transcript: (segments: readonly [number, number, string][], o: { video?: string; origin?: "panel" | "asr" } = {}) =>

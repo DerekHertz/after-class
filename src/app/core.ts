@@ -4,12 +4,19 @@
  */
 import { heldMessage, resetDay } from "../shared/allowance";
 import type {
-  Allowance, Author, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
+  Allowance, Author, CaptureStatus, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
   ReviewState, ReviewView, ScopePreview, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
 } from "../shared/domain";
 import type { EvidenceId, SourceId } from "../shared/ids";
 import { IntervalSet, Material } from "../shared/time";
 import type { Interval } from "../shared/time";
+
+/** What the lecture list and the lecture page say about capture. A capture the page paused or stopped on its own says why. */
+export function captureStatusLabel(s: CaptureStatus): string {
+  if (s.state === "capturing") return "Capturing";
+  if (s.state === "paused") return s.reason === "idle" ? "Capture paused: nothing was playing for a while" : "Capture paused";
+  return s.reason === "video_ended" ? "Capture stopped: the video ended" : "Capture stopped";
+}
 
 // ───────────────────────────── Time ─────────────────────────────────────────
 

@@ -8,7 +8,7 @@
  */
 import type { CaptureFactBody } from "../../shared/domain";
 import { createAdProbe, createPlaybackTracker, findPlayer, readSourceMetadata, watchNavigation } from "./capture";
-import type { Emit, PlaybackTracker } from "./capture";
+import type { Emit, PlaybackTracker, RestSignal } from "./capture";
 import { createFrameSampler } from "./frames";
 import type { FrameSampler, FrameSamplerConfig } from "./frames";
 import { STREAM_ID_ATTR, pickVideoId } from "./stream-id";
@@ -52,7 +52,7 @@ export type ContentDeps = {
   findPlayer(): Found | null;
   readSourceMetadata(videoId: string): Promise<SourceFact>;
   acquireTranscript(videoId: string, durationS: number | null): Promise<TranscriptResult>;
-  createTracker(found: Found, emit: Emit, videoId: () => string, sourceDurationS: () => number | null): PlaybackTracker;
+  createTracker(found: Found, emit: Emit, videoId: () => string, sourceDurationS: () => number | null, signal: (s: RestSignal) => void): PlaybackTracker;
   createSampler(found: Found, emit: Emit, videoId: () => string, sourceDurationS: () => number | null): FrameSampler;
   watchNavigation: typeof watchNavigation;
 };
@@ -80,7 +80,7 @@ export const browserDeps: ContentDeps = {
   findPlayer,
   readSourceMetadata,
   acquireTranscript,
-  createTracker: (found, emit, videoId, dur) => createPlaybackTracker(found.video, found.player, emit, videoId, dur),
+  createTracker: (found, emit, videoId, dur, signal) => createPlaybackTracker(found.video, found.player, emit, videoId, dur, undefined, signal),
   createSampler: createBrowserSampler,
   watchNavigation,
 };
@@ -142,7 +142,7 @@ export function startContent(deps: ContentDeps): void {
     attached?.tracker.dispose();
     attached?.sampler.dispose();
     const dur = () => durations.get(currentVideoId()) ?? null;
-    attached = { video: found.video, tracker: deps.createTracker(found, send, currentVideoId, dur), sampler: deps.createSampler(found, send, currentVideoId, dur) };
+    attached = { video: found.video, tracker: deps.createTracker(found, send, currentVideoId, dur, send), sampler: deps.createSampler(found, send, currentVideoId, dur) };
     return true;
   }
 

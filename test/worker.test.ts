@@ -51,6 +51,12 @@ describe("control transition table", () => {
     ["stop twice", { from: stopped, event: { kind: "stop" }, to: "same", fact: null }],
     ["closing the tab while capturing", { from: capturing, event: { kind: "tab_closed" }, to: { state: "stopped" }, fact: control("stop", "tab_closed") }],
     ["closing the tab while paused", { from: away, event: { kind: "tab_closed" }, to: { state: "stopped" }, fact: control("stop", "tab_closed") }],
+    ["nothing playing past the threshold pauses a capture", { from: capturing, event: { kind: "idle" }, to: { state: "paused", pauseReason: "idle" }, fact: control("pause", "idle") }],
+    ["idle while already paused keeps the first reason", { from: away, event: { kind: "idle" }, to: "same", fact: null }],
+    ["idle while stopped", { from: stopped, event: { kind: "idle" }, to: "same", fact: null }],
+    ["a video that ended stops a capture the way Stop does", { from: capturing, event: { kind: "video_ended" }, to: { state: "stopped", pauseReason: "video_ended" }, fact: control("stop", "video_ended") }],
+    ["a video that ended stops a paused capture", { from: paused, event: { kind: "video_ended" }, to: { state: "stopped", pauseReason: "video_ended" }, fact: control("stop", "video_ended") }],
+    ["a repeated video_ended after the stop", { from: state({ state: "stopped", pauseReason: "video_ended" }), event: { kind: "video_ended" }, to: "same", fact: null }],
     ["closing a stopped tab", { from: stopped, event: { kind: "tab_closed" }, to: "same", fact: null }],
     ["closing a tab with no capture", { from: null, event: { kind: "tab_closed" }, to: "same", fact: null }],
   ];
@@ -465,6 +471,12 @@ describe("popup view", () => {
     const paused = state({ state: "paused", pauseReason: "left_watch_page" });
     expect(describePopup(paused, home)).toMatchObject({ headline: "Paused: you left the video page", actions: ["stop"] });
     expect(describePopup(paused, watch).actions).toEqual(["resume", "stop"]);
+  });
+
+  test("a pause or stop the page made on its own says why, and Resume is the learner's", () => {
+    const idle = state({ state: "paused", pauseReason: "idle" });
+    expect(describePopup(idle, watch)).toMatchObject({ headline: "Paused: nothing was playing for a while", actions: ["resume", "stop"], hint: "Press Resume when you start watching again." });
+    expect(describePopup(state({ state: "stopped", pauseReason: "video_ended" }), watch)).toMatchObject({ headline: "Stopped: the video ended", actions: ["start"] });
   });
 
   test("a stopped capture can be started again", () => {
