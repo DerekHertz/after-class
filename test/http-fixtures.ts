@@ -68,6 +68,11 @@ function evidenceOn(db: UserDb, limits?: IngestLimits) {
   });
 }
 
+/** Records `userId` as the owner of a capture id without storing facts, as a first ingest does. */
+export function ownCapture(db: UserDb, captureId: string): void {
+  db.sql.query("INSERT INTO capture_owners (capture_id, user_id, claimed_ms) VALUES (?, ?, 0) ON CONFLICT DO NOTHING").run(captureId, db.userId);
+}
+
 /** The real evidence module on an in-memory db; reviews is a fake whose invite state a test sets. */
 export function world(limits?: IngestLimits) {
   const db = testUserDb();
@@ -368,7 +373,7 @@ export function reviewRig(script: Script = pick, extra: { turnDeadlineMs?: numbe
       return db.nextSeq();
     },
   } as unknown as Preparation;
-  const segmentation = { current: world.deps.currentChunks, heldByAnotherUser: () => false } as unknown as Segmentation;
+  const segmentation = { current: world.deps.currentChunks } as unknown as Segmentation;
 
   const evidence = evidenceOn(db);
   const diagrams = createDiagrams({
@@ -392,6 +397,7 @@ export function reviewRig(script: Script = pick, extra: { turnDeadlineMs?: numbe
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
   const capture = world.captureId;
+  ownCapture(db, capture);
 
   /** One chunk [0, 300) holding claims A and B, both supported. */
   const prepare = () => ({ rev: world.close(0, 0, 300), a: world.claim(1, 10, 20), b: world.claim(2, 30, 40) });

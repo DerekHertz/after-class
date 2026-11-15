@@ -386,7 +386,7 @@ describe("starting reviews that never got tutoring is limited", () => {
       return { port: 39555, stop: () => {} };
     };
     try {
-      serve({ modules: { reviews: r.reviews, evidence: { capturedByAnotherUser: () => false } } as any, auth: { port: 39555, token: "test-token", extensionId: "" } as any, appDir: tmpdir() } as any);
+      serve({ modules: { reviews: r.reviews, evidence: { capturedByAnotherUser: () => false, holdsCapture: () => true } } as any, auth: { port: 39555, token: "test-token", extensionId: "" } as any, appDir: tmpdir() } as any);
     } finally {
       (Bun as any).serve = original;
     }
