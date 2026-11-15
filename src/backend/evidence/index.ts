@@ -274,6 +274,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   /** "Uncertain visual → keep the frame." */
   function judge(e: FrameEntry): { readonly teaching: FrameTeaching; readonly input: FrameChangeInput | null } {
     if (!e.before) return { teaching: "kept", input: null };
+    if (!e.windowComplete) return { teaching: "unjudged", input: null };
     const input = inputOf(e);
     const found = deps.lookupFrameChange(input);
     if (found.kind === "hit") return { teaching: found.value === "yes" ? "kept" : found.value === "no" ? "dropped" : "uncertain", input };

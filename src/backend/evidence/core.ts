@@ -296,6 +296,13 @@ export type FrameEntry = {
   readonly before: FrameEntry | null;
   /** Watched passages within ±15 s media. */
   readonly nearby: readonly Passage[];
+  /**
+   * True once `nearby` can no longer grow: the watched media has passed the window's far edge and no transcript
+   * segment near the frame is still being watched (half watched, with its end ahead of the watched media), or the video has played to its end, the viewer has moved to another
+   * video, or the capture is paused or stopped. A judgment before then
+   * would be keyed on a caption list that is about to change, and would be asked again.
+   */
+  readonly windowComplete: boolean;
 };
 
 export type Projection = {
@@ -315,6 +322,8 @@ export type Projection = {
 };
 
 const NEARBY_S = 15;
+/** A span may end this close to the video's duration and still count as having reached the end. */
+const END_SLACK_S = 1;
 
 function holdsPoint(set: IntervalSet, p: number): boolean {
   return set.intervals().some((i) => contains(i, p));
@@ -379,7 +388,8 @@ export function foldCapture(captureId: CaptureId, stored: readonly StoredFact[])
   passages.sort((a, b) => a.order - b.order || a.passage.interval.start - b.passage.interval.start);
 
   const allPassages = passages.map((p) => p.passage);
-  const candidates: Omit<FrameEntry, "before" | "nearby">[] = [];
+  const currentSource = currentVideo === null ? null : sourceIdOf(currentVideo);
+  const candidates: Omit<FrameEntry, "before" | "nearby" | "windowComplete">[] = [];
   for (const f of facts) {
     if (f.kind !== "frame" || !bytesOf.get(f)) continue;
     const sourceId = sourceIdOf(f.videoId);
@@ -395,7 +405,13 @@ export function foldCapture(captureId: CaptureId, stored: readonly StoredFact[])
     for (const c of media) {
       const m = c.frame.mediaS;
       const nearby = allPassages.filter((p) => p.sourceId === c.frame.sourceId && p.interval.start < m + NEARBY_S && p.interval.end > m - NEARBY_S);
-      const entry: FrameEntry = { ...c, before, nearby };
+      const watchedEnd = Math.max(-Infinity, ...Material.get(watched, c.frame.sourceId).intervals().map((i) => i.end));
+      const halfWatched = partial.some((g) => g.sourceId === c.frame.sourceId && g.interval.start < m + NEARBY_S && g.interval.end > m - NEARBY_S && g.interval.end > watchedEnd);
+      const duration = durationOf(c.frame.sourceId);
+      const closed =
+        status.state !== "capturing" || c.frame.sourceId !== currentSource || (duration !== null && watchedEnd >= duration - END_SLACK_S);
+      const windowComplete = closed || (watchedEnd >= m + NEARBY_S && !halfWatched);
+      const entry: FrameEntry = { ...c, before, nearby, windowComplete };
       built.set(c.frame.id, entry);
       before = entry;
     }
