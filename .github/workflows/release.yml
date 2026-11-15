@@ -1,12 +1,13 @@
 name: release
 
 # A pushed v<major>.<minor>.<patch> tag becomes an arm64 image on GHCR and then a draft GitHub Release whose
-# image-digest.txt names that image by digest and whose notes summarize the PRs since the live release. The tag must be on
-# master and equal the version in package.json at the tagged commit. A tag push runs this file and the check as the tag
-# has them, so the tag ruleset (infra/github/tag-ruleset.json) decides who can cut a release. GHCR tags are mutable, so
-# every deploy uses the digest in the release, never a tag. The release is written last, so it never names an image that
-# was not pushed and checked. Publishing the draft is the deploy approval: the beta server's afterclass-autodeploy deploys
-# the highest published release. The image holds no keys, since the server reads them from Parameter Store at start.
+# image-digest.txt names that image by digest and whose notes summarize the PRs since the release the beta's GET /health
+# reports, or since the highest published release when it reports none. The tag must be on master and equal the version
+# in package.json at the tagged commit. A tag push runs this file and the check as the tag has them, so the tag ruleset
+# (infra/github/tag-ruleset.json) decides who can cut a release. GHCR tags are mutable, so every deploy uses the digest in
+# the release, never a tag. The release is written last, so it never names an image that was not pushed and checked.
+# Publishing the draft is the deploy approval: the beta server's afterclass-autodeploy deploys the highest published
+# release. The image holds no keys, since the server reads them from Parameter Store at start.
 on:
   push:
     tags: ["v*"]
@@ -41,7 +42,7 @@ jobs:
           echo "commit=${commit}" >> "$GITHUB_OUTPUT"
       # PR titles reach the output, so a random delimiter keeps a title from ending it early.
       - id: notes
-        name: Summarize the PRs since the live release
+        name: Summarize the PRs since the release the beta runs
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}

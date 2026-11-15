@@ -17,7 +17,11 @@ interface Opts {
   readonly healthy?: boolean;
   /** docker run --detach fails, as it does when the container name is taken. */
   readonly runFails?: boolean;
+  /** scripts/release-notes.ts --warnings cannot finish, as when GitHub or git fails. */
+  readonly checkFails?: boolean;
 }
+
+const CHECK = "## Changes since v0.1.3\n\nThe beta runs v0.1.3, not v0.1.4, the highest published release, so this list starts at v0.1.3.\n\n**Migrates the database.** This range changes `src/backend/migrations.ts`.";
 
 const CONTAINER = "0123456789ab".repeat(4);
 
@@ -70,6 +74,9 @@ exit 0`,
   stub(host.bin, "curl", opts.healthy === false ? "exit 7" : "exit 0");
   stub(host.bin, "sleep", "exit 0");
   stub(host.bin, "aws", log);
+  stub(host.bin, "git", `${log}\nexit 0`);
+  writeFileSync(join(host.root, "check"), CHECK);
+  stub(host.bin, "bun", `${log}\n${opts.checkFails ? "exit 1" : `cat ${host.root}/check`}`);
   const result = Bun.spawnSync(["bash", SCRIPT, opts.tag ?? "v0.1.5"], {
     env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}`, ANTHROPIC_API_KEY: KEY, TYPESAFE_API_KEY: KEY },
   });
@@ -102,6 +109,21 @@ describe("scripts/try-release.sh", () => {
     expect(run.stdout).toContain(SUMMARY);
     expect(run.stdout).toContain("http://127.0.0.1:8790/app/");
     expect(of(run, "aws")).toEqual([]);
+  });
+
+  test("recomputes the base and the warnings against the release the beta runs now, and prints them after the draft's summary", () => {
+    const run = tryRelease({ arm64: true });
+    expect(of(run, "git")).toEqual([["git", "-C", resolve(import.meta.dir, ".."), "fetch", "--quiet", "origin", "master", "--tags"]]);
+    expect(of(run, "bun")).toEqual([["bun", "scripts/release-notes.ts", "--warnings", "v0.1.5", COMMIT]]);
+    expect(run.stdout).toContain(CHECK);
+    expect(run.stdout.indexOf(CHECK)).toBeGreaterThan(run.stdout.indexOf(SUMMARY));
+  });
+
+  test("says loudly when it cannot recompute the warnings, and still runs the release", () => {
+    const run = tryRelease({ arm64: true, checkFails: true });
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("try-release: WARNING could not check the warnings against the release the beta runs");
+    expect(appRun(run)).toBeDefined();
   });
 
   test("passes no keys, key file or host folder into the container", () => {

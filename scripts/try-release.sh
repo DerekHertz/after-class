@@ -1,8 +1,11 @@
 #!/bin/bash
 # Usage: scripts/try-release.sh <release tag>, for example scripts/try-release.sh v0.1.5. Prints the release's summary and
 # runs the image its image-digest.txt names, by digest, on this machine. The app runs in replay mode with no keys file and
-# a database that lives and dies with the container, so it makes no Jev, Claude or AWS call and never touches the beta
-# server. Ctrl-C stops and removes the container. Needs gh, docker and curl.
+# a database that lives and dies with the container, so it makes no Jev, Claude or AWS call and never changes the beta
+# server. Ctrl-C stops and removes the container. Needs gh, git, bun, docker and curl, in a clone of the repository.
+#
+# The draft's notes were written when the tag was pushed, and anyone can edit them. So it also prints the base and the
+# warnings from scripts/release-notes.ts --warnings, computed now against the release the beta's GET /health reports.
 #
 # The release image is linux/arm64. On a machine that cannot run arm64 images, the script builds a local image from the
 # release image's own /app and /data on the amd64 build of the Bun base image that the release's Dockerfile pins, and
@@ -34,6 +37,13 @@ pattern=$'^commit ([0-9a-f]{40})\ndigest (sha256:[0-9a-f]{64})$'
 [[ "$record" =~ $pattern ]] || fail "the ${tag} release's image-digest.txt is not a commit line and a digest line"
 commit="${BASH_REMATCH[1]}"
 image="${repository}@${BASH_REMATCH[2]}"
+root=$(cd "$(dirname "$0")/.." && pwd)
+if git -C "$root" fetch --quiet origin master --tags && check=$(cd "$root" && bun scripts/release-notes.ts --warnings "$tag" "$commit"); then
+  :
+else
+  check="try-release: WARNING could not check the warnings against the release the beta runs. Run bun scripts/release-notes.ts --warnings ${tag} ${commit} before you publish."
+fi
+
 # A run of the same tag elsewhere must not share a name, or its cleanup would stop this run's container.
 suffix=$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
 name="afterclass-try-${tag//./-}-${suffix}"
@@ -104,6 +114,10 @@ cat <<EOF
 ${tag}, ${release}, commit ${commit}
 
 ${summary}
+
+try-release: the base and the warnings, checked now against the release the beta runs:
+
+${check}
 
 try-release: running ${how}, ${image}.
 try-release: replay mode with no keys and a throwaway database. Nothing reaches the beta server, Jev or Claude.
