@@ -44,9 +44,9 @@ OVERRIDES = {
     "mote-moonlit": {"cheer": "cheering: both wings lifted and spread a little higher, a big open happy smile and light blush marks, still sitting"},
     "mote-pagewing": {"cheer": "cheering: both wings lifted and spread a little higher, a big open happy smile and light blush marks, still sitting"},
     "lumi": {
-        "nod": "a happy nod: the lamp shade tips forward and down slightly on its arm, eyes closed in two upward-curved smiling arcs",
-        "hop-crouch": "squash down as if about to hop: the arm folds lower so the shade sits lower, eyes squeezed shut happily",
-        "hop-air": "the arm stretched a little straighter and taller as at the top of a happy hop, the shade raised, joyful open smile; keep the base in the same place",
+        "nod": "a clear happy nod: redraw the lamp shade tilted about 20 degrees further forward and down so its face points at the desk, the shade lower than now, eyes closed in two upward-curved smiling arcs; the base stays where it is",
+        "hop-crouch": "crouched low before a hop: redraw the two arm segments folded much more sharply so the shade sits clearly lower, close above the base, eyes squeezed shut happily; the base stays where it is",
+        "hop-air": "stretched up at the top of a happy hop: redraw the two arm segments almost straight and upright so the shade sits clearly higher than now, joyful open smile; the base stays where it is",
         "cheer": "cheering: the arm stretched up so the shade is raised high, a big open happy smile, light blush marks and a few small warm sparkles around the shade",
         "think": "thinking: the shade tilts slightly to the left, eyes look up and to the left, the mouth is a small flat line, one tiny sweat drop beside the shade",
     },
