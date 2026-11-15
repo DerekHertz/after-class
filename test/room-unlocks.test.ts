@@ -18,7 +18,7 @@ import { RecordScreen } from "../src/app/record";
 import { SavedNotes } from "../src/app/review";
 import type { UnlockId } from "../src/app/room/progress";
 import { buildScene } from "../src/app/room/scene";
-import type { Draw } from "../src/app/room/scene";
+import type { Draw, PictureDraw } from "../src/app/room/scene";
 import { UNLOCK_ART, UNLOCK_SLOTS } from "../src/app/room/unlocks";
 import type { Observation, RecordView, RecordedStatus } from "../src/shared/domain";
 import { stableId } from "../src/shared/ids";
@@ -120,7 +120,8 @@ const twoOpen = deriveProgress([
   obs("independent", "r2"), obs("independent", "r2"), obs("independent", "r2"), obs("after_help", "r2"), obs("disputed", "r2"),
 ]);
 const art = (ids: readonly UnlockId[]) => Object.fromEntries(ids.map((id) => [id, `/assets/unlocks/${id.replace("/", "-")}.webp`]));
-const unlockDraws = (draws: readonly Draw[]) => draws.filter((d) => d.kind === "image" && d.unlock !== undefined);
+const unlockDraws = (draws: readonly Draw[]) => draws.filter((d): d is PictureDraw => d.kind === "image" && d.unlock !== undefined);
+const srcOf = (d: Draw) => ("src" in d ? d.src : d.kind);
 
 describe("the stage draws unlocked objects", () => {
   const window = { width: 1440, height: 900 };
@@ -143,7 +144,7 @@ describe("the stage draws unlocked objects", () => {
   test("each object is drawn at its depth: on the desk between the desk and the mat, on the sill behind the board", () => {
     const layout = full("last-desk", window);
     const names = buildScene("last-desk", layout, null, null, slotIds("last-desk"), art(slotIds("last-desk"))).draws
-      .map((d) => (d.kind === "image" && d.unlock !== undefined ? d.unlock : d.src.split("/").pop()!.replace(/\.webp$/, "")));
+      .map((d) => (d.kind === "image" && d.unlock !== undefined ? d.unlock : srcOf(d).split("/").pop()!.replace(/\.webp$/, "")));
     const before = (a: string, b: string) => names.indexOf(a) < names.indexOf(b);
     expect([before("rail-background", "last-desk/2"), before("last-desk/2", "rail-board")]).toEqual([true, true]);
     expect([before("rail-board", "last-desk/4"), before("last-desk/4", "rail-desk")]).toEqual([true, true]);
@@ -155,10 +156,19 @@ describe("the stage draws unlocked objects", () => {
     const { draws } = buildScene("last-desk", layout, null, null, ["last-desk/1"], art(["last-desk/1"]));
     const object = unlockDraws(draws)[0]!.src;
     const states = (objectState: PictureState, layerState: PictureState = "decoded") => (src: string) => (src === object ? objectState : layerState);
-    expect(readyDraws(draws, states("pending"))?.map((d) => d.src)).toEqual(draws.filter((d) => d.src !== object).map((d) => d.src));
-    expect(readyDraws(draws, states("failed"))?.some((d) => d.src === object)).toBe(false);
-    expect(readyDraws(draws, states("decoded"))?.some((d) => d.src === object)).toBe(true);
+    expect(readyDraws(draws, states("pending"))?.map(srcOf)).toEqual(draws.map(srcOf).filter((src) => src !== object));
+    expect(readyDraws(draws, states("failed"))?.some((d) => srcOf(d) === object)).toBe(false);
+    expect(readyDraws(draws, states("decoded"))?.some((d) => srcOf(d) === object)).toBe(true);
     expect(readyDraws(draws, states("decoded", "pending"))).toBeNull();
+  });
+
+  test("in a moving room the specks pass through, and only the waiting object is left out", () => {
+    const layout = full("last-desk", window);
+    const { draws } = buildScene("last-desk", layout, 1000, null, ["last-desk/1"], art(["last-desk/1"]));
+    const object = unlockDraws(draws)[0]!.src;
+    expect(draws.some((d) => d.kind === "specks")).toBe(true);
+    const ready = readyDraws(draws, (src) => (src === object ? "pending" : "decoded"));
+    expect(ready).toEqual(draws.filter((d) => srcOf(d) !== object));
   });
 });
 

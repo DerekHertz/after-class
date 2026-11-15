@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { APPEARANCE_KEY, DEFAULT_APPEARANCE } from "../src/app/appearance";
 import type { Appearance } from "../src/app/appearance";
+import { AMBIENT_FPS } from "../src/app/room/ambient";
 
 /** Pip's shipped gesture frames. The spec cannot import room/companion-art.ts, whose pictures only a bundler can load. */
 const PAINTED_FRAMES = ["blink", "look-board", "look-mat", "nod", "hop-crouch", "hop-air", "think", "cheer", "talk"];
@@ -29,6 +30,7 @@ const clearReaction = (page: Page) => page.evaluate(() => (window as unknown as 
 const gesture = (page: Page, name: string) => page.evaluate((name) => (window as unknown as { afterClassGesture: (g: string) => void }).afterClassGesture(name), name);
 
 test.describe("the stage draws the companion", () => {
+  test.use({ reducedMotion: "no-preference" });
   test.beforeEach(() => { test.skip(test.info().project.name === "narrow", "a phone shows the companion in the page, not on the stage"); });
 
   test("in place of the page's sheet, which the browser never fetches", async ({ page }) => {
@@ -84,7 +86,7 @@ test.describe("the stage draws the companion", () => {
     expect((await frames(page)).filter((f) => f !== "blink").slice(0, 3)).toEqual(["hop-crouch", "hop-air", "hop-crouch"]);
   });
 
-  test("at rest it blinks now and then, and the stage paints only when a frame changes", async ({ page }) => {
+  test("at rest it blinks now and then, and the stage paints only when a frame or a step of ambient life changes", async ({ page }) => {
     await openRoom(page);
     await page.waitForTimeout(500);
     const before = await paints(page);
@@ -94,7 +96,7 @@ test.describe("the stage draws the companion", () => {
     const painted = (await paints(page)) - before;
     // At least two blinks fall in any 16 seconds (one per 5 second window), each a blink and back, a double blink four changes.
     expect(seen.filter((f) => f === "blink").length).toBeGreaterThanOrEqual(2);
-    expect(painted).toBeLessThanOrEqual(seen.length + 2);
+    expect(painted).toBeLessThanOrEqual(16 * AMBIENT_FPS + seen.length + 2);
   });
 
   for (const [name, setup] of [
