@@ -10,7 +10,8 @@
 # - A tag keeps the digest it was first acted on with. A later image-digest.txt naming another digest is refused at every
 #   check and never deployed, because publishing approved the first one.
 # - A manual deploy with scripts/deploy-beta.sh stays until a different release becomes the highest published one.
-# - A release that fails its health check is rolled back by afterclass-deploy and not tried again.
+# - A release that fails its health check is rolled back by afterclass-deploy and not tried again. A deploy that fails
+#   before it restarts the app, such as a lock timeout or a failed pull, is not a decision, so the release is tried again.
 # - Publishing an older version deploys nothing, because only the highest published version counts. To roll back from
 #   GitHub, mark the newest release as a pre-release or delete it, and the next highest one is deployed.
 set -euo pipefail

@@ -117,7 +117,7 @@ A release is a `v<major>.<minor>.<patch>` tag on a `master` commit whose `packag
    - In the package's **Package settings**, under **Manage Actions access**, keep `DerekHertz/after-class` as the only repository, with the **Write** role. Under **Manage access**, give no other account or repository write access. The package exists only after the first image push, so check again before the first deploy.
    - `test/release-workflow.test.ts` fails when any workflow other than the `image` job of `release.yml` asks for `packages: write`, or when a workflow leaves its token's permissions to the repository default.
 
-   This leaves every repository writer and every workflow with `contents: write` trusted, because either can replace a release's `image-digest.txt`. The admin bypasses the ruleset, so never move a pushed release tag.
+   This leaves every repository writer and every workflow with `contents: write` trusted, because either can replace a release's `image-digest.txt`. The server keeps each tag on the digest it first acted on, so it refuses a replacement made after that. The admin bypasses the ruleset, so never move a pushed release tag.
 
 2. In a pull request, set `version` in `package.json` to the new version, and merge it. A workflow cannot do this step or the next, because `master` takes changes only through a pull request and only the admin can create a `v*` tag.
 3. Tag the merge commit and push the tag.
@@ -128,7 +128,7 @@ A release is a `v<major>.<minor>.<patch>` tag on a `master` commit whose `packag
    git push origin v0.1.5
    ```
 
-   The `release` workflow checks the tag against `master` and the package version, builds the commit for `linux/arm64`, and pushes `ghcr.io/derekhertz/after-class:<commit>` and `:<tag>`. It then creates a draft GitHub Release with `image-digest.txt`, which reads `commit <commit>` and `digest sha256:<64 hex>`. The draft's notes list each PR merged since the live release, from its title. A **Needs the operator** line means the range changes `infra/`, so plan and apply that stack before you publish. A **Migrates the database** line names the migrations. Edit the notes in the draft freely. A rerun replaces only `image-digest.txt`, with a new digest. Never rerun it for a published release, because the server deploys the new digest.
+   The `release` workflow checks the tag against `master` and the package version, builds the commit for `linux/arm64`, and pushes `ghcr.io/derekhertz/after-class:<commit>` and `:<tag>`. It then creates a draft GitHub Release with `image-digest.txt`, which reads `commit <commit>` and `digest sha256:<64 hex>`. The draft's notes list each PR merged since the release the beta's `/health` reports, from its title. When `/health` reports no version, as before `v0.1.5`, they start at the highest published release under a **Check the base** line. A **Needs the operator** line means the range changes `infra/`, so plan and apply that stack before you publish. A **Migrates the database** line names the migrations. Edit the notes in the draft freely. A rerun replaces only the draft's `image-digest.txt`, with a new digest. A rerun for a published release fails, so release a rebuilt image under a new version.
 
 4. Try the draft's image on your machine.
 
@@ -136,7 +136,7 @@ A release is a `v<major>.<minor>.<patch>` tag on a `master` commit whose `packag
    scripts/try-release.sh v0.1.5
    ```
 
-   It prints the notes and serves the release's review app at `http://127.0.0.1:8790/app/` in replay mode, with no keys and a database that goes away with the container. `AFTERCLASS_TRY_PORT` picks another port, and Ctrl-C stops it. It needs `gh` and Docker and calls no AWS API. On a machine that cannot run arm64 images, it runs the release image's own `/app` and `/data` on the amd64 build of the pinned Bun base image, and says so. It runs the local app, not the hosted Clerk sign-in.
+   It prints the draft's notes, then the base and the warnings computed again against the release the beta's `/health` reports now. An edit to the draft cannot remove those. It serves the release's review app at `http://127.0.0.1:8790/app/` in replay mode, with no keys and a database that goes away with the container. `AFTERCLASS_TRY_PORT` picks another port, and Ctrl-C stops it. Run it from a clone. It needs `gh`, `git`, `bun` and Docker and calls no AWS API. On a machine that cannot run arm64 images, it runs the release image's own `/app` and `/data` on the amd64 build of the pinned Bun base image, and says so. It runs the local app, not the hosted Clerk sign-in.
 
 5. Publish the draft on GitHub. Within 75 seconds, `afterclass-autodeploy` on the server starts to deploy it through `afterclass-deploy`, which checks `/health` and rolls back on failure. To watch it, run this.
 
@@ -149,10 +149,12 @@ A release is a `v<major>.<minor>.<patch>` tag on a `master` commit whose `packag
 How the server picks a release:
 
 - It deploys the highest published version. Drafts and pre-releases never count, and publishing an older version deploys nothing.
-- It acts once per release. A release that fails its health check is rolled back and not tried again. Publish a fixed release, or retry by hand.
+- It acts once each time a different release becomes the highest published one. A release that fails its health check is rolled back and not tried again. Publish a fixed release, or retry by hand.
+- A deploy that fails before it restarts the app, such as a lock timeout or a failed pull, is tried again after 2, 4, 8 and 16 minutes, then every 30.
+- A tag keeps the digest it was first deployed or refused with. A later `image-digest.txt` under that tag is refused at every check with a `REFUSED` line, and the unit fails until a newer release is published.
 - To roll back, mark the newest release as a pre-release on GitHub, or delete it. The server deploys the next highest published version.
-- It asks the GitHub API without a sign-in every 75 seconds, about 48 requests an hour against GitHub's limit of 60. GitHub counts an unchanged list's 304 answer too. A GitHub error, a rate limit, a malformed `image-digest.txt` or a commit off `master` deploys nothing and logs why.
-- The release it last acted on is in `/data/afterclass/autodeploy`. `systemctl status afterclass-autodeploy` shows the last check.
+- It asks the GitHub API without a sign-in every 75 seconds, about 48 requests an hour against GitHub's limit of 60. GitHub counts an unchanged list's 304 answer too. A GitHub error, a rate limit, a release list over 4 MiB, a malformed `image-digest.txt` or a commit off `master` deploys nothing and logs why. Only the newest 30 releases count.
+- Each release it acted on is a line in `/data/afterclass/autodeploy`, and the last line is the latest. `systemctl status afterclass-autodeploy` shows the last check. The file is on the data volume, so a replaced instance keeps it. A manual deploy or rollback therefore survives an instance replacement, and the new instance deploys nothing until a different release becomes the highest published one.
 
 To deploy by hand, for example while GitHub is down, run this from the root of a clone.
 
