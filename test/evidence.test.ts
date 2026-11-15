@@ -528,8 +528,28 @@ describe("capture view", () => {
     expect(view.health).toEqual([
       { channel: "transcript", health: "unknown", detail: "" },
       { channel: "frames", health: "stalled", detail: "no frames for 12 s" },
-      { channel: "playback", health: "unknown", detail: "" },
+      { channel: "playback", health: "ok", detail: "watch time arriving" },
     ]);
+  });
+
+  test("captions that arrived make the transcript ok, and a later failure still shows", () => {
+    const h = harness();
+    const s = stream();
+    s.control("start");
+    s.source();
+    s.transcript([[0, 4, "hello"]]);
+    s.span(0, 10);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    const of = (c: string) => h.evidence.captureView(s.captureId).health.find((x) => x.channel === c)!;
+    expect(of("transcript")).toEqual({ channel: "transcript", health: "ok", detail: "captions received" });
+    expect(of("playback").health).toBe("ok");
+    expect(of("frames").health).toBe("unknown");
+    s.frame("f1", 5);
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(of("frames")).toEqual({ channel: "frames", health: "ok", detail: "frames arriving" });
+    s.push({ kind: "channel", channel: "transcript", health: "failed", videoId: VIDEO, atMediaS: media(12), detail: "caption feed dropped" });
+    h.evidence.ingest({ captureId: s.captureId, facts: s.facts });
+    expect(of("transcript").health).toBe("failed");
   });
 
   test("an unknown capture is stopped and empty", () => {
