@@ -88,7 +88,7 @@ Any change to `user_data` replaces the instance with a few minutes of downtime. 
    scripts/deploy-beta.sh v0.1.0
    ```
 
-   From an allowed address, `curl <public_url>/health` returns `{"ok":true}`.
+   From an allowed address, `curl <public_url>/health` returns `{"ok":true,"version":"<the release version>"}`.
 
 6. To open a shell, run `aws ssm start-session --target <instance_id output>`. This needs the Session Manager plugin for the AWS CLI.
 

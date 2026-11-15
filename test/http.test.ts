@@ -61,19 +61,21 @@ describe("authorize", () => {
   });
 });
 
+const HEALTH = JSON.stringify({ ok: true, version: (await Bun.file(new URL("../package.json", import.meta.url)).json()).version });
+
 describe("health and the API", () => {
-  test("GET /health is {\"ok\":true} on both loopback names without a token", async () => {
+  test("GET /health is ok with the package version on both loopback names without a token", async () => {
     const { port, base } = start();
     const r = await fetch(`${base}/health`);
     expect(r.status).toBe(200);
-    expect(await r.text()).toBe('{"ok":true}');
-    expect((await raw(port, "/health", { Host: `localhost:${port}` })).body).toBe('{"ok":true}');
+    expect(await r.text()).toBe(HEALTH);
+    expect((await raw(port, "/health", { Host: `localhost:${port}` })).body).toBe(HEALTH);
   });
 
   test("healthAnyHost answers /health for a load balancer's Host and leaves every other route on the localhost Host check", async () => {
     const { port } = start(undefined, { healthAnyHost: true });
     const lb = { Host: "10.0.1.7:4317" };
-    expect((await raw(port, "/health", lb)).body).toBe('{"ok":true}');
+    expect((await raw(port, "/health", lb)).body).toBe(HEALTH);
     expect((await raw(port, "/usage", { ...lb, Authorization: `Bearer ${TOKEN}` })).status).toBe(403);
     expect((await raw(port, "/app/", lb)).status).toBe(403);
   });
