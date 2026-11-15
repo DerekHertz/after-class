@@ -87,7 +87,7 @@ export const browserDeps: ContentDeps = {
   createTracker: (found, emit, videoId, dur, signal) => createPlaybackTracker(found.video, found.player, emit, videoId, dur, undefined, signal),
   createSampler: createBrowserSampler,
   watchNavigation,
-  pausedSign: createPausedSign(() => document),
+  pausedSign: createPausedSign(() => document, () => findPlayer()?.player ?? null),
 };
 
 export function startContent(deps: ContentDeps): void {
@@ -158,10 +158,17 @@ export function startContent(deps: ContentDeps): void {
     return true;
   }
 
-  /** The sign is on the page exactly while capture is paused and the tab is on a watch page. */
+  /**
+   * The sign is on the page exactly while capture is paused and the tab is on a watch page. Leaving the page only
+   * takes it down; a Hide the learner pressed lasts until this pause ends, so only a capture that is not paused clears it.
+   */
   function updateSign(): void {
-    if (paused && onWatch) deps.pausedSign.show(() => send({ type: "resume" }));
-    else deps.pausedSign.hide();
+    if (!paused) deps.pausedSign.reset();
+    else if (!onWatch || captureId === null) deps.pausedSign.remove();
+    else {
+      const shownFor = captureId;
+      deps.pausedSign.show(() => send({ type: "resume", captureId: shownFor }));
+    }
   }
 
   /** Closes the open span and stops observing; the worker re-sends observe if capture is still on. */
@@ -183,6 +190,8 @@ export function startContent(deps: ContentDeps): void {
     }
     const wasObserving = observing;
     observing = m.on;
+    // A different capture is a different pause, whatever the Hide on the last one said.
+    if (m.captureId !== captureId) deps.pausedSign.reset();
     captureId = m.captureId;
     paused = m.paused === true;
     updateSign();

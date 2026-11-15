@@ -39,7 +39,7 @@ function rig(over: Partial<ContentDeps> = {}) {
   const transcriptCalls: string[] = [];
   let nav: Parameters<ContentDeps["watchNavigation"]>[0] | null = null;
   const trackers: { tracker: PlaybackTracker; disposed: boolean }[] = [];
-  const sign = { visible: false, resume: () => {} };
+  const sign = { visible: false, resume: () => {}, calls: [] as string[] };
 
   const deps: ContentDeps = {
     connect: () => port,
@@ -60,7 +60,11 @@ function rig(over: Partial<ContentDeps> = {}) {
     },
     createSampler: () => ({ setObserving() {}, dispose() {} }),
     watchNavigation: (h) => ((nav = h), () => {}),
-    pausedSign: { show: (onResume) => ((sign.visible = true), (sign.resume = onResume)), hide: () => (sign.visible = false) },
+    pausedSign: {
+      show: (onResume) => (sign.calls.push("show"), (sign.visible = true), (sign.resume = onResume)),
+      remove: () => (sign.calls.push("remove"), (sign.visible = false)),
+      reset: () => (sign.calls.push("reset"), (sign.visible = false)),
+    },
     ...over,
   };
   startContent(deps);
@@ -330,7 +334,7 @@ describe("the paused sign", () => {
     r.deliver(observe(false, CAP_A, true));
     expect(r.sign.visible).toBe(true);
     r.sign.resume();
-    expect(r.posted).toContainEqual({ type: "resume" });
+    expect(r.posted).toContainEqual({ type: "resume", captureId: CAP_A });
     r.deliver(observe(true, CAP_A));
     expect(r.sign.visible).toBe(false);
   });
@@ -350,5 +354,53 @@ describe("the paused sign", () => {
     r.nav().onWatchPage(VID);
     r.deliver(observe(false, CAP_A, false));
     expect(r.sign.visible).toBe(false);
+  });
+});
+
+describe("the paused sign's Resume and Hide across the pause", () => {
+  const last = (r: ReturnType<typeof rig>) => r.sign.calls.at(-1);
+
+  test("Resume names the capture the sign was shown for, even after a newer capture is paused", () => {
+    const r = rig();
+    r.nav().onWatchPage(VID);
+    r.deliver(observe(false, CAP_A, true));
+    const resumeA = r.sign.resume;
+    r.deliver(observe(false, CAP_B, true));
+    resumeA();
+    expect(r.posted.filter((m) => (m as { type?: string }).type === "resume")).toEqual([{ type: "resume", captureId: CAP_A }]);
+    r.sign.resume();
+    expect(r.posted.filter((m) => (m as { type?: string }).type === "resume").at(-1)).toEqual({ type: "resume", captureId: CAP_B as unknown as CaptureId });
+  });
+
+  test("leaving the watch page only removes the sign, so a Hide lasts until the pause ends", () => {
+    const r = rig();
+    r.nav().onWatchPage(VID);
+    r.deliver(observe(false, CAP_A, true));
+    r.sign.calls.length = 0;
+    r.nav().onLeftWatchPage();
+    expect(last(r)).toBe("remove");
+    expect(r.sign.calls).not.toContain("reset");
+    r.nav().onWatchPage(VID);
+    expect(last(r)).toBe("show");
+  });
+
+  test("a pause that ends, by resume or stop, forgets a Hide", () => {
+    const r = rig();
+    r.nav().onWatchPage(VID);
+    r.deliver(observe(false, CAP_A, true));
+    r.deliver(observe(true, CAP_A));
+    expect(last(r)).toBe("reset");
+    r.deliver(observe(false, CAP_A, true));
+    r.deliver(observe(false, CAP_A, false));
+    expect(last(r)).toBe("reset");
+  });
+
+  test("a different capture is a new pause even when no observe in between said otherwise", () => {
+    const r = rig();
+    r.nav().onWatchPage(VID);
+    r.deliver(observe(false, CAP_A, true));
+    r.sign.calls.length = 0;
+    r.deliver(observe(false, CAP_B, true));
+    expect(r.sign.calls).toEqual(["reset", "show"]);
   });
 });

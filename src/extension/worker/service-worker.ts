@@ -317,7 +317,7 @@ async function onContentMessage(tabId: number, msg: FromContent): Promise<void> 
       return;
     }
     if (msg.type === "resume") {
-      await applyEvent(tabId, { kind: "resume" });
+      await resumeCapture(tabId, msg.captureId).catch((e: unknown) => console.warn("After Class: the page's Resume was refused", e));
       return;
     }
     await applyEvent(tabId, msg.type === "idle" || msg.type === "video_ended" ? { kind: msg.type, captureId: msg.captureId } : { kind: msg.type });
@@ -390,16 +390,27 @@ async function ensureWatchPage(tabId: number): Promise<void> {
   if (!isWatchUrl(tab.url)) throw new Error("open a YouTube video page (youtube.com/watch) first");
 }
 
+/**
+ * The one way capture resumes, for the popup's Resume and the page sign's Resume, so they cannot differ: only on a
+ * watch page, with the content script attached. `captureId` is the capture a sign was shown for; the popup has none.
+ */
+async function resumeCapture(tabId: number, captureId?: CaptureId): Promise<TabCaptureState | null> {
+  await ensureWatchPage(tabId);
+  await ensureContentScript(tabId);
+  return applyEvent(tabId, captureId === undefined ? { kind: "resume" } : { kind: "resume", captureId });
+}
+
 async function handlePopup(req: PopupRequest): Promise<WorkerResponse> {
   switch (req.type) {
-    case "start":
-    case "resume": {
+    case "start": {
       // A new capture belongs to the connected account, so a hosted build needs one before it starts.
-      if (req.type === "start" && !["local", "connected"].includes((await connection()).kind)) throw new Error("connect After Class to your account first: press Connect");
+      if (!["local", "connected"].includes((await connection()).kind)) throw new Error("connect After Class to your account first: press Connect");
       await ensureWatchPage(req.tabId);
       await ensureContentScript(req.tabId);
-      return { state: await applyEvent(req.tabId, req.type === "start" ? { kind: "start", tabId: req.tabId } : { kind: "resume" }) };
+      return { state: await applyEvent(req.tabId, { kind: "start", tabId: req.tabId }) };
     }
+    case "resume":
+      return { state: await resumeCapture(req.tabId) };
     case "pause":
     case "stop":
       return { state: await applyEvent(req.tabId, { kind: req.type }) };

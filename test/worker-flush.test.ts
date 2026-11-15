@@ -2,7 +2,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { createPlaybackTracker, VIDEO_END_GRACE_MS } from "../src/extension/content/capture";
 import type { PlaybackEnv } from "../src/extension/content/capture";
-import { answeringFlush, boot, connectPort, feed, kindsOf, newEnv, restoreGlobals, sendPopup, span, wait } from "./worker-harness";
+import { answeringFlush, boot, connectPort, feed, kindsOf, newEnv, restoreGlobals, sendPopup, span, wait, WATCH } from "./worker-harness";
 import type { FakePort } from "./worker-harness";
 
 afterAll(restoreGlobals);
@@ -208,10 +208,45 @@ describe("the paused sign's messages", () => {
     feed(p, { type: "idle", captureId: await captureIdOf(c) });
     await wait(50);
     expect(lastObserve()).toMatchObject({ on: false, paused: true });
-    feed(p, { type: "resume" });
+    feed(p, { type: "resume", captureId: await captureIdOf(c) });
     await wait(50);
     expect(lastObserve()).toMatchObject({ on: true, paused: false });
     expect((await sendPopup(c, { type: "status", tabId: 1 })).state.state).toBe("capturing");
+  });
+
+  async function paused() {
+    const rig = await capturing();
+    answeringFlush(rig.p);
+    const id = await captureIdOf(rig.c);
+    feed(rig.p, { type: "idle", captureId: id });
+    await wait(50);
+    return { ...rig, id };
+  }
+  const stateOf = async (c: Parameters<typeof sendPopup>[0]) => (await sendPopup(c, { type: "status", tabId: 1 })).state.state;
+
+  test("the page's Resume off a watch page is refused, as the popup's is", async () => {
+    const { env, c, p, id } = await paused();
+    env.urls[1] = "https://www.youtube.com/";
+    expect((await sendPopup(c, { type: "resume", tabId: 1 })).error).toContain("youtube.com/watch");
+    feed(p, { type: "resume", captureId: id });
+    await wait(50);
+    expect(await stateOf(c)).toBe("paused");
+    env.urls[1] = WATCH;
+    feed(p, { type: "resume", captureId: id });
+    await wait(50);
+    expect(await stateOf(c)).toBe("capturing");
+  });
+
+  test("a Resume from the sign of an earlier capture does not resume the capture that replaced it", async () => {
+    const { c, p, id } = await paused();
+    await sendPopup(c, { type: "stop", tabId: 1 });
+    await sendPopup(c, { type: "start", tabId: 1 });
+    await sendPopup(c, { type: "pause", tabId: 1 });
+    expect(await stateOf(c)).toBe("paused");
+    expect(await captureIdOf(c)).not.toBe(id);
+    feed(p, { type: "resume", captureId: id });
+    await wait(50);
+    expect(await stateOf(c)).toBe("paused");
   });
 });
 

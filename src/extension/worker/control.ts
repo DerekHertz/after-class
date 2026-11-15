@@ -50,9 +50,10 @@ export type ToContent =
 
 /**
  * Content script to worker, besides fact bodies. Same port, so a `flushed` always follows the spans sent before it.
- * `resume` is the Resume button on the page's paused sign; it is the learner's own click, as in the popup.
+ * `resume` is the Resume button on the page's paused sign; it is the learner's own click, as in the popup, and names
+ * the capture the sign was shown for so a late click cannot resume a later capture.
  */
-export type FromContent = CaptureFactBody | ContentSignal | { readonly type: "flushed" | "resume" };
+export type FromContent = CaptureFactBody | ContentSignal | { readonly type: "flushed" } | { readonly type: "resume"; readonly captureId: CaptureId };
 
 /** What the content script is told about a tab: whether to observe, and whether capture is paused so the page can say so. */
 export function observeMessage(state: TabCaptureState | null): ToContent {
@@ -130,15 +131,18 @@ export function mayUpload(owner: string | undefined, stored: StoredConnection): 
 
 export type ControlEvent =
   | { readonly kind: "start"; readonly tabId: number }
-  | { readonly kind: "pause" | "resume" | "stop" | "left_watch_page" | "returned_to_watch_page" | "tab_closed" }
+  | { readonly kind: "pause" | "stop" | "left_watch_page" | "returned_to_watch_page" | "tab_closed" }
+  /** The popup's Resume names no capture; the page's sign names the one it was shown for. */
+  | { readonly kind: "resume"; readonly captureId?: CaptureId }
   | RestEvent;
 
 /** The page saw the player at rest during `captureId`. It means nothing for any other capture. */
 export type RestEvent = { readonly kind: "idle" | "video_ended"; readonly captureId: CaptureId };
 
-/** True for a rest event aimed at a capture the tab is no longer in, whether it ended, restarted or never was. */
+/** True for a rest event or a page Resume aimed at a capture the tab is no longer in, whether it ended, restarted or never was. */
 export function isStaleRest(current: TabCaptureState | null, event: ControlEvent): boolean {
-  return (event.kind === "idle" || event.kind === "video_ended") && current?.captureId !== event.captureId;
+  const aimed = event.kind === "idle" || event.kind === "video_ended" || (event.kind === "resume" && event.captureId !== undefined);
+  return aimed && current?.captureId !== event.captureId;
 }
 
 /**
@@ -177,7 +181,7 @@ export function transition(
     case "idle":
       return isStaleRest(current, event) ? noop : current?.state === "capturing" ? { next: to("paused", "idle"), fact: control("pause", "idle") } : noop;
     case "resume":
-      return current?.state === "paused" ? { next: to("capturing", null), fact: control("resume", "user") } : noop;
+      return current?.state === "paused" && !isStaleRest(current, event) ? { next: to("capturing", null), fact: control("resume", "user") } : noop;
     case "returned_to_watch_page":
       return noop;
     case "stop":
