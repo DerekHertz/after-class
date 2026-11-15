@@ -28,7 +28,8 @@ import type { UserDb } from "../db";
 import { PAID_TUTOR_HOLD } from "../providers/budget";
 import type { Memo, RunResult } from "../providers/memo";
 import { MAX_MAIN_QUESTIONS, allowedMoves, askedClaims, parseMoveHeader, reviewState, settledCorrections, validateMove, validateSay, tutorOwesMove, waitsForLearner } from "./tutor";
-import type { TutorInput, TutorOutput, WrapUpInput, WrapUpOutput } from "./tutor";
+import type { TutorInput, TutorOutput } from "./tutor";
+import { NOTHING_TO_ASK_LINE, WRAP_UP_LINE } from "./clamp";
 import {
   corrections as deriveCorrections, decodeScope, encodeScope, foldInvites, freezeScope, takeSentences, unreviewed, usableInScope,
 } from "./core";
@@ -106,7 +107,11 @@ export type ReviewsDeps = {
   runTutor(input: TutorInput, streamTo: (delta: string) => void, signal: AbortSignal, onRetry: () => void): Promise<RunResult<TutorOutput>>;
   /** The memo's: a resend clears the stored terminal failure of its tutor call so the model is asked again. */
   clearFailures: Memo["clearFailures"];
-  runWrapUp(input: WrapUpInput): Promise<RunResult<WrapUpOutput>>;
+  /**
+   * Starts the summary the save will read, without waiting for it. It does not read the tutor's closing line, so it runs while that
+   * line streams (#234). Called when the review is bound to end, and again when the closing line is stored; the second call is dropped.
+   */
+  startWrapUp(reviewId: ReviewId): void;
   nextSeq(): Seq;
   /** The record's markEndedInTx, run in the transaction that stores the wrap_up turn, so an ended review always has a save row (#138). */
   endedInTx?(reviewId: ReviewId): void;
@@ -126,8 +131,6 @@ type Attempt =
 type Settled = { readonly ok: true; readonly lookup: RunResult<TutorOutput> } | { readonly ok: false; readonly error: string };
 
 const CLOSE_THREAD_LINE = "Let's leave that question there and move on.";
-const WRAP_UP_LINE = "Let's wrap up here.";
-const NOTHING_TO_ASK_LINE = "Every statement I prepared for this part was withdrawn after checking against the lecture, so there's nothing left I can fairly ask you about. Let's wrap up here.";
 /** One request may hold several tutor moves (a correction, then the next question); never more than this, so it cannot loop. */
 export const MAX_MOVES_PER_TURN = 4;
 const NON_TERMINAL = new Set(["awaiting_check", "awaiting_revision", "awaiting_recheck"]);
@@ -154,6 +157,12 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
   const kit: TutorKit = config.tutor ?? { reviewState, allowedMoves, parseMoveHeader, validateMove };
 
   const userId = db.userId;
+  const wrapUpStarted = new Set<ReviewId>();
+  const startWrapUp = (reviewId: ReviewId) => {
+    if (wrapUpStarted.has(reviewId)) return;
+    wrapUpStarted.add(reviewId);
+    deps.startWrapUp(reviewId);
+  };
   const REVIEW_COLUMNS = "id, capture_id, choice, scope_json, frozen_at_seq, started_ms";
   const q = {
     answers: db.sql.query<{ seq: number; answer: InviteAnswer; watched_s: number }, [string, string]>(
@@ -678,6 +687,7 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
         }
         break;
       }
+      if (input.allowed.length === 1 && input.allowed[0] === "wrap_up") startWrapUp(reviewId);
       const outId = moveTurnId(reviewId, turnId, n);
       const asOf = deps.nextSeq();
       let stored: { readonly move: TutorMove; readonly say: string } | null = null;
@@ -700,6 +710,7 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
         if (outcome.kind === "spoken") {
           const done = commit(reviewId, turnId, outId, review, input, outcome.move, outcome.say);
           if (done.ok) {
+            if (done.move.kind === "wrap_up") startWrapUp(reviewId);
             yield { type: "move", turnId: outId, move: done.move };
             stored = done;
             break;
@@ -724,6 +735,7 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
           yield { type: "turn_failed", error: `no valid move: ${done.why}`, retryable: true };
           return;
         }
+        if (done.move.kind === "wrap_up") startWrapUp(reviewId);
         yield* spoken(done.say);
         yield { type: "move", turnId: outId, move: done.move };
         stored = done;

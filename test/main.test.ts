@@ -461,21 +461,13 @@ describe("main, the pump an upload triggers", () => {
 // ───────────────────────────── M7b: the record, preparation and segmentation reach the server ─────────────────────────────
 
 describe("main, the live backend serves save, retry-preparation, the record and evidence", () => {
-  const wrapUpScript = (failFirst: number) => {
-    let calls = 0;
-    return scripted<unknown, { observations: never[]; notes: never[] }>("wrap_up", "claude", () => `wrap-${Math.min(calls, 1)}`, () => {
-      calls += 1;
-      return calls <= failFirst ? fail("claude timed out") : ok({ observations: [], notes: [] });
-    });
-  };
-
   const json = async (r: Response) => ({ status: r.status, body: (await r.json()) as Record<string, any> });
   const get = (b: Boot, path: string) => fetch(`${b.base}${path}`, { headers: authed(b.r.token) }).then(json);
   const post = (b: Boot, path: string, body: unknown = {}) => fetch(`${b.base}${path}`, { method: "POST", headers: authed(b.r.token), body: JSON.stringify(body) }).then(json);
 
   test("save and retry-preparation answer instead of 501; a failed save reads save_pending across a restart, and retrying it twice saves one record (R15)", async () => {
     const fakes = fakeTasks();
-    const wrapUp = wrapUpScript(1);
+    const wrapUp = stableWrapUp(["fail", "fail", "ok"]);
     const tutor = scripted("tutor_turn", "claude", () => "tutor", () => ok({ move: { kind: "wrap_up" }, say: "That is the end of this review." }));
     const tasks = { ...fakes.tasks, wrapUp, tutor } as unknown as TaskSet;
     const configDir = dir("afterclass-config-");
@@ -502,6 +494,8 @@ describe("main, the live backend serves save, retry-preparation, the record and 
     expect((await get(first, `/reviews/${reviewId}`)).body.state.phase).toBe("ended");
     // #138: ending records a pending save before any POST /save, so a closed tab cannot leave it without a row.
     expect((await get(first, `/reviews/${reviewId}`)).body.saved).toBe("save_pending");
+    // the end's early summary call fails (#234), and the save asks once more and fails too
+    await settled(wrapUp, 1);
 
     expect((await post(first, `/reviews/${reviewId}/save`)).body).toMatchObject({ kind: "save_failed", retryable: true });
     expect((await get(first, `/reviews/${reviewId}`)).body.saved).toBe("save_pending");
@@ -520,6 +514,12 @@ describe("main, the live backend serves save, retry-preparation, the record and 
     expect((await get(second, `/record?reviewId=${reviewId}`)).status).toBe(200);
   }, 30_000);
 
+  /** Waits until the early summary call has been asked `n` times and its outcome stored, so a save after it cannot join it. */
+  const settled = async (task: { calls: readonly unknown[] }, n: number) => {
+    await until(() => task.calls.length === n);
+    await Bun.sleep(50);
+  };
+
   // #95: the canonical key stays the same through failure and recovery, so only a retry that clears the stored failure can reach the recovered provider.
   const stableWrapUp = (outcomes: readonly ("fail" | "ok")[]) => {
     let calls = 0;
@@ -532,7 +532,7 @@ describe("main, the live backend serves save, retry-preparation, the record and 
 
   test("a save retry asks the wrap-up again after a cached terminal failure, across a restart, and saves one record (#95, R15)", async () => {
     const fakes = fakeTasks();
-    const wrapUp = stableWrapUp(["fail", "fail", "ok"]);
+    const wrapUp = stableWrapUp(["fail", "fail", "fail", "ok"]);
     const tutor = scripted("tutor_turn", "claude", () => "tutor", () => ok({ move: { kind: "wrap_up" }, say: "That is the end of this review." }));
     const tasks = { ...fakes.tasks, wrapUp, tutor } as unknown as TaskSet;
     const configDir = dir("afterclass-config-");
@@ -546,12 +546,13 @@ describe("main, the live backend serves save, retry-preparation, the record and 
     const ending = await fetch(`${first.base}/reviews/${reviewId}/turns`, { method: "POST", headers: authed(first.r.token), body: JSON.stringify({ turnId: stableId("turn", "main-test-stable-end"), act: { kind: "end" } }) });
     expect(await ending.text()).toContain("turn_complete");
 
-    // the first save fails; one request makes one model call, not a loop
-    expect((await post(first, `/reviews/${reviewId}/save`)).body).toMatchObject({ kind: "save_failed", retryable: true });
-    expect(wrapUp.calls).toHaveLength(1);
-    // the provider is still down: the retry asks once more and reports a recoverable failure
+    // the end's early summary call fails (#234); the first save asks once more and fails, one model call, not a loop
+    await settled(wrapUp, 1);
     expect((await post(first, `/reviews/${reviewId}/save`)).body).toMatchObject({ kind: "save_failed", retryable: true });
     expect(wrapUp.calls).toHaveLength(2);
+    // the provider is still down: the retry asks once more and reports a recoverable failure
+    expect((await post(first, `/reviews/${reviewId}/save`)).body).toMatchObject({ kind: "save_failed", retryable: true });
+    expect(wrapUp.calls).toHaveLength(3);
     expect((await get(first, `/reviews/${reviewId}`)).body.saved).toBe("save_pending");
 
     await first.r.stop();
@@ -562,11 +563,11 @@ describe("main, the live backend serves save, retry-preparation, the record and 
     // the provider has recovered: the restarted backend's retry reaches it and saves
     const once = await post(second, `/reviews/${reviewId}/save`);
     expect(once.body).toEqual({ kind: "saved", notes: 0, observations: 0, links: 0 });
-    expect(wrapUp.calls).toHaveLength(3);
+    expect(wrapUp.calls).toHaveLength(4);
     // R15: a further retry is answered from the first save, with no model call and no second record
     const twice = await post(second, `/reviews/${reviewId}/save`);
     expect(twice.body).toEqual(once.body);
-    expect(wrapUp.calls).toHaveLength(3);
+    expect(wrapUp.calls).toHaveLength(4);
     expect((await get(second, `/reviews/${reviewId}`)).body.saved).toBe("saved");
     expect(second.r.modules.db.sql.query("SELECT COUNT(*) AS n FROM saved_reviews").get()).toEqual({ n: 1 });
   }, 30_000);
