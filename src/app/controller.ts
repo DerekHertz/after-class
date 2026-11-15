@@ -145,14 +145,14 @@ export function createReviewController(deps: ControllerDeps): ReviewController {
   }
 
   /**
-   * A failed live turn whose reply the backend went on to store is finished: the stored view shows the learner turn with a turn
-   * after it, nothing still running and no move still owed, so the partial text, the error and Retry go.
+   * A failed live turn whose reply the backend went on to store is finished: the stored view shows a tutor turn after the learner
+   * turn (a code turn such as a correction is not a reply), nothing still running and no move still owed, so the partial text, the error and Retry go.
    */
   function settleLive(view: ReviewView): void {
     const live = state.live;
     if (live?.status !== "failed" || view.turnInFlight || view.owesMove) return;
     const at = view.turns.findIndex((t) => t.id === live.turnId);
-    if (at !== -1 && at < view.turns.length - 1) set({ live: null });
+    if (at !== -1 && view.turns.slice(at + 1).some((t) => t.actor === "tutor")) set({ live: null });
   }
 
   /** A turn the backend already stored is no longer unsent, whether or not this page saw the acknowledgment. */

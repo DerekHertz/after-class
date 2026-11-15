@@ -753,6 +753,17 @@ describe("a page loaded while the backend still runs a turn", () => {
     h.controller.dispose();
   });
 
+  test("a failed turn followed only by a code turn keeps its failure and Retry", async () => {
+    let sent = "";
+    const h = setup({
+      sendTurn: ({ turnId }) => ((sent = turnId), events({ type: "learner_turn_stored", turnId }, { type: "turn_failed", error: "connection lost", retryable: true })),
+      review: () => parsedReview({ turns: [tutorAsk, { ...learnerAnswer(2), id: sent }, turnJson(3, "code", { notice: { kind: "correction_applied", correctionId: "corr_x", affectedClaims: [clm] } })] }),
+    });
+    await h.controller.send(answer);
+    expect(h.controller.getState().live?.status).toBe("failed");
+    h.controller.dispose();
+  });
+
   test("a send that settles after the page is left does not start watching", async () => {
     let reads = 0;
     let release = () => {};
