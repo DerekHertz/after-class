@@ -11,6 +11,11 @@ import type { ThreadId, TurnId } from "../../shared/ids";
 import { HELP_MOVES } from "../../shared/domain";
 import { detourTracker } from "./detour";
 
+/** Closing lines code speaks itself. They end the session and teach nothing, so the record leaves them out of notes. */
+export const WRAP_UP_LINE = "Let's wrap up here.";
+export const NOTHING_TO_ASK_LINE = "Every statement I prepared for this part was withdrawn after checking against the lecture, so there's nothing left I can fairly ask you about. Let's wrap up here.";
+export const STOCK_CLOSINGS: ReadonlySet<string> = new Set([WRAP_UP_LINE, NOTHING_TO_ASK_LINE]);
+
 const HELP: ReadonlySet<TutorMove["kind"]> = new Set(HELP_MOVES);
 
 /** Statuses that count as a learning gap when no dispute stands in the way. */

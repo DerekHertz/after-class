@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { makeHost, stub } from "./beta-host";
+import { makeHost, offlineEnv, stub } from "./beta-host";
 
 const SCRIPT = resolve(import.meta.dir, "../scripts/deploy-beta.sh");
 const COMMIT = "f".repeat(40);
@@ -20,6 +20,18 @@ interface Opts {
   /** The release's image-digest.txt, or null for a release without one. */
   readonly record?: string | null;
   readonly statuses?: string[];
+  /** The digest scripts/release.sh showed and passes as the second argument. */
+  readonly expected?: string;
+  /** The commit scripts/release.sh showed and passes as the third argument. */
+  readonly expectedCommit?: string;
+  /** The exact bytes aws prints for the instance id, the command id and a status, in place of the well-formed ones. */
+  readonly instanceOut?: Buffer;
+  readonly commandOut?: Buffer;
+  readonly statusOut?: Buffer;
+  /** The seconds the whole wait may take, and the real seconds each status read and the final output read take. */
+  readonly waitSeconds?: number;
+  readonly statusDelay?: number;
+  readonly outputDelay?: number;
 }
 
 interface Run {
@@ -30,6 +42,7 @@ interface Run {
   readonly calls: string[][];
   /** What curl read on stdin when it asked GHCR for the manifest. */
   readonly manifestHeaders: string;
+  readonly elapsedMs: number;
 }
 
 /**
@@ -71,28 +84,39 @@ for arg; do
 done
 exit 2`,
   );
+  for (const [name, bytes] of [["instance-out", opts.instanceOut], ["command-out", opts.commandOut], ["status-out", opts.statusOut]] as const) {
+    if (bytes !== undefined) writeFileSync(join(host.root, name), bytes);
+  }
+  const answer = (name: string, fallback: string): string => (opts.instanceOut !== undefined && name === "instance-out") || (opts.commandOut !== undefined && name === "command-out") ? `cat ${host.root}/${name}` : fallback;
   stub(
     host.bin,
     "aws",
     `${record}
 case "$2" in
-  get-parameter) echo ${INSTANCE};;
-  send-command) echo ${COMMAND};;
+  get-parameter) ${answer("instance-out", `echo ${INSTANCE}`)};;
+  send-command) ${answer("command-out", `echo ${COMMAND}`)};;
   get-command-invocation)
     case "$*" in
       *"--query Status"*)
+        ${opts.statusDelay === undefined ? "" : `/usr/bin/sleep ${opts.statusDelay}`}
+        ${opts.statusOut === undefined ? "" : `cat ${host.root}/status-out; exit 0`}
         status=$(head -n 1 ${host.root}/statuses)
         [ "$(wc -l < ${host.root}/statuses)" -gt 1 ] && sed -i 1d ${host.root}/statuses
         echo "$status";;
-      *) echo "afterclass-deploy: ${COMMIT} is healthy";;
+      *) ${opts.outputDelay === undefined ? "" : `/usr/bin/sleep ${opts.outputDelay}`}
+        echo "afterclass-deploy: ${COMMIT} is healthy";;
     esac;;
 esac
 exit 0`,
   );
   stub(host.bin, "sleep", "exit 0");
-  const result = Bun.spawnSync(["bash", SCRIPT, opts.tag ?? "v0.1.0"], {
-    env: { ...process.env, PATH: `${host.bin}:${process.env.PATH}` },
+  const began = Date.now();
+  const result = Bun.spawnSync(["bash", SCRIPT, opts.tag ?? "v0.1.0", ...(opts.expected === undefined ? [] : [opts.expected]), ...(opts.expectedCommit === undefined ? [] : [opts.expectedCommit])], {
+    env: offlineEnv(host.bin, opts.waitSeconds === undefined ? {} : { AFTERCLASS_DEPLOY_WAIT_SECONDS: String(opts.waitSeconds) }),
+    timeout: 40_000,
+    killSignal: "SIGKILL",
   });
+  const elapsedMs = Date.now() - began;
   const raw = existsSync(calls) ? readFileSync(calls, "utf8") : "";
   return {
     status: result.exitCode,
@@ -102,6 +126,7 @@ exit 0`,
       .split("\n")
       .filter(Boolean)
       .map((line) => line.split("\0").filter(Boolean)),
+    elapsedMs,
     manifestHeaders: existsSync(join(host.root, "manifest-headers")) ? readFileSync(join(host.root, "manifest-headers"), "utf8") : "",
   };
 }
@@ -184,14 +209,15 @@ describe("scripts/deploy-beta.sh", () => {
 
   const badRecords: [string, string | null, string][] = [
     ["a release without image-digest.txt", null, "has no image-digest.txt"],
-    ["an empty record", "", "is not a commit line and a digest line"],
-    ["a record without a digest line", `commit ${COMMIT}\n`, "is not a commit line and a digest line"],
-    ["a digest that is too short", `commit ${COMMIT}\ndigest sha256:${"1".repeat(63)}\n`, "is not a commit line and a digest line"],
-    ["an uppercase digest", `commit ${COMMIT}\ndigest sha256:${"A".repeat(64)}\n`, "is not a commit line and a digest line"],
-    ["a digest that is a tag", `commit ${COMMIT}\ndigest ${COMMIT}\n`, "is not a commit line and a digest line"],
-    ["a digest with a registry in it", `commit ${COMMIT}\ndigest evil.example/x@${APPROVED}\n`, "is not a commit line and a digest line"],
-    ["a record with a line after the digest", `${RECORD}digest ${ATTACKER}\n`, "is not a commit line and a digest line"],
+    ["an empty record", "", "image-digest.txt is not in its format"],
+    ["a record without a digest line", `commit ${COMMIT}\n`, "image-digest.txt is not in its format"],
+    ["a digest that is too short", `commit ${COMMIT}\ndigest sha256:${"1".repeat(63)}\n`, "image-digest.txt is not in its format"],
+    ["an uppercase digest", `commit ${COMMIT}\ndigest sha256:${"A".repeat(64)}\n`, "image-digest.txt is not in its format"],
+    ["a digest that is a tag", `commit ${COMMIT}\ndigest ${COMMIT}\n`, "image-digest.txt is not in its format"],
+    ["a digest with a registry in it", `commit ${COMMIT}\ndigest evil.example/x@${APPROVED}\n`, "image-digest.txt is not in its format"],
+    ["a record with a line after the digest", `${RECORD}digest ${ATTACKER}\n`, "image-digest.txt is not in its format"],
     ["a record for another commit", `commit ${"0".repeat(40)}\ndigest ${APPROVED}\n`, "records commit 0000"],
+    ["a NUL inside the digest, which a shell would drop", `commit ${COMMIT}\ndigest sha\u0000256:${"1".repeat(64)}\n`, "image-digest.txt is not in its format"],
   ];
   for (const [name, record, reason] of badRecords) {
     test(`refuses ${name}, and asks GHCR and AWS nothing`, () => {
@@ -203,12 +229,60 @@ describe("scripts/deploy-beta.sh", () => {
     });
   }
 
+  test("deploys the digest it was given when the release still names it", () => {
+    const run = deploy({ expected: APPROVED });
+    expect(run.status).toBe(0);
+    expect(calledWith(run, "aws", "send-command")[0]!.join(" ")).toContain(`"digest":["${APPROVED}"]`);
+  });
+
+  test("refuses, and asks GHCR and AWS nothing, when the release now names another digest than the one it was given", () => {
+    const run = deploy({ expected: ATTACKER });
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain(`now names ${APPROVED}, not the ${ATTACKER} you tried. Nothing was deployed.`);
+    expect(calledWith(run, "curl")).toEqual([]);
+    expect(calledWith(run, "aws")).toEqual([]);
+  });
+
+  test("deploys when the tag and the release still name the commit it was given", () => {
+    const run = deploy({ expected: APPROVED, expectedCommit: COMMIT });
+    expect(run.status).toBe(0);
+    expect(calledWith(run, "aws", "send-command")[0]!.join(" ")).toContain(COMMIT);
+  });
+
+  test("refuses, and asks GHCR and AWS nothing, when the tag and its record moved to another commit with the same digest", () => {
+    const shown = "e".repeat(40);
+    const run = deploy({ expected: APPROVED, expectedCommit: shown });
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain(`the v0.1.0 tag and its release now name commit ${COMMIT}, not the ${shown} you tried. Nothing was deployed.`);
+    expect(calledWith(run, "curl")).toEqual([]);
+    expect(calledWith(run, "aws")).toEqual([]);
+  });
+
   test("refuses when GHCR has no public image for the digest, and sends nothing", () => {
     const run = deploy({ imageExists: false });
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain(`ghcr.io/derekhertz/after-class@${APPROVED}`);
     expect(calledWith(run, "aws")).toEqual([]);
   });
+
+  const malformedIds: [string, Opts][] = [
+    ["an instance id with a NUL inside, which a shell capture would drop", { instanceOut: Buffer.from(`i-01234567\u000089abcdef0\n`) }],
+    ["an instance id that is not an id", { instanceOut: Buffer.from("not-an-instance-id\n") }],
+    ["a command id with a NUL inside, which a shell capture would drop", { commandOut: Buffer.from(`11111111-2222-3333-4444-55555555\u00005555\n`) }],
+    ["a command id that is not an id", { commandOut: Buffer.from("not-a-command-id\n") }],
+    ["a status with a NUL inside, which a shell capture would drop", { statusOut: Buffer.from("Succ\u0000ess\n") }],
+  ];
+  for (const [name, opts] of malformedIds) {
+    test(`refuses ${name}, and never uses it`, () => {
+      const run = deploy(opts);
+      expect(run.status).not.toBe(0);
+      expect(run.stderr).not.toContain("ignored null byte");
+      expect(run.stderr).toContain("is not in its format");
+      expect(run.stdout).not.toContain("is healthy");
+      expect(calledWith(run, "aws", "send-command").length).toBe(opts.instanceOut === undefined ? 1 : 0);
+      expect(calledWith(run, "aws", "get-command-invocation").length).toBe(opts.statusOut === undefined ? 0 : 1);
+    });
+  }
 
   test("a deploy the server reports as failed fails the script and shows the server's output", () => {
     const run = deploy({ statuses: ["InProgress", "Failed"] });
@@ -217,11 +291,25 @@ describe("scripts/deploy-beta.sh", () => {
     expect(run.stdout + run.stderr).toContain(`afterclass-deploy: ${COMMIT} is healthy`);
   });
 
-  test("a deploy still running after 15 minutes fails the script", () => {
-    const run = deploy({ statuses: ["InProgress"] });
-    expect(run.status).not.toBe(0);
-    expect(run.stderr).toContain("still running");
+  test("a deploy still running when the wait ends fails the script and names the real bound", () => {
+    const run = deploy({ statuses: ["InProgress"], waitSeconds: 2 });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("still running after 2 seconds");
+    expect(run.elapsedMs).toBeLessThan(8000);
   });
+
+  test("slow status reads cannot stretch the wait past its one deadline", () => {
+    const run = deploy({ statuses: ["InProgress"], waitSeconds: 4, statusDelay: 3 });
+    expect(run.status).toBe(1);
+    expect(run.elapsedMs).toBeLessThan(10_000);
+  }, 60_000);
+
+  test("a final output read that hangs is cut at the same deadline, and the script says it did not read it", () => {
+    const run = deploy({ statuses: ["Success"], waitSeconds: 3, outputDelay: 30 });
+    expect(run.status).toBe(0);
+    expect(run.stderr).toContain("was not read within the 3 s wait");
+    expect(run.elapsedMs).toBeLessThan(10_000);
+  }, 60_000);
 });
 
 describe("the deploy document", () => {

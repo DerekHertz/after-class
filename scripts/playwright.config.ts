@@ -36,5 +36,13 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 60_000,
     },
+    {
+      command: "bun run scripts/finish-save-preview.ts",
+      cwd: "..",
+      env: { AFTERCLASS_FINISH_PREVIEW_PORT: "8776", AFTERCLASS_FINISH_CONTROL_PORT: "8777" },
+      url: "http://127.0.0.1:8777/health",
+      reuseExistingServer: false,
+      timeout: 60_000,
+    },
   ],
 });

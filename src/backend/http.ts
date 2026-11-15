@@ -35,6 +35,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
+import packageJson from "../../package.json" with { type: "json" };
 import { parseId } from "../shared/ids";
 import type { IdKind } from "../shared/ids";
 import type { CaptureId, ConceptId, DeviceId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, SourceId, TurnId, UserId } from "../shared/ids";
@@ -824,7 +825,7 @@ async function handle(req: Request, peer: string | null, opts: ServeOptions, gat
 
   if (req.method === "GET" && path === "/health") {
     const v = gate.health(req.headers);
-    return v.ok ? json(200, { ok: true }) : failure(v.status, "forbidden");
+    return v.ok ? json(200, { ok: true, version: packageJson.version }) : failure(v.status, "forbidden");
   }
 
   if (path === "/app" || path.startsWith("/app/")) {

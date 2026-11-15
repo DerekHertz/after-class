@@ -375,6 +375,42 @@ describe("begin (flow D: the tutor opens with a recall question)", () => {
   });
 });
 
+// ───────────────────────────── the end starts the summary (#234) ─────────────────────────────
+
+describe("the wrap-up summary starts when the review is bound to end", () => {
+  /** A rig whose reviews log, in order, when the tutor's call begins and when the summary is asked for. */
+  function logged(script: Script, tutor: TutorKit | undefined) {
+    const r = startedRig();
+    const log: string[] = [];
+    const t = tutorHarness(r.db, (input, call) => (log.push("tutor"), script(input, call)));
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: t.runTutor, clearFailures: t.clearFailures, startWrapUp: () => void log.push("summary") }, { ...(tutor ? { tutor } : {}), now: () => 1_000_000 });
+    return { ...r, reviews, log };
+  }
+
+  test("an end the tutor can only answer by wrapping up starts the summary before the closing line is asked for, once", async () => {
+    const r = logged(() => reply({ kind: "wrap_up" }, "Done."), undefined);
+    const turnId = randomId("turn");
+    await collect(r.reviews.turn(r.reviewId, turnId, { kind: "end" }));
+    expect(r.log).toEqual(["summary", "tutor"]);
+    await collect(r.reviews.turn(r.reviewId, turnId, { kind: "end" }));
+    expect(r.log).toEqual(["summary", "tutor"]);
+  });
+
+  test("a wrap-up the tutor chooses itself starts the summary once the closing line is stored", async () => {
+    const r = logged(() => reply({ kind: "wrap_up" }, "Done."), kit);
+    await collect(r.reviews.turn(r.reviewId, randomId("turn"), answer()));
+    expect(r.log).toEqual(["tutor", "summary"]);
+    expect(r.reviews.view(r.reviewId).state.phase).toBe("ended");
+  });
+
+  test("a turn that does not end the review never starts it", async () => {
+    const r: ReturnType<typeof logged> = logged(() => reply(askMain(r.claim), "What is the main idea?"), kit);
+    await collect(r.reviews.turn(r.reviewId, randomId("turn"), answer()));
+    await collect(r.reviews.turn(r.reviewId, randomId("turn"), { kind: "pause" }));
+    expect(r.log).not.toContain("summary");
+  });
+});
+
 // ───────────────────────────── material used up by earlier reviews ─────────────────────────────
 
 describe("which earlier reviews use up material", () => {
