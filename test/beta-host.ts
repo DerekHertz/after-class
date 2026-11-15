@@ -11,6 +11,42 @@ export function stub(dir: string, name: string, body: string): void {
   chmodSync(path, 0o755);
 }
 
+/** A local port nothing listens on. */
+const CLOSED = "http://127.0.0.1:9";
+
+/**
+ * The environment for a release script run with `bin` first on PATH. Every proxy and the AWS endpoint point at a closed
+ * local port and the AWS files are empty, so a call a stub missed fails at once instead of reaching GitHub, AWS or
+ * useafterclass.com.
+ */
+export function offlineEnv(bin: string, extra: Record<string, string> = {}): Record<string, string | undefined> {
+  return {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    HTTPS_PROXY: CLOSED,
+    https_proxy: CLOSED,
+    HTTP_PROXY: CLOSED,
+    http_proxy: CLOSED,
+    ALL_PROXY: CLOSED,
+    all_proxy: CLOSED,
+    NO_PROXY: "",
+    no_proxy: "",
+    AWS_ENDPOINT_URL: CLOSED,
+    AWS_CONFIG_FILE: "/dev/null",
+    AWS_SHARED_CREDENTIALS_FILE: "/dev/null",
+    GH_TOKEN: "offline-test-token",
+    ...extra,
+  };
+}
+
+/** What `aws ssm get-command-invocation --output text` prints for the server probe on a digest file and a /health body. */
+export function probeOutput(image: string | Buffer | null, health: string | Buffer | { unreachable: number }): Buffer {
+  const b64 = (data: string | Buffer): string => Buffer.from(data).toString("base64");
+  const file = image === null ? "image missing" : `image ${Buffer.from(image).length} ${b64(image)}`;
+  if (typeof health === "object" && !Buffer.isBuffer(health)) return Buffer.from(`${file}\nunreachable curl exited ${health.unreachable}\n`);
+  return Buffer.from(`${file}\nhealth ${Buffer.from(health).length} ${b64(health)}\n`);
+}
+
 export interface Host {
   readonly root: string;
   readonly bin: string;
