@@ -15,7 +15,7 @@ for (const scenario of scenarios) {
 const root = resolve(import.meta.dir, "..");
 const out = join(root, "dist/ui-preview");
 mkdirSync(out, { recursive: true });
-const result = await Bun.build({ entrypoints: [join(import.meta.dir, "ui-preview/index.html")], outdir: out, target: "browser", publicPath: "/", throw: false });
+const result = await Bun.build({ entrypoints: [join(import.meta.dir, "ui-preview/index.html"), join(import.meta.dir, "ui-preview/pip.html")], outdir: out, target: "browser", publicPath: "/", throw: false });
 if (!result.success) throw new Error(result.logs.map(String).join("\n"));
 writeFileSync(join(out, "preview-build.json"), JSON.stringify({ fixture: true, builtAt: new Date().toISOString() }));
 if (!process.argv.includes("--build-only")) {
@@ -27,6 +27,7 @@ if (!process.argv.includes("--build-only")) {
       const filePath = resolve(out, `.${path}`);
       if (filePath !== out && !filePath.startsWith(`${out}/`)) return new Response("Not found", { status: 404 });
       const file = Bun.file(filePath);
+      if (path === "/pip" || path === "/pip.html") return new Response(Bun.file(join(out, "pip.html")));
       if (extname(path) && await file.exists()) return new Response(file);
       if (extname(path)) return new Response("Not found", { status: 404 });
       return new Response(Bun.file(join(out, "index.html")));
