@@ -16,7 +16,7 @@ const overlaps = (a: Rect, b: Rect) => a.left < right(b) && b.left < right(a) &&
 const EPS = 1e-9;
 const inside = (r: Rect, { width, height }: Size) => r.left >= -EPS && r.top >= -EPS && right(r) <= width + EPS && bottom(r) <= height + EPS;
 
-/** Every desktop window from the smallest full room to 4K, in 40 px steps. */
+/** Desktop windows from the smallest full room to about 4K, in 40 px steps. */
 const windows: Size[] = [];
 for (let width = 900; width <= 3840; width += 40) for (let height = 560; height <= 2160; height += 40) windows.push({ width, height });
 
