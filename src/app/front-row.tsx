@@ -166,7 +166,7 @@ function DeskObject({ object, label, tag, open, rect }: { readonly object: RoomO
 /** A board or desk that scrolls its own long content. It joins the tab order only while it has something to scroll. */
 function ScrollArea({ area, label, areaRef, children }: { readonly area: "board" | "desk"; readonly label: string; readonly areaRef?: Ref<HTMLElement> | undefined; readonly children: ReactNode }) {
   const own = useRef<HTMLElement>(null);
-  const scrolls = useOverflow(own);
+  const scrolls = useOverflow(own, area === "board");
   return (
     <section
       ref={(node) => {
@@ -181,12 +181,30 @@ function ScrollArea({ area, label, areaRef, children }: { readonly area: "board"
   );
 }
 
-function useOverflow(ref: RefObject<HTMLElement | null>): boolean {
+/** The smallest the board's type shrinks to before the board scrolls, as a share of the mockup's sizes. */
+const BOARD_FIT_FLOOR = 0.7;
+
+/**
+ * Whether `ref` overflows. With `fit`, the board first steps its type down from the mockup's sizes (`--fr-fit`) until its
+ * whole exchange fits, so a reply or a held note shows without scrolling; only past the floor does it scroll.
+ */
+function useOverflow(ref: RefObject<HTMLElement | null>, fit = false): boolean {
   const [overflows, setOverflows] = useState(false);
   useEffect(() => {
     const node = ref.current;
     if (!node || typeof ResizeObserver === "undefined") return;
-    const measure = () => setOverflows(node.scrollHeight > node.clientHeight + 1);
+    const over = () => node.scrollHeight > node.clientHeight + 1;
+    const measure = () => {
+      if (fit) {
+        let scale = 1;
+        node.style.setProperty("--fr-fit", "1");
+        while (over() && scale > BOARD_FIT_FLOOR + 1e-9) {
+          scale = Math.max(BOARD_FIT_FLOOR, scale - 0.05);
+          node.style.setProperty("--fr-fit", String(scale));
+        }
+      }
+      setOverflows(over());
+    };
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     for (const child of node.children) observer.observe(child);
@@ -197,6 +215,6 @@ function useOverflow(ref: RefObject<HTMLElement | null>): boolean {
     mutations.observe(node, { childList: true, subtree: true, characterData: true });
     measure();
     return () => { observer.disconnect(); mutations.disconnect(); };
-  }, [ref]);
+  }, [ref, fit]);
   return overflows;
 }

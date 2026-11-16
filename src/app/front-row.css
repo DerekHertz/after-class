@@ -324,13 +324,13 @@
   .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { position: absolute; z-index: 7; inset: var(--fr-desk-text); overflow: auto; overscroll-behavior: contain; }
   /* The room's type follows its scale, s CSS pixels per plate pixel, from the sizes the mockup set in plate pixels: the question
      42 bold, the explanation 24, the topic label 20 and the small label 15. A floor keeps a small window's type readable. */
-  .front-row-scene .front-row-eyebrow, .front-row-scene .front-row-heading-box { font-size: max(.8rem, calc(var(--fr-s) * 20)); }
+  .front-row-scene .front-row-eyebrow, .front-row-scene .front-row-heading-box { font-size: max(.8rem, calc(var(--fr-s) * var(--fr-fit, 1) * 20)); }
   .front-row-scene .front-row-heading-box .front-row-eyebrow { font-size: 1em; }
-  .front-row-scene .front-row-heading { margin-bottom: calc(var(--fr-s) * 10); }
-  .front-row-scene .current-exchange .lines { gap: calc(var(--fr-s) * 12); }
-  .scene-shell .front-row-scene .current-exchange .line strong { font-size: max(.7rem, calc(var(--fr-s) * 15)); }
-  .scene-shell .front-row-scene .current-exchange .line p { font-size: max(.9rem, calc(var(--fr-s) * 24)); line-height: 1.45; }
-  .scene-shell .front-row-scene .current-exchange .line[data-question] p { font-size: max(1.15rem, calc(var(--fr-s) * 42)); font-weight: 700; line-height: 1.36; }
+  .front-row-scene .front-row-heading { margin-bottom: calc(var(--fr-s) * var(--fr-fit, 1) * 10); }
+  .front-row-scene .current-exchange .lines { gap: calc(var(--fr-s) * var(--fr-fit, 1) * 12); }
+  .scene-shell .front-row-scene .current-exchange .line strong { font-size: max(.7rem, calc(var(--fr-s) * var(--fr-fit, 1) * 15)); }
+  .scene-shell .front-row-scene .current-exchange .line p { font-size: max(.9rem, calc(var(--fr-s) * var(--fr-fit, 1) * 24)); line-height: 1.45; }
+  .scene-shell .front-row-scene .current-exchange .line[data-question] p { font-size: max(1.15rem, calc(var(--fr-s) * var(--fr-fit, 1) * 42)); font-weight: 700; line-height: 1.36; }
   /* Your thinking: the label 26, the field 20 and the buttons 21 plate pixels. */
   .scene-shell .front-row-scene .composer > label { font-size: max(1.05rem, calc(var(--fr-s) * 26)); }
   .scene-shell .front-row-scene .composer { gap: calc(var(--fr-s) * 10) calc(var(--fr-s) * 14); }
