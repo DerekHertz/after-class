@@ -5,9 +5,6 @@ import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SceneId } from "../src/app/appearance";
 import { layoutRoom } from "../src/app/room/layout";
-import type { FullRoomLayout, Rect, Size, UnlockLayer } from "../src/app/room/layout";
-import { readyDraws } from "../src/app/room/paint";
-import type { PictureState } from "../src/app/room/paint";
 import { ProgressPanel, progressRows } from "../src/app/room/progress-panel";
 import { onRecordChange } from "../src/app/api";
 import type { AppApi } from "../src/app/api";
@@ -18,8 +15,7 @@ import { RecordScreen } from "../src/app/record";
 import { SavedNotes } from "../src/app/review";
 import type { UnlockId } from "../src/app/room/progress";
 import { buildScene } from "../src/app/room/scene";
-import type { Draw, PictureDraw } from "../src/app/room/scene";
-import { UNLOCK_ART } from "../src/app/room/art";
+import { ROOM_LAYER_ART, UNLOCK_ART } from "../src/app/room/art";
 import { UNLOCK_SLOTS } from "../src/app/room/unlocks";
 import type { Observation, RecordView, RecordedStatus } from "../src/shared/domain";
 import { stableId } from "../src/shared/ids";
@@ -29,81 +25,10 @@ import manifestJson from "../art/manifest.json";
 const manifest = manifestJson as ArtEntry[];
 
 const rooms = ROOM_IDS as readonly SceneId[];
-const full = (scene: SceneId, window: Size): FullRoomLayout => {
-  const layout = layoutRoom(scene, window, "full");
-  if (layout.composition !== "full") throw new Error("a full window lays out the full room");
-  return layout;
-};
-const right = (r: Rect) => r.left + r.width;
-const bottom = (r: Rect) => r.top + r.height;
-const clip = (a: Rect, b: Rect): Rect | null => {
-  const [l, t, r, d] = [Math.max(a.left, b.left), Math.max(a.top, b.top), Math.min(right(a), right(b)), Math.min(bottom(a), bottom(b))];
-  return r > l && d > t ? { left: l, top: t, width: r - l, height: d - t } : null;
-};
-
-/** Desktop windows from the smallest full room to about 4K, in 40 px steps, as test/room-layout.test.ts walks them. */
-const windows: Size[] = [];
-for (let width = 900; width <= 3840; width += 40) for (let height = 560; height <= 2160; height += 40) windows.push({ width, height });
-
-/**
- * The navigation chips' band across the top: one row from 1360 px wide, two rows below that (front-row.css). The browser
- * test e2e/room-unlocks.spec.ts measures the real chips.
- */
-const navBand = ({ width }: Size): Rect => ({ left: 0, top: 0, width, height: width >= 1360 ? 64 : 120 });
-
-/** What of a slot shows: inside the window, and above the desk's far edge for anything drawn behind the desk. */
-function shown(slot: UnlockLayer, layout: FullRoomLayout): Rect | null {
-  const inWindow = clip(slot.rect, { left: 0, top: 0, ...layout.window });
-  return inWindow && slot.z < 5 ? clip(inWindow, { left: 0, top: 0, width: layout.window.width, height: layout.layers.desk.rect.top }) : inWindow;
-}
 
 describe("unlock slots", () => {
   test("each room has its fixed slots, in the order progress opens them", () => {
     for (const room of ROOM_IDS) expect(UNLOCK_SLOTS[room].map((s) => s.id)).toEqual([...slotIds(room)]);
-  });
-
-  test("no slot crowds the board's text, Your thinking, the companion, the folio, the notebook, the Your room panel or the navigation", () => {
-    for (const scene of rooms) for (const window of windows) {
-      const layout = full(scene, window);
-      const keepClear: Record<string, Rect> = {
-        boardText: layout.text.board, deskText: layout.text.desk, mat: layout.layers.mat.rect, companion: layout.companion.box,
-        source: layout.objects.source, history: layout.objects.history, progress: layout.progress, nav: navBand(window),
-      };
-      const hits = layout.layers.unlocks.flatMap((slot) => {
-        const seen = shown(slot, layout);
-        if (seen === null) return [];
-        const others = layout.layers.unlocks.filter((o) => o !== slot && o.z === slot.z).map((o) => [o.id, shown(o, layout)] as const);
-        return [
-          ...Object.entries(keepClear).filter(([, zone]) => clip(seen, zone) !== null).map(([name]) => `${slot.id} on ${name}`),
-          ...others.filter(([, rect]) => rect !== null && clip(seen, rect) !== null).map(([id]) => `${slot.id} on ${id}`),
-        ];
-      });
-      expect({ scene, window, hits }).toEqual({ scene, window, hits: [] });
-    }
-  });
-
-  test("on common desktop windows every slot shows at least 90% of its box", () => {
-    const common: Size[] = [[1440, 900], [1280, 720], [1280, 800], [1366, 768], [1536, 864], [1600, 900], [1920, 1080], [1920, 1200], [2560, 1440]].map(([width, height]) => ({ width: width!, height: height! }));
-    for (const scene of rooms) for (const window of common) {
-      const layout = full(scene, window);
-      const hidden = layout.layers.unlocks.filter((slot) => {
-        const seen = shown(slot, layout);
-        return (seen === null ? 0 : seen.width * seen.height) < 0.9 * slot.rect.width * slot.rect.height;
-      }).map((slot) => slot.id);
-      expect({ scene, window, hidden }).toEqual({ scene, window, hidden: [] });
-    }
-  });
-
-  test("the Your room panel's corner keeps off the board's visible part, Your thinking, the folio and the notebook", () => {
-    for (const scene of rooms) for (const window of windows) {
-      const layout = full(scene, window);
-      const board = layout.layers.board.rect;
-      // The board's legs may run behind the desk. Only the part above the desk's far edge shows.
-      const visibleBoard = clip(board, { left: 0, top: 0, width: window.width, height: layout.layers.desk.rect.top });
-      const zones = { board: visibleBoard, boardText: layout.text.board, mat: layout.layers.mat.rect, deskText: layout.text.desk, source: layout.objects.source, history: layout.objects.history };
-      const hits = Object.entries(zones).filter(([, zone]) => zone !== null && clip(layout.progress, zone) !== null).map(([name]) => name);
-      expect({ scene, window, hits, width: layout.progress.width > 0 }).toEqual({ scene, window, hits: [], width: true });
-    }
   });
 });
 
@@ -125,20 +50,18 @@ const twoOpen = deriveProgress([
   obs("independent", "r2"), obs("independent", "r2"), obs("independent", "r2"), obs("after_help", "r2"), obs("disputed", "r2"),
 ]);
 const art = (ids: readonly UnlockId[]) => Object.fromEntries(ids.map((id) => [id, `/assets/unlocks/${id.replace("/", "-")}.webp`]));
-const unlockDraws = (draws: readonly Draw[]) => draws.filter((d): d is PictureDraw => d.kind === "image" && d.unlock !== undefined);
-const srcOf = (d: Draw) => ("src" in d ? d.src : d.kind);
 
-describe("the stage draws unlocked objects", () => {
-  const window = { width: 1440, height: 900 };
-
-  test("nothing is drawn for a slot with no picture, however far the learner has come", () => {
+describe("the stage does not draw unlocked objects for now", () => {
+  test("every room's plate already shows the mockup's grown objects, so the draw list holds the plate and nothing for a slot", () => {
     for (const scene of rooms) {
-      const layout = full(scene, window);
-      expect(unlockDraws(buildScene(scene, layout, null, null, slotIds(scene), {}).draws)).toEqual([]);
+      const layout = layoutRoom(scene, { width: 1440, height: 900 }, "full");
+      const srcs = buildScene(scene, layout, null, null).draws.flatMap((d) => ("src" in d ? [d.src] : []));
+      expect(srcs.every((src) => src === ROOM_LAYER_ART[scene].plate)).toBe(true);
+      expect(srcs.some((src) => Object.values(UNLOCK_ART).includes(src))).toBe(false);
     }
   });
 
-  test("every slot has its painted picture, shipped at its box in plate pixels, so it is drawn one asset pixel per plate pixel", () => {
+  test("every slot has its painted picture, shipped at its box in plate pixels, kept for when unlocks are decided again", () => {
     const shipped = new Map(manifest.map((e) => [e.ship, e]));
     const sizes = rooms.flatMap((scene) => UNLOCK_SLOTS[scene].map((slot) => {
       const ship = `unlock-objects/${slot.id}.webp`;
@@ -146,43 +69,6 @@ describe("the stage draws unlocked objects", () => {
       return { id: slot.id, drawn: UNLOCK_ART[slot.id]?.endsWith(ship), size: entry && [entry.width, entry.height] };
     }));
     expect(sizes).toEqual(rooms.flatMap((scene) => UNLOCK_SLOTS[scene].map((slot) => ({ id: slot.id, drawn: true, size: [slot.width, slot.height] }))));
-  });
-
-  test("an open slot with a picture is drawn in its box, and a closed one is not, even with a picture", () => {
-    const layout = full("last-desk", window);
-    const draws = unlockDraws(buildScene("last-desk", layout, null, null, twoOpen.unlocks["last-desk"], art(slotIds("last-desk"))).draws);
-    const drawn = Object.fromEntries(draws.map((d) => [d.kind === "image" ? d.unlock : "", d.rect]));
-    expect(drawn).toEqual(Object.fromEntries(layout.layers.unlocks.slice(0, 2).map((s) => [s.id, s.rect])));
-  });
-
-  test("each object is drawn at its depth: on the desk between the desk and the mat, on the sill behind the board", () => {
-    const layout = full("last-desk", window);
-    const names = buildScene("last-desk", layout, null, null, slotIds("last-desk"), art(slotIds("last-desk"))).draws
-      .map((d) => (d.kind === "image" && d.unlock !== undefined ? d.unlock : srcOf(d).split("/").pop()!.replace(/\.webp$/, "")));
-    const before = (a: string, b: string) => names.indexOf(a) < names.indexOf(b);
-    expect([before("rail-background", "last-desk/2"), before("last-desk/2", "rail-board")]).toEqual([true, true]);
-    expect([before("rail-board", "last-desk/4"), before("last-desk/4", "rail-desk")]).toEqual([true, true]);
-    expect([before("rail-desk", "last-desk/1"), before("last-desk/1", "rail-mat")]).toEqual([true, true]);
-  });
-
-  test("an object's picture never holds the room back, while a layer's picture does", () => {
-    const layout = full("last-desk", window);
-    const { draws } = buildScene("last-desk", layout, null, null, ["last-desk/1"], art(["last-desk/1"]));
-    const object = unlockDraws(draws)[0]!.src;
-    const states = (objectState: PictureState, layerState: PictureState = "decoded") => (src: string) => (src === object ? objectState : layerState);
-    expect(readyDraws(draws, states("pending"))?.map(srcOf)).toEqual(draws.map(srcOf).filter((src) => src !== object));
-    expect(readyDraws(draws, states("failed"))?.some((d) => srcOf(d) === object)).toBe(false);
-    expect(readyDraws(draws, states("decoded"))?.some((d) => srcOf(d) === object)).toBe(true);
-    expect(readyDraws(draws, states("decoded", "pending"))).toBeNull();
-  });
-
-  test("in a moving room the specks pass through, and only the waiting object is left out", () => {
-    const layout = full("last-desk", window);
-    const { draws } = buildScene("last-desk", layout, 1000, null, ["last-desk/1"], art(["last-desk/1"]));
-    const object = unlockDraws(draws)[0]!.src;
-    expect(draws.some((d) => d.kind === "specks")).toBe(true);
-    const ready = readyDraws(draws, (src) => (src === object ? "pending" : "decoded"));
-    expect(ready).toEqual(draws.filter((d) => srcOf(d) !== object));
   });
 });
 
@@ -204,10 +90,11 @@ describe("the Your room panel", () => {
     expect(progressRows(allOpen, "last-desk", art(slotIds("last-desk"))).main.map((r) => r.key)).toEqual(["understood", "reviews"]);
   });
 
-  test("it starts closed behind one labelled button, with effort set apart from what counts as understood", () => {
-    const html = renderToStaticMarkup(createElement(ProgressPanel, { standing: { freshness: "current", progress: twoOpen }, room: "study-bench", rect: undefined, retry: () => {} }));
-    expect(html).toMatch(/<button[^>]*aria-expanded="false"[^>]*>Your room<\/button>/);
-    expect(html).toMatch(/class="room-progress-body" hidden=""/);
+  test("it starts shut until the bar's menu opens it, with effort set apart from what counts as understood", () => {
+    const panel = (open: boolean) => renderToStaticMarkup(createElement(ProgressPanel, { standing: { freshness: "current", progress: twoOpen }, room: "study-bench", open, close: () => {}, retry: () => {} }));
+    expect(panel(false)).toMatch(/aria-label="Your room"[^>]*hidden=""/);
+    expect(panel(true)).not.toMatch(/hidden=""/);
+    const html = panel(true);
     expect(html).toContain("<dt>Topics explained on your own</dt><dd>6</dd>");
     expect(html).toMatch(/class="room-progress-effort"><div data-count="effort"><dt>Questions answered with some help or only in part<\/dt><dd>2<\/dd>/);
     expect(html.replace(/<[^>]*>/g, " ")).not.toMatch(/understood|mastered|learned/i);
@@ -271,7 +158,7 @@ describe("the room's counts say how current they are, and its objects change onl
     };
   }
   const three = () => Array.from({ length: 3 }, () => obs("independent"));
-  const panel = (room: RoomRecord) => renderToStaticMarkup(createElement(ProgressPanel, { standing: room.getState()!, room: "last-desk", rect: undefined, retry: room.read }));
+  const panel = (room: RoomRecord) => renderToStaticMarkup(createElement(ProgressPanel, { standing: room.getState()!, room: "last-desk", open: true, close: () => {}, retry: room.read }));
   const seen = (room: RoomRecord) => {
     const state = room.getState()!;
     return [state.freshness, state.progress.understood.value, drawnUnlocks(state, "last-desk")];

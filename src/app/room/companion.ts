@@ -3,7 +3,6 @@ import { COMPANION_ART } from "./companion-art";
 import type { PaintedFrame } from "./companion-art";
 import type { Rect } from "./layout";
 import type { Gesture } from "./reactions";
-import { ROOM_ART } from "./rooms";
 import type { CompanionDraw } from "./scene";
 
 /**
@@ -147,15 +146,14 @@ const sizeFor = (height: number, ratio: number) => (height * ratio > SMALL_CELL 
 
 /**
  * The companion's draw in `box`, the square layout.ts gives it, at `ratio` device pixels per CSS pixel, and every file it may
- * draw at that size, so the stage can decode them before the first gesture needs one. A lift moves the whole frame up in
- * whole plate pixels. Until a gesture frame has decoded, the stage draws the sheet's idle pose in its place.
+ * draw at that size, so the stage can decode them before the first gesture needs one. `cell` is the box's height in plate
+ * pixels, and a lift moves the whole frame up in whole plate pixels. Until a gesture frame has decoded, the stage draws the sheet's idle pose in its place.
  */
-export function companionDraw(id: CompanionId, shown: Shown, box: Rect, ratio: number): { readonly draw: CompanionDraw; readonly files: readonly string[] } {
+export function companionDraw(id: CompanionId, shown: Shown, box: Rect, ratio: number, cell: number): { readonly draw: CompanionDraw; readonly files: readonly string[] } {
   const size = sizeFor(box.height, ratio);
   const { sheet, frames } = COMPANION_ART[id];
   const files = [sheet[size], ...Object.values(frames).map((f) => f[size])];
-  const u = box.height / ROOM_ART.companionSize;
-  const rect = { ...box, top: box.top - Math.round((shown.lift * ROOM_ART.companionSize) / CELL) * u };
+  const rect = { ...box, top: box.top - (Math.round((shown.lift * cell) / CELL) * box.height) / cell };
   const idle = { kind: "companion", frame: "idle", src: sheet[size], rect: box, column: 0, columns: SHEET.length, standIn: null } as const;
   const column = SHEET.indexOf(shown.frame);
   if (column >= 0) return { draw: { ...idle, frame: shown.frame, rect, column }, files };

@@ -5,7 +5,6 @@
  * The frames are the shipped large files, served by scripts/preview-ui.ts. This page does the timing and the hop's lift, as the stage in #222 will.
  */
 import background from "../../src/app/assets/front-row-v2/harbor-background.webp";
-import desk from "../../src/app/assets/front-row-v2/harbor-desk.webp";
 
 const CELL = 724;
 /** How many cell pixels below the ground line each companion's hop-air frame is drawn (measured in test/companion-frames.test.ts). */
@@ -36,7 +35,6 @@ const GESTURES = Object.fromEntries(Object.entries(ALL_GESTURES).filter(([, step
 const pip = document.getElementById("pip") as HTMLImageElement;
 pip.alt = companion;
 (document.getElementById("bg") as HTMLImageElement).src = background;
-(document.getElementById("desk") as HTMLImageElement).src = desk;
 
 // Idle is the first cell of the approved sheet, drawn through a canvas so every frame is an <img> of one square cell.
 const idleUrl = await new Promise<string>((resolve) => {

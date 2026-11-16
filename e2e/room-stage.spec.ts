@@ -4,9 +4,7 @@ import { deflateSync } from "node:zlib";
 import { APPEARANCE_KEY, DEFAULT_APPEARANCE, SCENES } from "../src/app/appearance";
 import type { SceneId } from "../src/app/appearance";
 import { layoutRoom } from "../src/app/room/layout";
-import type { NineSliceLayer, Rect } from "../src/app/room/layout";
 import { FRONT_ROW_ROOMS, ROOM_ART } from "../src/app/room/rooms";
-import type { Edges } from "../src/app/room/rooms";
 import { ROOM_ART_PREFIX } from "../src/shared/room-art";
 import { decodePng } from "../test/png";
 
@@ -100,36 +98,22 @@ function codedPng(width: number, height: number): Buffer {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", deflateSync(raw)), chunk("IEND", new Uint8Array())]);
 }
 
-/** Each room layer's file name, as the bundle names it, with the size of the picture it holds. */
+/** Each room picture's file name, as the bundle names it, with the size of the picture it holds. */
 function layerSizes(scene: SceneId): Map<string, { width: number; height: number }> {
-  const room = FRONT_ROW_ROOMS[scene];
   const prefix = ROOM_ART_PREFIX[scene];
-  return new Map([
-    [`${prefix}-background`, ROOM_ART.plate],
-    [`${prefix}-board`, room.board.art.size], [`${prefix}-desk`, room.desk.art.size], [`${prefix}-mat`, room.mat.art.size],
-    ...room.extras.map((e) => [`${prefix}-${e.name}`, { width: e.width, height: e.height }] as const),
-  ]);
+  return new Map<string, { width: number; height: number }>([[`${prefix}-background`, ROOM_ART.plate], [`${prefix}-wide`, FRONT_ROW_ROOMS[scene].plate.size]]);
 }
 
-/** The room's layers as front-row.css drew them before the stage, back to front, for the reference rendering. */
+/** The room's plate as one CSS-drawn picture at the place the layout gives it, for the reference rendering. */
 function cssLayers(scene: SceneId, window: { width: number; height: number }) {
   const layout = layoutRoom(scene, window, "full");
   if (layout.composition !== "full") throw new Error("a desktop window lays out the full room");
-  const room = FRONT_ROW_ROOMS[scene];
-  const prefix = ROOM_ART_PREFIX[scene];
-  const px = (e: Edges) => `${e.top}px ${e.right}px ${e.bottom}px ${e.left}px`;
-  const image = (name: string, rect: Rect, z: number) => ({ name: `${prefix}-${name}`, rect, z, slice: null, border: null });
-  const nine = (name: "board" | "desk" | "mat", layer: NineSliceLayer, z: number) => {
-    const s = room[name].art.slice;
-    return { name: `${prefix}-${name}`, rect: layer.rect, z, slice: `${s.top} ${s.right} ${s.bottom} ${s.left}`, border: px(layer.border) };
-  };
-  const { background, board, desk, mat, extras } = layout.layers;
-  return [image("background", background, 0), nine("board", board, 2), nine("desk", desk, 5), ...extras.map((e) => image(e.name, e.rect, e.z)), nine("mat", mat, 6)];
+  return [{ name: `${ROOM_ART_PREFIX[scene]}-wide`, rect: layout.plate, z: 0, slice: null, border: null }];
 }
 
 for (const scene of scenes) {
-  for (const size of [{ width: 1440, height: 900 }, { width: 1470, height: 1270 }]) {
-    test(`in ${scene} at ${size.width}x${size.height} the canvas samples the same art pixels the CSS layers did`, async ({ page }, info) => {
+  for (const size of [{ width: 1440, height: 900 }, { width: 2000, height: 1100 }]) {
+    test(`in ${scene} at ${size.width}x${size.height} the canvas samples the same art pixels as the plate drawn by CSS`, async ({ page }, info) => {
       test.skip(info.project.name === "narrow", "the phone backdrop is drawn smooth, so its pixels do not name a source pixel");
       await page.setViewportSize(size);
       const sizes = layerSizes(scene);
@@ -171,18 +155,18 @@ for (const scene of scenes) {
         if (Math.abs(cx! - sx!) > 1 || Math.abs(cy! - sy!) > 1) apart++;
       }
       // What is left are samples that fall exactly between two source pixels, which Chrome's CSS path and its canvas round
-      // either way: 0.41 percent of the window at most across the rooms when this was written.
-      expect({ scene, size, apart, share: differing / (css.width * css.height) < 0.006 }).toEqual({ scene, size, apart: 0, share: true });
+      // either way. The plate is drawn smaller than its file at 1440x900 (0.91 times), where that is 9.6 percent of the window,
+      // and never more than one source pixel apart. Above its size it is under 1 percent.
+      expect({ scene, size, apart, share: differing / (css.width * css.height) < 0.12 }).toEqual({ scene, size, apart: 0, share: true });
     });
   }
 }
 
-test("the room's words wait for its pictures, and a picture that fails does not hold them", async ({ page }, info) => {
+test("the room's words wait for its plate, and a plate that fails does not hold them", async ({ page }, info) => {
   test.skip(info.project.name === "narrow", "a phone shows its words over the page's own backdrop");
   let release = () => {};
   const held = new Promise<void>((done) => { release = done; });
-  await page.route(/\/harbor-board-[a-z0-9]{8}\.webp$/, async (route) => { await held; await route.continue(); });
-  await page.route(/\/harbor-lamp-[a-z0-9]{8}\.webp$/, (route) => route.fulfill({ status: 404 }));
+  await page.route(/\/harbor-wide-[a-z0-9]{8}\.webp$/, async (route) => { await held; await route.continue(); });
   await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene: "study-bench" } });
   await page.goto("/?scenario=review&clean=1");
   const board = page.locator('.front-row-area[data-area="board"]');
@@ -192,6 +176,15 @@ test("the room's words wait for its pictures, and a picture that fails does not 
   release();
   await expect(page.locator(".front-row-canvas[data-stage=painted]")).toBeAttached();
   expect(await board.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
+});
+
+test("a plate that fails to load does not hold the room's words", async ({ page }, info) => {
+  test.skip(info.project.name === "narrow", "a phone shows its words over the page's own backdrop");
+  await page.route(/\/harbor-wide-[a-z0-9]{8}\.webp$/, (route) => route.fulfill({ status: 404 }));
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene: "study-bench" } });
+  await page.goto("/?scenario=review&clean=1");
+  await expect(page.locator(".front-row-canvas[data-stage=painted]")).toBeAttached();
+  expect(await page.locator('.front-row-area[data-area="board"]').evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
 });
 
 for (const [unusable, init] of [
@@ -214,7 +207,7 @@ test("the setup's words wait for the room's pictures too", async ({ page }, info
   test.skip(info.project.name === "narrow", "a phone shows its words over the page's own backdrop");
   let release = () => {};
   const held = new Promise<void>((done) => { release = done; });
-  await page.route(/\/harbor-board-[a-z0-9]{8}\.webp$/, async (route) => { await held; await route.continue(); });
+  await page.route(/\/harbor-wide-[a-z0-9]{8}\.webp$/, async (route) => { await held; await route.continue(); });
   await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene: "study-bench" } });
   await page.goto("/?scenario=fuzzy-checklist&clean=1");
   const sections = page.locator(".setup-choices, .setup-start");
@@ -257,7 +250,7 @@ test("without a device-pixel box to observe, the stage still follows a change of
 });
 
 test("a room the learner moved on from does not repaint the stage when its pictures arrive", async ({ page }, info) => {
-  test.skip(info.project.name === "narrow", "the picker sits in the same place on both, and the desktop has more layers");
+  test.skip(info.project.name === "narrow", "the picker sits in the same place on both");
   let release = () => {};
   const held = new Promise<void>((done) => { release = done; });
   await page.route(/\/harbor-[a-z-]+-[a-z0-9]{8}\.webp$/, async (route) => { await held; await route.continue(); });
@@ -282,7 +275,7 @@ test("a room the learner moved on from does not repaint the stage when its pictu
   await page.getByRole("button", { name: /Lantern Canal Film Club/ }).click();
   const before = await settled();
   release();
-  await expect.poll(() => page.evaluate(() => performance.getEntriesByType("resource").filter((e) => /\/harbor-[a-z-]+-[a-z0-9]{8}\.webp$/.test(e.name)).length)).toBeGreaterThan(5);
+  await expect.poll(() => page.evaluate(() => performance.getEntriesByType("resource").filter((e) => /\/harbor-[a-z-]+-[a-z0-9]{8}\.webp$/.test(e.name)).length)).toBeGreaterThan(0);
   await page.waitForTimeout(500);
   expect(await paints()).toBe(before);
 });

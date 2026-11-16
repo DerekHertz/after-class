@@ -1,6 +1,4 @@
-import { useId, useRef, useState } from "react";
-import type { CSSProperties } from "react";
-import type { Rect } from "./layout";
+import { useId } from "react";
 import { slotIds } from "./progress";
 import type { Count, Progress, RoomId, UnlockId } from "./progress";
 import type { Freshness, RoomStanding } from "./room-record";
@@ -32,34 +30,27 @@ const NOTICE = {
 } as const satisfies Record<Freshness, string>;
 
 /**
- * "Your room": a button that opens the learner's counts from their saved reviews. Full rooms place it at `rect`, the desk's
- * corner around the companion, so it never covers the board or Your thinking. A phone stacks it below the desk.
+ * "Your room": the learner's counts from their saved reviews, in a panel the bar's menu opens (`open`). A full room floats it
+ * under the bar at the right, and a phone stacks it below the desk. Close shuts it (`close`), and so does Escape, which the review
+ * listens for.
  */
-export function ProgressPanel({ standing: { freshness, progress }, room, rect, retry }: { readonly standing: NonNullable<RoomStanding>; readonly room: RoomId; readonly rect: Rect | undefined; readonly retry: () => void }) {
-  const [open, setOpen] = useState(false);
-  const body = useId();
+export function ProgressPanel({ standing: { freshness, progress }, room, open, close, retry }: {
+  readonly standing: NonNullable<RoomStanding>; readonly room: RoomId; readonly open: boolean; readonly close: () => void; readonly retry: () => void;
+}) {
   const noticeId = useId();
-  const toggle = useRef<HTMLButtonElement>(null);
   const { main, effort } = progressRows(progress, room);
-  const style: CSSProperties | undefined = rect && { left: rect.left, top: rect.top, width: rect.width, maxHeight: rect.height };
   const busy = freshness === "refreshing";
   return (
     <section
-      className="room-progress" aria-label="Your room" data-open={open} data-freshness={freshness} style={style}
-      onKeyDown={(event) => {
-        if (event.key !== "Escape" || !open) return;
-        event.stopPropagation();
-        setOpen(false);
-        toggle.current?.focus();
-      }}
+      className="room-progress" aria-label="Your room" aria-describedby={freshness === "current" ? undefined : noticeId} data-open={open} data-freshness={freshness} hidden={!open}
     >
-      <button ref={toggle} type="button" aria-expanded={open} aria-controls={body} aria-describedby={freshness === "current" ? undefined : noticeId} onClick={() => setOpen(!open)}>Your room</button>
-      <div id={body} className="room-progress-body" hidden={!open}>
+      <div className="room-progress-body">
         {freshness === "current" ? <p>{NOTICE.current}</p>
           : freshness === "refreshing" ? <p id={noticeId} className="room-progress-notice" role="status">{NOTICE.refreshing}</p>
           : <p id={noticeId} className="room-progress-notice" role="alert">{NOTICE.stale} <button type="button" onClick={retry}>Retry</button></p>}
         <dl aria-busy={busy || undefined}>{main.map(({ key, label, value }) => <div key={key} data-count={key}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
         <dl className="room-progress-effort" aria-busy={busy || undefined}>{effort.map(({ key, label, value }) => <div key={key} data-count={key}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+        <button type="button" className="room-progress-close" onClick={close}>Close</button>
       </div>
     </section>
   );

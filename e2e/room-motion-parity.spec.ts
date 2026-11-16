@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import type { Page, Route } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { APPEARANCE_KEY, DEFAULT_APPEARANCE, SCENES } from "../src/app/appearance";
 import type { SceneId } from "../src/app/appearance";
 
@@ -42,23 +42,6 @@ test.describe("a moving room's steps match a whole repaint", () => {
           expect(Math.max(...steps.map((s) => s.repainted / s.total))).toBeLessThan(0.25);
         });
       }
-
-      test("in last-desk, while unlocked objects decode one after another", async ({ page }) => {
-        test.setTimeout(120_000);
-        const held: Route[] = [];
-        await page.route(unlockPicture, (route) => { held.push(route); });
-        const release = async (count: number) => {
-          await expect.poll(() => held.length).toBeGreaterThanOrEqual(count);
-          for (const route of held.splice(0, count)) await route.continue();
-          return count;
-        };
-        const steps = await runSteps(page, "last-desk", dpr, "room-grown", { 20: () => release(1), 40: () => release(5) });
-        const bad = steps.flatMap((s, i) => (s.wrong + s.missed > 0 ? [`step ${i} (${s.frame}): ${s.wrong} wrong, ${s.missed} missed, first at ${s.at}`] : []));
-        expect(bad).toEqual([]);
-        expect(steps.map((s) => s.unlocks)).toEqual(steps.map((_, i) => (i < 20 ? 0 : i < 40 ? 1 : 6)));
-        expect([steps[20]!.repainted, steps[40]!.repainted]).toEqual([steps[20]!.total, steps[40]!.total]);
-        expect(steps.slice(41).every((s) => s.repainted < s.total * 0.25)).toBe(true);
-      });
     });
   }
 });

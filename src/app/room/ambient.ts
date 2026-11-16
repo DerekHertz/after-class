@@ -1,11 +1,14 @@
 import type { SceneId } from "../appearance";
 import type { FullRoomLayout, Rect } from "./layout";
-import { ROOM_ART } from "./rooms";
+import { FRONT_ROW_ROOMS } from "./rooms";
 import type { Draw, Specks } from "./scene";
 
 type Hex = `#${string}`;
 
-/** A span of the room's background, in plate pixels from its top left. */
+/**
+ * A span of the room, in pixels of its 16:10 core from the core's top left (the mockup's pixels). The plate's strips lie
+ * beyond the core, so a region may start left of 0 or run past its width.
+ */
 export type PlateRegion = { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
 
 /**
@@ -37,28 +40,28 @@ export const AMBIENT_FPS = 12;
 const DEPTH_Z = { far: 0.5, mid: 1.5, near: 2.5 } as const;
 
 /**
- * Each room's ambient life. Regions are measured on the room's background, which is also where the window and the sea are.
+ * Each room's ambient life. Regions are measured on the room's core, which is also where the window and the sea are.
  * The rail room's petals blow in from the cherry tree in its window, the canal's rain falls in its window, and the harbor's
  * water glints. Dust catches the light in the two rooms with lamps.
  */
 export const AMBIENT: { readonly [S in SceneId]: readonly AmbientLayer[] } = {
   "last-desk": [
     { name: "window petals", depth: "far", region: { x: 1262, y: 140, width: 272, height: 450 }, count: 8, size: { width: 4, height: 3 }, speed: { x: -5, y: 12 }, sway: { amplitude: 6, period: 5 }, color: "#f6b6c8", alpha: 0.9 },
-    { name: "drifting petals", depth: "mid", region: { x: 0, y: 0, width: 1586, height: 992 }, count: 14, size: { width: 6, height: 4 }, speed: { x: -16, y: 20 }, sway: { amplitude: 14, period: 6 }, color: "#f4a9c0", alpha: 0.85 },
-    { name: "near petals", depth: "near", region: { x: 0, y: 0, width: 1586, height: 992 }, count: 6, size: { width: 9, height: 6 }, speed: { x: -30, y: 44 }, sway: { amplitude: 22, period: 4.5 }, color: "#f9c3d3", alpha: 0.8, clearOfBoard: true },
-    { name: "dust", depth: "mid", region: { x: 0, y: 40, width: 1586, height: 560 }, count: 18, size: { width: 2, height: 2 }, speed: { x: 3, y: -4 }, blink: { period: 4, on: 2.6 }, color: "#fff1c9", alpha: 0.7 },
+    { name: "drifting petals", depth: "mid", region: { x: -364, y: 0, width: 2314, height: 992 }, count: 14, size: { width: 6, height: 4 }, speed: { x: -16, y: 20 }, sway: { amplitude: 14, period: 6 }, color: "#f4a9c0", alpha: 0.85 },
+    { name: "near petals", depth: "near", region: { x: -364, y: 0, width: 2314, height: 992 }, count: 6, size: { width: 9, height: 6 }, speed: { x: -30, y: 44 }, sway: { amplitude: 22, period: 4.5 }, color: "#f9c3d3", alpha: 0.8, clearOfBoard: true },
+    { name: "dust", depth: "mid", region: { x: -364, y: 40, width: 2314, height: 560 }, count: 18, size: { width: 2, height: 2 }, speed: { x: 3, y: -4 }, blink: { period: 4, on: 2.6 }, color: "#fff1c9", alpha: 0.7 },
   ],
   "study-bench": [
     { name: "water glints", depth: "far", region: { x: 420, y: 440, width: 760, height: 105 }, count: 26, size: { width: 4, height: 1 }, speed: { x: 0, y: 0 }, blink: { period: 2.4, on: 0.7 }, color: "#f4fdff", alpha: 0.85 },
     { name: "far glints", depth: "far", region: { x: 1200, y: 440, width: 370, height: 130 }, count: 16, size: { width: 5, height: 1 }, speed: { x: 0, y: 0 }, blink: { period: 3.2, on: 0.8 }, color: "#dff6ff", alpha: 0.7 },
-    { name: "sunlit motes", depth: "mid", region: { x: 0, y: 0, width: 1586, height: 640 }, count: 14, size: { width: 2, height: 2 }, speed: { x: 4, y: -5 }, blink: { period: 5, on: 3 }, color: "#fffbe0", alpha: 0.75 },
-    { name: "near motes", depth: "near", region: { x: 0, y: 0, width: 1586, height: 640 }, count: 4, size: { width: 4, height: 4 }, speed: { x: 7, y: -10 }, blink: { period: 6, on: 3.6 }, color: "#fff6c4", alpha: 0.4, clearOfBoard: true },
+    { name: "sunlit motes", depth: "mid", region: { x: -364, y: 0, width: 2314, height: 640 }, count: 14, size: { width: 2, height: 2 }, speed: { x: 4, y: -5 }, blink: { period: 5, on: 3 }, color: "#fffbe0", alpha: 0.75 },
+    { name: "near motes", depth: "near", region: { x: -364, y: 0, width: 2314, height: 640 }, count: 4, size: { width: 4, height: 4 }, speed: { x: 7, y: -10 }, blink: { period: 6, on: 3.6 }, color: "#fff6c4", alpha: 0.4, clearOfBoard: true },
   ],
   "projection-booth": [
     { name: "window rain", depth: "far", region: { x: 52, y: 158, width: 286, height: 494 }, count: 40, size: { width: 1, height: 5 }, speed: { x: -4, y: 150 }, color: "#a9c4f0", alpha: 0.55 },
     { name: "near window rain", depth: "mid", region: { x: 52, y: 158, width: 286, height: 494 }, count: 16, size: { width: 1, height: 8 }, speed: { x: -7, y: 260 }, color: "#d3e2fb", alpha: 0.6 },
-    { name: "lamplit dust", depth: "mid", region: { x: 380, y: 40, width: 1206, height: 640 }, count: 16, size: { width: 2, height: 2 }, speed: { x: 3, y: -4 }, blink: { period: 4.5, on: 2.8 }, color: "#ffd9a0", alpha: 0.65 },
-    { name: "near dust", depth: "near", region: { x: 380, y: 40, width: 1206, height: 640 }, count: 4, size: { width: 4, height: 4 }, speed: { x: 6, y: -9 }, blink: { period: 6, on: 3.6 }, color: "#ffdcae", alpha: 0.35, clearOfBoard: true },
+    { name: "lamplit dust", depth: "mid", region: { x: 380, y: 40, width: 1570, height: 640 }, count: 16, size: { width: 2, height: 2 }, speed: { x: 3, y: -4 }, blink: { period: 4.5, on: 2.8 }, color: "#ffd9a0", alpha: 0.65 },
+    { name: "near dust", depth: "near", region: { x: 380, y: 40, width: 1570, height: 640 }, count: 4, size: { width: 4, height: 4 }, speed: { x: 6, y: -9 }, blink: { period: 6, on: 3.6 }, color: "#ffdcae", alpha: 0.35, clearOfBoard: true },
   ],
 };
 
@@ -94,6 +97,7 @@ export function speckPositions(layer: AmbientLayer, index: number, seconds: numb
 
 /**
  * A shaft of window light: a band of `width` plate pixels whose top edge starts at `from` and whose bottom edge ends at `to`,
+ * both in plate pixels from the room's light anchor (`light` in room/rooms.ts),
  * drawn as plain rows `row` plate pixels tall, each moved sideways a whole plate pixel. Its alpha rises and falls between
  * `alpha.low` and `alpha.high` over `alpha.period` seconds, in `alpha.steps` steps.
  */
@@ -114,7 +118,7 @@ export type LightShaft = {
  */
 export const LIGHT: { readonly [S in SceneId]: readonly LightShaft[] } = {
   "last-desk": [
-    { name: "window light", depth: "near", from: { x: 1262, y: 150 }, to: { x: 860, y: 740 }, width: 272, row: 6, color: "#fff4d6", alpha: { low: 0.08, high: 0.16, period: 9, steps: 4 } },
+    { name: "window light", depth: "near", from: { x: 0, y: 0 }, to: { x: -402, y: 590 }, width: 272, row: 6, color: "#fff4d6", alpha: { low: 0.08, high: 0.16, period: 9, steps: 4 } },
   ],
   "study-bench": [],
   "projection-booth": [],
@@ -142,19 +146,20 @@ const overlaps = (a: Rect, b: Rect) => a.left < b.left + b.width && a.left + a.w
 export function ambientDraws(scene: SceneId, layout: FullRoomLayout, now: number): { readonly draws: readonly { readonly z: number; readonly draw: Draw }[]; readonly next: number } {
   const step = Math.floor((now / 1000) * AMBIENT_FPS);
   const seconds = step / AMBIENT_FPS;
-  const { background, board } = layout.layers;
-  const scale = background.width / ROOM_ART.plate.width;
-  const onStage = ({ x, y, width, height }: PlateRegion): Rect => ({ left: background.left + x * scale, top: background.top + y * scale, width: width * scale, height: height * scale });
+  const { plate: drawn, s: scale } = layout;
+  const { core, light: anchor } = FRONT_ROW_ROOMS[scene].plate;
+  const onPlate = ({ x, y, width, height }: PlateRegion): Rect => ({ left: drawn.left + x * scale, top: drawn.top + y * scale, width: width * scale, height: height * scale });
+  const onStage = (region: PlateRegion): Rect => onPlate({ ...region, x: region.x + core.x });
   const specks = (z: number, color: string, alpha: number, rects: readonly Rect[]) => ({ z, draw: { kind: "specks", color, alpha, rects } as const satisfies Specks });
   const light = LIGHT[scene].map((shaft) => {
     const { alpha, rows } = shaftRows(shaft, seconds);
-    return specks(DEPTH_Z[shaft.depth], shaft.color, alpha, rows.map(onStage));
+    return specks(DEPTH_Z[shaft.depth], shaft.color, alpha, rows.map((row) => onPlate({ ...row, x: row.x + anchor.x, y: row.y + anchor.y })));
   });
   // A layer with no speck in view stays in the list, so the stage's runs of still pictures keep their bounds at every step.
   const motes = AMBIENT[scene].map((layer, index) => {
     const rects = speckPositions(layer, index, seconds)
       .map(({ x, y }) => onStage({ x, y, ...layer.size }))
-      .filter((rect) => !(layer.clearOfBoard && overlaps(rect, board.rect)));
+      .filter((rect) => !(layer.clearOfBoard && overlaps(rect, layout.text.board)));
     return specks(DEPTH_Z[layer.depth], layer.color, layer.alpha, rects);
   });
   return { draws: [...light, ...motes], next: ((step + 1) / AMBIENT_FPS) * 1000 };

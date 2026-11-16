@@ -9,7 +9,6 @@
       #stage { position: relative; width: min(100vw, 1586px); aspect-ratio: 1586 / 992; margin: 0 auto; overflow: hidden; container-type: inline-size; }
       #stage img { position: absolute; display: block; image-rendering: auto; }
       #bg { inset: 0; width: 100%; height: 100%; }
-      #desk { left: 0; bottom: 0; width: 100%; }
       #pip { width: 22%; left: 40%; bottom: 7%; }
       #bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; justify-content: center; }
       #bar button { padding: 4px 10px; }
@@ -17,7 +16,7 @@
     </style>
   </head>
   <body>
-    <div id="stage"><img id="bg" alt="" /><img id="desk" alt="" /><img id="pip" alt="Pip" /></div>
+    <div id="stage"><img id="bg" alt="" /><img id="pip" alt="Pip" /></div>
     <div id="bar"></div>
     <script type="module" src="./pip.ts"></script>
   </body>

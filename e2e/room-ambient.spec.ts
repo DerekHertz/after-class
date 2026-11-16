@@ -140,13 +140,13 @@ test.describe("with motion on", () => {
     });
     const offscreen = () => page.evaluate(() => (window as unknown as { offscreen: () => number }).offscreen());
     await openRoom(page, "last-desk");
-    await expect.poll(offscreen).toBeGreaterThan(1440 * 900);
+    await expect.poll(offscreen).toBeGreaterThanOrEqual(1440 * 900);
     await setHidden(page, true);
     expect(await offscreen()).toBe(0);
     await page.waitForTimeout(500);
     expect(await offscreen()).toBe(0);
     await setHidden(page, false);
-    await expect.poll(offscreen).toBeGreaterThan(1440 * 900);
+    await expect.poll(offscreen).toBeGreaterThanOrEqual(1440 * 900);
   });
 
   test("a stage with no size holds no offscreen pixels, and builds them again when it has one", async ({ page }) => {
@@ -162,14 +162,14 @@ test.describe("with motion on", () => {
     });
     const offscreen = () => page.evaluate(() => (window as unknown as { offscreen: () => number }).offscreen());
     await openRoom(page, "last-desk");
-    await expect.poll(offscreen).toBeGreaterThan(1440 * 900);
+    await expect.poll(offscreen).toBeGreaterThanOrEqual(1440 * 900);
     await setCanvasSize(page, false);
     await expect.poll(() => page.locator(".front-row-canvas").evaluate((c: HTMLCanvasElement) => c.width)).toBe(0);
     expect(await offscreen()).toBe(0);
     await page.waitForTimeout(500);
     expect(await offscreen()).toBe(0);
     await setCanvasSize(page, true);
-    await expect.poll(offscreen).toBeGreaterThan(1440 * 900);
+    await expect.poll(offscreen).toBeGreaterThanOrEqual(1440 * 900);
   });
 
   test("a stage that has no size and then its old size shows the whole room", async ({ page }) => {

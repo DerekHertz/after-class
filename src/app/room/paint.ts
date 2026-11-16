@@ -6,15 +6,14 @@ export type PictureState = "pending" | "decoded" | "failed";
 
 /**
  * What of `draws` to paint now, or null while the room waits. The room waits until every layer's picture has settled, and
- * a layer that failed is left out rather than holding it. An unlocked object never holds the room: it is left out until its
- * picture decodes. The companion passes through, as the stage picks its frame or stand-in itself, and so do the specks, which need no picture.
+ * a layer that failed is left out rather than holding it. The companion passes through, as the stage picks its frame or
+ * stand-in itself, and so do the specks and the balloon, which need no picture.
  */
 export function readyDraws(draws: readonly Draw[], state: (src: string) => PictureState): readonly Draw[] | null {
   let waits = false;
   const ready = draws.filter((draw) => {
-    if (draw.kind === "companion" || draw.kind === "specks") return true;
+    if (draw.kind === "companion" || draw.kind === "specks" || draw.kind === "balloon") return true;
     const settled = state(draw.src);
-    if (draw.kind === "image" && draw.unlock !== undefined) return settled === "decoded";
     if (settled === "pending") waits = true;
     return true;
   });
@@ -32,31 +31,23 @@ export type Piece = {
 
 /**
  * The `drawImage` calls that paint `draw` from a picture of `natural` size at `scale`, on the device pixels Chrome painted
- * the same layer on when CSS drew it, so the canvas keeps the room's pixels.
+ * the same layer on when CSS drew it, so the canvas keeps the room's pixels. An edge fill takes its one row or column of source pixels.
  */
 export function pieces(draw: PictureDraw | CompanionDraw, natural: Size, scale: Scale): readonly Piece[] {
   const box = snap(draw, scale);
   const { width: w, height: h } = natural;
-  if (draw.kind === "image") return [{ sx: 0, sy: 0, sw: w, sh: h, dx: box.left, dy: box.top, dw: box.right - box.left, dh: box.bottom - box.top }];
+  const [dx, dy, dw, dh] = [box.left, box.top, box.right - box.left, box.bottom - box.top];
+  if (draw.kind === "image") return [{ sx: 0, sy: 0, sw: w, sh: h, dx, dy, dw, dh }];
   if (draw.kind === "companion") {
     const sw = w / draw.columns;
-    return [{ sx: sw * draw.column, sy: 0, sw, sh: h, dx: box.left, dy: box.top, dw: box.right - box.left, dh: box.bottom - box.top }];
+    return [{ sx: sw * draw.column, sy: 0, sw, sh: h, dx, dy, dw, dh }];
   }
-  const { slice, border } = draw;
-  // As Chrome paints border-image: each border width floors to whole device pixels, measured in from the snapped box's own
-  // edges, after widths that would overlap all shrink by one factor.
-  const fit = Math.min(1, (box.right - box.left) / ((border.left + border.right) * scale.x || 1), (box.bottom - box.top) / ((border.top + border.bottom) * scale.y || 1));
-  const width = (edge: number, s: number) => Math.floor(edge * s * fit);
-  const xs = [box.left, box.left + width(border.left, scale.x), box.right - width(border.right, scale.x), box.right];
-  const ys = [box.top, box.top + width(border.top, scale.y), box.bottom - width(border.bottom, scale.y), box.bottom];
-  const us = [0, slice.left, w - slice.right, w];
-  const vs = [0, slice.top, h - slice.bottom, h];
-  const out: Piece[] = [];
-  for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) {
-    const piece = { sx: us[col]!, sy: vs[row]!, sw: us[col + 1]! - us[col]!, sh: vs[row + 1]! - vs[row]!, dx: xs[col]!, dy: ys[row]!, dw: xs[col + 1]! - xs[col]!, dh: ys[row + 1]! - ys[row]! };
-    if (piece.sw > 0 && piece.sh > 0 && piece.dw > 0 && piece.dh > 0) out.push(piece);
+  switch (draw.edge) {
+    case "left": return [{ sx: 0, sy: 0, sw: 1, sh: h, dx, dy, dw, dh }];
+    case "right": return [{ sx: w - 1, sy: 0, sw: 1, sh: h, dx, dy, dw, dh }];
+    case "top": return [{ sx: 0, sy: 0, sw: w, sh: 1, dx, dy, dw, dh }];
+    case "bottom": return [{ sx: 0, sy: h - 1, sw: w, sh: 1, dx, dy, dw, dh }];
   }
-  return out;
 }
 
 /**
@@ -75,7 +66,7 @@ function snapSpan(start: number, size: number, scale: number, image: boolean): r
 }
 
 function snap({ rect, kind }: PictureDraw | CompanionDraw, s: Scale) {
-  const [left, right] = snapSpan(rect.left, rect.width, s.x, kind !== "nine-slice");
-  const [top, bottom] = snapSpan(rect.top, rect.height, s.y, kind !== "nine-slice");
+  const [left, right] = snapSpan(rect.left, rect.width, s.x, kind !== "edge");
+  const [top, bottom] = snapSpan(rect.top, rect.height, s.y, kind !== "edge");
   return { left, right, top, bottom };
 }

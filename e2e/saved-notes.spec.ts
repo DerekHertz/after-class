@@ -9,7 +9,9 @@ for (const scene of Object.keys(SCENES)) {
       key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene, motion: "reduced" },
     });
     await page.goto("/?scenario=review&clean=1");
+    const menu = page.getByRole("button", { name: "Menu", exact: true });
     const opener = page.getByRole("button", { name: "Saved notes", exact: true });
+    await menu.click();
     await opener.click();
     const dialog = page.getByRole("dialog", { name: "Saved notes" });
     await expect(dialog).toBeVisible();
@@ -36,7 +38,8 @@ for (const scene of Object.keys(SCENES)) {
 
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
-    await expect(opener).toBeFocused();
+    await expect(menu).toBeFocused();
+    await menu.click();
     await opener.click();
     await expect(dialog.getByText(note, { exact: false })).toBeVisible();
     await dialog.getByRole("button", { name: /Edit your note on/ }).first().click();
@@ -44,7 +47,7 @@ for (const scene of Object.keys(SCENES)) {
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(dialog.getByText(note, { exact: false })).toBeVisible();
     await close.click();
-    await expect(opener).toBeFocused();
+    await expect(menu).toBeFocused();
     expect(errors).toEqual([]);
   });
 }

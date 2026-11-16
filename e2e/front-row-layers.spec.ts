@@ -46,7 +46,7 @@ for (const scene of Object.keys(SCENES)) {
       const sceneSize = await page.locator(".front-row-canvas").evaluate((node) => { const r = node.getBoundingClientRect(); return { width: r.width, height: r.height }; });
       const layout = layoutRoom(scene as SceneId, sceneSize, "full");
       if (layout.composition !== "full") throw new Error("a desktop window lays out the full room");
-      const [boardArt, matArt] = [edges(layout.layers.board.rect), edges(layout.layers.mat.rect)];
+      const [boardArt, matArt] = [edges(layout.text.board), edges(layout.text.desk)];
       expect(boxes.navigation.length).toBeGreaterThan(3);
       expect(within(boxes.boardText, boardArt)).toBe(true);
       expect(boxes.overflow).toBeLessThanOrEqual(1);
@@ -54,12 +54,14 @@ for (const scene of Object.keys(SCENES)) {
       for (const part of [boxes.heading, boxes.showDiagram, boxes.question]) expect(within(part, boxes.boardText)).toBe(true);
       expect(within(boxes.deskText, matArt)).toBe(true);
       expect(within(boxes.field, boxes.deskText)).toBe(true);
-      for (const [name, b] of Object.entries({ boardText: boxes.boardText, field: boxes.field, buddy: boxes.buddy, notebook: boxes.notebook, folio: boxes.folio })) {
+      // The companion's cell has clear padding around the figure, so its middle is what must be in the window.
+      const buddy = { ...boxes.buddy, left: (boxes.buddy.left + boxes.buddy.right) / 2, right: (boxes.buddy.left + boxes.buddy.right) / 2 };
+      for (const [name, b] of Object.entries({ boardText: boxes.boardText, field: boxes.field, buddy, notebook: boxes.notebook, folio: boxes.folio })) {
         expect({ name, inWindow: within(b, boxes.window) }).toEqual({ name, inWindow: true });
         for (const nav of boxes.navigation) expect({ name, hitsNavigation: overlaps(b, nav) }).toEqual({ name, hitsNavigation: false });
       }
       expect(overlaps(boxes.boardText, boxes.deskText)).toBe(false);
-      for (const side of [boxes.buddy, boxes.notebook, boxes.folio]) expect(overlaps(side, matArt)).toBe(false);
+      for (const side of [buddy, boxes.notebook, boxes.folio]) expect(overlaps(side, matArt)).toBe(false);
     });
   }
 }

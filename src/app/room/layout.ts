@@ -1,43 +1,40 @@
 import type { SceneId } from "../appearance";
 import type { RoomObject } from "../room-object";
 import { FRONT_ROW_ROOMS, ROOM_ART } from "./rooms";
-import type { Anchor, Edges, FrontRowRoom, NineSlice, Placement } from "./rooms";
-import type { UnlockId } from "./progress";
-import { UNLOCK_SLOTS } from "./unlocks";
+import type { FrontRowRoom, PlatePoint, PlateRect } from "./rooms";
 
 /** A size or a box in CSS pixels of the window. */
 export type Size = { readonly width: number; readonly height: number };
 export type Rect = { readonly left: number; readonly top: number; readonly width: number; readonly height: number };
 
-/** A nine-slice layer on screen: its box, and how far its four cuts sit from its edges, in screen pixels. */
-export type NineSliceLayer = { readonly rect: Rect; readonly border: Edges };
-export type ExtraLayer = { readonly name: string; readonly rect: Rect; readonly z: number };
-/** Where an unlocked object stands, whether or not it is unlocked yet. */
-export type UnlockLayer = { readonly id: UnlockId; readonly rect: Rect; readonly z: number };
+/** A side of the plate that the window shows more of than the plate covers. */
+export type Edge = "left" | "right" | "top" | "bottom";
+
+/** The part of the window a plate edge's colours fill, which runs a little under the plate so no seam shows between them. */
+export type EdgeFill = { readonly edge: Edge; readonly rect: Rect };
 
 /**
- * The room built from layers, as a window at least `FULL_ROOM_MIN` shows it. Every rectangle is in CSS pixels from the
- * window's top left. `u` is the screen pixels of one plate pixel at the object scale, which also sizes the board's type.
+ * The room as a window at least `FULL_ROOM_MIN` shows it: one wide plate drawn at one scale, with its text, companion and
+ * notebook placed on it. Every rectangle is in CSS pixels from the window's top left. `s` is the screen pixels of one plate
+ * pixel. It is the same on both axes, so nothing is stretched, and it sizes the room's type.
  */
 export type FullRoomLayout = {
   readonly composition: "full";
   readonly window: Size;
-  readonly u: number;
-  readonly layers: {
-    readonly background: Rect;
-    readonly board: NineSliceLayer;
-    readonly desk: NineSliceLayer;
-    readonly mat: NineSliceLayer;
-    readonly extras: readonly ExtraLayer[];
-    /** Every unlock slot of the room, in the order they open (room/unlocks.ts). */
-    readonly unlocks: readonly UnlockLayer[];
-  };
-  /** Where the board's and the mat's text may go: each plain area less its pad. */
+  readonly s: number;
+  /** Where the whole plate is drawn. A wide window crops its side strips, and a narrow or tall one leaves the fills below. */
+  readonly plate: Rect;
+  /** Where the 16:10 core of the plate is: the part every window shows whole. */
+  readonly core: Rect;
+  readonly fills: readonly EdgeFill[];
+  /** Where the board's and the mat's text go. */
   readonly text: { readonly board: Rect; readonly desk: Rect };
+  /** The companion's painted cell. */
   readonly companion: { readonly box: Rect };
+  /** The two tags on the desk: the folio (Source) above the notebook's, and the notebook's stack with its tag at the bottom. */
   readonly objects: Readonly<Record<RoomObject, Rect>>;
-  /** The desk's corner left of the mat, around the companion, where the progress panel opens. */
-  readonly progress: Rect;
+  /** Where the room's live light effect starts. */
+  readonly light: { readonly left: number; readonly top: number };
 };
 
 /**
@@ -49,83 +46,58 @@ export type CompactRoomLayout = { readonly composition: "compact"; readonly wind
 export type RoomLayout = FullRoomLayout | CompactRoomLayout;
 export type Composition = RoomLayout["composition"];
 
+/** The tags on the desk, in plate pixels: the notebook's stack the tag sits under, and the source tag above the notebook's tag. */
+const NOTEBOOK = { width: 200, height: 266, tagBelow: 16 } as const;
+const SOURCE = { width: 150, height: 34, above: 52 } as const;
+/** The fills run this far, in CSS pixels, under the plate. */
+const TUCK = 2;
+
 /**
- * Where everything in `scene` goes in a window of `window` CSS pixels. Two scales apply, both screen pixels per plate
- * pixel. `b` makes the background cover the window's width and reach down behind the desk. `u` sizes everything else, and
- * is the smaller of `b` and `u0`, so a tall or very wide window does not magnify the desk and the objects.
+ * The scale at which the plate's 16:10 core just fits `window` on its shorter side: s = min(H / plate height, W / core width).
+ * A window of the core's own shape shows the core whole, a wider one shows more of the strips, and a taller one leaves room
+ * above and below.
  */
+export function plateScale(scene: SceneId, window: Size): number {
+  const { size, core } = FRONT_ROW_ROOMS[scene].plate;
+  return Math.min(window.height / size.height, window.width / core.width);
+}
+
+/** Where everything in `scene` goes in a window of `window` CSS pixels. */
 export function layoutRoom(scene: SceneId, window: Size, composition: Composition): RoomLayout {
   const room: FrontRowRoom = FRONT_ROW_ROOMS[scene];
   const { width: W, height: H } = window;
-  const { plate } = ROOM_ART;
   if (composition === "compact") {
+    const { plate } = ROOM_ART;
     const cover = Math.max(W / plate.width, H / plate.height);
     const [width, height] = [cover * plate.width, cover * plate.height];
     return { composition, window, layers: { background: { left: (W - width) * parseFloat(room.phoneArtX) / 100, top: 0, width, height } } };
   }
-  const u0 = Math.min(1.12 * H / plate.height, 1.25 * W / plate.width);
-  const b = Math.max(W / plate.width, (H - u0 * ROOM_ART.deskCovers) / plate.height);
-  const u = Math.min(b, u0);
+  const { size, core } = room.plate;
+  const s = plateScale(scene, window);
+  const drawn = { left: (W - size.width * s) / 2, top: (H - size.height * s) / 2, width: size.width * s, height: size.height * s };
+  const rect = ({ x, y, width, height }: PlateRect): Rect => ({ left: drawn.left + x * s, top: drawn.top + y * s, width: width * s, height: height * s });
+  const point = ({ x, y }: PlatePoint) => ({ left: drawn.left + x * s, top: drawn.top + y * s });
 
-  const bgWidth = b * plate.width;
-  const bgHeight = b * plate.height;
-  const bgLeft = (W - bgWidth) * room.background.anchorX;
-  const background = { left: bgLeft, top: Math.min(0, (H - bgHeight) * room.background.anchorY), width: bgWidth, height: bgHeight };
-  const wallLeft = Math.max(0, bgLeft + b * room.background.wall.from);
-  const wallRight = Math.min(W, bgLeft + b * room.background.wall.to);
+  // An edge is filled wherever the plate ends within a pixel of the window's own edge, too, so rounding to device pixels can
+  // never leave the last row or column unpainted.
+  const fills: EdgeFill[] = [];
+  const [right, bottom] = [drawn.left + drawn.width, drawn.top + drawn.height];
+  const [rowTop, rowBottom] = [Math.max(0, drawn.top), Math.min(H, bottom)];
+  if (drawn.top > -1) fills.push({ edge: "top", rect: { left: 0, top: 0, width: W, height: Math.max(0, drawn.top) + TUCK } });
+  if (bottom < H + 1) fills.push({ edge: "bottom", rect: { left: 0, top: Math.min(H, bottom) - TUCK, width: W, height: H - Math.min(H, bottom) + TUCK } });
+  if (drawn.left > -1) fills.push({ edge: "left", rect: { left: 0, top: rowTop, width: Math.max(0, drawn.left) + TUCK, height: rowBottom - rowTop } });
+  if (right < W + 1) fills.push({ edge: "right", rect: { left: Math.min(W, right) - TUCK, top: rowTop, width: W - Math.min(W, right) + TUCK, height: rowBottom - rowTop } });
 
-  const deskTop = H - u * ROOM_ART.deskReach;
-  const boardTop = H * room.board.top;
-  const boardHeight0 = deskTop - u * room.board.gapAboveDesk - boardTop;
-  const boardWidth = Math.min(wallRight - wallLeft - u * room.board.sideMargin * 2, boardHeight0 * room.board.maxAspect);
-  const boardHeight = Math.min(boardHeight0, boardWidth / Math.max(room.board.minAspect ?? 0, 0.01));
-  const board = { left: wallLeft + (wallRight - wallLeft - boardWidth) / 2, top: boardTop, width: boardWidth, height: boardHeight };
-
-  const matWidth = Math.min(W - u * ROOM_ART.matSideReserve * 2, u * ROOM_ART.matMaxWidth);
-  const matTop = deskTop + u * ROOM_ART.matTop;
-  const mat = { left: (W - matWidth) / 2, top: matTop, width: matWidth, height: H - u * ROOM_ART.matBottom - matTop };
-
-  const side = W * ROOM_ART.sideInset;
-  const book = { width: u * ROOM_ART.notebook.width, height: u * ROOM_ART.notebook.height };
-  const history = { left: W - side - book.width, top: H - u * ROOM_ART.notebook.bottom - book.height, ...book };
-  const folioWidth = book.width * ROOM_ART.folio.width;
-  const folioHeight = folioWidth / ROOM_ART.folio.aspect;
-  const source = { left: history.left + (book.width - folioWidth) / 2, top: history.top - u * ROOM_ART.folio.gap - folioHeight, width: folioWidth, height: folioHeight };
-  const buddy = u * ROOM_ART.companionSize;
-
-  const frames = { board, window: { left: 0, top: 0, width: W, height: H }, background };
-  const along = (anchor: Anchor, start: number, length: number, size: number) =>
-    start + length * anchor.share + u * anchor.offset - size * { start: 0, center: 0.5, end: 1 }[anchor.align];
-  const place = ({ on, x, y }: Placement, width: number, height: number): Rect => {
-    const frame = frames[on];
-    return { left: along(x, frame.left, frame.width, width), top: along(y, frame.top, frame.height, height), width, height };
-  };
+  const { companion, notebook } = room.plate;
+  const tag = point(notebook);
+  const history = { left: tag.left - (NOTEBOOK.width / 2) * s, top: tag.top - (NOTEBOOK.height - NOTEBOOK.tagBelow) * s, width: NOTEBOOK.width * s, height: NOTEBOOK.height * s };
+  const source = { left: tag.left - (SOURCE.width / 2) * s, top: tag.top - SOURCE.above * s, width: SOURCE.width * s, height: SOURCE.height * s };
 
   return {
-    composition, window, u,
-    layers: {
-      background,
-      board: { rect: board, border: scaled(room.board.art.slice, u) },
-      desk: { rect: { left: 0, top: deskTop, width: W, height: u * room.desk.art.size.height }, border: scaled(room.desk.art.slice, u) },
-      mat: { rect: mat, border: scaled(room.mat.art.slice, u) },
-      extras: room.extras.map((extra) => ({ name: extra.name, z: extra.z, rect: place(extra.place, u * extra.width, u * extra.height) })),
-      unlocks: UNLOCK_SLOTS[scene].map((slot) => ({ id: slot.id, z: slot.z, rect: place(slot.place, u * slot.width, u * slot.height) })),
-    },
-    text: {
-      board: inset(board, room.board.art, { x: ROOM_ART.boardTextPad, y: ROOM_ART.boardTextPad }, u),
-      desk: inset(mat, room.mat.art, ROOM_ART.matTextPad, u),
-    },
-    companion: { box: { left: side, top: H - u * room.companionBottom - buddy, width: buddy, height: buddy } },
+    composition, window, s, plate: drawn, core: rect(core), fills,
+    text: { board: rect(room.plate.board), desk: rect(room.plate.mat) },
+    companion: { box: rect({ x: companion.x - companion.height / 2, y: companion.bottom - companion.height, width: companion.height, height: companion.height }) },
     objects: { source, history },
-    progress: { left: side, top: matTop, width: mat.left - 2 * side, height: H - side - matTop },
+    light: point(room.plate.light),
   };
-}
-
-const scaled = (edges: Edges, u: number): Edges => ({ top: u * edges.top, right: u * edges.right, bottom: u * edges.bottom, left: u * edges.left });
-
-/** A surface's plain inner area less a pad, in `u`. */
-function inset(rect: Rect, art: NineSlice, pad: { readonly x: number; readonly y: number }, u: number): Rect {
-  const { inner } = art;
-  const [top, right, bottom, left] = [u * (inner.top + pad.y), u * (inner.right + pad.x), u * (inner.bottom + pad.y), u * (inner.left + pad.x)];
-  return { left: rect.left + left, top: rect.top + top, width: rect.width - left - right, height: rect.height - top - bottom };
 }

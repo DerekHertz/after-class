@@ -5,7 +5,7 @@ import { layoutRoom } from "../src/app/room/layout";
 import type { FullRoomLayout, Rect } from "../src/app/room/layout";
 import { companionAt } from "../src/app/room/companion";
 import { motionOn } from "../src/app/room/motion";
-import { FRONT_ROW_ROOMS, ROOM_ART } from "../src/app/room/rooms";
+import { FRONT_ROW_ROOMS } from "../src/app/room/rooms";
 import { buildScene } from "../src/app/room/scene";
 import type { Draw, Specks } from "../src/app/room/scene";
 
@@ -59,12 +59,12 @@ describe("ambient life on the draw list", () => {
     }
   });
 
-  test("every room has specks at three depths, drawn behind the desk", () => {
+  test("every room has specks at three depths, drawn over the plate", () => {
     for (const scene of rooms) {
       expect(new Set(AMBIENT[scene].map((layer) => layer.depth))).toEqual(new Set(["far", "mid", "near"]));
       const draws = buildScene(scene, fullLayout(scene), T).draws;
-      const desk = draws.findIndex((d) => d.kind === "nine-slice" && d.src.includes("-desk"));
-      draws.forEach((d, i) => { if (d.kind === "specks") expect(i).toBeLessThan(desk); });
+      const plate = draws.findIndex((d) => d.kind === "image");
+      draws.forEach((d, i) => { if (d.kind === "specks") expect(i).toBeGreaterThan(plate); });
     }
   });
 
@@ -108,10 +108,9 @@ describe("ambient life on the draw list", () => {
     }
   });
 
-  test("each speck is a whole number of plate pixels from the background's corner and as big as its plate size", () => {
+  test("each speck is a whole number of plate pixels from the plate's corner and as big as its plate size", () => {
     const layout = fullLayout("projection-booth");
-    const { background } = layout.layers;
-    const scale = background.width / ROOM_ART.plate.width;
+    const { plate: background, s: scale } = layout;
     const rain = specksOf(buildScene("projection-booth", layout, T).draws).find((s) => s.color === "#a9c4f0")!;
     for (const { left, top, width, height } of rain.rects) {
       expect((left - background.left) / scale).toBeCloseTo(Math.round((left - background.left) / scale), 6);
@@ -128,7 +127,7 @@ describe("ambient life on the draw list", () => {
       const near = new Set<string>(AMBIENT[scene].filter((l) => l.clearOfBoard).map((l) => l.color));
       for (const seconds of [1, 20, 333]) {
         for (const specks of specksOf(buildScene(scene, layout, seconds * 1000).draws).filter((s) => near.has(s.color))) {
-          for (const rect of specks.rects) expect(overlaps(rect, layout.layers.board.rect)).toBe(false);
+          for (const rect of specks.rects) expect(overlaps(rect, layout.text.board)).toBe(false);
         }
       }
     }
@@ -138,6 +137,7 @@ describe("ambient life on the draw list", () => {
     const shaft = LIGHT["last-desk"][0]!;
     const { rows } = shaftRows(shaft, 3);
     expect(rows[0]).toMatchObject({ x: shaft.from.x, y: shaft.from.y, width: shaft.width });
+    expect(shaft.from).toEqual({ x: 0, y: 0 });
     expect(rows.at(-1)!.y + rows.at(-1)!.height).toBe(shaft.to.y);
     for (const [i, row] of rows.entries()) {
       expect([row.x, row.y, row.width, row.height].every(Number.isInteger)).toBe(true);

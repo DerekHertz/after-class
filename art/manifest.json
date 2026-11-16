@@ -1766,51 +1766,6 @@
     "undoUpscale": 2
   },
   {
-    "master": "front-row-v2/canal-board.png",
-    "masterSha256": "3c3d118595df4a1c82e9722815689a25124d014e7ca87e7f33f1686e2b620fbd",
-    "ship": "front-row-v2/canal-board.webp",
-    "shipSha256": "977e3c3f48dd99c4e41123b837ef339259b5e7f1bdd6b67592d80526f33aed66",
-    "width": 1463,
-    "height": 823,
-    "undoUpscale": 2
-  },
-  {
-    "master": "front-row-v2/canal-desk.png",
-    "masterSha256": "9175775b8f9d054c575b3dd373b47de8f12a1c04f851317bf7c05fb7d126a1ad",
-    "ship": "front-row-v2/canal-desk.webp",
-    "shipSha256": "9d0d45423eec2f69fb5e7795375f4386edc828a38c145905e3f65e3da19951fb",
-    "width": 2172,
-    "height": 410,
-    "undoUpscale": 2
-  },
-  {
-    "master": "front-row-v2/canal-mat.png",
-    "masterSha256": "ff9b93bff38c4c9686297fdf74cd7b416c29585931499412b1135bdb8bd71ee4",
-    "ship": "front-row-v2/canal-mat.webp",
-    "shipSha256": "7e97ae90008a31661721e5459a72dcf08538e27d142acf421d8fde395d4c7f7e",
-    "width": 1455,
-    "height": 433,
-    "undoUpscale": 2
-  },
-  {
-    "master": "front-row-v2/canal-projector.png",
-    "masterSha256": "a0ae5643e11a7c4e6ad173733c058c0a02e2d88b1892d3e4140703256b5a74d7",
-    "ship": "front-row-v2/canal-projector.webp",
-    "shipSha256": "49b010c2adbf743d6ac55495c04cbe85dd4113ce460e068478b44dbc5bbf190b",
-    "width": 237,
-    "height": 254,
-    "undoUpscale": 2
-  },
-  {
-    "master": "front-row-v2/canal-pull-tab.png",
-    "masterSha256": "7e258e6a1f4a0b7827c682c0598d7cf783d204580e283b8a90962c6b0d5efef2",
-    "ship": "front-row-v2/canal-pull-tab.webp",
-    "shipSha256": "5979b43829314fcddac50ce9060e7c9db59dcd502edf15aad50705e0fa4b1523",
-    "width": 49,
-    "height": 52,
-    "undoUpscale": 2
-  },
-  {
     "master": "front-row-v2/closed-folio.png",
     "masterSha256": "e3957584f2028d5483b13877c91254754e71b73b2e59d0d80938368c94ea5656",
     "ship": "front-row-v2/closed-folio.webp",
@@ -1829,15 +1784,6 @@
     "undoUpscale": 2
   },
   {
-    "master": "front-row-v2/harbor-awning.png",
-    "masterSha256": "4feecf1ebdd1cd8cc15c0463d2f0aee34fb41312164308b7c1943fba4879af5e",
-    "ship": "front-row-v2/harbor-awning.webp",
-    "shipSha256": "1553daaa44501adf3cff581ed685d0b36e8ca0cfd5e78d281971e80ce96372ec",
-    "width": 307,
-    "height": 346,
-    "undoUpscale": 2
-  },
-  {
     "master": "front-row-v2/harbor-background.png",
     "masterSha256": "069b1ce737ebe7b5a43b1750ca03a0ad94c58f3a6ab8bebb13e86e33fd0d0517",
     "ship": "front-row-v2/harbor-background.webp",
@@ -1847,102 +1793,12 @@
     "undoUpscale": 2
   },
   {
-    "master": "front-row-v2/harbor-board.png",
-    "masterSha256": "da69a89325622e1579c431d976aa5415cdf43fe04c328242c28c8c36a87254b0",
-    "ship": "front-row-v2/harbor-board.webp",
-    "shipSha256": "b8083fa72bb926c548970bd7274328ac74e919758c6f72789d96f182f5fd2441",
-    "width": 1446,
-    "height": 830,
-    "undoUpscale": 2
-  },
-  {
-    "master": "front-row-v2/harbor-cushion.png",
-    "masterSha256": "dedfcd6dae46790256c818c462e064ffb217f8a595bfef190d553d75ac92da33",
-    "ship": "front-row-v2/harbor-cushion.webp",
-    "shipSha256": "cbabf755d9b261ef679283a3e3f5ac5ac565d36965ea048d41b63204de44a48b",
-    "width": 248,
-    "height": 123,
-    "undoUpscale": 2
-  },
-  {
-    "master": "front-row-v2/harbor-desk.png",
-    "masterSha256": "73692f1ae2935cc5bc97319b6dc6a66607d9bf9ec52ed344f08bd071a13d6bcc",
-    "ship": "front-row-v2/harbor-desk.webp",
-    "shipSha256": "36d5745d1fb46560854e0cdb5d82e5e5dc0a2690af7b1b311b2a348f8e40578b",
-    "width": 2172,
-    "height": 362,
-    "undoUpscale": 2
-  },
-  {
-    "master": "front-row-v2/harbor-lamp.png",
-    "masterSha256": "1bbe88816b2d17b3cf9f6cecab03a47fee8fdfc31abf9ab063d4391ccd4f6352",
-    "ship": "front-row-v2/harbor-lamp.webp",
-    "shipSha256": "e7317f145b571165af2f93bc9cfe765c643c587dc0562d248bc17ae8b7bfa8e0",
-    "width": 121,
-    "height": 108,
-    "undoUpscale": 2
-  },
-  {
-    "master": "front-row-v2/harbor-mat.png",
-    "masterSha256": "a438046415075d04277a0009b52eccd71a0ea2ad3a184e6df8c54230085d52f4",
-    "ship": "front-row-v2/harbor-mat.webp",
-    "shipSha256": "f978cca8862f19c4656dfba26708065319811ba894123d6a8d1f702097056843",
-    "width": 1436,
-    "height": 478,
-    "undoUpscale": 2
-  },
-  {
     "master": "front-row-v2/rail-background.png",
     "masterSha256": "eedd4cdea2de123617637ed09227c5d428a8876b4ed06b3f44cc63250b080dd7",
     "ship": "front-row-v2/rail-background.webp",
     "shipSha256": "7b9525e04a11409c9da29e2b09d13d45a07a51e12f22d7b66ba67ed5209c4bae",
     "width": 1586,
     "height": 992,
-    "undoUpscale": 2
-  },
-  {
-    "master": "front-row-v2/rail-board.png",
-    "masterSha256": "9c0cb339a9ce1e141e94c452c3ab25f516267cd32751ff25c046be6ff028c36f",
-    "ship": "front-row-v2/rail-board.webp",
-    "shipSha256": "1f0b274f783d1f84666ad3d72512e20715f41d52e0375abc64977b4a200f195b",
-    "width": 1473,
-    "height": 844,
-    "undoUpscale": 2
-  },
-  {
-    "master": "front-row-v2/rail-desk.png",
-    "masterSha256": "93960cc5fd88e82bbaa385e99f5d97d342389fe827e10426e6544ee7dfa2df3d",
-    "ship": "front-row-v2/rail-desk.webp",
-    "shipSha256": "2a28dd4189a7961374298c00dc269158899e7b5dfa2815504ef3bbbfdad9036c",
-    "width": 2172,
-    "height": 359,
-    "undoUpscale": 2
-  },
-  {
-    "master": "front-row-v2/rail-ledge-items.png",
-    "masterSha256": "da27f0dc6fd1eb7da8f9140d5e91d01669a2587c1f4c895d7c0887223eee95d5",
-    "ship": "front-row-v2/rail-ledge-items.webp",
-    "shipSha256": "40291c59ea6711ee2af903b2a1871f029b38f480974777209783cb45c7c5519a",
-    "width": 548,
-    "height": 55,
-    "undoUpscale": 2
-  },
-  {
-    "master": "front-row-v2/rail-mat.png",
-    "masterSha256": "6dc81d654662356f9044579cc2e189613d09ec44feea789bb523167c5219ed83",
-    "ship": "front-row-v2/rail-mat.webp",
-    "shipSha256": "622b8b85dc1b1b81dd93b4f44a1a870bd46ae86da1508aa71ecf804e180422ce",
-    "width": 1458,
-    "height": 485,
-    "undoUpscale": 2
-  },
-  {
-    "master": "front-row-v2/rail-vine.png",
-    "masterSha256": "80f24f954e667b96dfccd629a967c533890d5978aa1988073fb6ccf5398277f3",
-    "ship": "front-row-v2/rail-vine.webp",
-    "shipSha256": "998d58e6dbaf24352eef632f2b1af7b2176a5e4d20a22afad5572b4402053beb",
-    "width": 261,
-    "height": 395,
     "undoUpscale": 2
   },
   {
@@ -1984,6 +1840,30 @@
     "shipSha256": "2b3f37b9503407e0f632556ec48b3d6d53f689b01855df43e3ffb3477771d5c4",
     "width": 1448,
     "height": 1086
+  },
+  {
+    "master": "room-plates/canal-wide.png",
+    "masterSha256": "437543030a67721794de8cda268cc3115d2ebe3061bd0db528787c6e0c1e19ac",
+    "ship": "room-plates/canal-wide.webp",
+    "shipSha256": "3a8e3b27dab89f2368f1ac9a5e86cda430046feb79d560aee5f7b08ae307d954",
+    "width": 2314,
+    "height": 992
+  },
+  {
+    "master": "room-plates/harbor-wide.png",
+    "masterSha256": "5b6a9045b50d8da465e9d98c5adf217def14d557eb9b42dfbad8ee9249d64c47",
+    "ship": "room-plates/harbor-wide.webp",
+    "shipSha256": "1d790293e302371828eacda2fb5d647cfe81ad5391c0eee17028eb8c92f7b270",
+    "width": 2314,
+    "height": 992
+  },
+  {
+    "master": "room-plates/rail-wide.png",
+    "masterSha256": "5d3627dad5c7d5498bc8cb690bceb09ab8a3ae9473362334ef261bf55434c2b4",
+    "ship": "room-plates/rail-wide.webp",
+    "shipSha256": "6775d9db87df2e23d677cb8371bd5cff1de504cda1ef29c0a5033f5b83908ed5",
+    "width": 2314,
+    "height": 992
   },
   {
     "master": "scenes-v2/bell.png",

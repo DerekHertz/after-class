@@ -65,8 +65,8 @@ describe("a gesture plays its painted frames on stepped timing, then the compani
     expect(play(cue("lumi", "cheer"), 1000, 1580).map(([, f]) => f)).toEqual(["hop-crouch", "hop-air", "hop-crouch"]);
     const box = { left: 0, top: 0, width: 200, height: 200 };
     for (const id of ids) for (const name of GESTURE_NAMES) for (const [, frame, lift] of play(cue(id, name, 0), 0, 20_000)) {
-      expect(() => companionDraw(id, { frame, lift, next: null }, box, 1)).not.toThrow();
-      const { draw } = companionDraw(id, { frame, lift, next: null }, box, 1);
+      expect(() => companionDraw(id, { frame, lift, next: null }, box, 1, box.height)).not.toThrow();
+      const { draw } = companionDraw(id, { frame, lift, next: null }, box, 1, box.height);
       expect(draw.src).toBeTruthy();
     }
   });
@@ -160,26 +160,26 @@ describe("the companion's draw", () => {
   test("every frame but the airborne one fills the same box, so a swap never shifts the companion", () => {
     const rects = new Set<string>();
     for (const frame of ["idle", "draw", "read", "blink", "look-board", "look-mat", "nod", "hop-crouch", "think", "cheer", "talk"] as const) {
-      rects.add(JSON.stringify(companionDraw("pip", { frame, lift: 0, next: null }, box, 1).draw.rect));
+      rects.add(JSON.stringify(companionDraw("pip", { frame, lift: 0, next: null }, box, 1, box.height).draw.rect));
     }
     expect([...rects]).toEqual([JSON.stringify(box)]);
   });
 
   test("a lift moves the frame up by whole plate pixels", () => {
-    const { draw } = companionDraw("pip", { frame: "hop-air", lift: 144, next: null }, box, 1);
+    const { draw } = companionDraw("pip", { frame: "hop-air", lift: 144, next: null }, box, 1, box.height);
     // 144 cell pixels of 724 are 43.76 of the 220 plate pixels the companion is tall, so 44 plate pixels of 1 CSS px each.
     expect(draw.rect).toEqual({ ...box, top: box.top - 44 });
   });
 
   test("a gesture frame stands in the sheet's idle pose while it decodes", () => {
-    const { draw } = companionDraw("pip", { frame: "blink", lift: 0, next: null }, box, 1);
+    const { draw } = companionDraw("pip", { frame: "blink", lift: 0, next: null }, box, 1, box.height);
     expect(draw.kind === "companion" && draw.standIn).toMatchObject({ frame: "idle", src: COMPANION_ART.pip.sheet.small, column: 0, columns: 3, rect: box });
   });
 
   test("the small files serve a companion drawn at up to 362 device pixels, the large ones above", () => {
-    expect(companionDraw("pip", { frame: "nod", lift: 0, next: null }, box, 1.6).draw.src).toBe(COMPANION_ART.pip.frames.nod!.small);
-    expect(companionDraw("pip", { frame: "nod", lift: 0, next: null }, box, 1.7).draw.src).toBe(COMPANION_ART.pip.frames.nod!.large);
-    expect(companionDraw("pip", { frame: "idle", lift: 0, next: null }, box, 2).draw.src).toBe(COMPANION_ART.pip.sheet.large);
+    expect(companionDraw("pip", { frame: "nod", lift: 0, next: null }, box, 1.6, box.height).draw.src).toBe(COMPANION_ART.pip.frames.nod!.small);
+    expect(companionDraw("pip", { frame: "nod", lift: 0, next: null }, box, 1.7, box.height).draw.src).toBe(COMPANION_ART.pip.frames.nod!.large);
+    expect(companionDraw("pip", { frame: "idle", lift: 0, next: null }, box, 2, box.height).draw.src).toBe(COMPANION_ART.pip.sheet.large);
   });
 
   test("the room decodes ahead only the active companion's files, at the size it draws", () => {

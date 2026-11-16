@@ -3,13 +3,13 @@ import type { SceneId } from "../appearance";
 import { layoutRoom } from "./layout";
 import type { Composition, Rect, Size } from "./layout";
 import { buildScene } from "./scene";
-import type { CompanionDraw, Draw, DrawList, PictureDraw, Specks } from "./scene";
+import type { BalloonDraw, CompanionDraw, Draw, DrawList, PictureDraw, Specks } from "./scene";
 import { restsFrom } from "./companion";
 import type { CompanionCue, Idle } from "./companion";
 import { pieces, readyDraws } from "./paint";
 import { ROOM_LAYER_ART } from "./art";
 import type { PictureState, Scale } from "./paint";
-import type { UnlockId } from "./progress";
+import { BALLOON, BALLOON_COLOURS } from "./balloon";
 
 /**
  * The canvas behind the room's text and controls. It paints the draw list of `scene` at the window's device pixels and
@@ -17,15 +17,13 @@ import type { UnlockId } from "./progress";
  * picture of a room has decoded it keeps the room it last finished, or stays empty so the page's backdrop shows through.
  * Its `data-stage` attribute says which, and front-row.css holds the room's words back only while it is `waiting`.
  * `companion` draws the companion in front of the room, animated only while `motion` is on (room/motion.ts). The frame it
- * last drew is the canvas's `data-companion` attribute. `unlocked` are the room's open slots (room/progress.ts). Only their
- * pictures are fetched, and each is drawn once it decodes, never holding the rest of the room.
+ * last drew is the canvas's `data-companion` attribute.
  */
-export function RoomStage({ scene, composition, motion, companion, unlocked }: {
+export function RoomStage({ scene, composition, motion, companion }: {
   readonly scene: SceneId;
   readonly composition: Composition;
   readonly motion: boolean;
   readonly companion: CompanionCue | null;
-  readonly unlocked: readonly UnlockId[];
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<Stage | null>(null);
@@ -45,11 +43,10 @@ export function RoomStage({ scene, composition, motion, companion, unlocked }: {
   const { id, activity } = companion ?? {};
   const gesture = companion?.gesture?.name;
   const at = companion?.gesture?.at;
-  const opened = unlocked.join(" ");
   useLayoutEffect(() => {
     const cue = id === undefined || activity === undefined ? null : { id, activity, gesture: gesture === undefined || at === undefined ? null : { name: gesture, at } };
-    stageRef.current?.show({ scene, composition, motion, companion: cue, unlocked: opened === "" ? [] : opened.split(" ") as UnlockId[] });
-  }, [scene, composition, motion, id, activity, gesture, at, opened]);
+    stageRef.current?.show({ scene, composition, motion, companion: cue });
+  }, [scene, composition, motion, id, activity, gesture, at]);
   return <canvas ref={canvasRef} className="front-row-canvas" aria-hidden="true" />;
 }
 
@@ -62,7 +59,6 @@ const setState = (canvas: HTMLCanvasElement, state: StageState) => { canvas.data
 
 type Wanted = {
   readonly scene: SceneId; readonly composition: Composition; readonly motion: boolean; readonly companion: CompanionCue | null;
-  readonly unlocked: readonly UnlockId[];
 };
 /** The canvas's box: its size in CSS pixels and the device pixels of its backing store. */
 type Box = { readonly css: Size; readonly device: Size };
@@ -192,8 +188,7 @@ class Stage {
     }
     const now = wanted.motion ? performance.now() : null;
     const companion = wanted.companion === null ? null : { cue: wanted.companion, idle: this.idle, ratio: scaleOf(box).y };
-    // Unlocks are progress the learner made, so a room shown in their place while the wanted one decodes keeps them too.
-    const list = (scene: SceneId) => buildScene(scene, layoutRoom(scene, box.css, wanted.composition), now, companion, wanted.unlocked);
+    const list = (scene: SceneId) => buildScene(scene, layoutRoom(scene, box.css, wanted.composition), now, companion);
     let drawn: DrawList | null = list(wanted.scene);
     let ready = readyDraws(drawn.draws, this.state);
     if (ready !== null) this.shown = wanted.scene;
@@ -203,7 +198,6 @@ class Stage {
     }
     if (ready === null) drawn = null;
     let companionFrame: string | undefined;
-    // The bands are built from what is ready, so an unlock that decodes later changes its band's key and repaints it.
     const painted = (ready ?? []).flatMap((draw): Draw[] => {
       if (draw.kind !== "companion") return [draw];
       const shown = this.companion(draw);
@@ -326,7 +320,7 @@ function picture(src: string): Picture {
 // A review page preloads its saved room's layers (scripts/build-app.ts). They start decoding as this script runs, so the
 // stage can paint the room as soon as it mounts instead of a decode later.
 if (typeof document !== "undefined") {
-  const art = new Set(Object.values(ROOM_LAYER_ART).flatMap(({ extras, ...layers }) => [...Object.values(layers), ...Object.values(extras)]));
+  const art = new Set(Object.values(ROOM_LAYER_ART).flatMap((layers) => Object.values(layers)));
   for (const link of document.querySelectorAll('link[rel="preload"][as="image"]')) {
     const href = link.getAttribute("href");
     if (href !== null && art.has(href)) picture(href);
@@ -351,7 +345,7 @@ type Live = { readonly key: string; readonly boxes: readonly DeviceBox[] };
 /** The bands and live draws of the last frame of a room in motion, back to front. */
 type Moving = { readonly bands: readonly Band[]; readonly live: readonly Live[] };
 
-const isPicture = (draw: Draw): draw is PictureDraw => draw.kind === "image" || draw.kind === "nine-slice";
+const isPicture = (draw: Draw): draw is PictureDraw => draw.kind === "image" || draw.kind === "edge";
 
 /** `draws` with each run of pictures gathered into an array, and each live draw on its own. */
 function runs(draws: readonly Draw[]): readonly (LiveDraw | readonly PictureDraw[])[] {
@@ -369,6 +363,7 @@ function runs(draws: readonly Draw[]): readonly (LiveDraw | readonly PictureDraw
 function liveBoxes(draw: LiveDraw, scale: Scale): readonly DeviceBox[] {
   switch (draw.kind) {
     case "specks": return draw.rects.map((rect) => deviceBox(rect, scale));
+    case "balloon": return [deviceBox(draw.rect, scale)];
     case "companion": {
       const { image } = pictures.get(draw.src)!;
       const shadow = companionShadow(scale);
@@ -399,6 +394,7 @@ function paintBand(run: readonly PictureDraw[], box: Box, key: string, reuse?: H
 
 function paintDraw(context: CanvasRenderingContext2D, draw: Draw, scale: Scale): void {
   if (draw.kind === "specks") return paintSpecks(context, draw, scale);
+  if (draw.kind === "balloon") return paintBalloon(context, draw, scale);
   const { image, state } = pictures.get(draw.src)!;
   if (state !== "decoded") return;
   const smooth = draw.kind === "image" && draw.sampling === "smooth";
@@ -420,4 +416,18 @@ function paintSpecks(context: CanvasRenderingContext2D, { color, alpha, rects }:
     context.fillRect(x, y, width, height);
   }
   context.globalAlpha = 1;
+}
+
+/** Fills each cell of the balloon (room/balloon.ts) on whole device pixels, every cell edge rounded once so no gap opens between cells. */
+function paintBalloon(context: CanvasRenderingContext2D, { rect }: BalloonDraw, scale: Scale): void {
+  const [cols, rows] = [BALLOON[0]!.length, BALLOON.length];
+  const cell = rect.width / cols;
+  const [x, y] = [(c: number) => Math.round((rect.left + c * cell) * scale.x), (r: number) => Math.round((rect.top + r * cell) * scale.y)];
+  context.globalAlpha = 1;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const colour = BALLOON_COLOURS[BALLOON[r]![c] as keyof typeof BALLOON_COLOURS];
+    if (colour === undefined) continue;
+    context.fillStyle = colour;
+    context.fillRect(x(c), y(r), x(c + 1) - x(c), y(r + 1) - y(r));
+  }
 }
