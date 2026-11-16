@@ -38,3 +38,16 @@ describe.skipIf(Bun.which("terraform") === null)("infra/beta/clerk.tf", () => {
     }
   });
 });
+
+test.skipIf(Bun.which("terraform") === null)("beta requires a domain or explicit sslip.io HTTPS when planning", () => {
+  const dir = tmpDir("afterclass-https-tf-");
+  copyFileSync(resolve(import.meta.dir, "../infra/beta/variables.tf"), join(dir, "variables.tf"));
+  function plan(...args: string[]) {
+    return Bun.spawnSync(["terraform", `-chdir=${dir}`, "plan", "-no-color", "-input=false", '-var=ingress_cidrs=["0.0.0.0/0"]', ...args]);
+  }
+  const insecure = plan();
+  expect(insecure.exitCode).not.toBe(0);
+  expect(insecure.stderr.toString()).toContain("The hosted beta requires HTTPS");
+  expect(plan("-var=domain=afterclass.test").exitCode).toBe(0);
+  expect(plan("-var=sslip_https=true").exitCode).toBe(0);
+});

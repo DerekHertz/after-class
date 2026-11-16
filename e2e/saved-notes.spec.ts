@@ -77,3 +77,25 @@ test("source evidence retries once and renders a loaded frame", async ({ page })
   await ledger.getByText("Request ledger", { exact: true }).click();
   await expect.poll(async () => (await ledger.locator("pre").innerText()).split("evidence.read").length - 1).toBe(2);
 });
+
+test("evidence deletion explains retention before the learner confirms", async ({ page }) => {
+  await page.goto("/?scenario=record");
+  const source = page.getByRole("button", { name: /^Open transcript / }).first();
+  await source.click();
+  const remove = page.getByRole("button", { name: "Delete this evidence" });
+  const confirmation = page.waitForEvent("dialog").then(async dialog => {
+    const message = dialog.message();
+    await dialog.dismiss();
+    return message;
+  });
+  await remove.click();
+  const message = await confirmation;
+  expect(message).toContain("Caption text and AI results remain");
+  expect(message).toContain("Backups can retain copies after removal");
+  await expect(remove).toBeVisible();
+  await expect(source).toHaveAttribute("aria-pressed", "true");
+
+  page.once("dialog", dialog => dialog.accept());
+  await remove.click();
+  await expect(page.getByText(/\[\d+: deleted by you\]/).first()).toBeVisible();
+});

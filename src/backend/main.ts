@@ -360,11 +360,11 @@ const originOf = (text: string): string | null => {
   }
 };
 
-/** https, or http to a loopback host, which only a test's fake JWKS uses. */
-function keysUrlOk(text: string): boolean {
+/** Hosted traffic uses HTTPS. Local development and fake identity services can use loopback HTTP. */
+function httpsOrLoopback(text: string): boolean {
   try {
     const u = new URL(text);
-    return u.protocol === "https:" || (u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost"));
+    return u.protocol === "https:" || (u.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(u.hostname));
   } catch {
     return false;
   }
@@ -379,8 +379,9 @@ export function resolveAuth(env: Env): Auth {
   if (missing.length > 0) throw new Error(`AFTERCLASS_AUTH=clerk needs ${missing.join(", ")}; refusing to start`);
   const publicOrigin = env.AFTERCLASS_PUBLIC_ORIGIN!;
   if (originOf(publicOrigin) !== publicOrigin) throw new Error(`AFTERCLASS_PUBLIC_ORIGIN must be a bare origin such as https://afterclass.example, got "${publicOrigin}"`);
+  if (!httpsOrLoopback(publicOrigin)) throw new Error("AFTERCLASS_PUBLIC_ORIGIN requires HTTPS except on loopback");
   const jwksUrl = env.AFTERCLASS_CLERK_JWKS_URL!;
-  if (!keysUrlOk(jwksUrl)) throw new Error(`AFTERCLASS_CLERK_JWKS_URL must be an https URL, got "${jwksUrl}"`);
+  if (!httpsOrLoopback(jwksUrl)) throw new Error(`AFTERCLASS_CLERK_JWKS_URL must be an https URL, got "${jwksUrl}"`);
   const publishableKey = env.AFTERCLASS_CLERK_PUBLISHABLE_KEY!;
   const frontendApi = frontendApiOf(publishableKey);
   if (frontendApi === null) throw new Error("AFTERCLASS_CLERK_PUBLISHABLE_KEY is not a Clerk publishable key (pk_test_... or pk_live_...)");

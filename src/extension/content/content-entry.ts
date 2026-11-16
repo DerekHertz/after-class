@@ -47,14 +47,14 @@ type SourceFact = Extract<CaptureFactBody, { kind: "source" }>;
 
 export type ContentDeps = {
   connect(): ContentPort;
-  startCaptionListener(): void;
+  startCaptionListener(videoId: string, signal: AbortSignal): void;
   /** The id in the page URL. */
   urlVideoId(): string;
   /** The id the player has loaded, when it can be read. */
   streamVideoId(): string | null;
   findPlayer(): Found | null;
   readSourceMetadata(videoId: string): Promise<SourceFact>;
-  acquireTranscript(videoId: string, durationS: number | null): Promise<TranscriptResult>;
+  acquireTranscript(videoId: string, durationS: number | null, signal: AbortSignal): Promise<TranscriptResult>;
   createTracker(found: Found, emit: Emit, videoId: () => string, sourceDurationS: () => number | null, signal: (s: RestSignal) => void): PlaybackTracker;
   createSampler(found: Found, emit: Emit, videoId: () => string, sourceDurationS: () => number | null): FrameSampler;
   watchNavigation: typeof watchNavigation;
@@ -83,7 +83,7 @@ export const browserDeps: ContentDeps = {
   streamVideoId: () => document.documentElement.getAttribute(STREAM_ID_ATTR),
   findPlayer,
   readSourceMetadata,
-  acquireTranscript,
+  acquireTranscript: (id, duration, signal) => acquireTranscript(id, duration, undefined, undefined, signal),
   createTracker: (found, emit, videoId, dur, signal) => createPlaybackTracker(found.video, found.player, emit, videoId, dur, undefined, signal),
   createSampler: createBrowserSampler,
   watchNavigation,
@@ -91,7 +91,7 @@ export const browserDeps: ContentDeps = {
 };
 
 export function startContent(deps: ContentDeps): void {
-  deps.startCaptionListener();
+  let captions: { videoId: string; life: AbortController } | null = null;
 
   let port: ContentPort | null = null;
   let observing = false;
@@ -130,20 +130,44 @@ export function startContent(deps: ContentDeps): void {
     if (captureId !== null) send({ ...rest, captureId });
   }
 
-  async function readTranscript(force: boolean, videoId = currentVideoId()): Promise<void> {
-    // Keyed by capture: a Stop then Start on the same video is a new capture and needs its own transcript fact.
-    const key = `${captureId ?? ""}:${videoId}`;
-    if (videoId === "" || (!force && transcribed.has(key))) return;
-    transcribed.add(key);
-    send(await deps.acquireTranscript(videoId, deps.findPlayer()?.video.duration || null));
+  function stopCaptions(): void {
+    captions?.life.abort();
+    captions = null;
+  }
+
+  function observeCaptions(videoId: string): void {
+    if (captions?.videoId === videoId) return;
+    stopCaptions();
+    if (!observing || !videoId) return;
+    captions = { videoId, life: new AbortController() };
+    deps.startCaptionListener(videoId, captions.life.signal);
+  }
+
+  let pendingTranscript: AbortSignal | null = null;
+  async function readTranscript(force: boolean): Promise<void> {
+    if (!captions) return;
+    const { videoId, life: { signal } } = captions;
+    if (pendingTranscript === signal || (!force && transcribed.has(videoId))) return;
+    pendingTranscript = signal;
+    try {
+      const result = await deps.acquireTranscript(videoId, deps.findPlayer()?.video.duration || null, signal);
+      if (signal.aborted) return;
+      transcribed.add(videoId);
+      send(result);
+    } finally {
+      if (pendingTranscript === signal) pendingTranscript = null;
+    }
   }
 
   async function beginVideo(videoId = currentVideoId()): Promise<void> {
-    if (videoId === "") return;
+    observeCaptions(videoId);
+    if (!captions) return;
+    const signal = captions.life.signal;
     const source = await deps.readSourceMetadata(videoId);
+    if (signal.aborted) return;
     if (source.durationS !== null) durations.set(videoId, source.durationS);
     send(source);
-    await readTranscript(false, videoId);
+    await readTranscript(false);
   }
 
   function ensureObservers(): boolean {
@@ -174,6 +198,7 @@ export function startContent(deps: ContentDeps): void {
   /** Closes the open span and stops observing; the worker re-sends observe if capture is still on. */
   function flushObservers(): void {
     observing = false;
+    stopCaptions();
     attached?.tracker.setObserving(false);
     attached?.sampler.setObserving(false);
   }
@@ -191,7 +216,15 @@ export function startContent(deps: ContentDeps): void {
     const wasObserving = observing;
     observing = m.on;
     // A different capture is a different pause, whatever the Hide on the last one said.
-    if (m.captureId !== captureId) deps.pausedSign.reset();
+    const changedCapture = m.captureId !== captureId;
+    if (changedCapture) {
+      deps.pausedSign.reset();
+      stopCaptions();
+      transcribed.clear();
+      durations.clear();
+    }
+    if (observing) observeCaptions(currentVideoId());
+    else stopCaptions();
     captureId = m.captureId;
     paused = m.paused === true;
     updateSign();
@@ -209,7 +242,7 @@ export function startContent(deps: ContentDeps): void {
     }
     attached?.tracker.setObserving(observing);
     attached?.sampler.setObserving(observing);
-    if (observing && !wasObserving) void beginVideo();
+    if (observing && (!wasObserving || changedCapture)) void beginVideo();
   }
 
   deps.watchNavigation({

@@ -404,7 +404,7 @@ function TopicSource({ api, notes, name, diagram, deleted, citations, watchOrder
           <EvidencePane api={api} ids={open.ids} titles={noTitles} />
           <button
             type="button"
-            onClick={() => window.confirm("Delete this evidence everywhere? Notes citing it will show it as deleted.") && void run(async () => { await api.deleteEvidence(open.ids); setOpen(null); })}
+            onClick={() => window.confirm("Remove this evidence from your reviews? Citing notes will mark it as deleted. Selected frames are removed from the server. Caption text and AI results remain. Backups can retain copies after removal.") && void run(async () => { await api.deleteEvidence(open.ids); setOpen(null); })}
           >
             Delete this evidence
           </button>

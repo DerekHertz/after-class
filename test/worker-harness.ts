@@ -45,13 +45,16 @@ export class FakeIDB {
   open(_name?: string, version = 1): Any {
     const r: Any = {};
     setTimeout(() => {
-      const db = this.db();
+      const upgradeCursors: Promise<void>[] = [];
+      const db = this.db(upgradeCursors);
       r.result = db;
       if (version > this.version) {
+        const oldVersion = this.version;
         this.version = version;
-        r.onupgradeneeded?.();
+        r.transaction = db.transaction();
+        r.onupgradeneeded?.({ oldVersion });
       }
-      r.onsuccess?.();
+      void Promise.all(upgradeCursors).then(() => r.onsuccess?.());
     }, 0);
     return r;
   }
@@ -60,7 +63,7 @@ export class FakeIDB {
     return Array.isArray(s.keyPath) ? s.keyPath.map((k: string) => v[k]) : v[s.keyPath];
   }
 
-  private db(): Any {
+  private db(upgradeCursors: Promise<void>[]): Any {
     return {
       objectStoreNames: { contains: (n: string) => this.stores.has(n) },
       createObjectStore: (n: string, o: Any) => this.stores.set(n, { keyPath: o.keyPath, rows: new Map() }),
@@ -74,6 +77,25 @@ export class FakeIDB {
                 .filter((e) => !range || (cmp(e.k, range.lo) >= 0 && cmp(e.k, range.hi) <= 0))
                 .sort((a, b) => cmp(a.k, b.k));
             return {
+              openCursor: () => {
+                const request: Any = {};
+                const entries = sorted()[Symbol.iterator]();
+                upgradeCursors.push(new Promise<void>((resolve) => {
+                  const advance = () => setTimeout(() => {
+                    const entry = entries.next().value;
+                    request.result = entry ? {
+                      value: structuredClone(entry.v),
+                      primaryKey: entry.k,
+                      update: (value: Any) => s.rows.set(JSON.stringify(entry.k), structuredClone(value)),
+                      continue: advance,
+                    } : null;
+                    request.onsuccess?.();
+                    if (!entry) resolve();
+                  }, 0);
+                  advance();
+                }));
+                return request;
+              },
               get: (k: Any) => this.req(() => s.rows.get(JSON.stringify(k))),
               put: (v: Any) => void s.rows.set(JSON.stringify(this.keyOf(s, v)), structuredClone(v)),
               delete: (range: Any) => void sorted(range).forEach((e) => s.rows.delete(JSON.stringify(e.k))),
