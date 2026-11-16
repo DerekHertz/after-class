@@ -43,7 +43,7 @@ export function roomArtTable(emitted: readonly string[], layerNames: readonly st
   for (const [scene, prefix] of Object.entries(ROOM_ART_PREFIX)) {
     const layers = ROOM_LAYER_ORDER.map((layer) => `${prefix}-${layer}`);
     for (const stem of [...layers, ...COMPACT_ROOM_LAYERS.map((layer) => `${prefix}-${layer}`)]) if (!layerNames.includes(stem)) throw new Error(`${scene} has no ${stem} in assets/room-plates or assets/front-row-v2`);
-    rooms[scene] = { plate: url(scene), layers: layers.map(url), compact: COMPACT_ROOM_LAYERS.map((layer) => url(`${prefix}-${layer}`)) };
+    rooms[scene] = { plate: url(`${prefix}-wide`), layers: layers.map(url), compact: COMPACT_ROOM_LAYERS.map((layer) => url(`${prefix}-${layer}`)) };
   }
   return { rooms, shared: SHARED_ROOM_ART.map(url) };
 }

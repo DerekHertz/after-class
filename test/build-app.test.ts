@@ -81,7 +81,7 @@ describe("the review app bundle", () => {
       return { table: JSON.parse(json) as RoomArtTable, hrefs: links.map((l) => l.href!) };
     }
 
-    test("every file in the table is in the bundle, each room's review is its wide plate, and a phone's is its background", () => {
+    test("every file in the table is in the bundle, every page and each room's review draw its wide plate, and a phone's is its background", () => {
       const { out } = built();
       const { table } = preloaded(null, "/app/");
       const urls = [...Object.values(table.rooms).flatMap((r) => [r.plate, ...r.layers, ...r.compact]), ...table.shared];
@@ -92,7 +92,7 @@ describe("the review app bundle", () => {
         expect(room.layers[0]).toMatch(new RegExp(`^/app/${prefix}-wide-[a-z0-9]{8}\\.webp$`));
         expect(room.compact).toHaveLength(1);
         expect(room.compact[0]).toMatch(new RegExp(`^/app/${prefix}-background-[a-z0-9]{8}\\.webp$`));
-        expect(room.plate).toMatch(new RegExp(`^/app/${scene}-[a-z0-9]{8}\\.webp$`));
+        expect(room.plate).toBe(room.layers[0]!);
       }
     });
 
@@ -179,7 +179,7 @@ describe("a file name the server caches for a year", () => {
       const stage = join(root, "src/app/room/companion-art.ts");
       writeFileSync(stage, readFileSync(stage, "utf8").replace("companions-v3/pip.webp", "companions-v3/pip-large.webp"));
     }],
-    ["an image the stylesheet inlines changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/front-row/study-bench.webp"), "\0")],
+    ["an image the stylesheet inlines changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/front-row-v2/closed-folio.webp"), "\0")],
     ["a layer the stage imports changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/room-plates/harbor-wide.webp"), "\0")],
     ["an image too large to inline changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/companions-v3/pip.webp"), "\0")],
     ["a stylesheet rule changes", (root) => appendFileSync(join(root, "src/app/completion.css"), "\n.release-probe { order: 7; }\n")],
