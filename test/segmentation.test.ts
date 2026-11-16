@@ -15,7 +15,7 @@ import type { SegmentationConfig } from "../src/backend/segmentation";
 import { fakeTask, ok, testUserDb } from "./fakes";
 
 /** 30 s windows are three 10 s passages; the cap is five windows so cap tests stay short. */
-const CFG: SegmentationConfig = { windowNewS: 30, contextS: 60, timeCapS: 150, maxFramesPerWindow: 2, reviseOnNextNoNo: true };
+const CFG: SegmentationConfig = { windowNewS: 30, contextS: 60, timeCapS: 150, firstTimeCapS: 150, maxFramesPerWindow: 2, reviseOnNextNoNo: true };
 const SRC_A = stableId("src", "youtube", "lectureA");
 const SRC_B = stableId("src", "youtube", "lectureB");
 const CAP = randomId("cap");
@@ -89,7 +89,7 @@ describe("flow B routing table", () => {
   });
 
   test("the starting values are the flow B numbers", () => {
-    expect(SEGMENTATION_DEFAULTS).toEqual({ windowNewS: 30, contextS: 120, timeCapS: 480, maxFramesPerWindow: 2, reviseOnNextNoNo: false });
+    expect(SEGMENTATION_DEFAULTS).toEqual({ windowNewS: 30, contextS: 120, timeCapS: 480, firstTimeCapS: 480, maxFramesPerWindow: 2, reviseOnNextNoNo: false });
   });
 });
 
@@ -263,6 +263,24 @@ describe("time cap", () => {
 
   test("below the cap nothing closes", () => {
     expect(plan(["no/no", "no/yes", "no/no", "no/yes"]).closed).toEqual([]);
+  });
+
+  test("the first chunk closes at its own cap, at the latest soft pause; later chunks close at the plain cap", () => {
+    const cfg = { ...CFG, firstTimeCapS: 90 };
+    const early = plan(["no/no", "no/yes", "no/no"], { cfg });
+    expect(early.closed).toEqual([[[0, 1], "time"]]);
+    expect(early.open).toEqual([2]);
+
+    const later = plan(Array.from({ length: 9 }, () => "no/no" as const), { cfg });
+    expect(later.closed).toEqual([[[0, 1, 2], "time"], [[3, 4, 5, 6, 7], "time"]]);
+    expect(later.open).toEqual([8]);
+  });
+
+  test("with the product setup the first chunk closes once it holds 210 s and later chunks at 480 s", () => {
+    // Ten-second passages make the product's 45 s windows 50 s long.
+    const p = plan(Array.from({ length: 18 }, () => "no/no" as const), { cfg: PRODUCT_JEV_SETUP.segmentation, passages: lecture(SRC_A, 0, 900) });
+    expect(p.closed).toEqual([[[0, 1, 2, 3, 4], "time"], [[5, 6, 7, 8, 9, 10, 11, 12, 13, 14], "time"]]);
+    expect(p.open).toEqual([15, 16, 17]);
   });
 
   test("a time close is not reconsidered", () => {
@@ -443,6 +461,20 @@ describe("segmentation over the database", () => {
     f.judge(1, "failed");
     f.judge(2, "no/no");
     expect(f.seg.sync(CAP).closed).toEqual([]);
+  });
+
+  test("a capture planned before the first-chunk cap keeps the plain cap, so its stored chunks are not re-planned", () => {
+    const cfg = { ...CFG, firstTimeCapS: 90 };
+    const stored = fixture(6, { cfg });
+    stored.db.sql.query("INSERT INTO plain_first_cap_captures (user_id, capture_id) VALUES (?, ?)").run(stored.db.userId, CAP);
+    const fresh = fixture(6, { cfg });
+    for (const f of [stored, fresh]) {
+      f.show(6);
+      for (let k = 0; k < 6; k++) f.judge(k, "no/no");
+      f.seg.sync(CAP);
+    }
+    expect(summary(stored)).toEqual([{ ordinal: 0, revisionNo: 1, provenance: "time", windows: [0, 1, 2, 3, 4] }]);
+    expect(summary(fresh)).toEqual([{ ordinal: 0, revisionNo: 1, provenance: "time", windows: [0, 1, 2] }]);
   });
 
   test("the time cap closes at the latest soft pause", () => {

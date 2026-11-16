@@ -67,6 +67,8 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 - Frame relevance and claim relevance are not in the product (lab only).
 - Evidence: held-out recall 4/5 at 1.118 false closes per 15 min; the false-close bar fails (see the experiment doc). Derek, 2026-11-06: "it is way better for me to test as the user and collect data rather than sit in these experiments for days on end".
 
+**Amendment (2026-11-15), Derek: "Yes, adopt it".** The agent proposed this line in PR 312 (#247), with the measurement in `docs/trail/first-review-wait-2026-11-15.md`: "The first chunk of a capture closes at a ~3.5 min cap (cut at the latest soft pause), provenance 'time'. Later chunks keep ~8 min." Captures that already had chunks keep the 8 min cap. Every routing row is unchanged, and a soft pause alone still does not close a chunk. No rule text changed. The TLA+ model treats time as abstract, so it is unchanged.
+
 ## C. Preparation and review invites (approved 2026-11-03)
 
 ```text

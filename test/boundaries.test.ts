@@ -132,6 +132,8 @@ const REBUILT_BY_MIGRATION = new Set(["memo_inputs", "memo", "memo_failures", "u
 for (const table of ["capture_facts", "frames", "evidence_snapshots", "evidence_deletions", "capture_owners"]) REBUILT_BY_MIGRATION.add(table);
 /** segmentation/002-user-id and preparation/003-user-id rebuild their tables to add user_id, so migrations.ts copies rows into them. */
 for (const table of ["chunk_revisions", "claim_index", "concept_index", "prep_controls", "prep_inputs"]) REBUILT_BY_MIGRATION.add(table);
+/** segmentation/003-plain-first-cap fills its new table with the captures that already have chunks. */
+REBUILT_BY_MIGRATION.add("plain_first_cap_captures");
 
 /** review/002-user-id rebuilds its three tables to add user_id, so migrations.ts copies rows into them. */
 for (const table of ["invite_answers", "reviews", "review_turns"]) REBUILT_BY_MIGRATION.add(table);
@@ -139,8 +141,8 @@ for (const table of ["invite_answers", "reviews", "review_turns"]) REBUILT_BY_MI
 /** record/004-user-id rebuilds its ten tables to add user_id, so its migration copies rows into them. */
 for (const table of ["notes", "note_edits", "note_deletions", "note_evidence", "observations", "observation_decisions", "link_suggestions", "link_decisions", "saved_reviews", "save_failures"]) REBUILT_BY_MIGRATION.add(table);
 
-/** The kernel files that hold schema text; migrations-record.ts holds the record's last migration because migrations.ts is at the line limit. */
-const MIGRATION_FILES = new Set(["src/backend/db.ts", "src/backend/migrations.ts", "src/backend/migrations-record.ts", "src/backend/migrations-budget.ts", "src/backend/migrations-review.ts"]);
+/** The kernel files that hold schema text; migrations-record.ts and migrations-segmentation.ts hold migrations because migrations.ts is at the line limit. */
+const MIGRATION_FILES = new Set(["src/backend/db.ts", "src/backend/migrations.ts", "src/backend/migrations-record.ts", "src/backend/migrations-budget.ts", "src/backend/migrations-review.ts", "src/backend/migrations-segmentation.ts"]);
 
 /** devices.ts holds the kernel's devices and connect_codes tables, their migration, and their only writes. */
 const KERNEL_FILES = new Set([...MIGRATION_FILES, "src/backend/devices.ts"]);
