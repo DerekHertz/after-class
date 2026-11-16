@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { media } from "../src/shared/time";
 import type { TranscriptSegment } from "../src/shared/domain";
-import { parseTimedTextUrl } from "../src/extension/content/main-world";
+import { CAPTION_SCOPE_EVENT, MAX_CAPTION_BYTES } from "../src/extension/content/caption-scope";
+import { installTimedTextTap, parseTimedTextUrl } from "../src/extension/content/main-world";
 import {
   buildTranscript, decodeEntities, isTimedTextMessage, isUsable, languageFromPanelHtml, normalizeText, parseClock, parseJson3, parseLanguageLabel,
-  rowsFromHtml, segmentsFromRows, acquireTranscript, startCaptionListener,
+  rowsFromHtml, segmentsFromRows, acquireTranscript, startCaptionListener, readTranscriptPanel, SELECTORS,
 } from "../src/extension/content/transcript";
 
 const oldRow = (ts: string, text: string) => `
@@ -209,6 +210,7 @@ describe("usability check", () => {
 describe("caption interception", () => {
   test("only the player's own json3 track requests are tapped", () => {
     expect(parseTimedTextUrl("https://www.youtube.com/api/timedtext?v=QgWz_s7uugE&lang=en&kind=asr&fmt=json3")).toEqual({ videoId: "QgWz_s7uugE", lang: "en", asr: true });
+    expect(parseTimedTextUrl("/api/timedtext?v=QgWz_s7uugE&fmt=json3", "https://example.org/")).toBeNull();
     expect(parseTimedTextUrl("/api/timedtext?v=QgWz_s7uugE&lang=en&fmt=json3")).toEqual({ videoId: "QgWz_s7uugE", lang: "en", asr: false });
     expect(parseTimedTextUrl("https://www.youtube.com/api/timedtext?v=QgWz_s7uugE&lang=en&tlang=fr&fmt=json3")).toBeNull();
     expect(parseTimedTextUrl("https://www.youtube.com/api/timedtext?v=QgWz_s7uugE&fmt=srv3")).toBeNull();
@@ -217,7 +219,7 @@ describe("caption interception", () => {
   });
 
   test("forwarded messages are recognised only with the afterclass envelope", () => {
-    const good = { source: "afterclass", kind: "timedtext", videoId: "QgWz_s7uugE", lang: "en", asr: false, payload: {} };
+    const good = { source: "afterclass", kind: "timedtext", videoId: "QgWz_s7uugE", lang: "en", asr: false, scope: "one", text: "{}" };
     expect(isTimedTextMessage(good)).toBe(true);
     expect(isTimedTextMessage({ ...good, source: "other" })).toBe(false);
     expect(isTimedTextMessage({ ...good, asr: "no" })).toBe(false);
@@ -243,14 +245,131 @@ describe("acquireTranscript never hangs", () => {
 
   test("a caption track with a negative start still becomes a transcript instead of vanishing", async () => {
     const { deliver } = fakeWindow();
-    startCaptionListener();
-    g.document = { querySelector: () => null, querySelectorAll: () => [] };
+    const doc = Object.assign(new EventTarget(), { querySelector: () => null, querySelectorAll: () => [] });
+    g.document = doc;
+    let scope = "";
+    doc.addEventListener(CAPTION_SCOPE_EVENT, e => { scope = (e as CustomEvent<string>).detail; });
+    const life = new AbortController();
+    startCaptionListener("NEGSTART_aa", life.signal);
     const events = [event(-3000, -1), ...Array.from({ length: 8 }, (_, i) => event(i * 1000, i))];
-    const pending = acquireTranscript("NEGSTART_aaa", 8, 500);
-    deliver({ source: "afterclass", kind: "timedtext", videoId: "NEGSTART_aaa", lang: "en", asr: false, payload: { events } });
+    const pending = acquireTranscript("NEGSTART_aa", 8, 500);
+    deliver({ source: "afterclass", kind: "timedtext", videoId: "NEGSTART_aa", lang: "en", asr: false, scope, text: JSON.stringify({ events }) });
     const r = await pending;
     expect(r.kind).toBe("transcript");
     if (r.kind === "transcript") expect(r.segments).toHaveLength(8);
+    life.abort();
+  });
+
+  test("only an active video can copy bounded captions and a stop discards in-flight responses", async () => {
+    const doc = new EventTarget();
+    g.document = doc;
+    let finish!: (response: Response) => void;
+    const fetch = (_url: string) => new Promise<Response>(r => { finish = r; });
+    const forwarded: unknown[] = [];
+    const win = { fetch, postMessage: (message: unknown) => forwarded.push(message), location: { origin: "https://www.youtube.com" } };
+    g.window = win;
+    const previousXHR = g.XMLHttpRequest;
+    g.XMLHttpRequest = class { open() {} };
+    try {
+      installTimedTextTap();
+      const set = (key: string | null) => doc.dispatchEvent(new CustomEvent(CAPTION_SCOPE_EVENT, { detail: key }));
+      const url = "https://www.youtube.com/api/timedtext?v=aaaaaaaaaaa&fmt=json3";
+      let clones = 0;
+      function complete(body: string, finalUrl = url) {
+        const response = new Response(body);
+        Object.defineProperty(response, "url", { value: finalUrl });
+        const clone = response.clone.bind(response);
+        response.clone = () => { clones++; return clone(); };
+        finish(response);
+      }
+      const request = () => win.fetch(url);
+      let flight = request();
+      complete("idle");
+      await flight;
+      expect(clones).toBe(0);
+      set("one:aaaaaaaaaaa");
+      flight = request();
+      set(null);
+      set("two:aaaaaaaaaaa");
+      complete("stale");
+      await flight;
+      expect(clones).toBe(0);
+      flight = request();
+      complete("different track", url + "&lang=fr");
+      await flight;
+      expect(clones).toBe(0);
+      flight = request();
+      complete("x".repeat(MAX_CAPTION_BYTES + 1));
+      await flight;
+      flight = request();
+      complete("active");
+      await flight;
+      await Bun.sleep(20);
+      expect(forwarded).toEqual([expect.objectContaining({ scope: "two:aaaaaaaaaaa", text: "active" })]);
+      expect(isTimedTextMessage({ source: "afterclass", kind: "timedtext", videoId: "aaaaaaaaaaa", lang: "en", asr: false, scope: "two", text: "x".repeat(MAX_CAPTION_BYTES + 1) })).toBe(false);
+    } finally {
+      g.XMLHttpRequest = previousXHR;
+    }
+  });
+
+  test("a reused XHR forwards only the matching caption response of its current request", () => {
+    const doc = new EventTarget();
+    g.document = doc;
+    const forwarded: unknown[] = [];
+    g.window = { fetch, location: { origin: "https://www.youtube.com" }, postMessage: (message: unknown) => forwarded.push(message) };
+    const previous = g.XMLHttpRequest;
+    class Xhr extends EventTarget {
+      responseURL = "";
+      responseType = "text";
+      responseText = "";
+      open(_method: string, _url: string) {}
+      deliver(body: string, finalUrl: string) {
+        this.responseText = body;
+        this.responseURL = finalUrl;
+        this.dispatchEvent(new Event("load"));
+      }
+    }
+    g.XMLHttpRequest = Xhr;
+    try {
+      installTimedTextTap();
+      doc.dispatchEvent(new CustomEvent(CAPTION_SCOPE_EVENT, { detail: "active:aaaaaaaaaaa" }));
+      const xhr = new Xhr();
+      const captions = "https://www.youtube.com/api/timedtext?v=aaaaaaaaaaa";
+      xhr.open("GET", captions);
+      xhr.open("GET", "/watch");
+      xhr.deliver("ordinary page", ""); // Even without responseURL the old listener must be gone.
+      xhr.open("GET", captions);
+      xhr.deliver("redirected", "https://example.org/api/timedtext?v=aaaaaaaaaaa");
+      xhr.open("GET", captions);
+      xhr.deliver("current", captions);
+      expect(forwarded).toEqual([expect.objectContaining({ text: "current" })]);
+    } finally {
+      g.XMLHttpRequest = previous;
+    }
+  });
+
+  test("cancelling closes only a panel the read opened, before the next session starts", async () => {
+    let open = false;
+    let closes = 0;
+    const panel = {
+      getAttribute: () => open ? SELECTORS.expandedValue : "",
+      querySelectorAll: () => [],
+      querySelector: () => ({ click: () => { open = false; closes++; } }),
+    };
+    g.document = { querySelector: (selector: string) => selector === SELECTORS.panel ? panel :
+      { click: () => { open = true; } } };
+    const first = new AbortController();
+    const reading = readTranscriptPanel("aaaaaaaaaaa", 10, first.signal);
+    expect(open).toBe(true);
+    first.abort();
+    expect(open).toBe(false);
+    open = true; // Already open for the next session.
+    const second = new AbortController();
+    const next = readTranscriptPanel("bbbbbbbbbbb", 10, second.signal);
+    second.abort();
+    await Promise.all([reading, next]);
+    expect(closes).toBe(1);
+    expect(open).toBe(true);
   });
 
   test("a panel whose rows never stop changing is abandoned at the overall deadline", async () => {

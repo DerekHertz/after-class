@@ -219,6 +219,16 @@ function hostedEnv(jwksUrl: string, dataDir: string) {
 }
 
 describe("resolveAuth", () => {
+  test("hosted sign-in requires HTTPS for a public origin and permits HTTP on loopback", () => {
+    const env = hostedEnv("https://clerk.afterclass.test/.well-known/jwks.json", "/unused");
+    for (const origin of ["http://afterclass.test", "http://203.0.113.1", "http://localhost.example", "ftp://localhost"]) {
+      expect(() => resolveAuth({ ...env, AFTERCLASS_PUBLIC_ORIGIN: origin })).toThrow(/requires HTTPS/);
+    }
+    for (const origin of ["https://afterclass.test", "http://localhost:4317", "http://127.0.0.1:4317", "http://[::1]:4317"]) {
+      expect(resolveAuth({ ...env, AFTERCLASS_PUBLIC_ORIGIN: origin })).toMatchObject({ publicOrigin: origin });
+    }
+  });
+
   test("unset or local keeps local mode; clerk needs every setting and refuses a malformed one", () => {
     expect(resolveAuth({})).toEqual({ kind: "local" });
     expect(resolveAuth({ AFTERCLASS_AUTH: "local" })).toEqual({ kind: "local" });

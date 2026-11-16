@@ -21,9 +21,9 @@ The beta server has no SSH and no key pair. Session Manager is the way in. Ports
 
 ## Beta variables
 
-- `ingress_cidrs` is required. Use `["<your public IP>/32"]` until sign-in lands, then `["0.0.0.0/0"]`.
+- `ingress_cidrs` is required. Include `0.0.0.0/0` so Let's Encrypt can validate the public hostname.
 - `clerk_publishable_key` is required. It is the public `pk_live_...` or `pk_test_...` key from Clerk's API keys page. Keep it in `infra/beta/terraform.tfvars`, which git ignores.
-- `domain` defaults to `null`, which serves HTTP only on the Elastic IP. Set it to the apex domain to turn on HTTPS. Its Route 53 hosted zone must exist.
+- Set `domain` to an apex domain with an existing Route 53 public hosted zone, or enable `sslip_https`. Planning fails if neither is configured.
 - `sslip_https` defaults to `false`. Set it to `true` with no domain to serve HTTPS on `<elastic-ip-with-dashes>.sslip.io`. `domain` and `sslip_https` both need `ingress_cidrs` to include `0.0.0.0/0`, because Let's Encrypt validates from the internet.
 - `availability_zone` defaults to `us-east-2a` and is pinned, so the data volume never moves when zone offerings change.
 - `caddy_image` is pinned by version and digest. To update it, change both.
@@ -61,7 +61,7 @@ Any change to `user_data` replaces the instance with a few minutes of downtime. 
    ```
    cd infra/beta
    terraform init -backend-config="bucket=afterclass-tfstate-<account id>"
-   terraform plan -var='ingress_cidrs=["<your public IP>/32"]' -var='clerk_publishable_key=<pk_...>' -out=beta.tfplan
+   terraform plan -var='ingress_cidrs=["0.0.0.0/0"]' -var='sslip_https=true' -var='clerk_publishable_key=<pk_...>' -out=beta.tfplan
    terraform apply beta.tfplan
    ```
 
@@ -157,9 +157,9 @@ A release is a `v<major>.<minor>.<patch>` tag on a `master` commit whose `packag
 
    The tool needs `git`, `bun`, `gh`, `curl`, `docker` and the AWS CLI, and an AWS sign-in that may run `AWS-RunShellScript` and the `afterclass-beta-deploy` document on the instance. Nothing on GitHub or the server starts a deploy. `scripts/deploy-beta.sh` also refuses a tag off `master` or with another `package.json` version, a release without a valid `image-digest.txt` for the tag's commit, and a digest that GHCR does not serve anonymously. It runs the `afterclass-beta-deploy` document on the instance named in `/afterclass-beta/instance_id` and waits at most 15 minutes in total, status reads and the final output read included. Every outside answer the tool acts on, each release's `image-digest.txt`, the server's read and both `/health` answers, goes through `scripts/release-input.ts` as raw bytes and must match its exact format, so a stray byte such as a NUL or a byte order mark stops the run instead of being dropped.
 
-## Turning on HTTPS
+## Choosing the HTTPS hostname
 
-Run these in `infra/beta` after the first setup. Each apply replaces the instance. Keep the variables in `terraform.tfvars`, because a later plan without them turns HTTPS off.
+Select one hostname at first setup and keep the variables in `terraform.tfvars`. Changing the hostname replaces the instance.
 
 With the domain registered and its public Route 53 hosted zone in place:
 
@@ -181,7 +181,7 @@ terraform apply beta.tfplan
 
 `terraform output public_url` prints the address in both cases.
 
-Caddy passes the client's `Host` header unchanged and replaces any `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` a client sends. The app still applies its localhost Host check, so a public name answers `/health` and nothing else until the hosted sign-in change lands.
+Caddy passes the client's `Host` header unchanged and replaces any `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` a client sends. The app checks the configured public origin for hosted sign-in.
 
 ## Failure behavior
 
@@ -203,7 +203,7 @@ aws ec2 create-volume --availability-zone us-east-2a --snapshot-id <snapshot id>
 cd infra/beta
 terraform state rm aws_volume_attachment.data aws_ebs_volume.data
 terraform import aws_ebs_volume.data <new volume id>
-terraform plan -var='ingress_cidrs=["<your public IP>/32"]' -out=beta.tfplan
+terraform plan -out=beta.tfplan
 ```
 
 The plan must replace `aws_instance.beta` and `aws_volume_attachment.data` and add only the default tags to the volume. Then apply it. A snapshot from before the first format is blank, and bootstrap stops at the mount. Do not format it. Pick a later snapshot.

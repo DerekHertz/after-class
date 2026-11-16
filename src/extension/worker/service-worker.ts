@@ -150,10 +150,7 @@ async function backendFetch(method: "GET" | "POST", path: string, body?: unknown
         await forgetToken(cred.token);
         return { ok: false, retryable: false, error: "disconnected from your account: press Reconnect in the After Class popup" };
       }
-      const c = classifyStatus(res.status, res.headers.get("Retry-After"));
-      // The backend says which fact it refused; keep that with the dead letter.
-      const detail = c.rejected ? (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 200) : "";
-      return { ok: false, ...c, error: detail === "" ? c.error : `${c.error}: ${detail}` };
+      return { ok: false, ...classifyStatus(res.status, res.headers.get("Retry-After")) };
     }
     return { ok: true, json: await res.json().catch(() => null) };
   } catch {

@@ -1,5 +1,5 @@
 output "public_url" {
-  description = "The https address when a domain or sslip_https is set, otherwise http on the Elastic IP."
+  description = "The public HTTPS origin served by Caddy."
   value       = local.public_origin
 }
 

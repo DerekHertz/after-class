@@ -34,8 +34,39 @@ describe("outbox database upgrade", () => {
     expect((await store.append(cap, span(5, 10), 2)).clientSeq).toBe(1);
     const [first] = await store.pending(cap, 1);
     await store.quarantine(cap, first!, { kind: "channel", channel: "playback", health: "failed", videoId: null, atMediaS: null, detail: "withheld" }, "refused");
-    expect((await store.deadLetters(cap)).map((d) => [d.clientSeq, d.reason])).toEqual([[0, "refused"]]);
-    expect(idb.version).toBe(2);
+    expect((await store.deadLetters(cap)).map((d) => [d.clientSeq, d.reason])).toEqual([[0, "span fact: backend rejected the batch"]]);
+    expect(idb.version).toBe(3);
+  });
+
+  test("a version 2 upgrade scrubs rejected captions, images and echoed errors while keeping the queue", async () => {
+    const cap = randomId("cap");
+    const env = newEnv();
+    await boot(env);
+    const idb = new FakeIDB();
+    idb.version = 2;
+    const key = (seq: number) => JSON.stringify([cap, seq]);
+    const privateText = "sensitive lecture content";
+    const error = `backend rejected the batch (HTTP 422): ${privateText}`;
+    const transcript = { kind: "transcript", segments: [{ text: privateText }] };
+    const frame = { kind: "frame", jpegBase64: privateText };
+    const legacy = (body: typeof transcript | typeof frame, clientSeq: number) => ({
+      captureId: cap, clientSeq, wallMs: 1, atMs: 2, body, reason: `${body.kind} fact: ${error}`,
+    });
+    const unsent = { captureId: cap, clientSeq: 2, wallMs: 1, body: span(1, 2) };
+    const gap = { kind: "channel", channel: "transcript", health: "failed", videoId: null, atMediaS: null, detail: `withheld by the extension: ${error}` } as const;
+    idb.stores.set("dead", { keyPath: ["captureId", "clientSeq"], rows: new Map([[key(0), legacy(frame, 0)], [key(1), legacy(transcript, 1)]]) });
+    idb.stores.set("facts", { keyPath: ["captureId", "clientSeq"], rows: new Map([[key(2), unsent], [key(1), { ...unsent, clientSeq: 1, body: gap }]]) });
+    idb.stores.set("seq", { keyPath: "captureId", rows: new Map([[JSON.stringify(cap), { captureId: cap, next: 3 }]]) });
+    const store = createIdbOutbox(idb as unknown as IDBFactory);
+    const dead = await store.deadLetters(cap);
+    expect(dead).toEqual(["frame", "transcript"].map((kind, clientSeq) => ({
+      captureId: cap, clientSeq, reason: `${kind} fact: backend rejected the batch (HTTP 422)`,
+    })));
+    const pending = await store.pending(cap, 10);
+    expect(pending.map((fact) => fact.clientSeq)).toEqual([1, 2]);
+    expect(pending[1]).toEqual(unsent);
+    expect(JSON.stringify(pending)).not.toContain(privateText);
+    expect((await store.append(cap, span(2, 3), 2)).clientSeq).toBe(3);
   });
 });
 
@@ -57,7 +88,9 @@ describe("a fact the backend refuses", () => {
     expect(st.uploadBacklog).toBe(0);
     expect(st.deadLetters.count).toBe(1);
     expect(st.deadLetters.latestReason).toContain("transcript fact");
-    expect(st.deadLetters.latestReason).toContain("a fact is invalid");
+    expect(st.deadLetters.latestReason).toBe("transcript fact: backend rejected the batch (HTTP 400)");
+    const dead = [...env.idb.stores.get("dead")!.rows.values()];
+    expect(dead).toEqual([{ captureId: st.captureId, clientSeq: 2, reason: st.deadLetters.latestReason }]);
     const stored = [...env.backend.stored.values()][0]!;
     expect(kindsOf(stored)).toEqual(["control:start", "span", "channel", "span"]);
   });

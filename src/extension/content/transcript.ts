@@ -9,6 +9,7 @@
  */
 import type { CaptureFactBody, TranscriptOrigin, TranscriptSegment } from "../../shared/domain";
 import { media } from "../../shared/time";
+import { CAPTION_SCOPE_EVENT, MAX_CAPTION_BYTES } from "./caption-scope";
 
 export type TranscriptResult =
   | Extract<CaptureFactBody, { kind: "transcript" }>
@@ -195,9 +196,10 @@ export function buildTranscript(
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-async function waitFor<T>(probe: () => T | null | undefined | false, timeoutMs: number, everyMs = 200): Promise<T | null> {
+async function waitFor<T>(probe: () => T | null | undefined | false, timeoutMs: number, signal?: AbortSignal, everyMs = 200): Promise<T | null> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
+    if (signal?.aborted) return null;
     const v = probe();
     if (v) return v;
     if (Date.now() >= deadline) return null;
@@ -222,47 +224,50 @@ function findShowTranscriptButton(): HTMLElement | null {
   return byLabel ?? null;
 }
 
-function closePanel(): void {
-  panelElement()?.querySelector<HTMLElement>(SELECTORS.panelClose)?.click();
-}
-
 /**
- * Open the "Show transcript" engagement panel, read every segment row, then
- * restore the user's layout.
+ * Open the transcript panel, read its rows and restore the panel this read opened.
+ * Release it synchronously on cancellation so an older read cannot close a later session's panel.
  */
-export async function readTranscriptPanel(videoId: string, durationS: number | null): Promise<TranscriptResult> {
+export async function readTranscriptPanel(videoId: string, durationS: number | null, signal?: AbortSignal): Promise<TranscriptResult> {
   const missing: TranscriptResult = { kind: "transcript_unavailable", videoId, reason: "panel_missing" };
-  const wasOpen = panelIsOpen();
-  if (!wasOpen) {
-    let button = findShowTranscriptButton();
-    if (!button) {
-      document.querySelector<HTMLElement>(SELECTORS.descriptionExpand)?.click();
-      button = await waitFor(findShowTranscriptButton, 1500);
+  if (signal?.aborted) return missing;
+  let openedHere = false;
+  const restore = () => {
+    if (!openedHere) return;
+    openedHere = false;
+    panelElement()?.querySelector<HTMLElement>(SELECTORS.panelClose)?.click();
+  };
+  signal?.addEventListener("abort", restore, { once: true });
+  try {
+    if (!panelIsOpen()) {
+      let button = findShowTranscriptButton();
+      if (!button) {
+        document.querySelector<HTMLElement>(SELECTORS.descriptionExpand)?.click();
+        button = await waitFor(findShowTranscriptButton, 1500, signal);
+      }
+      if (!button || signal?.aborted) return missing;
+      openedHere = true;
+      button.click();
     }
-    if (!button) return missing;
-    button.click();
+    const rowCount = () => panelElement()?.querySelectorAll(SELECTORS.row).length ?? 0;
+    const appeared = await waitFor(() => rowCount() > 0, 8000, signal);
+    if (!appeared || signal?.aborted) return missing;
+    let last = -1;
+    const settleDeadline = Date.now() + SETTLE_MAX_MS;
+    for (let stable = 0; stable < 2 && Date.now() < settleDeadline; ) {
+      await sleep(300);
+      if (signal?.aborted) return missing;
+      const now = rowCount();
+      stable = now === last ? stable + 1 : 0;
+      last = now;
+    }
+    const html = panelElement()?.outerHTML ?? "";
+    const segments = segmentsFromRows(rowsFromHtml(html), durationS);
+    return buildTranscript(videoId, "panel", languageFromPanelHtml(html), segments, durationS);
+  } finally {
+    signal?.removeEventListener("abort", restore);
+    restore();
   }
-
-  const rowCount = () => panelElement()?.querySelectorAll(SELECTORS.row).length ?? 0;
-  const appeared = await waitFor(() => rowCount() > 0, 8000);
-  if (!appeared) {
-    if (!wasOpen) closePanel();
-    return missing;
-  }
-  // Rows load in batches; wait for the count to stop growing.
-  let last = -1;
-  const settleDeadline = Date.now() + SETTLE_MAX_MS;
-  for (let stable = 0; stable < 2 && Date.now() < settleDeadline; ) {
-    await sleep(300);
-    const now = rowCount();
-    stable = now === last ? stable + 1 : 0;
-    last = now;
-  }
-
-  const html = panelElement()?.outerHTML ?? "";
-  if (!wasOpen) closePanel();
-  const segments = segmentsFromRows(rowsFromHtml(html), durationS);
-  return buildTranscript(videoId, "panel", languageFromPanelHtml(html), segments, durationS);
 }
 
 // ───────────────────────────── Interception (isolated side) ─────────────────
@@ -271,63 +276,76 @@ export async function readTranscriptPanel(videoId: string, durationS: number | n
 export type TimedTextMessage = {
   readonly source: "afterclass";
   readonly kind: "timedtext";
+  readonly scope: string;
   readonly videoId: string;
   readonly lang: string;
   readonly asr: boolean;
-  readonly payload: unknown;
+  readonly text: string;
 };
 
 export function isTimedTextMessage(data: unknown): data is TimedTextMessage {
   const d = data as Partial<TimedTextMessage> | null;
-  return !!d && d.source === "afterclass" && d.kind === "timedtext" && typeof d.videoId === "string" && typeof d.lang === "string" && typeof d.asr === "boolean";
+  return !!d && d.source === "afterclass" && d.kind === "timedtext" && typeof d.scope === "string" &&
+    typeof d.videoId === "string" && typeof d.lang === "string" && d.lang.length <= 64 &&
+    typeof d.asr === "boolean" && typeof d.text === "string" && d.text.length <= MAX_CAPTION_BYTES;
 }
 
-const captured = new Map<string, TimedTextMessage>();
-const waiters = new Set<(videoId: string) => void>();
-let tapListening = false;
+type CaptionSession = {
+  readonly videoId: string;
+  readonly signal: AbortSignal;
+  caption: { lang: string; asr: boolean; segments: TranscriptSegment[] } | null;
+  readonly updates: EventTarget;
+};
+let currentSession: CaptionSession | null = null;
 
-/** Start collecting forwarded captions. Call early: the player may fetch them before anyone asks. */
-export function startCaptionListener(): void {
-  if (tapListening) return;
-  tapListening = true;
+/** Exactly one active video. End the isolated listener and the page tap together. */
+export function startCaptionListener(videoId: string, signal: AbortSignal): void {
+  if (signal.aborted) return;
+  const key = crypto.randomUUID() + ":" + videoId;
+  const session: CaptionSession = { videoId, signal, caption: null, updates: new EventTarget() };
+  currentSession = session;
   window.addEventListener("message", (e: MessageEvent) => {
-    if (e.source !== window || e.origin !== window.location.origin || !isTimedTextMessage(e.data)) return;
-    if (parseJson3(e.data.payload).length === 0) return;
-    captured.set(e.data.videoId, e.data);
-    for (const w of waiters) w(e.data.videoId);
-  });
+    if (signal.aborted || currentSession !== session || e.source !== window || e.origin !== window.location.origin || !isTimedTextMessage(e.data)) return;
+    const msg = e.data;
+    if (msg.scope !== key || msg.videoId !== videoId || new TextEncoder().encode(msg.text).byteLength > MAX_CAPTION_BYTES) return;
+    try {
+      const segments = parseJson3(JSON.parse(msg.text));
+      if (segments.length === 0) return;
+      session.caption = { lang: msg.lang, asr: msg.asr, segments };
+      session.updates.dispatchEvent(new Event("caption"));
+    } catch {
+      // An invalid page message cannot replace the active track.
+    }
+  }, { signal });
+  signal.addEventListener("abort", () => {
+    session.caption = null;
+    if (currentSession !== session) return;
+    currentSession = null;
+    document.dispatchEvent(new CustomEvent(CAPTION_SCOPE_EVENT, { detail: null }));
+  }, { once: true });
+  document.dispatchEvent(new CustomEvent(CAPTION_SCOPE_EVENT, { detail: key }));
 }
 
-function fromCaptured(videoId: string, durationS: number | null): TranscriptResult {
-  const msg = captured.get(videoId);
-  if (!msg) return { kind: "transcript_unavailable", videoId, reason: "intercept_failed" };
-  try {
-    return buildTranscript(videoId, "caption_intercept", { language: msg.lang || "unknown", autoGenerated: msg.asr }, parseJson3(msg.payload), durationS);
-  } catch {
-    return { kind: "transcript_unavailable", videoId, reason: "intercept_failed" };
-  }
-}
-
-/**
- * Fallback: json3 captions forwarded by main-world.ts. Millisecond timing, better
- * than the panel. Resolves when a payload for `videoId` is held or arrives, or
- * after `timeoutMs`. The player only fetches captions while CC is on.
- */
-export function awaitInterceptedCaptions(videoId: string, timeoutMs: number, durationS: number | null = null): Promise<TranscriptResult> {
-  startCaptionListener();
-  if (captured.has(videoId)) return Promise.resolve(fromCaptured(videoId, durationS));
-  return new Promise((resolve) => {
-    const done = () => {
+export async function awaitInterceptedCaptions(videoId: string, timeoutMs: number, durationS: number | null = null, signal?: AbortSignal): Promise<TranscriptResult> {
+  const session = currentSession;
+  const missing: TranscriptResult = { kind: "transcript_unavailable", videoId, reason: "intercept_failed" };
+  if (!session || session.videoId !== videoId || signal?.aborted) return missing;
+  if (!session.caption) await new Promise<void>((resolve) => {
+    const finish = () => {
       clearTimeout(timer);
-      waiters.delete(onCapture);
-      resolve(fromCaptured(videoId, durationS));
+      session.signal.removeEventListener("abort", finish);
+      signal?.removeEventListener("abort", finish);
+      session.updates.removeEventListener("caption", finish);
+      resolve();
     };
-    const onCapture = (id: string) => {
-      if (id === videoId) done();
-    };
-    const timer = setTimeout(done, timeoutMs);
-    waiters.add(onCapture);
+    const timer = setTimeout(finish, timeoutMs);
+    session.signal.addEventListener("abort", finish);
+    signal?.addEventListener("abort", finish);
+    session.updates.addEventListener("caption", finish);
   });
+  const c = session.caption;
+  if (!c || session.signal.aborted || signal?.aborted) return missing;
+  return buildTranscript(videoId, "caption_intercept", { language: c.lang || "unknown", autoGenerated: c.asr }, c.segments, durationS);
 }
 
 /**
@@ -335,12 +353,16 @@ export function awaitInterceptedCaptions(videoId: string, timeoutMs: number, dur
  * never outlasts `deadlineMs`: the page is hostile territory, and a caller that
  * awaits this must always get an answer.
  */
-export async function acquireTranscript(videoId: string, durationS: number | null, interceptWaitMs = 4000, deadlineMs = ACQUIRE_DEADLINE_MS): Promise<TranscriptResult> {
+export async function acquireTranscript(videoId: string, durationS: number | null, interceptWaitMs = 4000, deadlineMs = ACQUIRE_DEADLINE_MS, signal?: AbortSignal): Promise<TranscriptResult> {
   const unavailable: TranscriptResult = { kind: "transcript_unavailable", videoId, reason: "panel_missing" };
+  const read = new AbortController();
+  const end = () => read.abort();
+  if (signal?.aborted) return unavailable;
+  signal?.addEventListener("abort", end, { once: true });
   const work = (async (): Promise<TranscriptResult> => {
-    const panel = await readTranscriptPanel(videoId, durationS).catch((): TranscriptResult => unavailable);
+    const panel = await readTranscriptPanel(videoId, durationS, read.signal).catch((): TranscriptResult => unavailable);
     if (panel.kind === "transcript") return panel;
-    const tapped = await awaitInterceptedCaptions(videoId, interceptWaitMs, durationS).catch((): TranscriptResult => ({ kind: "transcript_unavailable", videoId, reason: "intercept_failed" }));
+    const tapped = await awaitInterceptedCaptions(videoId, interceptWaitMs, durationS, read.signal).catch((): TranscriptResult => ({ kind: "transcript_unavailable", videoId, reason: "intercept_failed" }));
     if (tapped.kind === "transcript") return tapped;
     return panel.reason === "unusable" || tapped.reason === "unusable" ? { kind: "transcript_unavailable", videoId, reason: "unusable" } : tapped;
   })();
@@ -352,5 +374,7 @@ export async function acquireTranscript(videoId: string, durationS: number | nul
     return await Promise.race([work.catch((): TranscriptResult => unavailable), deadline]);
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", end);
+    read.abort();
   }
 }
