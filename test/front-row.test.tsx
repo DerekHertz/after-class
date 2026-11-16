@@ -23,7 +23,6 @@ const picture = async (scene: SceneId, dir: "room-plates" | "front-row-v2", name
   if (!decoded.has(file)) decoded.set(file, await readImage(new URL(`../src/app/assets/${dir}/${file}`, import.meta.url)));
   return decoded.get(file)!;
 };
-const plate = (scene: SceneId) => readImage(new URL(`../src/app/assets/front-row/${scene}.webp`, import.meta.url));
 /** A rect of the plate as fractions of the plate, for sampling the colour the text sits on. */
 const frac = ({ x, y, width, height }: PlateRect, size: { width: number; height: number }) => ({ left: x / size.width, top: y / size.height, right: (x + width) / size.width, bottom: (y + height) / size.height });
 const inside = (r: PlateRect, outer: PlateRect) => r.x >= outer.x && r.y >= outer.y && r.x + r.width <= outer.x + outer.width && r.y + r.height <= outer.y + outer.height;
@@ -73,13 +72,6 @@ describe("each room's text sits on its own art and reads clearly", () => {
     }
   });
 
-  test("the room picker's plates are still the measured size with no transparency", async () => {
-    for (const scene of rooms) {
-      const png = await plate(scene);
-      expect({ scene, width: png.width, height: png.height, alpha: png.alpha }).toEqual({ scene, width: 1585, height: 992, alpha: false });
-    }
-  });
-
   test("the canal film club writes dark ink on its light screen and light ink on its dark mat", () => {
     const canal = FRONT_ROW_ROOMS["projection-booth"];
     expect([canal.board.tone, canal.mat.tone]).toEqual(["light", "dark"]);
@@ -109,7 +101,7 @@ describe("each room's art is named where the build, the stage and the stylesheet
       expect(Object.fromEntries(Object.entries(ROOM_LAYER_ART[scene]).map(([name, url]) => [name, file(url)]))).toEqual({ plate: `${p}-wide.webp`, background: `${p}-background.webp` });
       expect(FRONT_ROW_ROOMS[scene].plate.src).toBe(`room-plates/${p}-wide.webp`);
       expect(css).toContain(`.scene-shell[data-scene="${scene}"] { --fr-bg: url('./assets/front-row-v2/${p}-background.webp'); }`);
-      expect(css).toContain(`[data-room="${scene}"]) { --fr-plate: url('./assets/front-row/${scene}.webp'); }`);
+      expect(css).toContain(`[data-room="${scene}"]) { --fr-plate: url('./assets/room-plates/${p}-wide.webp'); }`);
     }
   });
 });

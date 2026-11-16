@@ -1802,30 +1802,6 @@
     "undoUpscale": 2
   },
   {
-    "master": "front-row/last-desk.png",
-    "masterSha256": "dc9db04f544e936cb89a5702bac69e811d2e903464523a8d314522d2a5ad8308",
-    "ship": "front-row/last-desk.webp",
-    "shipSha256": "e902a66a78aaaab4fe7e8c067ad45809274e2911e8c5ca18c74292ddd7fd6fa6",
-    "width": 1585,
-    "height": 992
-  },
-  {
-    "master": "front-row/projection-booth.png",
-    "masterSha256": "c88479e0b8a325d3b9dda1907e9819cfc2e6c2d49f96b25749855cab35ecc711",
-    "ship": "front-row/projection-booth.webp",
-    "shipSha256": "66c33271de9262034f6f7b41d5cb813ced07ce2aff3e0d4caaa6da571a82d4e1",
-    "width": 1585,
-    "height": 992
-  },
-  {
-    "master": "front-row/study-bench.png",
-    "masterSha256": "9e40e4421d3800ea48fbcda91334a2cba438bb289068afd92da1dfd9db89669e",
-    "ship": "front-row/study-bench.webp",
-    "shipSha256": "a548a10a42a3bd2a1b14e33f8db0c245547ead7f7976343e249cf66beaae56d9",
-    "width": 1585,
-    "height": 992
-  },
-  {
     "master": "room-objects/review-notebook.png",
     "masterSha256": "3951c1dc61e224fe0844a06994c0aba08cd5bddba3d5cb38c8a560c665a9518e",
     "ship": "room-objects/review-notebook.webp",

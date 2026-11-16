@@ -3,12 +3,13 @@
    rules and one React tree. */
 @font-face { font-family: 'After Class Pixel'; src: url('./assets/fonts-v2/pixelify-sans.ttf') format('truetype'); font-weight: 400 700; font-display: block; }
 
-:is(.scene-shell[data-scene="last-desk"], .front-row-scene[data-room="last-desk"]) { --fr-plate: url('./assets/front-row/last-desk.webp'); }
-:is(.scene-shell[data-scene="study-bench"], .front-row-scene[data-room="study-bench"]) { --fr-plate: url('./assets/front-row/study-bench.webp'); }
-:is(.scene-shell[data-scene="projection-booth"], .front-row-scene[data-room="projection-booth"]) { --fr-plate: url('./assets/front-row/projection-booth.webp'); }
+:is(.scene-shell[data-scene="last-desk"], .front-row-scene[data-room="last-desk"]) { --fr-plate: url('./assets/room-plates/rail-wide.webp'); }
+:is(.scene-shell[data-scene="study-bench"], .front-row-scene[data-room="study-bench"]) { --fr-plate: url('./assets/room-plates/harbor-wide.webp'); }
+:is(.scene-shell[data-scene="projection-booth"], .front-row-scene[data-room="projection-booth"]) { --fr-plate: url('./assets/room-plates/canal-wide.webp'); }
 
 /* The backdrop behind a review, one per room: its painted background, which the stage (room/stage.tsx) paints over once the
-   picture has decoded. The plates above stay for the room picker and for every page that has no review scene. */
+   picture has decoded. The wide plates above are the backdrop of every page that has no review scene, and the room picker's
+   thumbnails. */
 .scene-shell[data-scene="last-desk"] { --fr-bg: url('./assets/front-row-v2/rail-background.webp'); }
 .scene-shell[data-scene="study-bench"] { --fr-bg: url('./assets/front-row-v2/harbor-background.webp'); }
 .scene-shell[data-scene="projection-booth"] { --fr-bg: url('./assets/front-row-v2/canal-background.webp'); }
