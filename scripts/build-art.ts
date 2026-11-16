@@ -30,6 +30,12 @@ export const MAX_DEVICE_PIXEL_RATIO = 3;
 /** One companion sheet is three equal cells. These cell heights are what each of its two sizes ships at. */
 export const COMPANION_CELL = { large: 724, small: 362 } as const;
 
+/**
+ * A room swatch in the appearance picker is at most 210 CSS px wide at 1585:992 (scene.css), so its plate (2314:992, cut to its
+ * middle by `background-size: cover`) is scaled to 131 CSS px tall and 306 wide. The thumbnail ships at 3x that width.
+ */
+const PICKER_PLATE = { drawnWidth: 306, drawnHeight: 131, shipWidth: 306 * MAX_DEVICE_PIXEL_RATIO } as const;
+
 export type ArtOutput = {
   /** Path under src/app/assets. */
   readonly ship: string;
@@ -46,8 +52,8 @@ const webp = (master: string, suffix = "") => master.replace(/\.png$/, `${suffix
 /** Where each master goes. A master no rule names fails the build. */
 export function outputsFor(master: string, size: { readonly width: number; readonly height: number }): ArtOutput[] {
   if (master.startsWith("front-row-v2/")) return [{ ship: webp(master), undoUpscale: 2 }];
-  // A wide room plate is drawn at its own size, one asset pixel to a plate pixel (room/rooms.ts), so it ships as it is.
-  if (master.startsWith("room-plates/")) return [{ ship: webp(master) }];
+  // The stage draws the HD master. The picker uses a smaller copy of the same composition.
+  if (master.startsWith("room-plates/")) return [{ ship: webp(master) }, { ship: webp(master, "-thumb"), width: PICKER_PLATE.shipWidth, drawn: { width: PICKER_PLATE.drawnWidth, height: PICKER_PLATE.drawnHeight } }];
   // The bell is drawn at most 30 CSS px wide (reference.css), in a square.
   if (master === "scenes-v2/bell.png") return [{ ship: webp(master), width: 30 * MAX_DEVICE_PIXEL_RATIO, drawn: { width: 30, height: 38 } }];
   if (master.startsWith("companions-v3/")) {

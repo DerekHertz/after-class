@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { MAX_DEVICE_PIXEL_RATIO } from "../scripts/build-art";
 import type { ArtEntry } from "../scripts/build-art";
@@ -83,6 +83,20 @@ describe("the art the app ships is built from art/masters by scripts/build-art.t
     for (const entry of manifest) {
       expect({ ship: entry.ship, sha: sha256(join(ASSETS, entry.ship)) }).toEqual({ ship: entry.ship, sha: entry.shipSha256 });
       expect({ master: entry.master, sha: sha256(join(MASTERS, entry.master)) }).toEqual({ master: entry.master, sha: entry.masterSha256 });
+    }
+  });
+
+  test("the appearance picker's room swatches draw small thumbnails, and the stage's full plate is not downloaded for them", () => {
+    const scene = parseRules(readFileSync(join(REPO, "src/app/scene.css"), "utf8"));
+    const swatches = scene.filter((r) => r.selector.startsWith(".room-raster"));
+    const drawn = swatches.flatMap((r) => [...r.body.matchAll(/url\(['"]?\.\/assets\/([^'")]+)['"]?\)/g)].map((m) => m[1]!)).sort();
+    const thumbs = manifest.filter((e) => e.ship.startsWith("room-plates/") && e.ship.endsWith("-wide-thumb.webp"));
+    expect(thumbs).toHaveLength(3);
+    expect(drawn).toEqual(thumbs.map((e) => e.ship).sort());
+    for (const thumb of thumbs) {
+      const full = thumb.ship.replace("-thumb", "");
+      expect(manifest.some((e) => e.ship === full)).toBe(true);
+      expect({ thumb: thumb.ship, ratio: statSync(join(ASSETS, thumb.ship)).size / statSync(join(ASSETS, full)).size < 0.1 }).toEqual({ thumb: thumb.ship, ratio: true });
     }
   });
 

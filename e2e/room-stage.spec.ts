@@ -1,10 +1,8 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { deflateSync } from "node:zlib";
 import { APPEARANCE_KEY, DEFAULT_APPEARANCE, SCENES } from "../src/app/appearance";
 import type { SceneId } from "../src/app/appearance";
 import { layoutRoom } from "../src/app/room/layout";
-import { FRONT_ROW_ROOMS, ROOM_ART } from "../src/app/room/rooms";
 import { ROOM_ART_PREFIX } from "../src/shared/room-art";
 import { decodePng } from "../test/png";
 
@@ -16,6 +14,20 @@ async function openRoom(page: Page, scene: SceneId) {
   await page.goto("/?scenario=review&clean=1");
   await expect(page.locator(".front-row-canvas[data-stage=painted]")).toBeAttached();
 }
+
+test("opening the room picker requests thumbnails for the unselected rooms", async ({ page }) => {
+  const requested = new Set<string>();
+  page.on("request", (request) => {
+    const match = /\/(rail|harbor|canal)-wide(-thumb)?-[a-z0-9]{8}\.webp$/.exec(request.url());
+    if (match) requested.add(match[1] + (match[2] ?? ""));
+  });
+  await openRoom(page, "last-desk");
+  await page.getByText("Room & companion").click();
+  await expect.poll(() => [...requested].filter((name) => name.endsWith("-thumb")).sort())
+    .toEqual(["canal-thumb", "harbor-thumb", "rail-thumb"]);
+  expect(requested.has("harbor")).toBe(false);
+  expect(requested.has("canal")).toBe(false);
+});
 
 test.describe("the stage's backing store follows the device pixel ratio", () => {
   for (const dpr of [1, 2]) {
@@ -69,98 +81,53 @@ test("a still room draws once, never while idle, and never while the tab is hidd
   expect(await draws()).toBe(shown);
 });
 
-/**
- * A PNG whose every pixel names its own position, x in red and the low half of green, y in blue and the high half, so a
- * screenshot says which source pixel each device pixel sampled.
- */
-function codedPng(width: number, height: number): Buffer {
-  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
-  const crc = (bytes: Uint8Array) => { let c = 0xffffffff; for (const b of bytes) c = crcTable[(c ^ b) & 0xff]! ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
-  const chunk = (type: string, body: Uint8Array) => {
-    const out = Buffer.alloc(12 + body.length);
-    out.writeUInt32BE(body.length, 0);
-    out.write(type, 4, "latin1");
-    out.set(body, 8);
-    out.writeUInt32BE(crc(out.subarray(4, 8 + body.length)), 8 + body.length);
-    return out;
-  };
-  const raw = Buffer.alloc((width * 3 + 1) * height);
-  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const at = y * (width * 3 + 1) + 1 + x * 3;
-    raw[at] = x & 255;
-    raw[at + 1] = ((x >> 8) & 15) | (((y >> 8) & 15) << 4);
-    raw[at + 2] = y & 255;
-  }
-  const header = Buffer.alloc(13);
-  header.writeUInt32BE(width, 0);
-  header.writeUInt32BE(height, 4);
-  header.set([8, 2, 0, 0, 0], 8);
-  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", deflateSync(raw)), chunk("IEND", new Uint8Array())]);
-}
-
-/** Each room picture's file name, as the bundle names it, with the size of the picture it holds. */
-function layerSizes(scene: SceneId): Map<string, { width: number; height: number }> {
-  const prefix = ROOM_ART_PREFIX[scene];
-  return new Map<string, { width: number; height: number }>([[`${prefix}-background`, ROOM_ART.plate], [`${prefix}-wide`, FRONT_ROW_ROOMS[scene].plate.size]]);
-}
-
 /** The room's plate as one CSS-drawn picture at the place the layout gives it, for the reference rendering. */
-function cssLayers(scene: SceneId, window: { width: number; height: number }) {
+function cssPlate(scene: SceneId, window: { width: number; height: number }) {
   const layout = layoutRoom(scene, window, "full");
   if (layout.composition !== "full") throw new Error("a desktop window lays out the full room");
-  return [{ name: `${ROOM_ART_PREFIX[scene]}-wide`, rect: layout.plate, z: 0, slice: null, border: null }];
+  return { name: `${ROOM_ART_PREFIX[scene]}-wide`, rect: layout.plate };
 }
 
 for (const scene of scenes) {
   for (const size of [{ width: 1440, height: 900 }, { width: 2000, height: 1100 }]) {
-    test(`in ${scene} at ${size.width}x${size.height} the canvas samples the same art pixels as the plate drawn by CSS`, async ({ page }, info) => {
-      test.skip(info.project.name === "narrow", "the phone backdrop is drawn smooth, so its pixels do not name a source pixel");
+    test(`in ${scene} at ${size.width}x${size.height} the canvas draws the plate where and as CSS draws it`, async ({ page }, info) => {
+      test.skip(info.project.name === "narrow", "a phone draws the backdrop, not the plate");
       await page.setViewportSize(size);
-      const sizes = layerSizes(scene);
-      await page.route(/\/([a-z]+-[a-z-]+)-[a-z0-9]{8}\.webp$/, async (route) => {
-        const stem = /\/([a-z]+-[a-z-]+)-[a-z0-9]{8}\.webp$/.exec(route.request().url())![1]!;
-        const picture = sizes.get(stem);
-        return picture ? route.fulfill({ body: codedPng(picture.width, picture.height), contentType: "image/png" }) : route.continue();
-      });
       await openRoom(page, scene);
       await page.addStyleTag({ content: "body * { visibility: hidden !important } .front-row-canvas { visibility: visible !important } .scene-shell::before { display: none !important }" });
       const decode = async () => decodePng(await page.screenshot(), "screenshot");
       const canvas = await decode();
+      const plate = cssPlate(scene, size);
       const urls = await page.evaluate(() => performance.getEntriesByType("resource").map((e) => e.name).filter((n) => n.endsWith(".webp")));
-      const layers = cssLayers(scene, size).map((layer) => ({ ...layer, url: urls.find((u) => new RegExp(`/${layer.name}-[a-z0-9]{8}\\.webp$`).test(u))! }));
-      await page.evaluate((layers) => {
+      const url = urls.find((u) => new RegExp(`/${plate.name}-[a-z0-9]{8}\\.webp$`).test(u))!;
+      await page.evaluate(({ rect, url }) => {
         document.querySelector<HTMLElement>(".front-row-canvas")!.style.display = "none";
-        const host = document.createElement("div");
-        host.style.cssText = "position: fixed; inset: 0; visibility: visible !important; z-index: 99";
-        for (const { rect, z, slice, border, url } of layers) {
-          const div = document.createElement("div");
-          div.style.cssText = `position: absolute; box-sizing: border-box; visibility: visible !important; image-rendering: pixelated; left: ${rect.left}px; top: ${rect.top}px; width: ${rect.width}px; height: ${rect.height}px; z-index: ${z}`;
-          if (slice === null) div.style.background = `url(${url}) no-repeat 0 0 / 100% 100%`;
-          else Object.assign(div.style, { borderStyle: "solid", borderWidth: border, borderImage: `url(${url}) ${slice} fill / ${border} / 0 stretch` });
-          host.append(div);
-        }
-        document.body.append(host);
-        return Promise.all(layers.map(({ url }) => { const i = new Image(); i.src = url; return i.decode(); }));
-      }, layers);
+        const div = document.createElement("div");
+        div.style.cssText = `position: fixed; box-sizing: border-box; visibility: visible !important; z-index: 99; left: ${rect.left}px; top: ${rect.top}px; width: ${rect.width}px; height: ${rect.height}px; background: url(${url}) no-repeat 0 0 / 100% 100%`;
+        document.body.append(div);
+        const image = new Image();
+        image.src = url;
+        return image.decode();
+      }, { ...plate, url });
       await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
       const css = await decode();
-      const at = (png: typeof css, i: number) => [png.rgba[i]! | ((png.rgba[i + 1]! & 15) << 8), png.rgba[i + 2]! | ((png.rgba[i + 1]! >> 4) << 8)];
-      let differing = 0;
-      let apart = 0;
+      // The plate file is twice the plate's pixels and both paths shrink it smoothly. In Chrome they draw the same pixels,
+      // and the same plate one device pixel out of place differs by 3.5 levels on average, so the limits catch a shift.
+      let total = 0;
+      let far = 0;
       for (let i = 0; i < css.rgba.length; i += 4) {
-        const [cx, cy] = at(css, i);
-        const [sx, sy] = at(canvas, i);
-        if (cx === sx && cy === sy) continue;
-        differing++;
-        if (Math.abs(cx! - sx!) > 1 || Math.abs(cy! - sy!) > 1) apart++;
+        const d = Math.max(...[0, 1, 2].map((c) => Math.abs(css.rgba[i + c]! - canvas.rgba[i + c]!)));
+        total += d;
+        if (d > 32) far++;
       }
-      // What is left are samples that fall exactly between two source pixels, which Chrome's CSS path and its canvas round
-      // either way. The plate is drawn smaller than its file at 1440x900 (0.91 times), where that is 9.6 percent of the window,
-      // and never more than one source pixel apart. Above its size it is under 1 percent.
-      expect({ scene, size, apart, share: differing / (css.width * css.height) < 0.12 }).toEqual({ scene, size, apart: 0, share: true });
+      const pixels = css.width * css.height;
+      expect({ scene, size, mean: total / pixels < MEAN_LIMIT, far: far / pixels < FAR_LIMIT }).toEqual({ scene, size, mean: true, far: true });
     });
   }
 }
+
+const MEAN_LIMIT = 0.5;
+const FAR_LIMIT = 0.001;
 
 test("the room's words wait for its plate, and a plate that fails does not hold them", async ({ page }, info) => {
   test.skip(info.project.name === "narrow", "a phone shows its words over the page's own backdrop");

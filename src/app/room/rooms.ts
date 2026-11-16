@@ -92,6 +92,8 @@ export const ROOM_ART = {
 } as const;
 
 const PLATE_SIZE = { width: 2314, height: 992 } as const;
+/** Each plate's file holds this many pixels per plate pixel: the Meshy takes are upscaled before the plate is composed. */
+export const PLATE_FILE_SCALE = 2;
 const CORE = { x: 364, y: 0, width: 1586, height: 992 } as const;
 
 /**

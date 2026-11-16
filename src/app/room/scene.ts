@@ -8,8 +8,8 @@ import { BALLOON_AT, BALLOON_CELLS } from "./balloon";
 import type { Edge, Rect, RoomLayout } from "./layout";
 
 /**
- * How a picture is resampled to its box. The room's plate is pixelated, as the HD pixel look needs. A phone's backdrop is
- * smooth, as `.scene-shell::before` draws it on every other page, so the review does not change the picture under the learner.
+ * How a picture is resampled to its box. The room's plate file is twice its plate pixels, so it is drawn smoothly down to
+ * the window, as `.scene-shell::before` draws it on every other page. A phone's backdrop is smooth too.
  */
 export type Sampling = "pixelated" | "smooth";
 
@@ -64,7 +64,7 @@ export function buildScene(scene: SceneId, layout: RoomLayout, now: number | nul
     return { draws: [{ kind: "image", src: art.background, rect: layout.layers.background, sampling: "smooth" }], next: null };
   }
   const fills = layout.fills.map(({ edge, rect }): Draw => ({ kind: "edge", src: art.plate, edge, rect }));
-  const layered: { readonly z: number; readonly draw: Draw }[] = [{ z: DEPTH.plate, draw: { kind: "image", src: art.plate, rect: layout.plate, sampling: "pixelated" } }];
+  const layered: { readonly z: number; readonly draw: Draw }[] = [{ z: DEPTH.plate, draw: { kind: "image", src: art.plate, rect: layout.plate, sampling: "smooth" } }];
   const ambient = now === null ? null : ambientDraws(scene, layout, now);
   if (ambient !== null) layered.push(...ambient.draws);
   const draws = [...fills, ...layered.sort((a, b) => a.z - b.z).map(({ draw }) => draw)];

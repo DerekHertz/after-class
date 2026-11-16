@@ -16,13 +16,13 @@ const full = (scene: SceneId, window: Size) => {
 };
 
 describe("the stage's draw list", () => {
-  test("a full room is its wide plate, one pixelated picture that holds the board, desk and mat, drawn at the plate's own shape", () => {
+  test("a full room is its wide plate, one smoothly drawn picture that holds the board, desk and mat, drawn at the plate's own shape", () => {
     for (const scene of rooms) {
       const { draws } = full(scene, { width: 1920, height: 1080 });
       const images = draws.filter((d) => d.kind === "image");
       expect(images).toHaveLength(1);
       const [plate] = images;
-      expect(plate).toMatchObject({ kind: "image", sampling: "pixelated", src: ROOM_LAYER_ART[scene].plate });
+      expect(plate).toMatchObject({ kind: "image", sampling: "smooth", src: ROOM_LAYER_ART[scene].plate });
       expect(plate!.rect.width / plate!.rect.height).toBeCloseTo(2314 / 992, 9);
     }
   });

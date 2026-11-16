@@ -1819,27 +1819,63 @@
   },
   {
     "master": "room-plates/canal-wide.png",
-    "masterSha256": "437543030a67721794de8cda268cc3115d2ebe3061bd0db528787c6e0c1e19ac",
+    "masterSha256": "4f12becc42c9707d20a435ea00462764f257e0ad0a28d206d799cbebbc793488",
     "ship": "room-plates/canal-wide.webp",
-    "shipSha256": "3a8e3b27dab89f2368f1ac9a5e86cda430046feb79d560aee5f7b08ae307d954",
-    "width": 2314,
-    "height": 992
+    "shipSha256": "a4267625209b415b84371610d138398a625792d179ad840221d30461f948a9a5",
+    "width": 4628,
+    "height": 1984
+  },
+  {
+    "master": "room-plates/canal-wide.png",
+    "masterSha256": "4f12becc42c9707d20a435ea00462764f257e0ad0a28d206d799cbebbc793488",
+    "ship": "room-plates/canal-wide-thumb.webp",
+    "shipSha256": "ddf4791a9baf91d4bebc839ee9f5ac9acdeeb25cc2ecfd98a59bad96736d07e9",
+    "width": 918,
+    "height": 394,
+    "drawn": {
+      "width": 306,
+      "height": 131
+    }
   },
   {
     "master": "room-plates/harbor-wide.png",
-    "masterSha256": "5b6a9045b50d8da465e9d98c5adf217def14d557eb9b42dfbad8ee9249d64c47",
+    "masterSha256": "301773563f27f13c6ae1565e72a3ca10de7a3867d2674e050ea9f4ec6236b6d2",
     "ship": "room-plates/harbor-wide.webp",
-    "shipSha256": "1d790293e302371828eacda2fb5d647cfe81ad5391c0eee17028eb8c92f7b270",
-    "width": 2314,
-    "height": 992
+    "shipSha256": "65f76c98c37ebc0acc10a8f6eecb2ff2ae6563ca75a7357547a61e526610df12",
+    "width": 4628,
+    "height": 1984
+  },
+  {
+    "master": "room-plates/harbor-wide.png",
+    "masterSha256": "301773563f27f13c6ae1565e72a3ca10de7a3867d2674e050ea9f4ec6236b6d2",
+    "ship": "room-plates/harbor-wide-thumb.webp",
+    "shipSha256": "ef3f44092dd599534d8711171a1fad93769f4c55ea5809ced13c564f0e323ad7",
+    "width": 918,
+    "height": 394,
+    "drawn": {
+      "width": 306,
+      "height": 131
+    }
   },
   {
     "master": "room-plates/rail-wide.png",
-    "masterSha256": "5d3627dad5c7d5498bc8cb690bceb09ab8a3ae9473362334ef261bf55434c2b4",
+    "masterSha256": "8a01a0ba00b80bc7eed147c7e280585d1807c8d23ffa83938ad192a466462828",
     "ship": "room-plates/rail-wide.webp",
-    "shipSha256": "6775d9db87df2e23d677cb8371bd5cff1de504cda1ef29c0a5033f5b83908ed5",
-    "width": 2314,
-    "height": 992
+    "shipSha256": "a42f7f8d51c9d97fa0c0039036036f2987bbe126ab38788d00edb2eda6706e18",
+    "width": 4628,
+    "height": 1984
+  },
+  {
+    "master": "room-plates/rail-wide.png",
+    "masterSha256": "8a01a0ba00b80bc7eed147c7e280585d1807c8d23ffa83938ad192a466462828",
+    "ship": "room-plates/rail-wide-thumb.webp",
+    "shipSha256": "1cfd4aca369e55fcd95b5fe25b55b1bc1220b42351ea112674160c8a0dc707b9",
+    "width": 918,
+    "height": 394,
+    "drawn": {
+      "width": 306,
+      "height": 131
+    }
   },
   {
     "master": "scenes-v2/bell.png",

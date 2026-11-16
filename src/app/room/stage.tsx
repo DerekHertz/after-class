@@ -403,7 +403,7 @@ function paintDraw(context: CanvasRenderingContext2D, draw: Draw, scale: Scale):
   if (state !== "decoded") return;
   const smooth = draw.kind === "image" && draw.sampling === "smooth";
   context.imageSmoothingEnabled = smooth;
-  if (smooth) context.imageSmoothingQuality = "medium";
+  if (smooth) context.imageSmoothingQuality = "high";
   if (draw.kind === "companion") Object.assign(context, { shadowColor: "#00000040", shadowOffsetY: companionShadow(scale) });
   for (const { sx, sy, sw, sh, dx, dy, dw, dh } of pieces(draw, { width: image.naturalWidth, height: image.naturalHeight }, scale)) {
     context.drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh);
