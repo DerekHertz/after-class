@@ -9,8 +9,16 @@ const pauseButton = (page: Page) => page.locator('.front-row-bar button[data-act
 const modal = (page: Page) => page.locator("dialog:modal");
 const confirmDialog = (page: Page) => page.getByRole("alertdialog", { name: "Finish and save this review?" });
 
+/** Opens the bar's menu, which holds Pause and Finish & save, if it is shut. */
+async function openMenu(page: Page) {
+  const toggle = page.getByRole("button", { name: "Menu", exact: true });
+  await expect(toggle).toBeVisible();
+  if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
+}
+
 async function open(page: Page) {
   await page.goto("/?scenario=review&clean=1");
+  await openMenu(page);
   await expect(finishButton(page)).toBeVisible();
   await finishButton(page).click();
   await expect(confirmDialog(page)).toBeVisible();
@@ -25,6 +33,7 @@ const center = async (locator: Locator) => {
 
 test("opening the finish confirm leaves every header control where it was", async ({ page }) => {
   await page.goto("/?scenario=review&clean=1");
+  await openMenu(page);
   const finish = finishButton(page);
   await expect(finish).toBeVisible();
   const boxes = () => page.evaluate((selectors) => selectors.flatMap(s => [...document.querySelectorAll(s)].map(e => {
@@ -125,7 +134,9 @@ test("a click inside the confirm does not close it", async ({ page }) => {
 
 test("the confirm works the same while the review is paused", async ({ page }) => {
   await page.goto("/?scenario=review&clean=1");
+  await openMenu(page);
   await pauseButton(page).click();
+  await openMenu(page);
   await expect(page.locator('.front-row-bar button[data-action="resume"]')).toBeVisible();
   await finishButton(page).click();
   await expect(confirmDialog(page)).toBeVisible();

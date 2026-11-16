@@ -46,6 +46,8 @@ const webp = (master: string, suffix = "") => master.replace(/\.png$/, `${suffix
 /** Where each master goes. A master no rule names fails the build. */
 export function outputsFor(master: string, size: { readonly width: number; readonly height: number }): ArtOutput[] {
   if (master.startsWith("front-row-v2/")) return [{ ship: webp(master), undoUpscale: 2 }];
+  // A wide room plate is drawn at its own size, one asset pixel to a plate pixel (room/rooms.ts), so it ships as it is.
+  if (master.startsWith("room-plates/")) return [{ ship: webp(master) }];
   // The bell is drawn at most 30 CSS px wide (reference.css), in a square.
   if (master === "scenes-v2/bell.png") return [{ ship: webp(master), width: 30 * MAX_DEVICE_PIXEL_RATIO, drawn: { width: 30, height: 38 } }];
   if (master.startsWith("companions-v3/")) {

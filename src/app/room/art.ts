@@ -1,25 +1,11 @@
 import type { SceneId } from "../appearance";
-import type { FRONT_ROW_ROOMS } from "./rooms";
 import type { UnlockId } from "./progress";
+import railWide from "../assets/room-plates/rail-wide.webp";
+import harborWide from "../assets/room-plates/harbor-wide.webp";
+import canalWide from "../assets/room-plates/canal-wide.webp";
 import railBackground from "../assets/front-row-v2/rail-background.webp";
-import railBoard from "../assets/front-row-v2/rail-board.webp";
-import railDesk from "../assets/front-row-v2/rail-desk.webp";
-import railMat from "../assets/front-row-v2/rail-mat.webp";
-import railLedgeItems from "../assets/front-row-v2/rail-ledge-items.webp";
-import railVine from "../assets/front-row-v2/rail-vine.webp";
 import harborBackground from "../assets/front-row-v2/harbor-background.webp";
-import harborBoard from "../assets/front-row-v2/harbor-board.webp";
-import harborDesk from "../assets/front-row-v2/harbor-desk.webp";
-import harborMat from "../assets/front-row-v2/harbor-mat.webp";
-import harborLamp from "../assets/front-row-v2/harbor-lamp.webp";
-import harborAwning from "../assets/front-row-v2/harbor-awning.webp";
-import harborCushion from "../assets/front-row-v2/harbor-cushion.webp";
 import canalBackground from "../assets/front-row-v2/canal-background.webp";
-import canalBoard from "../assets/front-row-v2/canal-board.webp";
-import canalDesk from "../assets/front-row-v2/canal-desk.webp";
-import canalMat from "../assets/front-row-v2/canal-mat.webp";
-import canalPullTab from "../assets/front-row-v2/canal-pull-tab.webp";
-import canalProjector from "../assets/front-row-v2/canal-projector.webp";
 import rail1 from "../assets/unlock-objects/last-desk/1.webp";
 import rail2 from "../assets/unlock-objects/last-desk/2.webp";
 import rail3 from "../assets/unlock-objects/last-desk/3.webp";
@@ -39,25 +25,17 @@ import canal4 from "../assets/unlock-objects/projection-booth/4.webp";
 import canal5 from "../assets/unlock-objects/projection-booth/5.webp";
 import canal6 from "../assets/unlock-objects/projection-booth/6.webp";
 
-type ExtraName<S extends SceneId> = (typeof FRONT_ROW_ROOMS)[S]["extras"][number]["name"];
-
-/** A room's painted layers as bundle URLs, one file per layer, each stored at plate density. */
-export type RoomArt<S extends SceneId = SceneId> = {
-  readonly background: string;
-  readonly board: string;
-  readonly desk: string;
-  readonly mat: string;
-  readonly extras: Readonly<Record<ExtraName<S>, string>>;
-};
+/** A room's pictures as bundle URLs: the wide plate the full room is drawn from, and the background a phone is drawn over. */
+export type RoomArt = { readonly plate: string; readonly background: string };
 
 /**
  * The files the stage draws for each room. The bundler names each `<stem>-<hash>.webp`, which is how scripts/build-app.ts
  * finds them for the page's preload and prefetch table.
  */
-export const ROOM_LAYER_ART: { readonly [S in SceneId]: RoomArt<S> } = {
-  "last-desk": { background: railBackground, board: railBoard, desk: railDesk, mat: railMat, extras: { "ledge-items": railLedgeItems, vine: railVine } },
-  "study-bench": { background: harborBackground, board: harborBoard, desk: harborDesk, mat: harborMat, extras: { lamp: harborLamp, awning: harborAwning, cushion: harborCushion } },
-  "projection-booth": { background: canalBackground, board: canalBoard, desk: canalDesk, mat: canalMat, extras: { "pull-tab": canalPullTab, projector: canalProjector } },
+export const ROOM_LAYER_ART: { readonly [S in SceneId]: RoomArt } = {
+  "last-desk": { plate: railWide, background: railBackground },
+  "study-bench": { plate: harborWide, background: harborBackground },
+  "projection-booth": { plate: canalWide, background: canalBackground },
 };
 
 /**

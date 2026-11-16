@@ -10,7 +10,6 @@ import { layoutRoom } from "./room/layout";
 import type { FullRoomLayout, Rect, Size } from "./room/layout";
 import { useMotion } from "./room/motion";
 import { ProgressPanel } from "./room/progress-panel";
-import { drawnUnlocks } from "./room/room-record";
 import type { RoomStanding } from "./room/room-record";
 import { RoomStage } from "./room/stage";
 import { FRONT_ROW_ROOMS } from "./room/rooms";
@@ -60,15 +59,18 @@ export type FrontRowLayout =
  * The review seen from the front-row desk. Every room renders this same tree; a room only changes data attributes, custom
  * properties and the positions room/layout.ts gives, so switching rooms or companions never remounts the response field and
  * its draft. `standing` is the learner's progress from their saved reviews and how current it is, or null until it first
- * loads: it opens the room's unlocked objects and fills the Your room panel. `retry` reads the record again.
+ * loads: it fills the Your room panel. `retry` reads the record again.
  */
-export function FrontRowScene({ scene, layout, appearance, activity, standing, retry, boardRef }: {
+export function FrontRowScene({ scene, layout, appearance, activity, standing, retry, boardRef, roomOpen = false, closeRoom = () => {} }: {
   readonly scene: SceneId;
   readonly layout: FrontRowLayout;
   readonly appearance: Pick<Appearance, "companion" | "visible" | "motion">;
   readonly activity: CompanionActivity;
   readonly standing: RoomStanding;
   readonly retry: () => void;
+  /** Whether the Your room panel is open, which the bar's menu controls, and how it shuts. */
+  readonly roomOpen?: boolean;
+  readonly closeRoom?: () => void;
   readonly boardRef?: Ref<HTMLElement>;
 }) {
   const room = FRONT_ROW_ROOMS[scene];
@@ -87,7 +89,7 @@ export function FrontRowScene({ scene, layout, appearance, activity, standing, r
     <div ref={sceneRef} className="front-row-scene" data-room={scene} data-board-tone={room.board.tone} data-mat-tone={room.mat.tone} data-mat-actions={room.mat.actions} data-board-align={room.board.align} data-phase={layout.kind}>
       {/* The room's painted layers on one canvas, with every control placed over them from room/layout.ts. */}
       <div className="front-row-stage" style={full ? stageStyle(full) : undefined}>
-        <RoomStage scene={scene} composition={composition} motion={motion} companion={companion} unlocked={drawnUnlocks(standing, scene)} />
+        <RoomStage scene={scene} composition={composition} motion={motion} companion={companion} />
         {layout.kind === "setup" ? layout.form : <>
           <ScrollArea area="board" label={room.surfaceName} areaRef={boardRef}>{layout.board}</ScrollArea>
           <ScrollArea area="desk" label="Your desk">{layout.desk}</ScrollArea>
@@ -99,7 +101,7 @@ export function FrontRowScene({ scene, layout, appearance, activity, standing, r
           <DeskObject object="source" label={sourceButtonLabel(layout.objects.cited)} tag={layout.objects.cited === 0 ? "Source" : `Source · ${layout.objects.cited}`} open={layout.objects.open} rect={full?.objects.source} />
           <DeskObject object="history" label="Earlier in this review" tag="Earlier" open={layout.objects.open} rect={full?.objects.history} />
         </>}
-        {standing !== null && <ProgressPanel standing={standing} room={scene} rect={full?.progress} retry={retry} />}
+        {standing !== null && <ProgressPanel standing={standing} room={scene} open={roomOpen} close={closeRoom} retry={retry} />}
       </div>
     </div>
   );
@@ -108,14 +110,14 @@ export function FrontRowScene({ scene, layout, appearance, activity, standing, r
 const box = ({ left, top, width, height }: Rect): CSSProperties => ({ left, top, width, height });
 
 /**
- * The scale the board's type follows, and the two text areas. The setup form draws its own text areas, so they are placed
+ * The scale the room's type follows, and the two text areas. The setup form draws its own text areas, so they are placed
  * through custom properties rather than on the elements. The board's text starts below the navigation where the board's own
  * top would sit under it.
  */
-function stageStyle({ u, window, text }: FullRoomLayout): CSSProperties {
+function stageStyle({ s, window, text }: FullRoomLayout): CSSProperties {
   const sides = ({ left, top, width, height }: Rect, topEdge: string) => `${topEdge} ${window.width - left - width}px ${window.height - top - height}px ${left}px`;
   return {
-    "--fr-u": `${u}px`,
+    "--fr-s": `${s}px`,
     "--fr-board-text": sides(text.board, `max(${text.board.top}px, var(--fr-nav-reserve))`),
     "--fr-desk-text": sides(text.desk, `${text.desk.top}px`),
   };
@@ -164,7 +166,7 @@ function DeskObject({ object, label, tag, open, rect }: { readonly object: RoomO
 /** A board or desk that scrolls its own long content. It joins the tab order only while it has something to scroll. */
 function ScrollArea({ area, label, areaRef, children }: { readonly area: "board" | "desk"; readonly label: string; readonly areaRef?: Ref<HTMLElement> | undefined; readonly children: ReactNode }) {
   const own = useRef<HTMLElement>(null);
-  const scrolls = useOverflow(own);
+  const scrolls = useOverflow(own, area === "board");
   return (
     <section
       ref={(node) => {
@@ -179,12 +181,30 @@ function ScrollArea({ area, label, areaRef, children }: { readonly area: "board"
   );
 }
 
-function useOverflow(ref: RefObject<HTMLElement | null>): boolean {
+/** The smallest the board's type shrinks to before the board scrolls, as a share of the mockup's sizes. */
+const BOARD_FIT_FLOOR = 0.7;
+
+/**
+ * Whether `ref` overflows. With `fit`, the board first steps its type down from the mockup's sizes (`--fr-fit`) until its
+ * whole exchange fits, so a reply or a held note shows without scrolling; only past the floor does it scroll.
+ */
+function useOverflow(ref: RefObject<HTMLElement | null>, fit = false): boolean {
   const [overflows, setOverflows] = useState(false);
   useEffect(() => {
     const node = ref.current;
     if (!node || typeof ResizeObserver === "undefined") return;
-    const measure = () => setOverflows(node.scrollHeight > node.clientHeight + 1);
+    const over = () => node.scrollHeight > node.clientHeight + 1;
+    const measure = () => {
+      if (fit) {
+        let scale = 1;
+        node.style.setProperty("--fr-fit", "1");
+        while (over() && scale > BOARD_FIT_FLOOR + 1e-9) {
+          scale = Math.max(BOARD_FIT_FLOOR, scale - 0.05);
+          node.style.setProperty("--fr-fit", String(scale));
+        }
+      }
+      setOverflows(over());
+    };
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     for (const child of node.children) observer.observe(child);
@@ -195,6 +215,6 @@ function useOverflow(ref: RefObject<HTMLElement | null>): boolean {
     mutations.observe(node, { childList: true, subtree: true, characterData: true });
     measure();
     return () => { observer.disconnect(); mutations.disconnect(); };
-  }, [ref]);
+  }, [ref, fit]);
   return overflows;
 }

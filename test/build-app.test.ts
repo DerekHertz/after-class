@@ -3,7 +3,6 @@ import { appendFileSync, cpSync, existsSync, mkdtempSync, readFileSync, readdirS
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { INLINE_LIMIT, buildApp, bundledPackages } from "../scripts/build-app";
-import { FRONT_ROW_ROOMS } from "../src/app/room/rooms";
 import { parseAppearance } from "../src/app/appearance";
 import { FULL_ROOM_QUERY, ROOM_ART_PREFIX } from "../src/shared/room-art";
 import type { RoomArtTable } from "../src/shared/room-art";
@@ -82,21 +81,22 @@ describe("the review app bundle", () => {
       return { table: JSON.parse(json) as RoomArtTable, hrefs: links.map((l) => l.href!) };
     }
 
-    test("every file in the table is in the bundle, each room's review starts with its background, and every extra a room draws is in it", () => {
+    test("every file in the table is in the bundle, each room's review is its wide plate, and a phone's is its background", () => {
       const { out } = built();
       const { table } = preloaded(null, "/app/");
       const urls = [...Object.values(table.rooms).flatMap((r) => [r.plate, ...r.layers, ...r.compact]), ...table.shared];
       expect(urls.filter((u) => !existsSync(join(out, u.slice("/app/".length))))).toEqual([]);
       for (const [scene, prefix] of Object.entries(ROOM_ART_PREFIX)) {
         const room = table.rooms[scene]!;
-        expect(room.layers[0]).toMatch(new RegExp(`^/app/${prefix}-background-[a-z0-9]{8}\\.webp$`));
-        expect(room.compact).toEqual([room.layers[0]!]);
+        expect(room.layers).toHaveLength(1);
+        expect(room.layers[0]).toMatch(new RegExp(`^/app/${prefix}-wide-[a-z0-9]{8}\\.webp$`));
+        expect(room.compact).toHaveLength(1);
+        expect(room.compact[0]).toMatch(new RegExp(`^/app/${prefix}-background-[a-z0-9]{8}\\.webp$`));
         expect(room.plate).toMatch(new RegExp(`^/app/${scene}-[a-z0-9]{8}\\.webp$`));
-        for (const extra of FRONT_ROW_ROOMS[scene as keyof typeof FRONT_ROW_ROOMS].extras) expect(room.layers.some((u) => u.startsWith(`/app/${prefix}-${extra.name}-`))).toBe(true);
       }
     });
 
-    test("a page that is not a review preloads the saved room's plate, and a review preloads that room's layers, background first", () => {
+    test("a page that is not a review preloads the saved room's plate, and a review preloads that room's wide plate", () => {
       const harbor = JSON.stringify({ scene: "study-bench" });
       const home = preloaded(harbor, "/app/");
       expect(home.hrefs).toEqual([home.table.rooms["study-bench"]!.plate]);
@@ -166,10 +166,10 @@ describe("a file name the server caches for a year", () => {
   /** A browser holding a file from release A asks for that name again in release B, so a name must never stand for two different files. */
   const edits: [string, (root: string) => void][] = [
     ["an image is renamed with the same bytes", (root) => {
-      const art = join(root, "src/app/assets/front-row-v2");
-      renameSync(join(art, "harbor-lamp.webp"), join(art, "harbor-light.webp"));
+      const art = join(root, "src/app/assets/unlock-objects/study-bench");
+      renameSync(join(art, "1.webp"), join(art, "first.webp"));
       const stage = join(root, "src/app/room/art.ts");
-      writeFileSync(stage, readFileSync(stage, "utf8").replace("harbor-lamp.webp", "harbor-light.webp"));
+      writeFileSync(stage, readFileSync(stage, "utf8").replace("study-bench/1.webp", "study-bench/first.webp"));
     }],
     ["an image too large to inline is renamed with the same bytes", (root) => {
       const art = join(root, "src/app/assets/companions-v3");
@@ -180,7 +180,7 @@ describe("a file name the server caches for a year", () => {
       writeFileSync(stage, readFileSync(stage, "utf8").replace("companions-v3/pip.webp", "companions-v3/pip-large.webp"));
     }],
     ["an image the stylesheet inlines changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/front-row/study-bench.webp"), "\0")],
-    ["a layer the stage imports changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/front-row-v2/harbor-lamp.webp"), "\0")],
+    ["a layer the stage imports changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/room-plates/harbor-wide.webp"), "\0")],
     ["an image too large to inline changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/companions-v3/pip.webp"), "\0")],
     ["a stylesheet rule changes", (root) => appendFileSync(join(root, "src/app/completion.css"), "\n.release-probe { order: 7; }\n")],
     ["the script changes", (root) => appendFileSync(join(root, "src/app/main.tsx"), "\nconsole.info('release-probe');\n")],

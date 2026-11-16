@@ -41,10 +41,8 @@ export function roomArtTable(emitted: readonly string[], layerNames: readonly st
   };
   const rooms: Record<string, { plate: string; layers: string[]; compact: string[] }> = {};
   for (const [scene, prefix] of Object.entries(ROOM_ART_PREFIX)) {
-    const own = layerNames.filter((n) => n.startsWith(`${prefix}-`));
-    const first = ROOM_LAYER_ORDER.map((layer) => `${prefix}-${layer}`);
-    for (const stem of first) if (!own.includes(stem)) throw new Error(`${scene} has no ${stem} in assets/front-row-v2`);
-    const layers = [...first, ...own.filter((n) => !first.includes(n)).sort()];
+    const layers = ROOM_LAYER_ORDER.map((layer) => `${prefix}-${layer}`);
+    for (const stem of [...layers, ...COMPACT_ROOM_LAYERS.map((layer) => `${prefix}-${layer}`)]) if (!layerNames.includes(stem)) throw new Error(`${scene} has no ${stem} in assets/room-plates or assets/front-row-v2`);
     rooms[scene] = { plate: url(scene), layers: layers.map(url), compact: COMPACT_ROOM_LAYERS.map((layer) => url(`${prefix}-${layer}`)) };
   }
   return { rooms, shared: SHARED_ROOM_ART.map(url) };
@@ -140,7 +138,7 @@ export async function buildApp(outDir: string, root = REPO): Promise<void> {
     if (file === undefined) throw new Error(`the first-screen font ${stem} is not in the review app's CSS`);
     return `<link rel="preload" href="/app/${file}" as="font" type="font/ttf" crossorigin>`;
   });
-  const layers = readdirSync(join(root, "src/app/assets/front-row-v2")).map((f) => basename(f, extname(f)));
+  const layers = ["room-plates", "front-row-v2"].flatMap((dir) => readdirSync(join(root, "src/app/assets", dir)).map((f) => basename(f, extname(f))));
   const table = JSON.stringify(roomArtTable(readdirSync(out), layers)).replaceAll("<", "\\u003c");
   const artTags = `<script type="application/json" id="room-art">${table}</script><script>${preloadScript()}</script>`;
   html = html.replace('<link rel="stylesheet"', () => `${artTags}<link rel="stylesheet"`);

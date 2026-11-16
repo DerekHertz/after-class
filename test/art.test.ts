@@ -19,7 +19,7 @@ const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true 
 const rel = (root: string, path: string) => relative(root, path).split("\\").join("/");
 /** The room layers and companion frames the review's canvas stage draws (src/app/room/stage.tsx), which import their files instead of naming them in a stylesheet. */
 const STAGE_DRAWN = new Set([
-  ...Object.values(ROOM_LAYER_ART).flatMap(({ extras, ...layers }) => [...Object.values(layers), ...Object.values(extras)]),
+  ...Object.values(ROOM_LAYER_ART).flatMap((layers) => Object.values(layers)),
   ...Object.values(UNLOCK_ART),
   ...Object.values(COMPANION_ART).flatMap(({ sheet, frames }) => [sheet, ...Object.values(frames)].flatMap((sized) => [sized.large, sized.small])),
 ].map((file: string) => rel(ASSETS, file)));
@@ -138,7 +138,7 @@ describe("the art the app ships is built from art/masters by scripts/build-art.t
   test("every image stored at half size is drawn pixelated, or smooth with a reason the stylesheet records", () => {
     const stylesheets = files(join(REPO, "src/app")).filter((f) => f.endsWith(".css")).map((f) => readFileSync(f, "utf8"));
     const halved = manifest.filter((e) => e.undoUpscale !== undefined).map((e) => e.ship);
-    expect(halved.length).toBe(21);
+    expect(halved.length).toBe(5);
     // The stage draws its layers pixelated in the full room (test/room-scene.test.ts). A file it draws is checked here only
     // where a stylesheet draws it too, as the phone's backdrop draws each room's background.
     expect(unprotectedHalvedImages(stylesheets, halved.filter((ship) => !STAGE_DRAWN.has(ship) || stylesheets.some((css) => css.includes(ship))))).toEqual([]);

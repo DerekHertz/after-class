@@ -1,30 +1,28 @@
 import type { SceneId } from "../appearance";
 import { ambientDraws } from "./ambient";
-import { ROOM_LAYER_ART, UNLOCK_ART } from "./art";
+import { ROOM_LAYER_ART } from "./art";
 import { companionAt, companionDraw } from "./companion";
-import type { CompanionCue, Frame, Idle } from "./companion";
-import type { NineSliceLayer, Rect, RoomLayout } from "./layout";
-import type { UnlockId } from "./progress";
 import { FRONT_ROW_ROOMS } from "./rooms";
-import type { Edges } from "./rooms";
+import type { CompanionCue, Frame, Idle } from "./companion";
+import { BALLOON_AT, BALLOON_CELLS } from "./balloon";
+import type { Edge, Rect, RoomLayout } from "./layout";
 
 /**
- * How a picture is resampled to its box. The room's layers are pixelated, as the HD pixel look needs. A phone's backdrop is
+ * How a picture is resampled to its box. The room's plate is pixelated, as the HD pixel look needs. A phone's backdrop is
  * smooth, as `.scene-shell::before` draws it on every other page, so the review does not change the picture under the learner.
  */
 export type Sampling = "pixelated" | "smooth";
 
 /**
  * One thing the stage paints, in CSS pixels of the stage. `src` names the picture by its bundle URL. `image` draws the whole
- * picture into `rect`. `nine-slice` cuts the picture `slice` asset pixels from each edge, keeps the corners at `border`
- * screen pixels, and stretches the edges and the middle, as CSS `border-image` with `fill` does. `companion` draws column
- * `column` of `columns` equal cells of its picture, pixelated, with the companion's drop shadow. It never holds the room
- * back: until its picture decodes the stage draws `standIn` in its place, or nothing. An `image` that names an `unlock` never
- * holds the room back either: the stage leaves it out until its picture decodes.
+ * picture into `rect`. `edge` stretches the plate's outermost row or column of pixels over `rect`, to fill what the plate
+ * does not cover with its own edge colours. `companion` draws column `column` of `columns` equal cells of its picture,
+ * pixelated, with the companion's drop shadow. It never holds the room back: until its picture decodes the stage draws
+ * `standIn` in its place, or nothing.
  */
 export type PictureDraw =
-  | { readonly kind: "image"; readonly src: string; readonly rect: Rect; readonly sampling: Sampling; readonly unlock?: UnlockId }
-  | { readonly kind: "nine-slice"; readonly src: string; readonly rect: Rect; readonly slice: Edges; readonly border: Edges };
+  | { readonly kind: "image"; readonly src: string; readonly rect: Rect; readonly sampling: Sampling }
+  | { readonly kind: "edge"; readonly src: string; readonly edge: Edge; readonly rect: Rect };
 export type CompanionDraw = {
   readonly kind: "companion"; readonly frame: Frame; readonly src: string; readonly rect: Rect; readonly column: number; readonly columns: number;
   readonly standIn: CompanionDraw | null;
@@ -33,8 +31,11 @@ export type CompanionDraw = {
 /** Plain squares of one colour at one opacity, in CSS pixels of the stage: the ambient specks of room/ambient.ts. */
 export type Specks = { readonly kind: "specks"; readonly color: string; readonly alpha: number; readonly rects: readonly Rect[] };
 
-/** Pictures stay put until the room or the window changes. The companion and the specks change as the room moves. */
-export type Draw = PictureDraw | CompanionDraw | Specks;
+/** The question balloon over a waiting companion, drawn from cells (room/balloon.ts) into `rect`. */
+export type BalloonDraw = { readonly kind: "balloon"; readonly rect: Rect };
+
+/** Pictures stay put until the room or the window changes. The companion, its balloon and the specks change as the room moves. */
+export type Draw = PictureDraw | CompanionDraw | Specks | BalloonDraw;
 
 /**
  * What the stage paints, back to front. `next` is the `performance.now()` time at which the list changes by itself, so the
@@ -47,46 +48,37 @@ export type DrawList = { readonly draws: readonly Draw[]; readonly next: number 
 export type CompanionScene = { readonly cue: CompanionCue; readonly idle: Idle; readonly ratio: number };
 
 /**
- * Depths of the room's own layers, as front-row.css stacked them. Each extra carries its own depth in rooms.ts: 1 behind the
- * board, 3 on it, 6 in front of the desk.
+ * Depths of the room's own layers: the plate is 0, and the ambient life of room/ambient.ts sits between its depths. The plate is
+ * one picture, so the board, desk and mat are in it. The companion is in front of everything.
  */
-const DEPTH = { background: 0, board: 2, desk: 5, mat: 6 } as const;
+const DEPTH = { plate: 0 } as const;
 
 /**
- * The draw list of `scene` laid out as `layout`. Layers of equal depth keep the order they are listed in, the mat last, and
- * the companion in front of them all. `now` is the `performance.now()` time of the frame, or null while the room is still
- * (see motion.ts): the room's ambient life is drawn only for a time. `unlocked` are the room's open slots (room/progress.ts).
- * Each is drawn at its depth if `unlockArt` has its picture, and not at all if it has none.
+ * The draw list of `scene` laid out as `layout`: the plate's edge fills, the plate, the ambient life, then the companion and
+ * its balloon. `now` is the `performance.now()` time of the frame, or null while the room is still (see motion.ts): the
+ * room's ambient life is drawn only for a time. Unlocked objects are not drawn for now (room/unlocks.ts keeps their slots).
  */
-export function buildScene(
-  scene: SceneId, layout: RoomLayout, now: number | null = null, companion: CompanionScene | null = null,
-  unlocked: readonly UnlockId[] = [], unlockArt: Readonly<Partial<Record<UnlockId, string>>> = UNLOCK_ART,
-): DrawList {
+export function buildScene(scene: SceneId, layout: RoomLayout, now: number | null = null, companion: CompanionScene | null = null): DrawList {
   const art = ROOM_LAYER_ART[scene];
   if (layout.composition === "compact") {
     return { draws: [{ kind: "image", src: art.background, rect: layout.layers.background, sampling: "smooth" }], next: null };
   }
-  const room = FRONT_ROW_ROOMS[scene];
-  const { background, board, desk, mat, extras, unlocks } = layout.layers;
-  const extraArt: Readonly<Record<string, string>> = art.extras;
-  const nineSlice = (src: string, layer: NineSliceLayer, slice: Edges): Draw => ({ kind: "nine-slice", src, rect: layer.rect, slice, border: layer.border });
-  const layered: { readonly z: number; readonly draw: Draw }[] = [
-    { z: DEPTH.background, draw: { kind: "image", src: art.background, rect: background, sampling: "pixelated" } },
-    { z: DEPTH.board, draw: nineSlice(art.board, board, room.board.art.slice) },
-    { z: DEPTH.desk, draw: nineSlice(art.desk, desk, room.desk.art.slice) },
-    ...extras.map((extra) => ({ z: extra.z, draw: { kind: "image", src: extraArt[extra.name]!, rect: extra.rect, sampling: "pixelated" } as const })),
-    ...unlocks.flatMap(({ id, z, rect }) => {
-      const src = unlocked.includes(id) ? unlockArt[id] : undefined;
-      return src === undefined ? [] : [{ z, draw: { kind: "image", src, rect, sampling: "pixelated", unlock: id } as const }];
-    }),
-    { z: DEPTH.mat, draw: nineSlice(art.mat, mat, room.mat.art.slice) },
-  ];
+  const fills = layout.fills.map(({ edge, rect }): Draw => ({ kind: "edge", src: art.plate, edge, rect }));
+  const layered: { readonly z: number; readonly draw: Draw }[] = [{ z: DEPTH.plate, draw: { kind: "image", src: art.plate, rect: layout.plate, sampling: "pixelated" } }];
   const ambient = now === null ? null : ambientDraws(scene, layout, now);
   if (ambient !== null) layered.push(...ambient.draws);
-  const draws = layered.sort((a, b) => a.z - b.z).map(({ draw }) => draw);
+  const draws = [...fills, ...layered.sort((a, b) => a.z - b.z).map(({ draw }) => draw)];
   if (companion === null) return { draws, next: ambient?.next ?? null };
   const shown = companionAt(companion.cue, companion.idle, now);
-  const { draw, files } = companionDraw(companion.cue.id, shown, layout.companion.box, companion.ratio);
+  const { draw, files } = companionDraw(companion.cue.id, shown, layout.companion.box, companion.ratio, FRONT_ROW_ROOMS[scene].plate.companion.height);
   const next = [ambient?.next, shown.next].filter((at): at is number => at != null);
-  return { draws: [...draws, draw], next: next.length === 0 ? null : Math.min(...next), ahead: files };
+  const balloon = companion.cue.activity === "waiting" ? [balloonDraw(layout.companion.box)] : [];
+  return { draws: [...draws, draw, ...balloon], next: next.length === 0 ? null : Math.min(...next), ahead: files };
+}
+
+/** The balloon over the companion's cell `box`: its tail's tip just over the companion's head, a little right of its middle. */
+function balloonDraw(box: Rect): Draw {
+  const width = BALLOON_AT.width * box.height;
+  const height = (width * BALLOON_CELLS.height) / BALLOON_CELLS.width;
+  return { kind: "balloon", rect: { left: box.left + box.width / 2 + BALLOON_AT.left * box.height, top: box.top + BALLOON_AT.tip * box.height - height, width, height } };
 }

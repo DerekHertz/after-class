@@ -109,12 +109,14 @@ describe("the layout switch and the companion's sheet follow the size the art is
     return list.split(/,\s*/).some((q) => group(q.trim()));
   }
 
-  /** CSS px tall that the review room draws the companion, as room/layout.ts places it. Below the full layout it is 72. */
+  /** CSS px tall that the review room draws the companion's cell, as room/layout.ts places it, taking the tallest room's. Below the full layout it is 72. */
   function drawnHeight(width: number, height: number): number {
     if (width < FULL_ROOM_MIN.width || height < FULL_ROOM_MIN.height) return 72;
-    const layout = layoutRoom("last-desk", { width, height }, "full");
-    if (layout.composition !== "full") throw new Error("a full window lays out the full room");
-    return layout.companion.box.height;
+    return Math.max(...(["last-desk", "study-bench", "projection-booth"] as const).map((scene) => {
+      const layout = layoutRoom(scene, { width, height }, "full");
+      if (layout.composition !== "full") throw new Error("a full window lays out the full room");
+      return layout.companion.box.height;
+    }));
   }
 
   const query = companion.match(/@media\s+([^{]*?)\s*\{\s*\.front-row-buddy \.companion-sprite \{ --companion-sheet: var\(--companion-sheet-large\); \}/)?.[1];
@@ -139,7 +141,7 @@ describe("the layout switch and the companion's sheet follow the size the art is
   });
 
   test("the cases that decided this: 1920x1080 at 1.5x needs the large sheet, 1440x900 at 1x and a phone do not", () => {
-    expect(drawnHeight(1920, 1080) * 1.5).toBeCloseTo(399.5, 0);
+    expect(drawnHeight(1920, 1080) * 1.5).toBeCloseTo(480, 0);
     expect(matches(query!, { width: 1920, height: 1080, dppx: 1.5 })).toBe(true);
     expect(matches(query!, { width: 1440, height: 900, dppx: 1 })).toBe(false);
     expect(matches(query!, { width: 1440, height: 900, dppx: 2 })).toBe(true);

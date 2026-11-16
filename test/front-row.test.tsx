@@ -7,25 +7,26 @@ import { FrontRowScene, reserveNavSpace, roomStyle } from "../src/app/front-row"
 import type { FrontRowLayout } from "../src/app/front-row";
 import { FRONT_ROW_ROOMS, ROOM_ART } from "../src/app/room/rooms";
 import { ROOM_LAYER_ART } from "../src/app/room/art";
-import type { NineSlice } from "../src/app/room/rooms";
+import type { PlateRect } from "../src/app/room/rooms";
 import { APPEARANCE_STORAGE_KEY, DEFAULT_ROOM, ROOM_ART_PREFIX } from "../src/shared/room-art";
 import { OBJECT_ART_SIZE, ROOM_OBJECTS } from "../src/app/room-object";
 import type { ObjectArt, RoomObject } from "../src/app/room-object";
 import { contrast, medianColor, readImage } from "./png";
 
 const rooms = Object.keys(FRONT_ROW_ROOMS) as SceneId[];
-/** The asset names of each room's layers, as the files in assets/front-row-v2 are called. They ship at the plate's own resolution. */
+/** The asset names of each room's pictures, as the files in assets/room-plates and assets/front-row-v2 are called. They ship at the plate's own resolution. */
 const ART = { "last-desk": "rail", "study-bench": "harbor", "projection-booth": "canal" } as const satisfies Record<SceneId, string>;
 const decoded = new Map<string, Awaited<ReturnType<typeof readImage>>>();
-/** The layers are large, so each is decoded once. */
-const layer = async (scene: SceneId, name: string) => {
+/** The pictures are large, so each is decoded once. */
+const picture = async (scene: SceneId, dir: "room-plates" | "front-row-v2", name: "wide" | "background") => {
   const file = `${ART[scene]}-${name}.webp`;
-  if (!decoded.has(file)) decoded.set(file, await readImage(new URL(`../src/app/assets/front-row-v2/${file}`, import.meta.url)));
+  if (!decoded.has(file)) decoded.set(file, await readImage(new URL(`../src/app/assets/${dir}/${file}`, import.meta.url)));
   return decoded.get(file)!;
 };
 const plate = (scene: SceneId) => readImage(new URL(`../src/app/assets/front-row/${scene}.webp`, import.meta.url));
-/** The plain area of a nine-slice as fractions of the image, for sampling the colour the text sits on. */
-const innerBox = ({ size, inner }: NineSlice) => ({ left: inner.left / size.width, top: inner.top / size.height, right: 1 - inner.right / size.width, bottom: 1 - inner.bottom / size.height });
+/** A rect of the plate as fractions of the plate, for sampling the colour the text sits on. */
+const frac = ({ x, y, width, height }: PlateRect, size: { width: number; height: number }) => ({ left: x / size.width, top: y / size.height, right: (x + width) / size.width, bottom: (y + height) / size.height });
+const inside = (r: PlateRect, outer: PlateRect) => r.x >= outer.x && r.y >= outer.y && r.x + r.width <= outer.x + outer.width && r.y + r.height <= outer.y + outer.height;
 
 describe("the three skins keep saved preferences", () => {
   test("each saved scene ID opens its selected skin", () => {
@@ -37,36 +38,33 @@ describe("the three skins keep saved preferences", () => {
 });
 
 describe("each room's text sits on its own art and reads clearly", () => {
-  test("every layer is the measured size, and only the background is opaque", async () => {
+  test("the wide plate is the measured size and opaque, and the background a phone draws is the 16:10 core's size", async () => {
     for (const scene of rooms) {
-      const room = FRONT_ROW_ROOMS[scene];
-      const bg = await layer(scene, "background");
+      const { size } = FRONT_ROW_ROOMS[scene].plate;
+      const wide = await picture(scene, "room-plates", "wide");
+      expect({ scene, width: wide.width, height: wide.height, alpha: wide.alpha }).toEqual({ scene, ...size, alpha: false });
+      const bg = await picture(scene, "front-row-v2", "background");
       expect({ scene, width: bg.width, height: bg.height, alpha: bg.alpha }).toEqual({ scene, width: ROOM_ART.plate.width, height: ROOM_ART.plate.height, alpha: false });
-      for (const [name, art] of [["board", room.board.art], ["desk", room.desk.art], ["mat", room.mat.art]] as const) {
-        const png = await layer(scene, name);
-        expect({ scene, name, width: png.width, height: png.height, alpha: png.alpha }).toEqual({ scene, name, ...art.size, alpha: true });
-      }
     }
   }, 60_000);
 
-  test("each nine-slice keeps its corners apart, and its plain area ends inside the corner cuts so it never stretches", () => {
+  test("each plate's board, mat, companion, notebook and light sit inside its core, which sits inside the plate", () => {
     for (const scene of rooms) {
-      const room = FRONT_ROW_ROOMS[scene];
-      for (const [name, art] of [["board", room.board.art], ["mat", room.mat.art]] as const) {
-        const { slice, inner, size } = art;
-        expect({ scene, name, apart: slice.left + slice.right < size.width && slice.top + slice.bottom < size.height }).toEqual({ scene, name, apart: true });
-        expect({ scene, name, inside: inner.left <= slice.left && inner.right <= slice.right + 2 && inner.top <= slice.top && inner.bottom <= slice.bottom + 2 }).toEqual({ scene, name, inside: true });
-      }
-      const { slice, size } = room.desk.art;
-      expect({ scene, desk: slice.top === 0 && slice.bottom === 0 && slice.left + slice.right < size.width }).toEqual({ scene, desk: true });
+      const { plate: p } = FRONT_ROW_ROOMS[scene];
+      const whole = { x: 0, y: 0, ...p.size };
+      expect({ scene, core: inside(p.core, whole), board: inside(p.board, p.core), mat: inside(p.mat, p.core) }).toEqual({ scene, core: true, board: true, mat: true });
+      const { companion: c, notebook: n, light: l } = p;
+      expect({ scene, companion: inside({ x: c.x, y: c.bottom - c.height, width: 0, height: c.height }, p.core), notebook: inside({ ...n, width: 0, height: 0 }, p.core), light: inside({ ...l, width: 0, height: 0 }, whole) }).toEqual({ scene, companion: true, notebook: true, light: true });
+      expect({ scene, core: p.core.width / p.core.height }).toEqual({ scene, core: 1586 / 992 });
     }
   });
 
-  test("board and mat ink pass WCAG AA against the colour the layer actually has in its plain area", async () => {
+  test("board and mat ink pass WCAG AA against the colour the plate actually has under its text", async () => {
     for (const scene of rooms) {
       const room = FRONT_ROW_ROOMS[scene];
       for (const [surface, spec] of [["board", room.board], ["mat", room.mat]] as const) {
-        const painted = medianColor(await layer(scene, surface), innerBox(spec.art));
+        const wide = await picture(scene, "room-plates", "wide");
+        const painted = medianColor(wide, frac(FRONT_ROW_ROOMS[scene].plate[surface === "board" ? "board" : "mat"], wide));
         for (const ink of [spec.ink, spec.inkSoft]) expect({ scene, surface, ink, ratio: contrast(ink, painted) >= 4.5 }).toEqual({ scene, surface, ink, ratio: true });
         // A phone draws the surface in flat colour; it must be the art's own colour, not a recolour.
         const [r, g, b] = [1, 3, 5].map((i) => parseInt(spec.fill.slice(i, i + 2), 16));
@@ -102,15 +100,14 @@ describe("each room's art is named where the build, the stage and the stylesheet
   const css = readFileSync(new URL("../src/app/front-row.css", import.meta.url), "utf8");
   const file = (url: string) => url.split("/").pop();
 
-  test("ROOM_ART_PREFIX is the prefix of every layer the stage draws for each room, and its plate is named for the scene", () => {
+  test("ROOM_ART_PREFIX is the prefix of the plate and the background the stage draws for each room, and its plate is named for the scene", () => {
     expect(ROOM_ART_PREFIX).toEqual(ART);
     expect(Object.keys(ROOM_ART_PREFIX).sort()).toEqual(Object.keys(SCENES).sort());
     expect({ key: APPEARANCE_STORAGE_KEY, room: DEFAULT_ROOM }).toEqual({ key: APPEARANCE_KEY, room: DEFAULT_APPEARANCE.scene });
     for (const scene of rooms) {
       const p = ART[scene];
-      const { extras, ...layers } = ROOM_LAYER_ART[scene];
-      expect(Object.fromEntries(Object.entries(layers).map(([name, url]) => [name, file(url)]))).toEqual({ background: `${p}-background.webp`, board: `${p}-board.webp`, desk: `${p}-desk.webp`, mat: `${p}-mat.webp` });
-      expect(Object.entries(extras).map(([name, url]) => [name, file(url)])).toEqual(FRONT_ROW_ROOMS[scene].extras.filter((e, i, all) => all.findIndex((o) => o.name === e.name) === i).map((e) => [e.name, `${p}-${e.name}.webp`]));
+      expect(Object.fromEntries(Object.entries(ROOM_LAYER_ART[scene]).map(([name, url]) => [name, file(url)]))).toEqual({ plate: `${p}-wide.webp`, background: `${p}-background.webp` });
+      expect(FRONT_ROW_ROOMS[scene].plate.src).toBe(`room-plates/${p}-wide.webp`);
       expect(css).toContain(`.scene-shell[data-scene="${scene}"] { --fr-bg: url('./assets/front-row-v2/${p}-background.webp'); }`);
       expect(css).toContain(`[data-room="${scene}"]) { --fr-plate: url('./assets/front-row/${scene}.webp'); }`);
     }
@@ -123,14 +120,6 @@ describe("room geometry", () => {
     expect(roomStyle("study-bench")).toMatchObject({ "--fr-field-ink": FRONT_ROW_ROOMS["study-bench"].palette.fieldInk, "--fr-phone-x": "50%" });
   });
 
-  test("each extra is the size its room declares, and the harbor stands three lamps on its beam", async () => {
-    for (const scene of rooms) for (const extra of FRONT_ROW_ROOMS[scene].extras) {
-      const png = await layer(scene, extra.name);
-      expect({ scene, name: extra.name, width: png.width, height: png.height, alpha: png.alpha, placed: Object.keys(extra.place).length > 0 })
-        .toEqual({ scene, name: extra.name, width: extra.width, height: extra.height, alpha: true, placed: true });
-    }
-    expect(FRONT_ROW_ROOMS["study-bench"].extras.filter((e) => e.name === "lamp")).toHaveLength(3);
-  });
 });
 
 describe("switching room or companion keeps one tree", () => {
