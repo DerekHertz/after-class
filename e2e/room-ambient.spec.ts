@@ -61,14 +61,14 @@ test.describe("with motion on", () => {
   test.beforeEach(async ({ page: _page }, info) => { test.skip(info.project.name === "narrow", "a phone-width window does not move"); });
 
   for (const scene of scenes) {
-    test(`${scene} keeps drawing specks, and never rotates, scales or shifts the painted art`, async ({ page }) => {
+    test(`${scene} never rotates, scales or shifts the painted art, and only the rail room keeps drawing its window light`, async ({ page }) => {
       await watchCanvas(page);
       await openRoom(page, scene);
       const first = await counts(page);
       await page.waitForTimeout(1500);
       const later = await counts(page);
-      expect(later.specks).toBeGreaterThan(first.specks);
-      expect(later.drawImage).toBeGreaterThan(first.drawImage);
+      if (scene === "last-desk") expect(later.specks).toBeGreaterThan(first.specks);
+      else expect(later.specks).toBe(first.specks);
       expect(later.transforms).toBe(0);
       expect(later.moved).toBe(0);
     });
@@ -76,16 +76,16 @@ test.describe("with motion on", () => {
 
   test("each step copies the room's still art in at most one picture per run between live draws", async ({ page }) => {
     await watchCanvas(page);
-    for (const scene of scenes) {
+    for (const scene of ["last-desk"] as const) {
       await openRoom(page, scene);
       await page.waitForTimeout(300);
       const first = await counts(page);
-      await page.waitForTimeout(1000);
+      // The window light changes alpha only a few times in its nine-second swell, so a step that repaints is rare.
+      await page.waitForTimeout(5000);
       const later = await counts(page);
       const steps = later.clears - first.clears;
-      expect(steps).toBeGreaterThan(5);
-      // The rooms' painted layers fall into at most four runs between their depths of specks, and the companion is one more
-      // picture. Painted picture by picture, a step would make some thirty drawImage calls, nine for each nine-slice.
+      expect(steps).toBeGreaterThan(0);
+      // The plate falls into at most two runs either side of the window light, and the companion is one more picture.
       expect((later.drawImage - first.drawImage) / steps).toBeLessThanOrEqual(5);
     }
   });
@@ -212,7 +212,7 @@ test.describe("with motion on", () => {
 
   test("a system reduced-motion preference chosen while the room moves stops it", async ({ page }) => {
     await watchCanvas(page);
-    await openRoom(page, "study-bench");
+    await openRoom(page, "last-desk");
     await expect.poll(async () => (await counts(page)).specks).toBeGreaterThan(0);
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.waitForTimeout(400);

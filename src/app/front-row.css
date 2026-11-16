@@ -316,6 +316,10 @@
      gives the stage no canvas never holds them. The setup form has no box of its own, so its sections are held instead. */
   .front-row-stage:has(> .front-row-canvas[data-stage="waiting"]) > :not(.front-row-canvas, .topic-checklist),
   .front-row-stage:has(> .front-row-canvas[data-stage="waiting"]) > .topic-checklist > * { opacity: 0; }
+  /* With no room painted (a plate that failed, or no canvas), the board and mat stand in as flat colour, as on a phone, so
+     their ink keeps its contrast over the page's backdrop. */
+  .front-row-stage:has(> .front-row-canvas[data-stage="off"]) :is(.front-row-area[data-area="board"], .setup-choices) { background: var(--fr-board-fill); box-shadow: inset 0 0 0 5px var(--fr-frame); }
+  .front-row-stage:has(> .front-row-canvas[data-stage="off"]) :is(.front-row-area[data-area="desk"], .setup-start) { background: var(--fr-mat-fill); box-shadow: inset 0 0 0 4px var(--fr-desk); }
   .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { position: absolute; z-index: 4; inset: var(--fr-board-text); overflow: auto; overscroll-behavior: contain; }
   .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { position: absolute; z-index: 7; inset: var(--fr-desk-text); overflow: auto; overscroll-behavior: contain; }
   /* The room's type follows its scale, s CSS pixels per plate pixel, from the sizes the mockup set in plate pixels: the question

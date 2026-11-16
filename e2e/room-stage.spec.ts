@@ -274,9 +274,12 @@ test("a room the learner moved on from does not repaint the stage when its pictu
 test("a room whose plate fails to load still shows its question and answer controls over the backdrop", async ({ page }, info) => {
   test.skip(info.project.name === "narrow", "the phone layout draws its backdrop without the plate");
   await page.route(/\/[a-z]+-wide-[a-z0-9]{8}\.webp$/, (route) => route.fulfill({ status: 404 }));
-  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene: "study-bench", visible: false } });
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene: "projection-booth", visible: false } });
   await page.goto("/?scenario=review&clean=1");
   await expect(page.locator(".front-row-canvas[data-stage=off]")).toBeAttached();
   await expect(page.locator(".front-row-heading")).toBeVisible();
   await expect(page.getByRole("button", { name: "Share my thinking" })).toBeVisible();
+  // The canal's board carries navy ink, so it needs its cream fill behind it rather than the dark backdrop.
+  const fill = await page.locator('.front-row-area[data-area="board"]').evaluate((node) => getComputedStyle(node).backgroundColor);
+  expect(fill).toBe("rgb(251, 225, 197)");
 });
