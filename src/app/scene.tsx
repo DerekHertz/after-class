@@ -1,8 +1,12 @@
+import { useState } from "react";
 import type { ReactNode } from "react";
 import { COMPANIONS, SCENES, useAppearance } from "./appearance";
 import type { CompanionId, SceneId } from "./appearance";
 import { COMPANION_STATUS, Companion, CompanionDrawing } from "./companion";
-import { roomStyle } from "./front-row";
+import { ReviewStageClaim, roomStyle, useFullRoom } from "./front-row";
+import { useMotion } from "./room/motion";
+import { useReaction } from "./room/reaction-store";
+import { RoomStage } from "./room/stage";
 import { Link } from "./ui";
 
 export function RoomDrawing({ id }: { readonly id: SceneId }) {
@@ -37,16 +41,24 @@ function AppearancePicker() {
 /** `account` is the hosted app's sign-out control, shown after the appearance picker. The local app has none. */
 export function SceneShell({ children, account }: { readonly children: ReactNode; readonly account?: ReactNode }) {
   const { appearance, activity } = useAppearance();
-  return <div className="scene-shell" data-scene={appearance.scene} data-motion={appearance.motion} data-detail={appearance.detail} style={roomStyle(appearance.scene)}>
+  const full = useFullRoom();
+  const motion = useMotion(appearance.motion, full ? "full" : "compact");
+  const reaction = useReaction();
+  const [reviewStage, setReviewStage] = useState(false);
+  // Outside a review the room is drawn on the review's own stage, so a page shows the same sharp room and the same
+  // blinking companion. A review draws its own, and the phone layout keeps the backdrop picture.
+  const companion = appearance.visible ? { id: appearance.companion, activity, gesture: reaction === null ? null : { name: reaction.gesture, at: reaction.at } } : null;
+  return <ReviewStageClaim.Provider value={setReviewStage}><div className="scene-shell" data-scene={appearance.scene} data-motion={appearance.motion} data-detail={appearance.detail} style={roomStyle(appearance.scene)}>
     <header className="scene-masthead">
       <Link to={{ page: "home" }}><span className="bell-mark" aria-hidden="true" /><span>After Class</span></Link>
       <AppearancePicker />
       {account}
     </header>
+    {full && !reviewStage && <div className="scene-room"><RoomStage scene={appearance.scene} composition="full" motion={motion} companion={companion} /></div>}
     <div className="scene-content">{children}</div>
     <footer className="scene-footer">
       {appearance.visible ? <Companion id={appearance.companion} activity={activity} /> : <span className="quiet-status">{COMPANION_STATUS[activity]}</span>}
       <p>A little space to make sense of what you watched.</p>
     </footer>
-  </div>;
+  </div></ReviewStageClaim.Provider>;
 }

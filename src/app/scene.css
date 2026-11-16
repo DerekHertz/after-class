@@ -77,7 +77,10 @@
    in a review. */
 @media (min-width: 900px) and (min-height: 560px) {
   .scene-content { z-index: 1; }
-  .scene-shell .scene-content > .room-paper { width: min(100% - 24px, 76rem, (var(--fr-plate-w) - 2 * var(--fr-seat-x) - var(--fr-seat-h)) * max(100vw / var(--fr-plate-w), 100vh / var(--fr-plate-h)) - 24px); }
+  .scene-shell .scene-content > .room-paper { width: min(100% - 24px, 76rem, (var(--fr-plate-w) - 2 * var(--fr-seat-x) - var(--fr-seat-h)) * min(100vw / var(--fr-core-w), 100vh / var(--fr-plate-h)) - 24px); }
+  .scene-room { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+  /* Once the stage draws the room, it draws the companion too, and the footer keeps only its status for screen readers. */
+  .scene-shell:has(> .scene-room > .front-row-canvas:not([data-stage="off"])) .scene-footer > .study-companion > .companion-raster { visibility: hidden; }
   .scene-footer { position: fixed; inset: 0; z-index: 0; display: block; padding: 0; pointer-events: none; container-type: size; }
   .scene-footer > * { --s: max(100cqw / var(--fr-plate-w), 100cqh / var(--fr-plate-h)); position: absolute; }
   .scene-footer > p { display: none; }

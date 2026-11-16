@@ -129,6 +129,9 @@ class Stage {
     this.cancelFrame();
     this.wanted = null;
     this.forget();
+    // stop() runs as the canvas leaves the page, so its backing store is freed now too, as a page's stage does when a
+    // review takes over the room.
+    this.canvas.width = this.canvas.height = 0;
   }
 
   /** Frees the bands' backing stores at once rather than whenever the collector gets to them. */
