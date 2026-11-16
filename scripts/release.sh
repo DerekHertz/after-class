@@ -9,6 +9,8 @@
 # screen then says the base is yours, not read. Nothing on GitHub or the server can start a deploy. Needs git, bun, gh,
 # curl, docker and the AWS CLI.
 set -euo pipefail
+# The AWS CLI pages its output through less on a terminal, which stops the script until someone presses q.
+export AWS_PAGER=""
 
 release_tag='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 

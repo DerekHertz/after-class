@@ -7,6 +7,8 @@
 # tag's GitHub Release, in image-digest.txt, never the mutable commit tag on GHCR. The server pulls the image by that
 # digest, restarts the app, checks /health and rolls back on failure.
 set -euo pipefail
+# The AWS CLI pages its output through less on a terminal, which stops the script until someone presses q.
+export AWS_PAGER=""
 
 region=us-east-2
 repository=derekhertz/after-class
