@@ -10,26 +10,26 @@
 .companion-sprite[data-companion="yun"] { --companion-sheet: url('./assets/companions-v3/yun-small.webp'); --companion-sheet-large: url('./assets/companions-v3/yun.webp'); }
 .companion-sprite[data-companion="mote-moonlit"] { --companion-sheet: url('./assets/companions-v3/mote-moonlit-small.webp'); --companion-sheet-large: url('./assets/companions-v3/mote-moonlit.webp'); }
 .companion-sprite[data-companion="mote-pagewing"] { --companion-sheet: url('./assets/companions-v3/mote-pagewing-small.webp'); --companion-sheet-large: url('./assets/companions-v3/mote-pagewing.webp'); }
-.companion-sprite[data-gesture="draw"] .companion-pose { animation: companion-draw 1050ms ease-in-out; }
-.companion-sprite[data-gesture="read"] .companion-pose { animation: companion-read 1050ms ease-in-out; }
+.companion-sprite[data-pose="draw"] .companion-pose { animation: companion-draw 1050ms ease-in-out; }
+.companion-sprite[data-pose="read"] .companion-pose { animation: companion-read 1050ms ease-in-out; }
 @keyframes companion-draw { 0%,100% { transform: translateY(0); } 30% { transform: translateY(-5px); } 68% { transform: translateY(-1px); } }
 @keyframes companion-read { 0%,100% { transform: rotate(0); } 28%,62% { transform: rotate(2deg); } }
-/* Reduced motion keeps the companion at rest: no pose change and no movement. */
-.scene-shell[data-motion="reduced"] .companion-pose { animation: none; background-position-x: 0%; }
-@media (prefers-reduced-motion: reduce) { .companion-pose { animation: none; background-position-x: 0%; } }
-/* The review room draws the companion 220 plate pixels tall: 220 * u, where front-row.css derives u from the window, so that is 200 CSS px
-   in a 1440x900 window and 266 in 1920x1080. The small sheet's cell is 362 px, so it is enough only while the drawn height times the
-   device pixel ratio is 362 or less. A media query cannot compute u, so each band of pixel ratios uses what must hold when it is not:
-   u is at most 1.12 * height / 992 and at most 1.25 * width / 1586, and it is at most the larger of width / 1586 and
-   (height - 170 * u) / 992, which together bound it from above and never pick the small sheet when the large one is needed. A band
-   [lo, hi] needs ratio * u * 220 > 362 only if hi * width > 2087, hi * height > 1457 and (hi * width > 2609 or hi * height > 1912).
-   From 2.5x every full-layout window needs the large sheet. test/art-prefetch.test.ts evaluates these queries against the drawn
-   size over a grid of windows and ratios up to 3. Where the large sheet's 724 px is not enough, the art was not drawn sharper before. */
+/* Reduced motion: a reaction is an instant pose change with no movement. The selectors match the draw and read rules in
+   specificity and come after them, so the system preference and the app's Reduce motion setting both win. */
+.scene-shell[data-motion="reduced"] .companion-sprite .companion-pose,
+.companion-sprite[data-instant] .companion-pose { animation: none; }
+@media (prefers-reduced-motion: reduce) { .companion-sprite[data-pose] .companion-pose { animation: none; } }
+/* The review room draws the companion's cell 270 to 294 plate pixels tall (room/rooms.ts): at most 294 * s, where s = min(height / 992,
+   width / 1586) is the room's scale (room/layout.ts). The small sheet's cell is 362 px, so it is enough only while the drawn height times
+   the device pixel ratio is 362 or less. For a band of ratios up to hi that fails only if hi * s > 1.2313, which needs hi * height > 1222
+   and hi * width > 1953, so each band asks for exactly that and never picks the small sheet when the large one is needed.
+   From 2x every full-layout window needs the large sheet or nearly does. test/art-prefetch.test.ts evaluates these queries against the
+   drawn size over a grid of windows and ratios up to 3. Where the large sheet's 724 px is not enough, the art was not drawn sharper before. */
 @media
-  (max-resolution: 1.25dppx) and (min-width: 1670px) and (min-height: 1165px) and ((min-width: 2087px) or (min-height: 1529px)),
-  (min-resolution: 1.25dppx) and (max-resolution: 1.5dppx) and (min-width: 1391px) and (min-height: 971px) and ((min-width: 1739px) or (min-height: 1274px)),
-  (min-resolution: 1.5dppx) and (max-resolution: 2dppx) and (min-width: 1043px) and (min-height: 728px) and ((min-width: 1304px) or (min-height: 956px)),
-  (min-resolution: 2dppx) and (max-resolution: 2.5dppx) and (min-width: 900px) and (min-height: 582px) and ((min-width: 1043px) or (min-height: 764px)),
-  (min-width: 900px) and (min-height: 560px) and (min-resolution: 2.5dppx) {
+  (max-resolution: 1.01dppx) and (min-width: 1934px) and (min-height: 1210px),
+  (min-resolution: 1.01dppx) and (max-resolution: 1.25dppx) and (min-width: 1563px) and (min-height: 978px),
+  (min-resolution: 1.25dppx) and (max-resolution: 1.5dppx) and (min-width: 1303px) and (min-height: 815px),
+  (min-resolution: 1.5dppx) and (max-resolution: 2dppx) and (min-width: 977px) and (min-height: 611px),
+  (min-width: 900px) and (min-height: 560px) and (min-resolution: 2dppx) {
   .front-row-buddy .companion-sprite { --companion-sheet: var(--companion-sheet-large); }
 }

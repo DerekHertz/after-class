@@ -1,13 +1,16 @@
 import { RecordScreen } from "./record";
 import { useCallback, useEffect, useLayoutEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { Ref } from "react";
+import type { ReactNode, Ref, RefObject } from "react";
 import { Material } from "../shared/time";
 import type { ConceptId, EvidenceId, ReviewId } from "../shared/ids";
-import type { Concept } from "../shared/domain";
+import type { Concept, TurnEvent } from "../shared/domain";
 import type { AppApi } from "./api";
 import { useAppearance, useSceneActivity } from "./appearance";
 import { FrontRowScene, reserveNavSpace } from "./front-row";
-import { reactToCompanion } from "./companion-reaction";
+import { react } from "./room/reaction-store";
+import { inputFromTurnEvent } from "./room/reactions";
+import { roomRecord } from "./room/room-record";
+import type { RoomRecord } from "./room/room-record";
 import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
 import { ACTION_LABEL, END_CONFIRM_TEXT, composerActions, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow, softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, strandedEndTurn, selectedEvidenceIds, shouldSubmitAnswer, questionScrollTop, } from "./core";
@@ -28,6 +31,21 @@ export type ReviewDeps = { readonly api: AppApi; readonly speaker: Speaker; read
  * field lies on the desk. The lecture folio and the review notebook are picked up over the room, one at a time, only
  * when the learner asks; the response field stays mounted underneath, so a draft survives.
  */
+export function reactToTurnEvent(event: TurnEvent) {
+  const input = inputFromTurnEvent(event);
+  if (input !== null) react(input);
+}
+
+/** The Saved notes dialog over the room. It edits the record through `room`, so every change reads the room's counts again. */
+export function SavedNotes({ room, close }: { readonly room: RoomRecord; readonly close: () => void }) {
+  return (
+    <dialog className="room-object room-notebook-dialog" {...objectFrame("history")} aria-label="Saved notes" ref={node => { if (node && !node.open) node.showModal(); }} onClose={close}>
+      <div className="room-object-tools"><button type="button" onClick={close}>Close notebook</button></div>
+      <RecordScreen api={room.api} reviewId={null} />
+    </dialog>
+  );
+}
+
 export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewDeps & { readonly reviewId: ReviewId }) {
   const { appearance, voice, activity } = useAppearance();
   const board = useRef<HTMLElement>(null);
@@ -40,14 +58,25 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const [selection, setSelection] = useState<SourceSelection>({ kind: "automatic" });
   const [inspecting, setInspecting] = useState<Inspecting>(null);
   const [notebookOpen, setNotebookOpen] = useState(false);
-  const savedNotes = useRef<HTMLButtonElement>(null);
+  const menuToggle = useRef<HTMLButtonElement>(null);
+  const [roomOpen, setRoomOpen] = useState(false);
+  useEffect(() => {
+    if (!roomOpen) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || document.querySelector("dialog[open]") !== null) return;
+      setRoomOpen(false);
+      menuToggle.current?.focus();
+    };
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  }, [roomOpen]);
   const [diagramTopic, setDiagramTopic] = useState<ConceptId | null>(null);
   const diagrams = useDiagrams(api, reviewId);
   const [listening, setListening] = useState(false);
   const [handoff, setHandoff] = useState<StartHandoff>("none");
   const startStatus = useRef<HTMLParagraphElement>(null);
   const questionLine = useRef<HTMLLIElement>(null);
-  const controller = useMemo(() => createReviewController({ api, reviewId, speaker, unsent }), [api, reviewId, speaker, unsent]);
+  const controller = useMemo(() => createReviewController({ api, reviewId, speaker, unsent, onTurnEvent: reactToTurnEvent }), [api, reviewId, speaker, unsent]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
   useEffect(() => {
     void controller.load();
@@ -75,12 +104,20 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
     const page = objectPage.current;
     if (inspecting === "history" && followHistory.current && page) page.scrollTop = page.scrollHeight;
   }, [inspecting, state.view?.turns.length]);
+  const saved = state.savedSummary !== null;
+  useEffect(() => { if (saved) react({ type: "review_saved" }); }, [saved]);
+  // The room's progress comes from the saved record only, read on open, once this review is saved, and after every change
+  // made to it in Saved notes.
+  const room = useMemo(() => roomRecord(api), [api]);
+  const roomStanding = useSyncExternalStore(room.subscribe, room.getState);
+  useEffect(() => { room.read(); }, [room]);
+  useEffect(() => { if (saved) room.read(); }, [saved, room]);
   useSceneActivity(state.saving ? "saving" : listening ? "listening" : state.view?.state.phase === "paused" ? "paused" : state.live?.status === "streaming" ? "waiting" : "idle");
 
   /** Picks up an object. Switching from one object to the other keeps the control that picked up the first. */
   function inspect(object: RoomObject, origin: HTMLElement | null) {
     if (inspecting === null) pickedUpFrom.current = origin;
-    if (object === "source" && inspecting !== "source") reactToCompanion("draw");
+    if (object === "source" && inspecting !== "source") react({ type: "source_opened" });
     if (object === "history") followHistory.current = true;
     setInspecting(object);
   }
@@ -107,7 +144,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   /** The saved-notes dialog unmounts on close, so focus is put back on the control that opened it. */
   function closeNotebook() {
     setNotebookOpen(false);
-    requestAnimationFrame(() => savedNotes.current?.focus());
+    requestAnimationFrame(() => menuToggle.current?.focus());
   }
 
   /** Puts the object down. The source follows the current reply again next time it is picked up. */
@@ -251,20 +288,18 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
 
   return (
     <main className="review front-row">
-      {notebookOpen && <dialog className="room-object room-notebook-dialog" {...objectFrame("history")} aria-label="Saved notes" ref={node => { if (node && !node.open) node.showModal(); }} onClose={closeNotebook}>
-        <div className="room-object-tools"><button type="button" onClick={closeNotebook}>Close notebook</button></div>
-        <RecordScreen api={api} reviewId={null} />
-      </dialog>}
+      {notebookOpen && <SavedNotes room={room} close={closeNotebook} />}
       <header ref={reserveNavSpace} className="review-header front-row-bar">
         <div className="front-row-title">
           <h1>{heading.title}</h1>
           <p className="review-scope-line">Reviewing {heading.detail ?? "this lecture"} · {formatClock(scopeSeconds)} of lecture</p>
         </div>
-        <div className="review-navigation">
+        <BarMenu toggle={menuToggle}>
           <span className="review-phase">{questionMarker === null ? view.state.phase : `${questionMarker} · ${view.state.phase}`}</span>
-          <button ref={savedNotes} type="button" aria-haspopup="dialog" onClick={() => setNotebookOpen(true)}>Saved notes</button>
           <HeaderActions ids={actions.filter(id => id === "pause" || id === "resume" || id === "end")} state={state} send={id => void controller.send(toAct(id, "", "text"))} />
-        </div>
+          <button type="button" aria-haspopup="dialog" onClick={() => setNotebookOpen(true)}>Saved notes</button>
+          {roomStanding !== null && <button type="button" aria-expanded={roomOpen} onClick={() => setRoomOpen(!roomOpen)}>Your room</button>}
+        </BarMenu>
       </header>
       <div className="front-row-notices">
         <SaveBanner state={state} onRetry={() => void controller.save()} reviewId={reviewId} onSource={openSource} />
@@ -275,6 +310,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           scene={appearance.scene}
           appearance={appearance}
           activity={activity}
+          standing={roomStanding} retry={room.read}
+          roomOpen={roomOpen} closeRoom={() => { setRoomOpen(false); menuToggle.current?.focus(); }}
           boardRef={board}
           layout={checklist ? { kind: "setup", form: setupForm } : { kind: "review", board: boardContent, desk: deskContent, objects: { cited: automaticIds.length, open: inspect } }}
         />
@@ -450,6 +487,43 @@ function ScopeBundle({ api, view, titles, onSource }: { readonly api: AppApi; re
     </div>
     <BundleInspector report={inspectBundle(bundle.data, titles)} />
   </>;
+}
+
+/**
+ * The small menu at the right of the bar. Its panel stays mounted while shut, so Finish & save's confirmation, which is a modal
+ * dialog opened from inside it, keeps its state. A press on any control in it shuts it, except the Finish & save step that is
+ * still asking: that one's dialog and the button that opened it stay. Escape and a press outside shut it.
+ */
+function BarMenu({ toggle, children }: { readonly toggle: RefObject<HTMLButtonElement | null>; readonly children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const panel = useId();
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || document.querySelector("dialog[open]") !== null) return;
+      setOpen(false);
+      toggle.current?.focus();
+    };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape); };
+  }, [open, toggle]);
+  return (
+    <div ref={root} className="review-navigation bar-menu">
+      <button
+        ref={toggle} type="button" aria-expanded={open} aria-controls={panel} onClick={() => setOpen(!open)}
+      >Menu</button>
+      <div
+        id={panel} className="bar-menu-panel" hidden={!open}
+        onClick={(event) => {
+          const pressed = (event.target as HTMLElement).closest("button");
+          if (pressed !== null && pressed.dataset.action !== "end" && pressed.closest(".end-confirm") === null) setOpen(false);
+        }}
+      >{children}</div>
+    </div>
+  );
 }
 
 export function EndConfirm({ id, disabled, onConfirm, onCancel }: { readonly id: string; readonly disabled: boolean; readonly onConfirm: () => void; readonly onCancel: () => void }) {

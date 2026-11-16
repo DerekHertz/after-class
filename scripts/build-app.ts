@@ -36,15 +36,13 @@ const FIRST_SCREEN_FONTS = ["pixelify-sans", "dm-sans-400"];
 export function roomArtTable(emitted: readonly string[], layerNames: readonly string[]): RoomArtTable {
   const url = (stem: string): string => {
     const file = emitted.filter((f) => new RegExp(`^${stem}-[a-z0-9]{8}\\.webp$`).test(f));
-    if (file.length !== 1) throw new Error(`the review app's CSS must draw ${stem}.webp exactly once in the bundle; found ${file.length}`);
+    if (file.length !== 1) throw new Error(`the review app must ship ${stem}.webp exactly once in the bundle; found ${file.length}`);
     return `/app/${file[0]}`;
   };
   const rooms: Record<string, { plate: string; layers: string[]; compact: string[] }> = {};
   for (const [scene, prefix] of Object.entries(ROOM_ART_PREFIX)) {
-    const own = layerNames.filter((n) => n.startsWith(`${prefix}-`));
-    const first = ROOM_LAYER_ORDER.map((layer) => `${prefix}-${layer}`);
-    for (const stem of first) if (!own.includes(stem)) throw new Error(`${scene} has no ${stem} in assets/front-row-v2`);
-    const layers = [...first, ...own.filter((n) => !first.includes(n)).sort()];
+    const layers = ROOM_LAYER_ORDER.map((layer) => `${prefix}-${layer}`);
+    for (const stem of [...layers, ...COMPACT_ROOM_LAYERS.map((layer) => `${prefix}-${layer}`)]) if (!layerNames.includes(stem)) throw new Error(`${scene} has no ${stem} in assets/room-plates or assets/front-row-v2`);
     rooms[scene] = { plate: url(scene), layers: layers.map(url), compact: COMPACT_ROOM_LAYERS.map((layer) => url(`${prefix}-${layer}`)) };
   }
   return { rooms, shared: SHARED_ROOM_ART.map(url) };
@@ -85,6 +83,19 @@ function externalizeDataUrls(css: string, out: string, names: Map<string, string
   });
 }
 
+/** The npm packages whose code the bundle contains, from Bun's list of the files it read. */
+export function bundledPackages(inputs: readonly string[]): string[] {
+  const names = inputs.map((input) => /node_modules\/((?:@[^/]+\/)?[^/]+)\//.exec(input)?.[1]).filter((name) => name !== undefined);
+  return [...new Set(names)].sort();
+}
+
+function packageLicense(root: string, pkg: string): string {
+  const dir = join(root, "node_modules", pkg);
+  const file = readdirSync(dir).find((f) => /^licen[cs]e(\.(md|txt))?$/i.test(f));
+  if (file === undefined) throw new Error(`the bundled package ${pkg} has no license file, and its notice must ship in asset-notices.txt`);
+  return join("node_modules", pkg, file);
+}
+
 /**
  * A cached file must never be paired with a newer release, so each immutable name is a function of the file's final bytes.
  * Bun names the stylesheet by a hash of what it read, and `externalizeDataUrls` then rewrites it (the extracted names depend
@@ -100,6 +111,7 @@ export async function buildApp(outDir: string, root = REPO): Promise<void> {
     target: "browser",
     publicPath: "/app/",
     minify: true,
+    metafile: true,
     throw: false,
   });
   if (!result.success) throw new Error(`build of the review app failed:\n${result.logs.map(String).join("\n")}`);
@@ -126,7 +138,7 @@ export async function buildApp(outDir: string, root = REPO): Promise<void> {
     if (file === undefined) throw new Error(`the first-screen font ${stem} is not in the review app's CSS`);
     return `<link rel="preload" href="/app/${file}" as="font" type="font/ttf" crossorigin>`;
   });
-  const layers = readdirSync(join(root, "src/app/assets/front-row-v2")).map((f) => basename(f, extname(f)));
+  const layers = ["room-plates", "front-row-v2"].flatMap((dir) => readdirSync(join(root, "src/app/assets", dir)).map((f) => basename(f, extname(f))));
   const table = JSON.stringify(roomArtTable(readdirSync(out), layers)).replaceAll("<", "\\u003c");
   const artTags = `<script type="application/json" id="room-art">${table}</script><script>${preloadScript()}</script>`;
   html = html.replace('<link rel="stylesheet"', () => `${artTags}<link rel="stylesheet"`);
@@ -137,7 +149,9 @@ export async function buildApp(outDir: string, root = REPO): Promise<void> {
     ["Young Serif", "src/app/assets/fonts-v2/young-serif-OFL.txt"],
     ["DM Sans", "src/app/assets/fonts-v2/dm-sans-OFL.txt"],
     ["Pixelify Sans", "src/app/assets/fonts-v2/OFL-PixelifySans.txt"],
+    ["Companion animation frames and room unlock objects", "src/app/assets/meshy-CC-BY-4.0.txt"],
   ];
+  for (const pkg of bundledPackages(Object.keys(result.metafile?.inputs ?? {}))) licenses.push([pkg, packageLicense(root, pkg)]);
   const notices = licenses.map(([name, path]) => `${name}\n\n${readFileSync(join(root, path), "utf8")}`).join("\n\n");
   writeFileSync(join(out, "asset-notices.txt"), notices);
   console.log(`built the review app into ${out}`);

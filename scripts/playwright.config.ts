@@ -12,6 +12,8 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:8773",
     browserName: "chromium",
     ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}),
+    // Rooms are still unless a test turns motion on, so pixel checks see the room itself and not its ambient specks.
+    reducedMotion: "reduce",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },

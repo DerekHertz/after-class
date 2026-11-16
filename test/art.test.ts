@@ -4,6 +4,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { MAX_DEVICE_PIXEL_RATIO } from "../scripts/build-art";
 import type { ArtEntry } from "../scripts/build-art";
+import { COMPANION_ART } from "../src/app/room/companion-art";
+import { ROOM_LAYER_ART, UNLOCK_ART } from "../src/app/room/art";
 import { readImage } from "./png";
 import type { Png } from "./png";
 
@@ -15,6 +17,12 @@ const RASTER = /\.(png|webp|jpe?g|gif|avif)$/;
 const sha256 = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
 const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(dir, e.name)) : [join(dir, e.name)]));
 const rel = (root: string, path: string) => relative(root, path).split("\\").join("/");
+/** The room layers and companion frames the review's canvas stage draws (src/app/room/stage.tsx), which import their files instead of naming them in a stylesheet. */
+const STAGE_DRAWN = new Set([
+  ...Object.values(ROOM_LAYER_ART).flatMap((layers) => Object.values(layers)),
+  ...Object.values(UNLOCK_ART),
+  ...Object.values(COMPANION_ART).flatMap(({ sheet, frames }) => [sheet, ...Object.values(frames)].flatMap((sized) => [sized.large, sized.small])),
+].map((file: string) => rel(ASSETS, file)));
 
 /** True when every k x k block of pixels is one colour, so the image is a smaller one drawn k times larger. */
 export function isIntegerUpscale(png: Png, k: number): boolean {
@@ -71,7 +79,7 @@ describe("the art the app ships is built from art/masters by scripts/build-art.t
     const css = files(join(REPO, "src/app")).filter((f) => f.endsWith(".css")).map((f) => ({ f, text: readFileSync(f, "utf8") }));
     const drawn = new Set<string>();
     for (const { f, text } of css) for (const m of text.matchAll(/url\(['"]?(\.\/assets\/[^'")]+)['"]?\)/g)) if (RASTER.test(m[1]!)) drawn.add(rel(ASSETS, join(f, "..", m[1]!)));
-    expect([...drawn].sort()).toEqual(manifest.map((e) => e.ship).sort());
+    expect([...new Set([...drawn, ...STAGE_DRAWN])].sort()).toEqual(manifest.map((e) => e.ship).sort());
     for (const entry of manifest) {
       expect({ ship: entry.ship, sha: sha256(join(ASSETS, entry.ship)) }).toEqual({ ship: entry.ship, sha: entry.shipSha256 });
       expect({ master: entry.master, sha: sha256(join(MASTERS, entry.master)) }).toEqual({ master: entry.master, sha: entry.masterSha256 });
@@ -130,8 +138,10 @@ describe("the art the app ships is built from art/masters by scripts/build-art.t
   test("every image stored at half size is drawn pixelated, or smooth with a reason the stylesheet records", () => {
     const stylesheets = files(join(REPO, "src/app")).filter((f) => f.endsWith(".css")).map((f) => readFileSync(f, "utf8"));
     const halved = manifest.filter((e) => e.undoUpscale !== undefined).map((e) => e.ship);
-    expect(halved.length).toBe(21);
-    expect(unprotectedHalvedImages(stylesheets, halved)).toEqual([]);
+    expect(halved.length).toBe(5);
+    // The stage draws its layers pixelated in the full room (test/room-scene.test.ts). A file it draws is checked here only
+    // where a stylesheet draws it too, as the phone's backdrop draws each room's background.
+    expect(unprotectedHalvedImages(stylesheets, halved.filter((ship) => !STAGE_DRAWN.has(ship) || stylesheets.some((css) => css.includes(ship))))).toEqual([]);
     const sample = ".a { --art: url('./assets/x/y.webp'); }\n.b { background: var(--art); }\n";
     expect(unprotectedHalvedImages([sample], ["x/y.webp"])).toEqual(["x/y.webp: .b draws it smooth with no reason recorded"]);
     expect(unprotectedHalvedImages([sample.replace(".b {", ".b { image-rendering: pixelated;")], ["x/y.webp"])).toEqual([]);

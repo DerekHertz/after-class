@@ -1,0 +1,16 @@
+Copyright (c) 2026 Derek Hertzell. All rights reserved.
+
+This repository is public so it can be read. No license is granted to copy,
+modify, distribute or run this software or its art, except as the GitHub Terms
+of Service allow for viewing and forking on GitHub.
+
+Third-party material keeps its own license:
+
+- Feather icons: MIT, src/app/assets/icons-v2/LICENSE
+- DM Sans: SIL Open Font License 1.1, src/app/assets/fonts-v2/dm-sans-OFL.txt
+- Young Serif: SIL Open Font License 1.1, src/app/assets/fonts-v2/young-serif-OFL.txt
+- Pixelify Sans: SIL Open Font License 1.1, src/app/assets/fonts-v2/OFL-PixelifySans.txt
+- React, React DOM, Scheduler and Zod, bundled into the app: MIT, in each
+  package's own LICENSE file. The build copies them into asset-notices.txt.
+- Companion animation frames and room unlock objects generated with Meshy:
+  Creative Commons Attribution 4.0, src/app/assets/meshy-CC-BY-4.0.txt

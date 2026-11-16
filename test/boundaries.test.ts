@@ -23,7 +23,7 @@ function resolveTarget(from: string, spec: string): string {
   if (!spec.startsWith(".")) return spec;
   const base = normalize(join(dirname(from), spec));
   for (const candidate of [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts")]) {
-    if (existsSync(join(ROOT, candidate)) && !candidate.endsWith("/") && candidate.match(/\.(ts|tsx|json)$/)) return candidate;
+    if (existsSync(join(ROOT, candidate)) && !candidate.endsWith("/") && candidate.match(/\.(ts|tsx|json|webp)$/)) return candidate;
   }
   throw new Error(`${from}: cannot resolve import "${spec}"`);
 }

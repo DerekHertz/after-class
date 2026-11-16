@@ -2,8 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { appendFileSync, cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { INLINE_LIMIT, buildApp } from "../scripts/build-app";
-import { FRONT_ROW_ROOMS } from "../src/app/front-row";
+import { INLINE_LIMIT, buildApp, bundledPackages } from "../scripts/build-app";
 import { parseAppearance } from "../src/app/appearance";
 import { FULL_ROOM_QUERY, ROOM_ART_PREFIX } from "../src/shared/room-art";
 import type { RoomArtTable } from "../src/shared/room-art";
@@ -82,21 +81,22 @@ describe("the review app bundle", () => {
       return { table: JSON.parse(json) as RoomArtTable, hrefs: links.map((l) => l.href!) };
     }
 
-    test("every file in the table is in the bundle, each room's review starts with its background, and every extra a room draws is in it", () => {
+    test("every file in the table is in the bundle, each room's review is its wide plate, and a phone's is its background", () => {
       const { out } = built();
       const { table } = preloaded(null, "/app/");
       const urls = [...Object.values(table.rooms).flatMap((r) => [r.plate, ...r.layers, ...r.compact]), ...table.shared];
       expect(urls.filter((u) => !existsSync(join(out, u.slice("/app/".length))))).toEqual([]);
       for (const [scene, prefix] of Object.entries(ROOM_ART_PREFIX)) {
         const room = table.rooms[scene]!;
-        expect(room.layers[0]).toMatch(new RegExp(`^/app/${prefix}-background-[a-z0-9]{8}\\.webp$`));
-        expect(room.compact).toEqual([room.layers[0]!]);
+        expect(room.layers).toHaveLength(1);
+        expect(room.layers[0]).toMatch(new RegExp(`^/app/${prefix}-wide-[a-z0-9]{8}\\.webp$`));
+        expect(room.compact).toHaveLength(1);
+        expect(room.compact[0]).toMatch(new RegExp(`^/app/${prefix}-background-[a-z0-9]{8}\\.webp$`));
         expect(room.plate).toMatch(new RegExp(`^/app/${scene}-[a-z0-9]{8}\\.webp$`));
-        for (const extra of FRONT_ROW_ROOMS[scene as keyof typeof FRONT_ROW_ROOMS].extras) expect(room.layers.some((u) => u.startsWith(`/app/${prefix}-${extra.name}-`))).toBe(true);
       }
     });
 
-    test("a page that is not a review preloads the saved room's plate, and a review preloads that room's layers, background first", () => {
+    test("a page that is not a review preloads the saved room's plate, and a review preloads that room's wide plate", () => {
       const harbor = JSON.stringify({ scene: "study-bench" });
       const home = preloaded(harbor, "/app/");
       expect(home.hrefs).toEqual([home.table.rooms["study-bench"]!.plate]);
@@ -131,6 +131,18 @@ describe("the review app bundle", () => {
     const { files } = built();
     expect(files.filter((f) => f !== "index.html" && f !== "asset-notices.txt" && !/-[a-z0-9]{8}\.[a-z]+$/.test(f))).toEqual([]);
   });
+
+  test("bundledPackages names each npm package once, scoped ones included", () => {
+    expect(bundledPackages(["/r/node_modules/react/index.js", "/r/node_modules/react/cjs/a.js", "/r/node_modules/@scope/pkg/x.js", "/r/src/app/main.tsx"])).toEqual(["@scope/pkg", "react"]);
+  });
+
+  test("the shipped notices credit Meshy for the companion frames under CC BY 4.0, beside the font, icon and bundled package licenses", () => {
+    const { out } = built();
+    const notices = readFileSync(join(out, "asset-notices.txt"), "utf8");
+    for (const name of ["Feather icons", "Young Serif", "DM Sans", "Pixelify Sans", "Companion animation frames and room unlock objects", "react", "react-dom", "scheduler", "zod"]) expect(notices).toContain(`${name}\n\n`);
+    expect(notices).toContain("Credit: Meshy (https://www.meshy.ai)");
+    expect(notices).toContain("https://creativecommons.org/licenses/by/4.0/");
+  });
 });
 
 describe("a file name the server caches for a year", () => {
@@ -154,18 +166,21 @@ describe("a file name the server caches for a year", () => {
   /** A browser holding a file from release A asks for that name again in release B, so a name must never stand for two different files. */
   const edits: [string, (root: string) => void][] = [
     ["an image is renamed with the same bytes", (root) => {
-      const art = join(root, "src/app/assets/front-row-v2");
-      renameSync(join(art, "harbor-lamp.webp"), join(art, "harbor-light.webp"));
-      const css = join(root, "src/app/front-row.css");
-      writeFileSync(css, readFileSync(css, "utf8").replace("harbor-lamp.webp", "harbor-light.webp"));
+      const art = join(root, "src/app/assets/unlock-objects/study-bench");
+      renameSync(join(art, "1.webp"), join(art, "first.webp"));
+      const stage = join(root, "src/app/room/art.ts");
+      writeFileSync(stage, readFileSync(stage, "utf8").replace("study-bench/1.webp", "study-bench/first.webp"));
     }],
     ["an image too large to inline is renamed with the same bytes", (root) => {
       const art = join(root, "src/app/assets/companions-v3");
       renameSync(join(art, "pip.webp"), join(art, "pip-large.webp"));
       const css = join(root, "src/app/hd-companion.css");
       writeFileSync(css, readFileSync(css, "utf8").replace("companions-v3/pip.webp", "companions-v3/pip-large.webp"));
+      const stage = join(root, "src/app/room/companion-art.ts");
+      writeFileSync(stage, readFileSync(stage, "utf8").replace("companions-v3/pip.webp", "companions-v3/pip-large.webp"));
     }],
-    ["an image the stylesheet inlines changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/front-row-v2/harbor-lamp.webp"), "\0")],
+    ["an image the stylesheet inlines changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/front-row/study-bench.webp"), "\0")],
+    ["a layer the stage imports changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/room-plates/harbor-wide.webp"), "\0")],
     ["an image too large to inline changes its bytes", (root) => appendFileSync(join(root, "src/app/assets/companions-v3/pip.webp"), "\0")],
     ["a stylesheet rule changes", (root) => appendFileSync(join(root, "src/app/completion.css"), "\n.release-probe { order: 7; }\n")],
     ["the script changes", (root) => appendFileSync(join(root, "src/app/main.tsx"), "\nconsole.info('release-probe');\n")],

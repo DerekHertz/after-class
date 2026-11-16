@@ -48,3 +48,7 @@ The [capture probe](docs/experiments/01-capture-probe.md) is a guided capture ch
 - [Lifecycle models in TLA+](docs/flows/model/)
 - [Current room and companion design](docs/design/front-row/README.md)
 - [Visual review notes](docs/design/pixel-consistency/review.md)
+
+## License
+
+All rights reserved. See [LICENSE](LICENSE). Fonts, icons and the Meshy-generated companion frames keep their own licenses, listed there and shipped with the app in `asset-notices.txt`.

@@ -1,5 +1,6 @@
 /**
- * The file-name prefix of each room's layers in assets/front-row-v2 (`rail-board`, `harbor-desk`, ...). scripts/build-app.ts
+ * The file-name prefix of each room's pictures: its wide plate in assets/room-plates (`rail-wide`) and its background in
+ * assets/front-row-v2 (`rail-background`). scripts/build-app.ts
  * finds a room's art by it, to preload the first screen's picture and to list what the browser may fetch while the learner is
  * on another screen. test/front-row.test.tsx keeps it in step with front-row.css.
  */
@@ -13,18 +14,18 @@ export const ROOM_ART_PREFIX = { "last-desk": "rail", "study-bench": "harbor", "
 export const APPEARANCE_STORAGE_KEY = "afterclass.appearance.v1";
 export const DEFAULT_ROOM = "last-desk";
 
-/** The layers every review room draws first, back to front. Any other layer of the room comes after these. */
-export const ROOM_LAYER_ORDER = ["background", "board", "desk", "mat"] as const;
+/** The pictures a full review room draws: its wide plate, which holds the board, desk and mat. */
+export const ROOM_LAYER_ORDER = ["wide"] as const;
 
 /**
- * The window size from which a review is drawn as a room built from layers. Below it (a phone, a short window) the review is
- * recomposed: the room's background fills the page and the board and desk are flat colour, so no other layer is drawn.
+ * The window size from which a review is drawn as the room's wide plate. Below it (a phone, a short window) the review is
+ * recomposed: the room's background fills the page and the board and desk are flat colour, so the plate is not drawn.
  * src/app/front-row.css and hd-companion.css switch layouts at these sizes, and test/art-prefetch.test.ts keeps them equal.
  * The page's head script and the prefetch hook ask the browser the same question, so they fetch what the layout will draw.
  */
 export const FULL_ROOM_MIN = { width: 900, height: 560 } as const;
 export const FULL_ROOM_QUERY = `(min-width: ${FULL_ROOM_MIN.width}px) and (min-height: ${FULL_ROOM_MIN.height}px)`;
-/** The layers the compact layout draws. */
+/** The pictures the compact layout draws. */
 export const COMPACT_ROOM_LAYERS = ["background"] as const;
 
 /**
@@ -42,7 +43,7 @@ export const SHARED_ROOM_ART = ["closed-folio", "closed-notebook", "source-folio
 
 /** What the built page carries as `<script id="room-art" type="application/json">`: bundle URLs, written by scripts/build-app.ts. */
 export type RoomArtTable = {
-  /** Each room's plate, which is every non-review page's backdrop, its review layers, background first, and the ones of those that the compact layout draws. */
+  /** Each room's plate, which is every non-review page's backdrop, its review pictures, and the ones of those that the compact layout draws. */
   readonly rooms: Readonly<Record<string, { readonly plate: string; readonly layers: readonly string[]; readonly compact: readonly string[] }>>;
   readonly shared: readonly string[];
 };

@@ -1,11 +1,15 @@
 import { expect, test } from "@playwright/test";
 import { APPEARANCE_KEY, DEFAULT_APPEARANCE, SCENES } from "../src/app/appearance";
+import type { SceneId } from "../src/app/appearance";
+import { layoutRoom } from "../src/app/room/layout";
+import type { Rect } from "../src/app/room/layout";
 
 const windows = [{ width: 1440, height: 900 }, { width: 1470, height: 1270 }, { width: 1920, height: 1080 }];
 
 type Box = { left: number; top: number; right: number; bottom: number };
 const within = (inner: Box, outer: Box) => inner.left >= outer.left - 1 && inner.top >= outer.top - 1 && inner.right <= outer.right + 1 && inner.bottom <= outer.bottom + 1;
 const overlaps = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+const edges = ({ left, top, width, height }: Rect): Box => ({ left, top, right: left + width, bottom: top + height });
 
 for (const scene of Object.keys(SCENES)) {
   for (const size of windows) {
@@ -24,7 +28,7 @@ for (const scene of Object.keys(SCENES)) {
         const one = (selector: string) => box(document.querySelector(selector)!);
         const navigation = [...document.querySelectorAll(".scene-masthead > *, .front-row-bar > *, .front-row-bar .review-navigation > *")].map(box).filter((b) => b.right > b.left && b.bottom > b.top);
         return {
-          boardArt: one('.front-row-art [data-layer="board"]'), boardText: one('.front-row-area[data-area="board"]'),
+          boardText: one('.front-row-area[data-area="board"]'),
           heading: one(".front-row-heading"), showDiagram: one(".front-row-heading .show-diagram"), question: one(".current-exchange .line[data-question]"),
           headingLines: (() => {
             const text = document.querySelector(".front-row-eyebrow")!.lastChild!;
@@ -33,24 +37,31 @@ for (const scene of Object.keys(SCENES)) {
             return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size;
           })(),
           overflow: (({ scrollHeight, clientHeight }) => scrollHeight - clientHeight)(document.querySelector('.front-row-area[data-area="board"]')!),
-          matArt: one('.front-row-art [data-layer="mat"]'), deskText: one('.front-row-area[data-area="desk"]'), field: one(".composer textarea"),
+          deskText: one('.front-row-area[data-area="desk"]'), field: one(".composer textarea"),
           buddy: one(".front-row-buddy"), notebook: one('.front-row-object[data-object="history"]'), folio: one('.front-row-object[data-object="source"]'),
-          desk: one('.front-row-art [data-layer="desk"]'), navigation, window: { left: 0, top: 0, right: innerWidth, bottom: innerHeight },
+          navigation, window: { left: 0, top: 0, right: innerWidth, bottom: innerHeight },
         };
       });
+      // The stage paints the board and the mat where layoutRoom places them for the scene's size.
+      const sceneSize = await page.locator(".front-row-canvas").evaluate((node) => { const r = node.getBoundingClientRect(); return { width: r.width, height: r.height }; });
+      const layout = layoutRoom(scene as SceneId, sceneSize, "full");
+      if (layout.composition !== "full") throw new Error("a desktop window lays out the full room");
+      const [boardArt, matArt] = [edges(layout.text.board), edges(layout.text.desk)];
       expect(boxes.navigation.length).toBeGreaterThan(3);
-      expect(within(boxes.boardText, boxes.boardArt)).toBe(true);
+      expect(within(boxes.boardText, boardArt)).toBe(true);
       expect(boxes.overflow).toBeLessThanOrEqual(1);
       expect({ scene, size, headingLines: boxes.headingLines }).toEqual({ scene, size, headingLines: 1 });
       for (const part of [boxes.heading, boxes.showDiagram, boxes.question]) expect(within(part, boxes.boardText)).toBe(true);
-      expect(within(boxes.deskText, boxes.matArt)).toBe(true);
+      expect(within(boxes.deskText, matArt)).toBe(true);
       expect(within(boxes.field, boxes.deskText)).toBe(true);
-      for (const [name, b] of Object.entries({ boardText: boxes.boardText, field: boxes.field, buddy: boxes.buddy, notebook: boxes.notebook, folio: boxes.folio })) {
+      // The companion's cell has clear padding around the figure, so its middle is what must be in the window.
+      const buddy = { ...boxes.buddy, left: (boxes.buddy.left + boxes.buddy.right) / 2, right: (boxes.buddy.left + boxes.buddy.right) / 2 };
+      for (const [name, b] of Object.entries({ boardText: boxes.boardText, field: boxes.field, buddy, notebook: boxes.notebook, folio: boxes.folio })) {
         expect({ name, inWindow: within(b, boxes.window) }).toEqual({ name, inWindow: true });
         for (const nav of boxes.navigation) expect({ name, hitsNavigation: overlaps(b, nav) }).toEqual({ name, hitsNavigation: false });
       }
       expect(overlaps(boxes.boardText, boxes.deskText)).toBe(false);
-      for (const side of [boxes.buddy, boxes.notebook, boxes.folio]) expect(overlaps(side, boxes.matArt)).toBe(false);
+      for (const side of [buddy, boxes.notebook, boxes.folio]) expect(overlaps(side, matArt)).toBe(false);
     });
   }
 }
