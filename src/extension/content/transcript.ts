@@ -16,6 +16,7 @@ export type TranscriptResult =
 
 export const SELECTORS = {
   panel: 'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]',
+  anyPanel: "ytd-engagement-panel-section-list-renderer",
   row: "ytd-transcript-segment-renderer, transcript-segment-view-model",
   showTranscriptButton: "ytd-video-description-transcript-section-renderer button",
   descriptionExpand: "#description-inline-expander #expand, ytd-text-inline-expander #expand, tp-yt-paper-button#expand",
@@ -103,7 +104,7 @@ function textOfFirst(html: string, match: (tag: OpenTag) => boolean): string | n
 }
 
 const isTimestamp = (t: OpenTag) => classTokens(t.attrs).some((c) => c === "segment-timestamp" || c === "ytwTranscriptSegmentViewModelTimestamp");
-const isSegmentText = (t: OpenTag) => classTokens(t.attrs).some((c) => c === "segment-text" || c === "yt-core-attributed-string");
+const isSegmentText = (t: OpenTag) => classTokens(t.attrs).some((c) => c === "segment-text" || c === "yt-core-attributed-string" || c === "ytAttributedStringHost");
 
 /** Reads every transcript row out of the panel's serialized HTML (old and new YouTube markup). */
 export function rowsFromHtml(html: string): PanelRow[] {
@@ -205,8 +206,9 @@ async function waitFor<T>(probe: () => T | null | undefined | false, timeoutMs: 
   }
 }
 
+/** Since November 2026 YouTube renders the rows in an engagement panel without a target-id and leaves the named one hidden. */
 function panelElement(): Element | null {
-  return document.querySelector(SELECTORS.panel);
+  return document.querySelector(SELECTORS.row)?.closest(SELECTORS.anyPanel) ?? document.querySelector(SELECTORS.panel);
 }
 
 function panelIsOpen(): boolean {

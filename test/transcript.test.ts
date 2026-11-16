@@ -26,6 +26,14 @@ const newRow = (ts: string, text: string) => `
     <span class="yt-core-attributed-string yt-core-attributed-string--white-space-pre-wrap" role="text">${text}</span>
   </transcript-segment-view-model>`;
 
+/** The row markup YouTube served on 2026-11-16, inside a panel with no target-id and no footer. */
+const row2026 = (ts: string, text: string) => `
+  <transcript-segment-view-model class="ytwTranscriptSegmentViewModelHost">
+    <div class="ytwTranscriptSegmentViewModelTimestamp">${ts}</div>
+    <div class="ytwTranscriptSegmentViewModelTimestampA11yLabel">${ts} seconds</div>
+    <span class="ytAttributedStringHost ytAttributedStringLinkInheritColor" role="text">${text}</span>
+  </transcript-segment-view-model>`;
+
 const footer = (label: string) => `
   <ytd-transcript-footer-renderer class="style-scope">
     <yt-dropdown-menu><tp-yt-paper-menu-button><div id="label-container"><yt-formatted-string id="label-text" class="style-scope">${label}</yt-formatted-string></div></tp-yt-paper-menu-button></yt-dropdown-menu>
@@ -77,6 +85,13 @@ describe("transcript panel rows", () => {
     expect(rowsFromHtml(panel([newRow("0:07", "the row picture"), newRow("0:12", "and the column picture")]))).toEqual([
       { timestamp: "0:07", text: "the row picture" },
       { timestamp: "0:12", text: "and the column picture" },
+    ]);
+  });
+
+  test("November 2026 markup: the text span is an ytAttributedStringHost", () => {
+    expect(rowsFromHtml(`<ytd-engagement-panel-section-list-renderer>${row2026("0:07", "shooting at a target")}${row2026("0:12", "you respond")}</ytd-engagement-panel-section-list-renderer>`)).toEqual([
+      { timestamp: "0:07", text: "shooting at a target" },
+      { timestamp: "0:12", text: "you respond" },
     ]);
   });
 
@@ -253,11 +268,24 @@ describe("acquireTranscript never hangs", () => {
     if (r.kind === "transcript") expect(r.segments).toHaveLength(8);
   });
 
+  test("rows rendered in an unnamed panel are read while the named transcript panel stays hidden", async () => {
+    fakeWindow();
+    const html = `<ytd-engagement-panel-section-list-renderer visibility="ENGAGEMENT_PANEL_VISIBILITY_EXPANDED">${Array.from({ length: 12 }, (_, i) => row2026(`0:${String(i * 5).padStart(2, "0")}`, `sentence number ${i}`)).join("")}</ytd-engagement-panel-section-list-renderer>`;
+    const shown = { getAttribute: () => "ENGAGEMENT_PANEL_VISIBILITY_EXPANDED", querySelectorAll: () => Array.from({ length: 12 }), outerHTML: html, querySelector: () => null };
+    const hidden = { getAttribute: () => "ENGAGEMENT_PANEL_VISIBILITY_HIDDEN", querySelectorAll: () => [], outerHTML: "", querySelector: () => null };
+    const row = { closest: () => shown };
+    g.document = { querySelector: (sel: string) => (sel.includes("transcript-segment") ? row : sel.includes("searchable-transcript") ? hidden : null), querySelectorAll: () => [] };
+    const r = await acquireTranscript("UNNAMEDPANEL", 60, 100);
+    expect(r.kind).toBe("transcript");
+    if (r.kind === "transcript") expect(r.segments).toHaveLength(12);
+  });
+
   test("a panel whose rows never stop changing is abandoned at the overall deadline", async () => {
     fakeWindow();
     let rows = 0;
     const panel = { getAttribute: () => "ENGAGEMENT_PANEL_VISIBILITY_EXPANDED", querySelectorAll: () => Array.from({ length: ++rows }), outerHTML: "", querySelector: () => null };
-    g.document = { querySelector: () => panel, querySelectorAll: () => [] };
+    const row = { closest: () => panel };
+    g.document = { querySelector: (sel: string) => (sel.includes("transcript-segment") ? row : panel), querySelectorAll: () => [] };
     const started = Date.now();
     const r = await acquireTranscript("NEVERSETTLE", 600, 100, 400);
     expect(r.kind).toBe("transcript_unavailable");
