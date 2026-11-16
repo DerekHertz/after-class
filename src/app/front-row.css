@@ -18,10 +18,10 @@
    backing for legibility. There is no bar behind them. */
 .scene-shell { --fr-chip: color-mix(in srgb, var(--fr-bar) 86%, transparent); --fr-chip-line: color-mix(in srgb, var(--fr-bar-ink) 45%, transparent); background: none; }
 /* The backdrop stays fixed behind the whole page, so paper scrolls over artwork, never a flat wall colour. It is the review's
-   background while a review loads or shows, and the room's plate on every other page. The plate is drawn pixelated, as the
-   review's stage draws it, so a page's room is as sharp as its paper. It ignores the pointer and sits under the shell's
-   content (the shell isolates). */
-.scene-shell::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--fr-plate) 50% 100% / cover no-repeat; image-rendering: pixelated; }
+   background while a review loads or shows, and the room's plate on every other page. The plate file is twice the room's
+   plate pixels (docs/design/live-room/plates), so it is drawn smoothly down to the window, as the review's stage draws it.
+   It ignores the pointer and sits under the shell's content (the shell isolates). */
+.scene-shell::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: var(--fr-plate) 50% 100% / cover no-repeat; }
 /* smooth-ok: the backdrop is smooth on purpose. The file holds the room once per plate pixel, and this draws it at 0.86 to 3.2 times that size. In
    headless Chrome, against the doubled file this replaced, smooth drawing differs in 0 to 7.1 percent of pixels by more than 8 levels (at most 0.4 percent
    by more than 32) from 390x844 at 3x to 3840x2160 at 2x, and pixelated drawing in 2.3 to 17.6 percent. The room's stage, which draws the same file, is pixelated. */

@@ -2,6 +2,8 @@
 
 Generated 2026-11-15 with Meshy nano-banana-pro (meshy-cli 0.4.0, image-to-image, 16:9) by `plates.py`, from the signed-off mockups in `../mockup/`. Painted look, not pixel art. Meshy returns 1376x768 for a 1764x992 tile, so every take is upscaled 1.28x and the new strips are a little softer than the mockup. The wide plate is 2314x992: the cleaned plate in the middle, a 364 px strip on each side with a 24 px soft seam. Raw takes are gitignored (`gen/`).
 
+Upscaled 2026-11-16. Every chosen take was upscaled 4x with Real-ESRGAN's `realesrgan-x4plus-anime` model, from the official `realesrgan-ncnn-vulkan-20220424-ubuntu.zip` of release v0.2.5.0, run on the CPU through software Vulkan at about 2.5 minutes a take (`plates.py upscale <room>`). `plates.py build` now composes each plate at twice the sizes above, 4628x1984, from the upscaled takes, and `room/rooms.ts` keeps its anchors in the 2314x992 plate pixels. The stage and the page backdrop draw the plate smoothly down to the window. Edges such as wires, lettering, shutters and lanterns are sharper than the 1.28x plates. Some painted texture, such as wall planks and soft shading, is flatter. No Meshy credits were used.
+
 Chosen takes (`choices.json`): rail clean 2, canal right 2, everything else take 1. Rail clean take 1 turned the answer mat into desk wood, so it was rejected. Canal right take 1 added a stray mat at the far edge, so it was rejected.
 
 Credits for all takes: 99.

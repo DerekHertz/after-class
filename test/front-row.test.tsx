@@ -5,7 +5,7 @@ import { APPEARANCE_KEY, COMPANIONS, DEFAULT_APPEARANCE, SCENES, parseAppearance
 import type { CompanionId, SceneId } from "../src/app/appearance";
 import { FrontRowScene, reserveNavSpace, roomStyle } from "../src/app/front-row";
 import type { FrontRowLayout } from "../src/app/front-row";
-import { FRONT_ROW_ROOMS, ROOM_ART } from "../src/app/room/rooms";
+import { FRONT_ROW_ROOMS, PLATE_FILE_SCALE, ROOM_ART } from "../src/app/room/rooms";
 import { ROOM_LAYER_ART } from "../src/app/room/art";
 import type { PlateRect } from "../src/app/room/rooms";
 import { APPEARANCE_STORAGE_KEY, DEFAULT_ROOM, ROOM_ART_PREFIX } from "../src/shared/room-art";
@@ -37,11 +37,11 @@ describe("the three skins keep saved preferences", () => {
 });
 
 describe("each room's text sits on its own art and reads clearly", () => {
-  test("the wide plate is the measured size and opaque, and the background a phone draws is the 16:10 core's size", async () => {
+  test("the wide plate is twice the measured size and opaque, and the background a phone draws is the 16:10 core's size", async () => {
     for (const scene of rooms) {
       const { size } = FRONT_ROW_ROOMS[scene].plate;
       const wide = await picture(scene, "room-plates", "wide");
-      expect({ scene, width: wide.width, height: wide.height, alpha: wide.alpha }).toEqual({ scene, ...size, alpha: false });
+      expect({ scene, width: wide.width, height: wide.height, alpha: wide.alpha }).toEqual({ scene, width: size.width * PLATE_FILE_SCALE, height: size.height * PLATE_FILE_SCALE, alpha: false });
       const bg = await picture(scene, "front-row-v2", "background");
       expect({ scene, width: bg.width, height: bg.height, alpha: bg.alpha }).toEqual({ scene, width: ROOM_ART.plate.width, height: ROOM_ART.plate.height, alpha: false });
     }
@@ -63,7 +63,7 @@ describe("each room's text sits on its own art and reads clearly", () => {
       const room = FRONT_ROW_ROOMS[scene];
       for (const [surface, spec] of [["board", room.board], ["mat", room.mat]] as const) {
         const wide = await picture(scene, "room-plates", "wide");
-        const painted = medianColor(wide, frac(FRONT_ROW_ROOMS[scene].plate[surface === "board" ? "board" : "mat"], wide));
+        const painted = medianColor(wide, frac(FRONT_ROW_ROOMS[scene].plate[surface === "board" ? "board" : "mat"], FRONT_ROW_ROOMS[scene].plate.size));
         for (const ink of [spec.ink, spec.inkSoft]) expect({ scene, surface, ink, ratio: contrast(ink, painted) >= 4.5 }).toEqual({ scene, surface, ink, ratio: true });
         // A phone draws the surface in flat colour; it must be the art's own colour, not a recolour.
         const [r, g, b] = [1, 3, 5].map((i) => parseInt(spec.fill.slice(i, i + 2), 16));

@@ -1,7 +1,8 @@
 # Wide empty room plates: a Meshy nano-banana-pro clean pass per room, then one side pass per side (16:9 tile whose outer part is the
 # plate's edge and whose far part is blank), pasting back only the new strip. Meshy takes 16:9 at the widest, so each side is its own pass.
 # usage: python3 plates.py gen <room> clean|left|right [hint]   one more take (about 9 credits)
-#        python3 plates.py build <room>                          compose {room}-wide.png from the chosen takes (choices.json)
+#        python3 plates.py upscale <room>                        4x every chosen take with Real-ESRGAN (REALESRGAN names its unzipped release)
+#        python3 plates.py build <room>                          compose {room}-wide.png at SCALE from the upscaled chosen takes (choices.json)
 #        python3 plates.py previews                              16:10, 16:9 and 2:1 centre crops of each plate
 #        python3 plates.py balance
 import json
@@ -20,12 +21,15 @@ FLAGS = ["--output-schema", "v1", "--format", "json", "--no-update-check"]
 ROOMS = {"rail": "live-room.png", "harbor": "harbor-room.png", "canal": "canal-room.png"}
 LIGHT = {"rail": "warm sunlight from the window on the right", "harbor": "bright sunny seaside daylight",
          "canal": "dim blue rainy evening light with warm glow from lanterns"}
-W, H = 1586, 992          # plate size; the wide plate keeps the height
-TILE_W = 1764             # 16:9 at height 992
-WIDE_W = 2314             # 21:9 at height 992
+# Meshy returns 1376x768 for a 16:9 tile, softer than a 2560 px window draws it, so every take is upscaled 4x by Real-ESRGAN and the
+# plate is composed at SCALE times the mockup's size. room/rooms.ts keeps its anchors in 1x plate pixels.
+SCALE = 2
+W, H = 1586 * SCALE, 992 * SCALE  # plate size; the wide plate keeps the height
+TILE_W = 1764 * SCALE     # 16:9 at the plate's height
+WIDE_W = 2314 * SCALE     # 21:9 at the plate's height
 STRIP = (WIDE_W - W) // 2  # new pixels each side
-BLANK = 400               # blank part of a side tile, more than STRIP so the model has room to continue
-SEAM = 24
+BLANK = 400 * SCALE               # blank part of a side tile, more than STRIP so the model has room to continue
+SEAM = 24 * SCALE
 GRAY = (128, 128, 128)
 
 CLEAN = ("Edit the reference image, a cosy painted HD pixel-art room. It has grey bars on its left and right edges: keep the grey bars exactly as they are. "
@@ -119,9 +123,21 @@ def choices():
     return json.load(open(p)) if os.path.exists(p) else {}
 
 
+def chosen(room, kind):
+    return os.path.join(name(room, kind), choices().get(f"{room}/{kind}", (takes(room, kind) or [None])[-1]))
+
+
+def upscale(room):
+    """Real-ESRGAN's anime model, 4x, on the CPU through software Vulkan when there is no GPU: about 2.5 minutes a take."""
+    exe = os.path.join(os.environ["REALESRGAN"], "realesrgan-ncnn-vulkan")
+    for kind in ("clean", "left", "right"):
+        if os.path.isdir(name(room, kind)):
+            d = chosen(room, kind)
+            subprocess.run(["nice", exe, "-i", os.path.join(d, "image_0.png"), "-o", os.path.join(d, "image_0_x4.png"), "-n", "realesrgan-x4plus-anime", "-m", os.path.join(os.environ["REALESRGAN"], "models")], check=True, capture_output=True)
+
+
 def take_image(room, kind):
-    t = choices().get(f"{room}/{kind}", (takes(room, kind) or [None])[-1])
-    return Image.open(os.path.join(name(room, kind), t, "image_0.png")).convert("RGB").resize((TILE_W, H), Image.LANCZOS)
+    return Image.open(os.path.join(chosen(room, kind), "image_0_x4.png")).convert("RGB").resize((TILE_W, H), Image.LANCZOS)
 
 
 def build_clean(room):
@@ -162,6 +178,7 @@ def previews():
         if not os.path.exists(p):
             continue
         im = Image.open(p)
+        im = im.resize((im.width // SCALE, im.height // SCALE), Image.LANCZOS)
         os.makedirs(os.path.join(HERE, "previews"), exist_ok=True)
         for tag, (w, h) in {"16x10": (1586, 992), "16x9": (1764, 992), "2x1": (1984, 992)}.items():
             im.crop(((im.width - w) // 2, 0, (im.width + w) // 2, h)).save(os.path.join(HERE, "previews", f"{room}-{tag}.png"))
@@ -175,6 +192,8 @@ if __name__ == "__main__":
         print(balance())
     elif cmd == "gen":
         print(*gen(args[0], args[1], " ".join(args[2:])), flush=True)
+    elif cmd == "upscale":
+        upscale(args[0])
     elif cmd == "build":
         build(args[0])
     elif cmd == "previews":
