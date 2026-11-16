@@ -372,7 +372,7 @@ describe("acquireTranscript never hangs", () => {
       querySelector: () => ({ click: () => { open = false; closes++; } }),
     };
     g.document = { querySelector: (selector: string) => selector === SELECTORS.panel ? panel :
-      { click: () => { open = true; } } };
+      { click: () => { open = true; } }, querySelectorAll: () => [] };
     const first = new AbortController();
     const reading = readTranscriptPanel("aaaaaaaaaaa", 10, first.signal);
     expect(open).toBe(true);
