@@ -191,14 +191,15 @@ class Stage {
     const list = (scene: SceneId) => buildScene(scene, layoutRoom(scene, box.css, wanted.composition), now, companion);
     let drawn: DrawList | null = list(wanted.scene);
     let ready = readyDraws(drawn.draws, this.state);
-    if (ready !== null) this.shown = wanted.scene;
-    else if (this.shown !== null) {
+    const failed = ready === "failed";
+    if (typeof ready !== "string") this.shown = wanted.scene;
+    else if (this.shown !== null && !failed) {
       drawn = list(this.shown);
       ready = readyDraws(drawn.draws, this.state);
     }
-    if (ready === null) drawn = null;
+    if (typeof ready === "string") drawn = null;
     let companionFrame: string | undefined;
-    const painted = (ready ?? []).flatMap((draw): Draw[] => {
+    const painted = (typeof ready === "string" ? [] : ready).flatMap((draw): Draw[] => {
       if (draw.kind !== "companion") return [draw];
       const shown = this.companion(draw);
       companionFrame = shown?.frame;
@@ -213,7 +214,7 @@ class Stage {
     } else this.paintMoving(painted, box);
     if (companionFrame === undefined) delete this.canvas.dataset.companion;
     else this.canvas.dataset.companion = companionFrame;
-    setState(this.canvas, drawn === null ? "waiting" : "painted");
+    setState(this.canvas, failed ? "off" : drawn === null ? "waiting" : "painted");
     for (const src of drawn?.ahead ?? []) picture(src);
     if (drawn?.next != null) {
       // Rounded up, since a timer truncates its delay to whole milliseconds and would wake just before the change, paint the same frame and wait again.

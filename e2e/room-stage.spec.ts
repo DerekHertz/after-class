@@ -178,15 +178,6 @@ test("the room's words wait for its plate, and a plate that fails does not hold 
   expect(await board.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
 });
 
-test("a plate that fails to load does not hold the room's words", async ({ page }, info) => {
-  test.skip(info.project.name === "narrow", "a phone shows its words over the page's own backdrop");
-  await page.route(/\/harbor-wide-[a-z0-9]{8}\.webp$/, (route) => route.fulfill({ status: 404 }));
-  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene: "study-bench" } });
-  await page.goto("/?scenario=review&clean=1");
-  await expect(page.locator(".front-row-canvas[data-stage=painted]")).toBeAttached();
-  expect(await page.locator('.front-row-area[data-area="board"]').evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
-});
-
 for (const [unusable, init] of [
   ["has no 2D context", () => { HTMLCanvasElement.prototype.getContext = () => null; }],
   ["cannot observe its size", () => { delete (window as { ResizeObserver?: unknown }).ResizeObserver; }],
@@ -278,4 +269,14 @@ test("a room the learner moved on from does not repaint the stage when its pictu
   await expect.poll(() => page.evaluate(() => performance.getEntriesByType("resource").filter((e) => /\/harbor-[a-z-]+-[a-z0-9]{8}\.webp$/.test(e.name)).length)).toBeGreaterThan(0);
   await page.waitForTimeout(500);
   expect(await paints()).toBe(before);
+});
+
+test("a room whose plate fails to load still shows its question and answer controls over the backdrop", async ({ page }, info) => {
+  test.skip(info.project.name === "narrow", "the phone layout draws its backdrop without the plate");
+  await page.route(/\/[a-z]+-wide-[a-z0-9]{8}\.webp$/, (route) => route.fulfill({ status: 404 }));
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene: "study-bench", visible: false } });
+  await page.goto("/?scenario=review&clean=1");
+  await expect(page.locator(".front-row-canvas[data-stage=off]")).toBeAttached();
+  await expect(page.locator(".front-row-heading")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Share my thinking" })).toBeVisible();
 });

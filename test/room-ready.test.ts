@@ -12,9 +12,9 @@ test("the room paints once its plate has decoded", () => {
 });
 
 test("the room waits while its plate is still loading", () => {
-  expect(readyDraws(draws, all("pending"))).toBeNull();
+  expect(readyDraws(draws, all("pending"))).toBe("waiting");
 });
 
-test("a plate that failed to load leaves the room unpainted, so the page's backdrop shows", () => {
-  expect(readyDraws(draws, all("failed"))).toBeNull();
+test("a plate that failed to load is a settled failure, not a wait", () => {
+  expect(readyDraws(draws, all("failed"))).toBe("failed");
 });

@@ -36,7 +36,8 @@ test.describe("a moving room's steps match a whole repaint", () => {
           const frames = new Set(steps.map((s) => s.frame));
           expect(frames).toContain("blink");
           expect(frames).toContain("hop-crouch");
-          expect(steps.filter((s) => s.repainted > 0).length).toBeGreaterThan(50);
+          // With no specks in the air, only the companion's blinks and hop, and the rail room's light, repaint a step.
+          expect(steps.filter((s) => s.repainted > 0).length).toBeGreaterThan(5);
           expect(missing).toBeGreaterThan(0);
           // The rail room's window light is the largest live draw. When its alpha steps, the step repaints about 13 percent.
           expect(Math.max(...steps.map((s) => s.repainted / s.total))).toBeLessThan(0.25);
