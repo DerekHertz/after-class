@@ -2,10 +2,10 @@
 # Walks you through shipping master to useafterclass.com, one step at a time. Each step shows its command and runs it
 # when you press Enter, with the output right below. A step that is already done, such as a pushed tag or a built image,
 # says so and is skipped, so you can stop with q and run this again later. The deploy itself is scripts/release.sh,
-# which still asks its own y/N.
+# which still asks its own y/N. It works on the clone you run it from, so run it from your main clone.
 set -uo pipefail
 
-repo=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
+repo=$(git rev-parse --show-toplevel) || exit 1
 beta="$repo/infra/beta"
 export AWS_PROFILE=afterclass AWS_REGION=us-east-2
 
