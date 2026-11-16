@@ -40,29 +40,16 @@ export const AMBIENT_FPS = 12;
 const DEPTH_Z = { far: 0.5, mid: 1.5, near: 2.5 } as const;
 
 /**
- * Each room's ambient life. Regions are measured on the room's core, which is also where the window and the sea are.
- * The rail room's petals blow in from the cherry tree in its window, the canal's rain falls in its window, and the harbor's
- * water glints. Dust catches the light in the two rooms with lamps.
+ * Each room's ambient life, measured on the room's core. Only the harbor's water glints: Derek found falling rain and
+ * floating dust and petals distracting.
  */
 export const AMBIENT: { readonly [S in SceneId]: readonly AmbientLayer[] } = {
-  "last-desk": [
-    { name: "window petals", depth: "far", region: { x: 1262, y: 140, width: 272, height: 450 }, count: 8, size: { width: 4, height: 3 }, speed: { x: -5, y: 12 }, sway: { amplitude: 6, period: 5 }, color: "#f6b6c8", alpha: 0.9 },
-    { name: "drifting petals", depth: "mid", region: { x: -364, y: 0, width: 2314, height: 992 }, count: 14, size: { width: 6, height: 4 }, speed: { x: -16, y: 20 }, sway: { amplitude: 14, period: 6 }, color: "#f4a9c0", alpha: 0.85 },
-    { name: "near petals", depth: "near", region: { x: -364, y: 0, width: 2314, height: 992 }, count: 6, size: { width: 9, height: 6 }, speed: { x: -30, y: 44 }, sway: { amplitude: 22, period: 4.5 }, color: "#f9c3d3", alpha: 0.8, clearOfBoard: true },
-    { name: "dust", depth: "mid", region: { x: -364, y: 40, width: 2314, height: 560 }, count: 18, size: { width: 2, height: 2 }, speed: { x: 3, y: -4 }, blink: { period: 4, on: 2.6 }, color: "#fff1c9", alpha: 0.7 },
-  ],
+  "last-desk": [],
   "study-bench": [
     { name: "water glints", depth: "far", region: { x: 420, y: 440, width: 760, height: 105 }, count: 26, size: { width: 4, height: 1 }, speed: { x: 0, y: 0 }, blink: { period: 2.4, on: 0.7 }, color: "#f4fdff", alpha: 0.85 },
     { name: "far glints", depth: "far", region: { x: 1200, y: 440, width: 370, height: 130 }, count: 16, size: { width: 5, height: 1 }, speed: { x: 0, y: 0 }, blink: { period: 3.2, on: 0.8 }, color: "#dff6ff", alpha: 0.7 },
-    { name: "sunlit motes", depth: "mid", region: { x: -364, y: 0, width: 2314, height: 640 }, count: 14, size: { width: 2, height: 2 }, speed: { x: 4, y: -5 }, blink: { period: 5, on: 3 }, color: "#fffbe0", alpha: 0.75 },
-    { name: "near motes", depth: "near", region: { x: -364, y: 0, width: 2314, height: 640 }, count: 4, size: { width: 4, height: 4 }, speed: { x: 7, y: -10 }, blink: { period: 6, on: 3.6 }, color: "#fff6c4", alpha: 0.4, clearOfBoard: true },
   ],
-  "projection-booth": [
-    { name: "window rain", depth: "far", region: { x: 52, y: 158, width: 286, height: 494 }, count: 40, size: { width: 1, height: 5 }, speed: { x: -4, y: 150 }, color: "#a9c4f0", alpha: 0.55 },
-    { name: "near window rain", depth: "mid", region: { x: 52, y: 158, width: 286, height: 494 }, count: 16, size: { width: 1, height: 8 }, speed: { x: -7, y: 260 }, color: "#d3e2fb", alpha: 0.6 },
-    { name: "lamplit dust", depth: "mid", region: { x: 380, y: 40, width: 1570, height: 640 }, count: 16, size: { width: 2, height: 2 }, speed: { x: 3, y: -4 }, blink: { period: 4.5, on: 2.8 }, color: "#ffd9a0", alpha: 0.65 },
-    { name: "near dust", depth: "near", region: { x: 380, y: 40, width: 1570, height: 640 }, count: 4, size: { width: 4, height: 4 }, speed: { x: 6, y: -9 }, blink: { period: 6, on: 3.6 }, color: "#ffdcae", alpha: 0.35, clearOfBoard: true },
-  ],
+  "projection-booth": [],
 };
 
 /** Mixes two integers into a number in [0, 1), so each speck keeps its place and phase for good without any stored state. */

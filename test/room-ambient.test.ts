@@ -35,10 +35,10 @@ describe("ambient life on the draw list", () => {
     }
   });
 
-  test("a moving room adds specks and asks for the next step within one step's time", () => {
+  test("a moving room with light or glints adds specks and asks for the next step within one step's time", () => {
     for (const scene of rooms) {
       const list = buildScene(scene, fullLayout(scene), T);
-      expect(specksOf(list.draws).length).toBeGreaterThan(0);
+      expect(specksOf(list.draws).length).toBe(AMBIENT[scene].length + LIGHT[scene].length);
       expect(list.next!).toBeGreaterThan(T);
       expect(list.next!).toBeLessThanOrEqual(T + 1000 / AMBIENT_FPS + 1e-6);
     }
@@ -59,9 +59,11 @@ describe("ambient life on the draw list", () => {
     }
   });
 
-  test("every room has specks at three depths, drawn over the plate", () => {
+  test("nothing falls or floats: the only specks are the harbor's water glints, which stay in place, drawn over the plate", () => {
+    expect(AMBIENT["last-desk"]).toHaveLength(0);
+    expect(AMBIENT["projection-booth"]).toHaveLength(0);
     for (const scene of rooms) {
-      expect(new Set(AMBIENT[scene].map((layer) => layer.depth))).toEqual(new Set(["far", "mid", "near"]));
+      for (const layer of AMBIENT[scene]) expect({ speed: layer.speed, sway: layer.sway }).toEqual({ speed: { x: 0, y: 0 }, sway: undefined });
       const draws = buildScene(scene, fullLayout(scene), T).draws;
       const plate = draws.findIndex((d) => d.kind === "image");
       draws.forEach((d, i) => { if (d.kind === "specks") expect(i).toBeGreaterThan(plate); });
@@ -69,8 +71,8 @@ describe("ambient life on the draw list", () => {
   });
 
   test("a step holds until the next one, and the next one moves the specks", () => {
-    const layout = fullLayout("last-desk");
-    const at = (ms: number) => JSON.stringify(specksOf(buildScene("last-desk", layout, ms).draws));
+    const layout = fullLayout("study-bench");
+    const at = (ms: number) => JSON.stringify(specksOf(buildScene("study-bench", layout, ms).draws));
     const step = 1000 / AMBIENT_FPS;
     const start = Math.ceil(T / step) * step;
     expect(at(start + 1)).toBe(at(start + step - 1));
@@ -109,14 +111,15 @@ describe("ambient life on the draw list", () => {
   });
 
   test("each speck is a whole number of plate pixels from the plate's corner and as big as its plate size", () => {
-    const layout = fullLayout("projection-booth");
+    const layout = fullLayout("study-bench");
     const { plate: background, s: scale } = layout;
-    const rain = specksOf(buildScene("projection-booth", layout, T).draws).find((s) => s.color === "#a9c4f0")!;
-    for (const { left, top, width, height } of rain.rects) {
+    const glints = specksOf(buildScene("study-bench", layout, T).draws).find((s) => s.color === "#f4fdff")!;
+    expect(glints.rects.length).toBeGreaterThan(0);
+    for (const { left, top, width, height } of glints.rects) {
       expect((left - background.left) / scale).toBeCloseTo(Math.round((left - background.left) / scale), 6);
       expect((top - background.top) / scale).toBeCloseTo(Math.round((top - background.top) / scale), 6);
-      expect(width / scale).toBeCloseTo(1, 6);
-      expect(height / scale).toBeCloseTo(5, 6);
+      expect(width / scale).toBeCloseTo(4, 6);
+      expect(height / scale).toBeCloseTo(1, 6);
     }
   });
 
