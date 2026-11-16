@@ -17,6 +17,7 @@ export type TranscriptResult =
 
 export const SELECTORS = {
   panel: 'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]',
+  anyPanel: "ytd-engagement-panel-section-list-renderer",
   row: "ytd-transcript-segment-renderer, transcript-segment-view-model",
   showTranscriptButton: "ytd-video-description-transcript-section-renderer button",
   descriptionExpand: "#description-inline-expander #expand, ytd-text-inline-expander #expand, tp-yt-paper-button#expand",
@@ -104,7 +105,7 @@ function textOfFirst(html: string, match: (tag: OpenTag) => boolean): string | n
 }
 
 const isTimestamp = (t: OpenTag) => classTokens(t.attrs).some((c) => c === "segment-timestamp" || c === "ytwTranscriptSegmentViewModelTimestamp");
-const isSegmentText = (t: OpenTag) => classTokens(t.attrs).some((c) => c === "segment-text" || c === "yt-core-attributed-string");
+const isSegmentText = (t: OpenTag) => classTokens(t.attrs).some((c) => c === "segment-text" || c === "yt-core-attributed-string" || c === "ytAttributedStringHost");
 
 /** Reads every transcript row out of the panel's serialized HTML (old and new YouTube markup). */
 export function rowsFromHtml(html: string): PanelRow[] {
@@ -207,8 +208,17 @@ async function waitFor<T>(probe: () => T | null | undefined | false, timeoutMs: 
   }
 }
 
+/**
+ * Since November 2026 YouTube renders the rows in an engagement panel without a target-id and leaves the named one
+ * hidden. Only an expanded panel counts, so rows a hidden panel kept from an earlier video are never read.
+ */
 function panelElement(): Element | null {
-  return document.querySelector(SELECTORS.panel);
+  const shown = [...document.querySelectorAll(SELECTORS.anyPanel)].find((p) => p.getAttribute(SELECTORS.expandedAttr) === SELECTORS.expandedValue && p.querySelector(SELECTORS.row));
+  return shown ?? document.querySelector(SELECTORS.panel);
+}
+
+function expandedPanels(): Element[] {
+  return [...document.querySelectorAll(SELECTORS.anyPanel)].filter((p) => p.getAttribute(SELECTORS.expandedAttr) === SELECTORS.expandedValue);
 }
 
 function panelIsOpen(): boolean {
@@ -231,11 +241,19 @@ function findShowTranscriptButton(): HTMLElement | null {
 export async function readTranscriptPanel(videoId: string, durationS: number | null, signal?: AbortSignal): Promise<TranscriptResult> {
   const missing: TranscriptResult = { kind: "transcript_unavailable", videoId, reason: "panel_missing" };
   if (signal?.aborted) return missing;
-  let openedHere = false;
+  // The panels already expanded before this read clicked "Show transcript"; null when it did not open one.
+  let expandedBefore: Element[] | null = null;
   const restore = () => {
-    if (!openedHere) return;
-    openedHere = false;
-    panelElement()?.querySelector<HTMLElement>(SELECTORS.panelClose)?.click();
+    if (!expandedBefore) return;
+    const before = expandedBefore;
+    expandedBefore = null;
+    // Close only a panel that opened since the click and is known to be the transcript: it holds rows, or it is the
+    // named transcript panel. A panel still loading its first row is left open rather than risk closing Chapters.
+    const opened = expandedPanels().filter((p) => !before.includes(p));
+    const named = document.querySelector(SELECTORS.panel);
+    const namedOpened = named !== null && !before.includes(named) && named.getAttribute(SELECTORS.expandedAttr) === SELECTORS.expandedValue;
+    const mine = opened.find((p) => p.querySelector(SELECTORS.row)) ?? (namedOpened ? named : null);
+    mine?.querySelector<HTMLElement>(SELECTORS.panelClose)?.click();
   };
   signal?.addEventListener("abort", restore, { once: true });
   try {
@@ -246,7 +264,7 @@ export async function readTranscriptPanel(videoId: string, durationS: number | n
         button = await waitFor(findShowTranscriptButton, 1500, signal);
       }
       if (!button || signal?.aborted) return missing;
-      openedHere = true;
+      expandedBefore = expandedPanels();
       button.click();
     }
     const rowCount = () => panelElement()?.querySelectorAll(SELECTORS.row).length ?? 0;
