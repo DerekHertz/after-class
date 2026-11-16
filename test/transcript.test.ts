@@ -418,25 +418,46 @@ describe("acquireTranscript never hangs", () => {
     if (r.kind === "transcript") expect(r.segments.every((s) => s.text.startsWith("current"))).toBe(true);
   });
 
-  test("cancelling before rows load closes the panel the read opened, not the hidden named one", async () => {
-    let unnamedOpen = false;
+  type CancelPanel = { name: string; open: boolean; rows: number; named?: boolean };
+  function cancelPage(panels: CancelPanel[], onShow: () => void) {
     const closed: string[] = [];
-    const named = { getAttribute: (a: string) => (a === "visibility" ? HIDDEN : null), querySelector: () => ({ click: () => closed.push("named") }), querySelectorAll: () => [] };
-    const unnamed = {
-      getAttribute: (a: string) => (a === "visibility" ? (unnamedOpen ? EXPANDED : HIDDEN) : null),
-      querySelector: (sel: string) => (sel.includes("transcript-segment") ? null : { click: () => { unnamedOpen = false; closed.push("unnamed"); } }),
-      querySelectorAll: () => [],
-    };
+    const el = (p: CancelPanel) => ({
+      getAttribute: (a: string) => (a === "visibility" ? (p.open ? EXPANDED : HIDDEN) : a === "target-id" && p.named ? "engagement-panel-searchable-transcript" : null),
+      querySelector: (sel: string) => (sel.includes("transcript-segment") ? (p.rows > 0 ? {} : null) : { click: () => { p.open = false; closed.push(p.name); } }),
+      querySelectorAll: (sel: string) => (sel.includes("transcript-segment") ? Array.from({ length: p.rows }) : []),
+      outerHTML: "",
+    });
+    const els = panels.map(el);
     g.document = {
-      querySelector: (sel: string) => (sel.includes("searchable-transcript") ? named : { click: () => { unnamedOpen = true; } }),
-      querySelectorAll: (sel: string) => (sel === "ytd-engagement-panel-section-list-renderer" ? [named, unnamed] : []),
+      querySelector: (sel: string) => (sel.includes("searchable-transcript") ? els[panels.findIndex((p) => p.named)] ?? null : { click: onShow }),
+      querySelectorAll: (sel: string) => (sel === "ytd-engagement-panel-section-list-renderer" ? els : []),
     };
+    return closed;
+  }
+
+  test("cancelling closes the unnamed panel the read opened once it holds rows", async () => {
+    const named = { name: "named", open: false, rows: 0, named: true };
+    const unnamed = { name: "unnamed", open: false, rows: 0 };
+    const closed = cancelPage([named, unnamed], () => { unnamed.open = true; });
     const cancel = new AbortController();
     const reading = readTranscriptPanel("ccccccccccc", 10, cancel.signal);
-    expect(unnamedOpen).toBe(true);
+    expect(unnamed.open).toBe(true);
+    unnamed.rows = 3;
     cancel.abort();
     await reading;
     expect(closed).toEqual(["unnamed"]);
+  });
+
+  test("cancelling never closes the hidden named panel, a panel open before the read, or Chapters", async () => {
+    const named = { name: "named", open: false, rows: 0, named: true };
+    const before = { name: "before", open: true, rows: 0 };
+    const chapters = { name: "chapters", open: false, rows: 0 };
+    const closed = cancelPage([named, before, chapters], () => { before.rows = 3; chapters.open = true; });
+    const cancel = new AbortController();
+    const reading = readTranscriptPanel("ddddddddddd", 10, cancel.signal);
+    cancel.abort();
+    await reading;
+    expect(closed).toEqual([]);
   });
 
   test("a panel whose rows never stop changing is abandoned at the overall deadline", async () => {

@@ -247,9 +247,13 @@ export async function readTranscriptPanel(videoId: string, durationS: number | n
     if (!expandedBefore) return;
     const before = expandedBefore;
     expandedBefore = null;
+    // Close only a panel that opened since the click and is known to be the transcript: it holds rows, or it is the
+    // named transcript panel. A panel still loading its first row is left open rather than risk closing Chapters.
     const opened = expandedPanels().filter((p) => !before.includes(p));
-    const fallback = panelElement();
-    for (const p of opened.length > 0 ? opened : fallback ? [fallback] : []) p.querySelector<HTMLElement>(SELECTORS.panelClose)?.click();
+    const named = document.querySelector(SELECTORS.panel);
+    const namedOpened = named !== null && !before.includes(named) && named.getAttribute(SELECTORS.expandedAttr) === SELECTORS.expandedValue;
+    const mine = opened.find((p) => p.querySelector(SELECTORS.row)) ?? (namedOpened ? named : null);
+    mine?.querySelector<HTMLElement>(SELECTORS.panelClose)?.click();
   };
   signal?.addEventListener("abort", restore, { once: true });
   try {
