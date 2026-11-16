@@ -418,6 +418,27 @@ describe("acquireTranscript never hangs", () => {
     if (r.kind === "transcript") expect(r.segments.every((s) => s.text.startsWith("current"))).toBe(true);
   });
 
+  test("cancelling before rows load closes the panel the read opened, not the hidden named one", async () => {
+    let unnamedOpen = false;
+    const closed: string[] = [];
+    const named = { getAttribute: (a: string) => (a === "visibility" ? HIDDEN : null), querySelector: () => ({ click: () => closed.push("named") }), querySelectorAll: () => [] };
+    const unnamed = {
+      getAttribute: (a: string) => (a === "visibility" ? (unnamedOpen ? EXPANDED : HIDDEN) : null),
+      querySelector: (sel: string) => (sel.includes("transcript-segment") ? null : { click: () => { unnamedOpen = false; closed.push("unnamed"); } }),
+      querySelectorAll: () => [],
+    };
+    g.document = {
+      querySelector: (sel: string) => (sel.includes("searchable-transcript") ? named : { click: () => { unnamedOpen = true; } }),
+      querySelectorAll: (sel: string) => (sel === "ytd-engagement-panel-section-list-renderer" ? [named, unnamed] : []),
+    };
+    const cancel = new AbortController();
+    const reading = readTranscriptPanel("ccccccccccc", 10, cancel.signal);
+    expect(unnamedOpen).toBe(true);
+    cancel.abort();
+    await reading;
+    expect(closed).toEqual(["unnamed"]);
+  });
+
   test("a panel whose rows never stop changing is abandoned at the overall deadline", async () => {
     fakeWindow();
     let rows = 0;

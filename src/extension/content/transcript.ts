@@ -217,6 +217,10 @@ function panelElement(): Element | null {
   return shown ?? document.querySelector(SELECTORS.panel);
 }
 
+function expandedPanels(): Element[] {
+  return [...document.querySelectorAll(SELECTORS.anyPanel)].filter((p) => p.getAttribute(SELECTORS.expandedAttr) === SELECTORS.expandedValue);
+}
+
 function panelIsOpen(): boolean {
   return panelElement()?.getAttribute(SELECTORS.expandedAttr) === SELECTORS.expandedValue;
 }
@@ -237,11 +241,15 @@ function findShowTranscriptButton(): HTMLElement | null {
 export async function readTranscriptPanel(videoId: string, durationS: number | null, signal?: AbortSignal): Promise<TranscriptResult> {
   const missing: TranscriptResult = { kind: "transcript_unavailable", videoId, reason: "panel_missing" };
   if (signal?.aborted) return missing;
-  let openedHere = false;
+  // The panels already expanded before this read clicked "Show transcript"; null when it did not open one.
+  let expandedBefore: Element[] | null = null;
   const restore = () => {
-    if (!openedHere) return;
-    openedHere = false;
-    panelElement()?.querySelector<HTMLElement>(SELECTORS.panelClose)?.click();
+    if (!expandedBefore) return;
+    const before = expandedBefore;
+    expandedBefore = null;
+    const opened = expandedPanels().filter((p) => !before.includes(p));
+    const fallback = panelElement();
+    for (const p of opened.length > 0 ? opened : fallback ? [fallback] : []) p.querySelector<HTMLElement>(SELECTORS.panelClose)?.click();
   };
   signal?.addEventListener("abort", restore, { once: true });
   try {
@@ -252,7 +260,7 @@ export async function readTranscriptPanel(videoId: string, durationS: number | n
         button = await waitFor(findShowTranscriptButton, 1500, signal);
       }
       if (!button || signal?.aborted) return missing;
-      openedHere = true;
+      expandedBefore = expandedPanels();
       button.click();
     }
     const rowCount = () => panelElement()?.querySelectorAll(SELECTORS.row).length ?? 0;
