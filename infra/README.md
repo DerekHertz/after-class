@@ -141,6 +141,8 @@ A release is a `v<major>.<minor>.<patch>` tag on a `master` commit whose `packag
    scripts/release.sh
    ```
 
+   `scripts/ship.sh` runs the whole release as steps you start with Enter, each with its output below it. It tags the version on `master`, waits for the image, signs in to AWS, connects Terraform in `infra/beta`, plans and applies the server changes, and ends with this tool. It skips steps that are already done and refuses to apply a plan that destroys the data volume, the Elastic IP or the network interface.
+
    It first asks you to run `aws login` in another terminal when you are not signed in. It then reads which release the server runs through Systems Manager, with an `AWS-RunShellScript` command that prints the digest in `/data/afterclass/current-image` and what the app's `/health` answers on the server. A version in `/health` names the release. Without one, as up to v0.1.4, the release whose `image-digest.txt` names the recorded digest does. The public `/health` is not used for this, because a network filter can block it or answer with its own page. If the read fails, the tool stops before it shows notes, tries or asks anything. When you know which release runs, `scripts/release.sh --live v0.1.4` goes on from that release and marks the base as unverified at the start and at the question.
 
    It lists the release tags after the live one and picks the newest. Pass a tag, such as `scripts/release.sh v0.1.4`, to pick another. Passing an older tag is a rollback. With no newer tag, it prints the commands to cut the next version.
