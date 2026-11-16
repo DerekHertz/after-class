@@ -52,7 +52,9 @@ const NAV_GAP = 12;
 
 /**
  * How a review tells the page around it that it draws the room itself. SceneShell (scene.tsx) draws the room on every other
- * page, and it stops while a review's own stage is mounted, so the window never runs two stages.
+ * page and unmounts its stage while a review's own stage is mounted. The handover happens in one commit before the browser
+ * paints: the review's stage starts in its layout effect, the claim re-renders SceneShell, and the page's stage stops, so
+ * only one stage ever paints a frame.
  */
 export const ReviewStageClaim = createContext<((claimed: boolean) => void) | null>(null);
 
