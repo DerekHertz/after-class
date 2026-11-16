@@ -23,8 +23,10 @@ declare module "react" {
 /** The room's colours as the custom properties front-row.css reads: the surface colours, then the palette. */
 export function roomStyle(scene: SceneId): CSSProperties {
   const room: FrontRowRoom = FRONT_ROW_ROOMS[scene];
-  const { board, mat } = room;
+  const { board, mat, plate } = room;
   const style: CSSProperties = {
+    "--fr-plate-w": plate.size.width, "--fr-plate-h": plate.size.height,
+    "--fr-seat-x": plate.companion.x, "--fr-seat-bottom": plate.companion.bottom, "--fr-seat-h": plate.companion.height,
     "--fr-phone-x": room.phoneArtX,
     "--fr-board-fill": board.fill, "--fr-board-ink": board.ink, "--fr-board-ink-soft": board.inkSoft,
     "--fr-mat-fill": mat.fill, "--fr-mat-ink": mat.ink, "--fr-mat-ink-soft": mat.inkSoft,

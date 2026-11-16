@@ -68,3 +68,27 @@
 }
 .scene-shell[data-motion="reduced"] .companion-raster { transition: none; transform: none; }
 @media (prefers-reduced-motion: reduce) { .scene-shell .study-companion[data-activity] > .companion-raster { transition: none; transform: none; } }
+
+/* In a window big enough for the full room, the companion sits at its seat in the room's plate, the spot the review's
+   stage draws it at, and stays there whatever page is open. The footer covers the window under the page's paper, so the
+   paper scrolls over the room and its companion, and the backdrop's cover sizing (front-row.css) gives the scale: one
+   plate pixel is --s. The paper is no wider than the space between the companion and its mirror on the other side, so the
+   companion is never under it while the page is not scrolled. The tagline would sit under the paper, so it is hidden, as
+   in a review. */
+@media (min-width: 900px) and (min-height: 560px) {
+  .scene-content { z-index: 1; }
+  .scene-shell .scene-content > .room-paper { width: min(100% - 24px, 76rem, (var(--fr-plate-w) - 2 * var(--fr-seat-x) - var(--fr-seat-h)) * max(100vw / var(--fr-plate-w), 100vh / var(--fr-plate-h)) - 24px); }
+  .scene-footer { position: fixed; inset: 0; z-index: 0; display: block; padding: 0; pointer-events: none; container-type: size; }
+  .scene-footer > * { --s: max(100cqw / var(--fr-plate-w), 100cqh / var(--fr-plate-h)); position: absolute; }
+  .scene-footer > p { display: none; }
+  .scene-footer > .quiet-status { left: 12px; bottom: 20px; }
+  .scene-footer > .study-companion {
+    left: calc(50% + (var(--fr-seat-x) - var(--fr-plate-w) / 2 - var(--fr-seat-h) / 2) * var(--s));
+    bottom: calc((var(--fr-plate-h) - var(--fr-seat-bottom)) * var(--s));
+    width: calc(var(--fr-seat-h) * var(--s)); height: calc(var(--fr-seat-h) * var(--s));
+    justify-content: center; align-items: flex-end;
+  }
+  .scene-footer > .study-companion > .companion-raster { height: 100%; width: auto; filter: drop-shadow(0 4px 0 #00000040); }
+  .scene-footer > .study-companion > div { position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); margin-bottom: 4px; white-space: nowrap; }
+  .scene-footer > .study-companion[data-activity="idle"] > div { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); padding: 0; border: 0; }
+}
