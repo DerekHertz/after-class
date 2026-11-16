@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import type { CSSProperties, ReactNode, Ref, RefObject } from "react";
 import type { Appearance, CompanionActivity, SceneId } from "./appearance";
@@ -25,7 +25,7 @@ export function roomStyle(scene: SceneId): CSSProperties {
   const room: FrontRowRoom = FRONT_ROW_ROOMS[scene];
   const { board, mat, plate } = room;
   const style: CSSProperties = {
-    "--fr-plate-w": plate.size.width, "--fr-plate-h": plate.size.height,
+    "--fr-plate-w": plate.size.width, "--fr-plate-h": plate.size.height, "--fr-core-w": plate.core.width,
     "--fr-seat-x": plate.companion.x, "--fr-seat-bottom": plate.companion.bottom, "--fr-seat-h": plate.companion.height,
     "--fr-phone-x": room.phoneArtX,
     "--fr-board-fill": board.fill, "--fr-board-ink": board.ink, "--fr-board-ink-soft": board.inkSoft,
@@ -49,6 +49,12 @@ export function reserveNavSpace(bar: HTMLElement): () => void {
 }
 
 const NAV_GAP = 12;
+
+/**
+ * How a review tells the page around it that it draws the room itself. SceneShell (scene.tsx) draws the room on every other
+ * page, and it stops while a review's own stage is mounted, so the window never runs two stages.
+ */
+export const ReviewStageClaim = createContext<((claimed: boolean) => void) | null>(null);
 
 /** The folio and notebook on the desk during a review: how much the current reply cites, and how to pick either up. */
 export type DeskObjects = { readonly cited: number; readonly open: (object: RoomObject, origin: HTMLButtonElement) => void };
@@ -87,6 +93,11 @@ export function FrontRowScene({ scene, layout, appearance, activity, standing, r
   const placed = size === null ? null : layoutRoom(scene, size, composition);
   const full = placed?.composition === "full" ? placed : null;
   useEffect(() => { clearReaction(); }, [scene, appearance.companion, appearance.visible]);
+  const claim = useContext(ReviewStageClaim);
+  useLayoutEffect(() => {
+    claim?.(true);
+    return () => claim?.(false);
+  }, [claim]);
   return (
     <div ref={sceneRef} className="front-row-scene" data-room={scene} data-board-tone={room.board.tone} data-mat-tone={room.mat.tone} data-mat-actions={room.mat.actions} data-board-align={room.board.align} data-phase={layout.kind}>
       {/* The room's painted layers on one canvas, with every control placed over them from room/layout.ts. */}
@@ -148,7 +159,7 @@ const onFullRoomChange = (change: () => void) => {
 };
 
 /** Whether the window is large enough for the room built from layers, asked the way front-row.css's media queries ask. */
-function useFullRoom(): boolean {
+export function useFullRoom(): boolean {
   return useSyncExternalStore(onFullRoomChange, () => fullRoom?.matches ?? false, () => false);
 }
 
