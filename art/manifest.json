@@ -1826,6 +1826,18 @@
     "height": 1984
   },
   {
+    "master": "room-plates/canal-wide.png",
+    "masterSha256": "4f12becc42c9707d20a435ea00462764f257e0ad0a28d206d799cbebbc793488",
+    "ship": "room-plates/canal-wide-thumb.webp",
+    "shipSha256": "ddf4791a9baf91d4bebc839ee9f5ac9acdeeb25cc2ecfd98a59bad96736d07e9",
+    "width": 918,
+    "height": 394,
+    "drawn": {
+      "width": 306,
+      "height": 131
+    }
+  },
+  {
     "master": "room-plates/harbor-wide.png",
     "masterSha256": "301773563f27f13c6ae1565e72a3ca10de7a3867d2674e050ea9f4ec6236b6d2",
     "ship": "room-plates/harbor-wide.webp",
@@ -1834,12 +1846,36 @@
     "height": 1984
   },
   {
+    "master": "room-plates/harbor-wide.png",
+    "masterSha256": "301773563f27f13c6ae1565e72a3ca10de7a3867d2674e050ea9f4ec6236b6d2",
+    "ship": "room-plates/harbor-wide-thumb.webp",
+    "shipSha256": "ef3f44092dd599534d8711171a1fad93769f4c55ea5809ced13c564f0e323ad7",
+    "width": 918,
+    "height": 394,
+    "drawn": {
+      "width": 306,
+      "height": 131
+    }
+  },
+  {
     "master": "room-plates/rail-wide.png",
     "masterSha256": "8a01a0ba00b80bc7eed147c7e280585d1807c8d23ffa83938ad192a466462828",
     "ship": "room-plates/rail-wide.webp",
     "shipSha256": "a42f7f8d51c9d97fa0c0039036036f2987bbe126ab38788d00edb2eda6706e18",
     "width": 4628,
     "height": 1984
+  },
+  {
+    "master": "room-plates/rail-wide.png",
+    "masterSha256": "8a01a0ba00b80bc7eed147c7e280585d1807c8d23ffa83938ad192a466462828",
+    "ship": "room-plates/rail-wide-thumb.webp",
+    "shipSha256": "1cfd4aca369e55fcd95b5fe25b55b1bc1220b42351ea112674160c8a0dc707b9",
+    "width": 918,
+    "height": 394,
+    "drawn": {
+      "width": 306,
+      "height": 131
+    }
   },
   {
     "master": "scenes-v2/bell.png",

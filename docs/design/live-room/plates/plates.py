@@ -57,16 +57,22 @@ def balance():
 
 
 def plate(room):
-    """The mockup at 1586x992 (harbor is one pixel short, its last column repeated)."""
+    """The mockup at W x H: harbor is one 1x pixel short, so its last column is repeated before the upscale."""
     im = Image.open(os.path.join(MOCK, ROOMS[room])).convert("RGB")
-    if im.width < W:
-        im = im.resize((W, H), Image.LANCZOS) if im.width < W - 4 else Image.fromarray(np.pad(np.asarray(im), ((0, 0), (0, W - im.width), (0, 0)), mode="edge"))
-    return im
+    short = W // SCALE - im.width
+    if short > 0:
+        im = Image.fromarray(np.pad(np.asarray(im), ((0, 0), (0, short), (0, 0)), mode="edge"))
+    return im.resize((W, H), Image.LANCZOS)
 
 
 def clean_plate(room):
+    """Keep the artist's cached clean take, including caches saved at the original resolution."""
     p = os.path.join(HERE, "gen", room, "cleaned.png")
-    return Image.open(p).convert("RGB") if os.path.exists(p) else plate(room)
+    if not os.path.exists(p):
+        return plate(room)
+    with Image.open(p) as cached:
+        im = cached.convert("RGB")
+    return im if im.size == (W, H) else im.resize((W, H), Image.LANCZOS)
 
 
 def reference(room, kind):
@@ -173,17 +179,18 @@ def build(room):
 
 
 def previews():
+    """Each preview is the plate's centre slice, cut from the HD plate and resampled once to the file size."""
     for room in ROOMS:
         p = os.path.join(HERE, f"{room}-wide.png")
         if not os.path.exists(p):
             continue
         im = Image.open(p)
-        im = im.resize((im.width // SCALE, im.height // SCALE), Image.LANCZOS)
+        assert im.size == (WIDE_W, H), f"{p} is {im.size}, expected {(WIDE_W, H)}: run build first"
         os.makedirs(os.path.join(HERE, "previews"), exist_ok=True)
-        for tag, (w, h) in {"16x10": (1586, 992), "16x9": (1764, 992), "2x1": (1984, 992)}.items():
-            im.crop(((im.width - w) // 2, 0, (im.width + w) // 2, h)).save(os.path.join(HERE, "previews", f"{room}-{tag}.png"))
-        # 2:1 at 2580x1290 as asked: the 1984x992 centre slice at 1.3x.
-        im.crop(((im.width - 1984) // 2, 0, (im.width + 1984) // 2, 992)).resize((2580, 1290), Image.LANCZOS).save(os.path.join(HERE, "previews", f"{room}-2x1.png"))
+        # tag: (slice in plate pixels, file size). The 2:1 file is 2580x1290: the 1984x992 slice drawn at 1.3x.
+        for tag, ((w, h), size) in {"16x10": ((1586, 992), (1586, 992)), "16x9": ((1764, 992), (1764, 992)), "2x1": ((1984, 992), (2580, 1290))}.items():
+            box = ((im.width - w * SCALE) // 2, 0, (im.width + w * SCALE) // 2, h * SCALE)
+            im.crop(box).resize(size, Image.LANCZOS).save(os.path.join(HERE, "previews", f"{room}-{tag}.png"))
 
 
 if __name__ == "__main__":

@@ -29,11 +29,12 @@
 .appearance-options button[aria-pressed="true"] { border-color: var(--fr-bar); background: var(--fr-bar); color: var(--fr-bar-ink); box-shadow: inset 0 0 0 2px var(--fr-bar-ink), 0 3px 0 #00000059; }
 .appearance-options small { color: var(--paper-ink-soft); font: 400 .78rem/1.35 var(--font); }
 .appearance-options button[aria-pressed="true"] small { color: inherit; }
-/* Thumbnails are the rooms' wide plates cut to their middle, so a preview shows the room it selects. */
+/* Swatches are the rooms' wide plates cut to their middle, so a preview shows the room it selects. They draw the -thumb files
+   (scripts/build-art.ts), not the full plates the stage draws, which are megabytes each. */
 .room-raster { display: block; width: 100%; aspect-ratio: 1585 / 992; background-repeat: no-repeat; background-position: center; background-size: cover; }
-.room-raster[data-room="last-desk"] { background-image: url('./assets/room-plates/rail-wide.webp'); }
-.room-raster[data-room="projection-booth"] { background-image: url('./assets/room-plates/canal-wide.webp'); }
-.room-raster[data-room="study-bench"] { background-image: url('./assets/room-plates/harbor-wide.webp'); }
+.room-raster[data-room="last-desk"] { background-image: url('./assets/room-plates/rail-wide-thumb.webp'); }
+.room-raster[data-room="projection-booth"] { background-image: url('./assets/room-plates/canal-wide-thumb.webp'); }
+.room-raster[data-room="study-bench"] { background-image: url('./assets/room-plates/harbor-wide-thumb.webp'); }
 .companion-choice .companion-raster { height: 112px; max-width: 100%; }
 .appearance-preferences { display: flex; flex-wrap: wrap; gap: 8px 20px; padding-top: 12px; border-top: 2px dashed #2a1a0b55; }
 .appearance-preferences label { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; }

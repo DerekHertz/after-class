@@ -15,6 +15,20 @@ async function openRoom(page: Page, scene: SceneId) {
   await expect(page.locator(".front-row-canvas[data-stage=painted]")).toBeAttached();
 }
 
+test("opening the room picker requests thumbnails for the unselected rooms", async ({ page }) => {
+  const requested = new Set<string>();
+  page.on("request", (request) => {
+    const match = /\/(rail|harbor|canal)-wide(-thumb)?-[a-z0-9]{8}\.webp$/.exec(request.url());
+    if (match) requested.add(match[1] + (match[2] ?? ""));
+  });
+  await openRoom(page, "last-desk");
+  await page.getByText("Room & companion").click();
+  await expect.poll(() => [...requested].filter((name) => name.endsWith("-thumb")).sort())
+    .toEqual(["canal-thumb", "harbor-thumb", "rail-thumb"]);
+  expect(requested.has("harbor")).toBe(false);
+  expect(requested.has("canal")).toBe(false);
+});
+
 test.describe("the stage's backing store follows the device pixel ratio", () => {
   for (const dpr of [1, 2]) {
     test.describe(`at ${dpr}x`, () => {
