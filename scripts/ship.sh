@@ -4,6 +4,8 @@
 # says so and is skipped, so you can stop with q and run this again later. The deploy itself is scripts/release.sh,
 # which still asks its own y/N. It works on the clone you run it from, so run it from your main clone.
 set -uo pipefail
+# The AWS CLI pages its output through less on a terminal, which stops the script until someone presses q.
+export AWS_PAGER=""
 
 repo=$(git rev-parse --show-toplevel) || exit 1
 beta="$repo/infra/beta"
