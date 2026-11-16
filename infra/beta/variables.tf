@@ -11,7 +11,7 @@ variable "name" {
 }
 
 variable "ingress_cidrs" {
-  description = "CIDR blocks allowed to reach ports 80 and 443, for example [\"203.0.113.7/32\"]. Required, no default, so the server is never open to the internet by omission. Use Derek's address until sign-in lands, then [\"0.0.0.0/0\"]."
+  description = "CIDR blocks allowed to reach ports 80 and 443. Include 0.0.0.0/0 for public certificate validation."
   type        = list(string)
 
   validation {
@@ -21,7 +21,7 @@ variable "ingress_cidrs" {
 }
 
 variable "domain" {
-  description = "Apex domain, for example example.com, whose public hosted zone already exists in Route 53. Null creates no DNS record and serves HTTP only on the Elastic IP. A domain turns on automatic HTTPS, and Let's Encrypt must reach ports 80 and 443 from the internet, so it needs ingress_cidrs to include 0.0.0.0/0."
+  description = "Apex domain, for example example.com, whose public hosted zone already exists in Route 53. With no domain, enable sslip_https. A domain turns on automatic HTTPS, and Let's Encrypt must reach ports 80 and 443 from the internet, so it needs ingress_cidrs to include 0.0.0.0/0."
   type        = string
   default     = null
 
@@ -32,7 +32,7 @@ variable "domain" {
 
   validation {
     condition     = var.domain == null ? true : contains(var.ingress_cidrs, "0.0.0.0/0")
-    error_message = "A domain needs ingress_cidrs to include 0.0.0.0/0, because Let's Encrypt validates from the internet and could not issue the certificate. Leave domain null until then."
+    error_message = "A domain needs ingress_cidrs to include 0.0.0.0/0, because Let's Encrypt validates from the internet and could not issue the certificate."
   }
 }
 
@@ -40,6 +40,11 @@ variable "sslip_https" {
   description = "With no domain, serve HTTPS on <elastic-ip-with-dashes>.sslip.io, a free public name that resolves to the Elastic IP, so the beta gets a real Let's Encrypt certificate before a domain is bought. Ignored when domain is set. Needs ingress_cidrs to include 0.0.0.0/0 for the same reason as domain."
   type        = bool
   default     = false
+
+  validation {
+    condition     = var.domain != null || var.sslip_https
+    error_message = "The hosted beta requires HTTPS. Set domain or enable sslip_https."
+  }
 
   validation {
     condition     = !var.sslip_https || contains(var.ingress_cidrs, "0.0.0.0/0")

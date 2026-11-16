@@ -126,7 +126,7 @@ export function describePopup(
   if (connect !== null) actions = actions.filter((a) => a !== "start");
 
   const dead = state?.deadLetters;
-  const deadLetters = dead && dead.count > 0 ? `${dead.count} ${dead.count === 1 ? "fact was" : "facts were"} refused by the backend and set aside, logged as a gap${dead.latestReason ? ` (latest: ${dead.latestReason})` : ""}` : null;
+  const deadLetters = dead && dead.count > 0 ? `${dead.count} ${dead.count === 1 ? "fact was" : "facts were"} refused by the backend and logged as a gap${dead.latestReason ? ` (latest: ${dead.latestReason})` : ""}` : null;
 
   return {
     headline,

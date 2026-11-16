@@ -108,6 +108,35 @@ describe("the transcript is read once per capture and video", () => {
     expect(r.posted.filter((m) => "kind" in m && m.kind === "transcript_unavailable")).toHaveLength(2);
   });
 
+  test("late captions from a previous video or stopped capture never enter the next observation", async () => {
+    const scopes: AbortSignal[] = [];
+    const reads: (() => void)[] = [];
+    const r = rig({
+      startCaptionListener: (_, signal) => { scopes.push(signal); },
+      acquireTranscript: (videoId) => new Promise(resolve => reads.push(() =>
+        resolve({ kind: "transcript_unavailable", videoId, reason: "no_captions" }))),
+    });
+    expect(scopes).toHaveLength(0);
+    r.deliver(observe(true, CAP_A));
+    await wait();
+    r.setStreamId(VID2);
+    r.setUrlId(VID2);
+    r.nav().onWatchPage(VID2);
+    await wait();
+    expect(scopes[0]!.aborted).toBe(true);
+    r.deliver({ type: "flush" });
+    r.deliver(observe(false, CAP_A));
+    expect(scopes[1]!.aborted).toBe(true);
+    r.deliver(observe(true, CAP_B));
+    await wait();
+    expect(reads).toHaveLength(3);
+    reads.forEach(done => done());
+    await wait();
+    expect(r.posted.filter(m => "kind" in m && m.kind === "transcript_unavailable")).toEqual([
+      { kind: "transcript_unavailable", videoId: VID2, reason: "no_captions" },
+    ]);
+  });
+
   test("Pause then Resume inside one capture does not read it again", async () => {
     const r = rig();
     r.deliver(observe(true, CAP_A));

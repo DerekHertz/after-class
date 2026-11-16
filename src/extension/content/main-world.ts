@@ -1,12 +1,13 @@
 /**
  * MAIN-world script (document_start). Wraps window.fetch and XMLHttpRequest to
  * copy /api/timedtext json3 responses and forward them to the isolated content
- * script with window.postMessage({ source: "afterclass", kind: "timedtext", videoId, lang, asr, payload }).
+ * script with window.postMessage({ source: "afterclass", kind: "timedtext", scope, videoId, lang, asr, text }).
  *
  * It never sends anything off the page and holds no secrets: the pairing token
  * lives only in the service worker.
  */
 
+import { CAPTION_SCOPE_EVENT, MAX_CAPTION_BYTES } from "./caption-scope";
 import { STREAM_ID_ATTR, isVideoId } from "./stream-id";
 
 export type TimedTextRequest = { readonly videoId: string; readonly lang: string; readonly asr: boolean };
@@ -19,49 +20,98 @@ export function parseTimedTextUrl(raw: string, base = "https://www.youtube.com")
   } catch {
     return null;
   }
-  if (!/\/api\/timedtext\b/.test(url.pathname)) return null;
+  if (url.origin !== "https://www.youtube.com" || url.pathname !== "/api/timedtext") return null;
   const p = url.searchParams;
   const videoId = p.get("v");
   if (!videoId || p.has("tlang") || (p.get("fmt") !== null && p.get("fmt") !== "json3")) return null;
   return { videoId, lang: p.get("lang") ?? "", asr: p.get("kind") === "asr" };
 }
 
-function forward(req: TimedTextRequest, text: string): void {
-  let payload: unknown;
+function matchesResponse(req: TimedTextRequest, url: string): boolean {
+  if (!url) return true; // Synthetic responses can omit a final URL.
+  const track = parseTimedTextUrl(url);
+  return track !== null && track.videoId === req.videoId && track.lang === req.lang && track.asr === req.asr;
+}
+
+type CaptionScope = { readonly key: string; readonly videoId: string; readonly life: AbortController };
+
+/** Read only a bounded copy. Cancelling a tee branch must never delay the player's own response. */
+async function forwardFetch(req: TimedTextRequest, response: Response, scope: CaptionScope): Promise<void> {
+  if (scope.life.signal.aborted || !matchesResponse(req, response.url) || Number(response.headers.get("content-length")) > MAX_CAPTION_BYTES) return;
+  const reader = response.clone().body?.getReader();
+  if (!reader) return;
+  const cancel = () => { void reader.cancel().catch(() => {}); };
+  scope.life.signal.addEventListener("abort", cancel, { once: true });
   try {
-    payload = JSON.parse(text);
-  } catch {
-    return;
+    const decoder = new TextDecoder();
+    let size = 0;
+    let text = "";
+    while (!scope.life.signal.aborted) {
+      const chunk = await reader.read();
+      if (scope.life.signal.aborted) return;
+      if (chunk.done) {
+        forward(req, text + decoder.decode(), scope);
+        return;
+      }
+      size += chunk.value.byteLength;
+      if (size > MAX_CAPTION_BYTES) {
+        cancel();
+        return;
+      }
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+  } finally {
+    scope.life.signal.removeEventListener("abort", cancel);
+    reader.releaseLock();
   }
-  if (!Array.isArray((payload as { events?: unknown } | null)?.events)) return;
-  window.postMessage({ source: "afterclass", kind: "timedtext", ...req, payload }, window.location.origin);
+}
+
+function forward(req: TimedTextRequest, text: string, scope: CaptionScope): void {
+  if (scope.life.signal.aborted || text.length > MAX_CAPTION_BYTES || new TextEncoder().encode(text).byteLength > MAX_CAPTION_BYTES) return;
+  window.postMessage({ source: "afterclass", kind: "timedtext", ...req, scope: scope.key, text }, window.location.origin);
 }
 
 export function installTimedTextTap(): void {
+  let active: CaptionScope | null = null;
+  document.addEventListener(CAPTION_SCOPE_EVENT, (event) => {
+    active?.life.abort();
+    const key: unknown = (event as CustomEvent).detail;
+    const videoId = typeof key === "string" ? key.split(":")[1] : undefined;
+    active = typeof key === "string" && key.length <= 64 && isVideoId(videoId) ? { key, videoId, life: new AbortController() } : null;
+  });
   const originalFetch = window.fetch;
   window.fetch = async function (this: unknown, ...args: Parameters<typeof fetch>) {
+    const scope = active;
+    const input = args[0];
+    const req = scope && parseTimedTextUrl(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, document.baseURI);
     const response = await originalFetch.apply(this, args);
-    try {
-      const input = args[0];
-      const req = parseTimedTextUrl(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
-      if (req) void response.clone().text().then((t) => forward(req, t), () => {});
-    } catch {
-      // The tap must never break the player's own request.
-    }
+    if (scope && req?.videoId === scope.videoId) void forwardFetch(req, response, scope).catch(() => {});
     return response;
   } as typeof fetch;
 
   const open = XMLHttpRequest.prototype.open;
+  const listeners = new WeakMap<XMLHttpRequest, () => void>();
   XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
-    const req = parseTimedTextUrl(String(url));
-    if (req) {
-      this.addEventListener("load", () => {
+    const previous = listeners.get(this);
+    if (previous) {
+      this.removeEventListener("load", previous);
+      listeners.delete(this);
+    }
+    const scope = active;
+    const req = scope && parseTimedTextUrl(String(url), document.baseURI);
+    if (scope && req?.videoId === scope.videoId) {
+      const loaded = () => {
+        listeners.delete(this);
         try {
-          if (this.responseType === "" || this.responseType === "text") forward(req, this.responseText);
+          if (!scope.life.signal.aborted && matchesResponse(req, this.responseURL) && (this.responseType === "" || this.responseType === "text")) {
+            forward(req, this.responseText, scope);
+          }
         } catch {
           // Same: never break the player.
         }
-      });
+      };
+      listeners.set(this, loaded);
+      this.addEventListener("load", loaded, { once: true, signal: scope.life.signal });
     }
     return (open as (...a: unknown[]) => void).call(this, method, url, ...rest);
   } as typeof XMLHttpRequest.prototype.open;

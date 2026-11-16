@@ -134,8 +134,8 @@ locals {
   key_parameter_prefix = "/afterclass/beta"
   key_parameters_arn   = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${local.key_parameter_prefix}/*"
 
-  # The name Caddy serves and gets a certificate for. Empty means plain HTTP on the Elastic IP.
-  site_name = var.domain != null ? var.domain : (var.sslip_https ? "${replace(aws_eip.beta.public_ip, ".", "-")}.sslip.io" : "")
+  # Variable validation requires a domain or explicit sslip.io HTTPS.
+  site_name = var.domain != null ? var.domain : "${replace(aws_eip.beta.public_ip, ".", "-")}.sslip.io"
 
   caddyfile = templatefile("${path.module}/files/Caddyfile.tftpl", {
     domain   = local.site_name
@@ -152,7 +152,7 @@ locals {
     "",
   ])
 
-  public_origin = local.site_name == "" ? "http://${aws_eip.beta.public_ip}" : "https://${local.site_name}"
+  public_origin = "https://${local.site_name}"
 
   # The Dockerfile sets the replay skeleton's defaults. The beta runs live, with the keys from Parameter Store, Claude
   # through the Messages API only, and Clerk sign-in (docs/architecture/hosted-sign-in.md).

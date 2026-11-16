@@ -258,7 +258,7 @@ describe("a batch the backend refuses", () => {
     expect((placeholder as { detail: string }).detail).toContain("channel fact");
     const dead = await store.deadLetters(CAP);
     expect(dead).toHaveLength(1);
-    expect(dead[0]).toMatchObject({ clientSeq: 2, body: bodies[2], reason: "channel fact: backend rejected the batch (HTTP 400)" });
+    expect(dead[0]).toEqual({ captureId: CAP, clientSeq: 2, reason: "channel fact: backend rejected the batch (HTTP 400)" });
   });
 
   test("finding one bad fact in a full batch takes logarithmically many requests, not one per fact", async () => {

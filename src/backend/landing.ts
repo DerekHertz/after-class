@@ -123,7 +123,7 @@ function privacy(origin: string, signIn: string, files: Files): string {
 <li>Amazon Web Services. The server and its database run in the us-east-2 region (Ohio). A daily snapshot of the disk keeps the last 7, and server logs are kept for 14 days.</li>
 </ul>
 <h2>Deleting</h2>
-<p>Deleting a note in the app hides it, but the database keeps its text. Deleting a piece of captured evidence removes its frames from the server and from your reviews, but the database keeps its caption text and the AI results made from it. Copies also stay in the disk snapshots for up to 7 days. Full erasure of your data is not built yet.</p>
+<p>Deleting a note in the app hides it, but the database keeps its text. Deleting a piece of captured evidence removes its frames from the server and from your reviews, but the database keeps its caption text and the AI results made from it. Backup copies can remain until the snapshots containing them rotate out. Full erasure of your data is not built yet.</p>
 <h2>This site</h2>
 <p>This page and the home page run no script and load nothing from another site.</p>
 <nav><a href="/">Back to the home page</a> <span class="muted">&middot;</span> <a href="${escape(signIn)}">Sign in</a></nav>`,

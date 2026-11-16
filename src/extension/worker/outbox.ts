@@ -26,16 +26,26 @@ export interface OutboxStore {
   /** Captures that still hold unacked facts. */
   captureIds(): Promise<readonly CaptureId[]>;
   /**
-   * Atomically sets a fact the backend refuses aside: the original (with the reason) goes to the
-   * dead-letter store and `placeholder` takes its place at the same clientSeq, so the backend's
+   * Atomically records a refusal diagnostic and replaces the original with
+   * `placeholder` at the same clientSeq, so the backend's
    * contiguous ack is never blocked by a hole.
    */
   quarantine(captureId: CaptureId, fact: StoredFact, placeholder: CaptureFactBody, reason: string): Promise<void>;
-  /** Everything set aside for a capture, oldest first. Kept until a human looks; never deleted by an ack. */
+  /** Payload-free diagnostics for a capture, oldest first. */
   deadLetters(captureId: CaptureId): Promise<readonly DeadFact[]>;
 }
 
-export type DeadFact = StoredFact & { readonly reason: string; readonly atMs: number };
+export type DeadFact = Pick<StoredFact, "captureId" | "clientSeq"> & { readonly reason: string };
+
+/** Older servers can echo a rejected value in their response, so keep only a recognized status. */
+function refusal(reason: string): string {
+  const status = /^backend rejected the batch \(HTTP (400|413|422)\)/.exec(reason)?.[1];
+  return status ? `backend rejected the batch (HTTP ${status})` : "backend rejected the batch";
+}
+
+function diagnostic(fact: StoredFact, reason: string): DeadFact {
+  return { captureId: fact.captureId, clientSeq: fact.clientSeq, reason: `${fact.body.kind} fact: ${refusal(reason)}` };
+}
 
 const VIDEO_ID = /^[\w-]{11}$/;
 /** Marks a placeholder, so a refused placeholder is never set aside again. */
@@ -58,7 +68,7 @@ export function placeholderFor(fact: StoredFact, reason: string): CaptureFactBod
     health: "failed",
     videoId,
     atMediaS: at !== null && Number.isFinite(at) && at >= 0 ? at : null,
-    detail: `${WITHHELD}: the backend refused this ${b.kind} fact (${reason})`.slice(0, 500),
+    detail: `${WITHHELD}: the backend refused this ${b.kind} fact (${refusal(reason)})`,
   };
 }
 
@@ -92,7 +102,7 @@ export function createMemoryOutbox(): OutboxStore {
     },
     async quarantine(captureId, fact, placeholder, reason) {
       facts.set(captureId, (facts.get(captureId) ?? []).map((f) => (f.clientSeq === fact.clientSeq ? { ...f, body: placeholder } : f)));
-      dead.set(captureId, [...(dead.get(captureId) ?? []), { ...fact, reason, atMs: Date.now() }]);
+      dead.set(captureId, [...(dead.get(captureId) ?? []), diagnostic(fact, reason)]);
     },
     async deadLetters(captureId) {
       return dead.get(captureId) ?? [];
@@ -106,12 +116,32 @@ const txDone = (tx: IDBTransaction) => new Promise<void>((res, rej) => ((tx.onco
 /** Facts keyed [captureId, clientSeq]; `seq` holds the next clientSeq per capture; `dead` the facts the backend refused. */
 export function createIdbOutbox(factory: IDBFactory = indexedDB, name = "afterclass-outbox"): OutboxStore {
   const opened = new Promise<IDBDatabase>((resolve, reject) => {
-    const req = factory.open(name, 2);
-    req.onupgradeneeded = () => {
+    const req = factory.open(name, 3);
+    req.onupgradeneeded = (event) => {
       const have = req.result.objectStoreNames;
       if (!have.contains("facts")) req.result.createObjectStore("facts", { keyPath: ["captureId", "clientSeq"] });
       if (!have.contains("seq")) req.result.createObjectStore("seq", { keyPath: "captureId" });
       if (!have.contains("dead")) req.result.createObjectStore("dead", { keyPath: ["captureId", "clientSeq"] });
+      if (event.oldVersion === 2) {
+        const tx = req.transaction!;
+        const cursor = tx.objectStore("dead").openCursor();
+        cursor.onsuccess = () => {
+          const row = cursor.result;
+          if (!row) return;
+          const old = row.value as StoredFact & { reason: string };
+          const prefix = `${old.body.kind} fact: `;
+          const why = old.reason.startsWith(prefix) ? old.reason.slice(prefix.length) : "";
+          row.update(diagnostic(old, why));
+          // An unacknowledged v2 placeholder can also carry the old server response.
+          const facts = tx.objectStore("facts");
+          const pending = facts.get(row.primaryKey);
+          pending.onsuccess = () => {
+            const fact = pending.result as StoredFact | undefined;
+            if (fact && isPlaceholder(fact.body)) facts.put({ ...fact, body: placeholderFor(old, why) });
+            row.continue();
+          };
+        };
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -153,7 +183,7 @@ export function createIdbOutbox(factory: IDBFactory = indexedDB, name = "aftercl
       const db = await opened;
       const tx = db.transaction(["facts", "dead"], "readwrite");
       tx.objectStore("facts").put({ ...fact, body: placeholder });
-      tx.objectStore("dead").put({ ...fact, reason, atMs: Date.now() } satisfies DeadFact);
+      tx.objectStore("dead").put(diagnostic(fact, reason));
       await txDone(tx);
     },
     async deadLetters(captureId) {
@@ -289,7 +319,7 @@ export async function flushCapture(store: OutboxStore, transport: Transport, cap
         return { error: `backend refuses a ${fact.body.kind === "control" ? "control fact" : "placeholder"} that cannot be set aside`, retryable: false, rejected: true };
       }
       const placeholder = placeholderFor(fact, why);
-      await store.quarantine(captureId, fact, placeholder, `${fact.body.kind} fact: ${why}`);
+      await store.quarantine(captureId, fact, placeholder, why);
       const sent = await send([{ ...fact, body: placeholder }]);
       // A failure fact stays open until the channel's next ok, flagging every later span. One lost fact is not a
       // broken channel, so close it at the tail; a transcript stays failed because it is still missing.
