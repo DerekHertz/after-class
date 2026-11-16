@@ -268,24 +268,42 @@ describe("acquireTranscript never hangs", () => {
     if (r.kind === "transcript") expect(r.segments).toHaveLength(8);
   });
 
+  type FakePanel = { getAttribute: (a: string) => string | null; querySelector: (sel: string) => unknown; querySelectorAll: (sel: string) => unknown[]; outerHTML: string };
+  const fakePanel = (visibility: string, rowCount: number, html = "", named = false): FakePanel => ({
+    getAttribute: (a) => (a === "visibility" ? visibility : a === "target-id" && named ? "engagement-panel-searchable-transcript" : null),
+    querySelector: (sel) => (sel.includes("transcript-segment") && rowCount > 0 ? {} : null),
+    querySelectorAll: (sel) => (sel.includes("transcript-segment") ? Array.from({ length: rowCount }) : []),
+    outerHTML: html,
+  });
+  const fakeDocument = (panels: FakePanel[]) => ({
+    querySelector: (sel: string) => (sel.includes("searchable-transcript") ? panels.find((p) => p.getAttribute("target-id")) ?? null : null),
+    querySelectorAll: (sel: string) => (sel === "ytd-engagement-panel-section-list-renderer" ? panels : []),
+  });
+  const rowsHtml = (prefix: string) => Array.from({ length: 12 }, (_, i) => row2026(`0:${String(i * 5).padStart(2, "0")}`, `${prefix} sentence ${i}`)).join("");
+  const EXPANDED = "ENGAGEMENT_PANEL_VISIBILITY_EXPANDED";
+  const HIDDEN = "ENGAGEMENT_PANEL_VISIBILITY_HIDDEN";
+
   test("rows rendered in an unnamed panel are read while the named transcript panel stays hidden", async () => {
     fakeWindow();
-    const html = `<ytd-engagement-panel-section-list-renderer visibility="ENGAGEMENT_PANEL_VISIBILITY_EXPANDED">${Array.from({ length: 12 }, (_, i) => row2026(`0:${String(i * 5).padStart(2, "0")}`, `sentence number ${i}`)).join("")}</ytd-engagement-panel-section-list-renderer>`;
-    const shown = { getAttribute: () => "ENGAGEMENT_PANEL_VISIBILITY_EXPANDED", querySelectorAll: () => Array.from({ length: 12 }), outerHTML: html, querySelector: () => null };
-    const hidden = { getAttribute: () => "ENGAGEMENT_PANEL_VISIBILITY_HIDDEN", querySelectorAll: () => [], outerHTML: "", querySelector: () => null };
-    const row = { closest: () => shown };
-    g.document = { querySelector: (sel: string) => (sel.includes("transcript-segment") ? row : sel.includes("searchable-transcript") ? hidden : null), querySelectorAll: () => [] };
+    g.document = fakeDocument([fakePanel(HIDDEN, 0, "", true), fakePanel(EXPANDED, 12, rowsHtml("current"))]);
     const r = await acquireTranscript("UNNAMEDPANEL", 60, 100);
     expect(r.kind).toBe("transcript");
-    if (r.kind === "transcript") expect(r.segments).toHaveLength(12);
+    if (r.kind === "transcript") expect(r.segments.map((s) => s.text)).toContain("current sentence 0");
+  });
+
+  test("rows an earlier video left in a hidden panel are never read", async () => {
+    fakeWindow();
+    g.document = fakeDocument([fakePanel(HIDDEN, 12, rowsHtml("stale")), fakePanel(EXPANDED, 12, rowsHtml("current"), true)]);
+    const r = await acquireTranscript("STALEPANEL", 60, 100);
+    expect(r.kind).toBe("transcript");
+    if (r.kind === "transcript") expect(r.segments.every((s) => s.text.startsWith("current"))).toBe(true);
   });
 
   test("a panel whose rows never stop changing is abandoned at the overall deadline", async () => {
     fakeWindow();
     let rows = 0;
     const panel = { getAttribute: () => "ENGAGEMENT_PANEL_VISIBILITY_EXPANDED", querySelectorAll: () => Array.from({ length: ++rows }), outerHTML: "", querySelector: () => null };
-    const row = { closest: () => panel };
-    g.document = { querySelector: (sel: string) => (sel.includes("transcript-segment") ? row : panel), querySelectorAll: () => [] };
+    g.document = { querySelector: () => panel, querySelectorAll: () => [] };
     const started = Date.now();
     const r = await acquireTranscript("NEVERSETTLE", 600, 100, 400);
     expect(r.kind).toBe("transcript_unavailable");

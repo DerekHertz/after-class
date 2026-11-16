@@ -206,9 +206,13 @@ async function waitFor<T>(probe: () => T | null | undefined | false, timeoutMs: 
   }
 }
 
-/** Since November 2026 YouTube renders the rows in an engagement panel without a target-id and leaves the named one hidden. */
+/**
+ * Since November 2026 YouTube renders the rows in an engagement panel without a target-id and leaves the named one
+ * hidden. Only an expanded panel counts, so rows a hidden panel kept from an earlier video are never read.
+ */
 function panelElement(): Element | null {
-  return document.querySelector(SELECTORS.row)?.closest(SELECTORS.anyPanel) ?? document.querySelector(SELECTORS.panel);
+  const shown = [...document.querySelectorAll(SELECTORS.anyPanel)].find((p) => p.getAttribute(SELECTORS.expandedAttr) === SELECTORS.expandedValue && p.querySelector(SELECTORS.row));
+  return shown ?? document.querySelector(SELECTORS.panel);
 }
 
 function panelIsOpen(): boolean {
