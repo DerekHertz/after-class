@@ -39,6 +39,10 @@ describe("ambient life on the draw list", () => {
     for (const scene of rooms) {
       const list = buildScene(scene, fullLayout(scene), T);
       expect(specksOf(list.draws).length).toBe(AMBIENT[scene].length + LIGHT[scene].length);
+      if (specksOf(list.draws).length === 0) {
+        expect(list.next).toBeNull();
+        continue;
+      }
       expect(list.next!).toBeGreaterThan(T);
       expect(list.next!).toBeLessThanOrEqual(T + 1000 / AMBIENT_FPS + 1e-6);
     }

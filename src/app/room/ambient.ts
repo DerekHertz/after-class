@@ -130,7 +130,7 @@ const overlaps = (a: Rect, b: Rect) => a.left < b.left + b.width && a.left + a.w
  * The specks of `scene` at `now` (milliseconds, `performance.now()`), as draws with their depth, and the time the next step
  * is due. Time is quantised to `AMBIENT_FPS`, so a frame drawn between two steps repeats the last one.
  */
-export function ambientDraws(scene: SceneId, layout: FullRoomLayout, now: number): { readonly draws: readonly { readonly z: number; readonly draw: Draw }[]; readonly next: number } {
+export function ambientDraws(scene: SceneId, layout: FullRoomLayout, now: number): { readonly draws: readonly { readonly z: number; readonly draw: Draw }[]; readonly next: number | null } {
   const step = Math.floor((now / 1000) * AMBIENT_FPS);
   const seconds = step / AMBIENT_FPS;
   const { plate: drawn, s: scale } = layout;
@@ -149,5 +149,7 @@ export function ambientDraws(scene: SceneId, layout: FullRoomLayout, now: number
       .filter((rect) => !(layer.clearOfBoard && overlaps(rect, layout.text.board)));
     return specks(DEPTH_Z[layer.depth], layer.color, layer.alpha, rects);
   });
-  return { draws: [...light, ...motes], next: ((step + 1) / AMBIENT_FPS) * 1000 };
+  // A room with nothing in the air asks for no frame of its own, so it repaints only when its companion moves.
+  const draws = [...light, ...motes];
+  return { draws, next: draws.length === 0 ? null : ((step + 1) / AMBIENT_FPS) * 1000 };
 }
