@@ -11,6 +11,8 @@ test("Finish & save shows the closing line while the summary is written, then th
   const { reviewId, origin } = (await (await request.post(`${CONTROL}/new`, { timeout: 30_000 })).json()) as { reviewId: string; origin: string };
   await page.goto(`${origin}/app/review/${reviewId}`);
 
+  const menu = page.getByRole("button", { name: "Menu", exact: true });
+  if ((await menu.getAttribute("aria-expanded")) === "false") await menu.click();
   await page.locator('.front-row-bar button[data-action="end"]').click();
   const confirm = page.getByRole("alertdialog", { name: "Finish and save this review?" });
   await expect(confirm).toBeVisible();
