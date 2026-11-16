@@ -5,19 +5,14 @@ import type { CompanionDraw, Draw, PictureDraw } from "./scene";
 export type PictureState = "pending" | "decoded" | "failed";
 
 /**
- * What of `draws` to paint now, or null while the room waits. The room waits until every layer's picture has settled, and
- * a layer that failed is left out rather than holding it. The companion passes through, as the stage picks its frame or
- * stand-in itself, and so do the specks and the balloon, which need no picture.
+ * What of `draws` to paint now, or null while the room waits or cannot be painted. The room waits until every picture has
+ * settled, and a room with a failed picture is not painted at all, so the page's backdrop shows instead of a bare canvas.
+ * The companion passes through, as the stage picks its frame or stand-in itself, and so do the specks and the balloon,
+ * which need no picture.
  */
 export function readyDraws(draws: readonly Draw[], state: (src: string) => PictureState): readonly Draw[] | null {
-  let waits = false;
-  const ready = draws.filter((draw) => {
-    if (draw.kind === "companion" || draw.kind === "specks" || draw.kind === "balloon") return true;
-    const settled = state(draw.src);
-    if (settled === "pending") waits = true;
-    return true;
-  });
-  return waits ? null : ready;
+  const pictures = draws.flatMap((draw) => (draw.kind === "companion" || draw.kind === "specks" || draw.kind === "balloon" ? [] : [state(draw.src)]));
+  return pictures.every((settled) => settled === "decoded") ? draws : null;
 }
 
 /** Device pixels per CSS pixel on each axis. */
