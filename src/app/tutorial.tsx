@@ -152,6 +152,7 @@ const AVOID = [
   ".room-paper > *", '.front-row-area[data-area="board"] .line', '.front-row-area[data-area="board"] .front-row-heading-box', ".setup-choices > *",
 ];
 const POLL_MS = 400;
+const NO_CONTROLS: readonly string[] = [];
 const MARGIN = 16;
 
 const boxOf = (r: DOMRect): Box => ({ left: r.left, top: r.top, width: r.width, height: r.height });
@@ -186,16 +187,23 @@ function useBoxes(selectors: readonly string[]): Box[] {
   return boxes;
 }
 
-/** Brings the ringed controls into view when a step starts, if any is out of view or under the bubble. `inset` is the bottom of the window the bubble takes. */
-function useReveal(selectors: readonly string[], key: string, inset: number): void {
+/** The answer controls. In a review's first-question place, a phone keeps every one of them above the bubble. */
+const ANSWER_CONTROLS = [".composer textarea", ".composer button", ".composer .review-help summary"];
+
+/**
+ * Brings the ringed controls into view when a step starts, if any is out of view or under the bubble. `inset` is the bottom of
+ * the window the bubble takes. `also` lists controls that must clear the bubble even when they are not ringed.
+ */
+function useReveal(selectors: readonly string[], key: string, inset: number, also: readonly string[]): void {
   useEffect(() => {
     const shown = visible(selectors);
     const first = shown[0];
-    const last = shown.at(-1);
-    if (first === undefined || last === undefined) return;
+    if (first === undefined) return;
     if (first.getBoundingClientRect().top < 0) first.scrollIntoView({ block: "start", behavior: "auto" });
-    else if (last.getBoundingClientRect().bottom > window.innerHeight - inset) last.scrollIntoView({ block: "end", behavior: "auto" });
-  }, [selectors, key, inset]);
+    const bottom = Math.max(...[...shown, ...visible(also)].map((e) => e.getBoundingClientRect().bottom));
+    const over = bottom - (window.innerHeight - inset);
+    if (over > 0) window.scrollBy({ top: over, behavior: "auto" });
+  }, [selectors, key, inset, also]);
 }
 
 function CompanionBubble({ view }: { readonly view: View }) {
@@ -236,7 +244,7 @@ function CompanionBubble({ view }: { readonly view: View }) {
   }, [full, height]);
 
   // The page scrolls a ringed control clear of the bubble. This comes after the padding above, which the scroll respects.
-  useReveal(step.target, key, full ? 0 : height + MARGIN);
+  useReveal(step.target, key, full ? 0 : height + MARGIN, view.place === "question" && !full ? ANSWER_CONTROLS : NO_CONTROLS);
 
   // Focus moves to the bubble when a place's tutorial opens and goes back where it was when that tutorial ends.
   const placeKey = view.place;

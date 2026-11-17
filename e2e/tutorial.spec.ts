@@ -180,3 +180,24 @@ test("the notebook inside a review's Saved notes is not a tutorial place", async
   await page.waitForTimeout(500);
   await expect(bubble).toHaveCount(0);
 });
+
+for (const size of [{ width: 390, height: 844 }, { width: 320, height: 844 }]) {
+  test(`at ${size.width}x${size.height} no answer control is under the bubble on any first-question step`, async ({ page }) => {
+    await page.setViewportSize(size);
+    await page.goto("/?scenario=review&tutorial=1");
+    const bubble = bubbleOf(page);
+    await expect(bubble).toContainText("Answer in your own words");
+    const controls = [
+      page.getByRole("textbox", { name: "Your thinking" }),
+      page.getByRole("button", { name: "Share my thinking" }),
+      page.getByRole("button", { name: "I don't know", exact: true }),
+      page.getByRole("button", { name: "Hint", exact: true }),
+      page.getByText("More ways to work through it"),
+    ];
+    for (let step = 0; step < 4; step++) {
+      await page.waitForTimeout(300);
+      for (const control of controls) expect(await overlap(bubble, control)).toBe(false);
+      if (step < 3) await bubble.getByRole("button", { name: "Next" }).click();
+    }
+  });
+}
