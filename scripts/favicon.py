@@ -3,14 +3,18 @@
 Draws the After Class favicon: a closed book seen at a slight angle, as a hand-placed 16x16 pixel grid.
 Edit GRID or PALETTE, then run `python3 scripts/favicon.py` (needs Pillow). It writes src/app/assets/favicon/:
 favicon-16.png, favicon-32.png (the grid scaled 2x, nearest neighbour), apple-touch-icon.png (180x180, the grid scaled
-9x on a solid room-colored background) and favicon.ico (16, 32 and 48 px frames).
+9x on a solid room-colored background) and favicon.ico (16, 32 and 48 px frames). It also writes the Chrome extension's icons into src/extension/icons/: icon-16,
+32 and 48 are the grid scaled 1x, 2x and 3x, and icon-128 is the grid at 6x, 96 px of art inside 16 px of transparent
+padding, as the Chrome Web Store asks.
 Colors come from the room: the ink outline from src/app/front-row.css, cream paper and wood from the room plates, and the
 teal-green of the rail plate.
 """
 from pathlib import Path
 from PIL import Image
 
-OUT = Path(__file__).resolve().parent.parent / "src/app/assets/favicon"
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "src/app/assets/favicon"
+EXTENSION = ROOT / "src/extension/icons"
 
 PALETTE = {
     ".": None,
@@ -72,7 +76,13 @@ def main():
     apple.alpha_composite(book.resize((144, 144), Image.NEAREST), (18, 18))
     apple.convert("RGB").save(OUT / "apple-touch-icon.png", optimize=True)
     book.resize((48, 48), Image.NEAREST).save(OUT / "favicon.ico", sizes=[(16, 16), (32, 32), (48, 48)])
-    print(f"wrote the favicon files into {OUT}")
+    EXTENSION.mkdir(parents=True, exist_ok=True)
+    for size in (16, 32, 48):
+        book.resize((size, size), Image.NEAREST).save(EXTENSION / f"icon-{size}.png", optimize=True)
+    store = Image.new("RGBA", (128, 128), (0, 0, 0, 0))
+    store.alpha_composite(book.resize((96, 96), Image.NEAREST), (16, 16))
+    store.save(EXTENSION / "icon-128.png", optimize=True)
+    print(f"wrote the favicon files into {OUT} and the extension icons into {EXTENSION}")
 
 
 if __name__ == "__main__":
