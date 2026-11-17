@@ -41,7 +41,7 @@
 .page-loading { color: var(--muted); padding-block: 12px; }
 
 /* Controls are square and drawn in the page's ink; the one main action wears the room's navigation colour. */
-.notebook-page :is(button, select), .notebook-page .page-heading nav a, .home-primary a { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin: 0; padding: 6px 14px; border: 2px solid var(--fg); border-radius: 0; background: var(--note-bg); color: var(--fg); font: 400 .5rem/1.6 var(--body); text-align: left; text-decoration: none; box-shadow: 0 3px 0 color-mix(in srgb, var(--fg) 30%, transparent); cursor: pointer; }
+.notebook-page :is(button, select), .notebook-page .page-heading nav a, .home-primary a { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin: 0; padding: 6px 14px; border: 2px solid var(--fg); border-radius: 0; background: var(--note-bg); color: var(--fg); font: 400 .75rem/1.6 var(--body); text-align: left; text-decoration: none; box-shadow: 0 3px 0 color-mix(in srgb, var(--fg) 30%, transparent); cursor: pointer; }
 .notebook-page button:hover:not(:disabled), .notebook-page .page-heading nav a:hover { background: color-mix(in srgb, var(--fg) 16%, transparent); }
 .notebook-page button:not(:disabled):active { translate: 0 2px; box-shadow: 0 1px 0 color-mix(in srgb, var(--fg) 30%, transparent); }
 .notebook-page button:disabled { opacity: .55; cursor: not-allowed; }

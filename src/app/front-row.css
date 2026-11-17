@@ -35,7 +35,7 @@
 .scene-shell :is(.scene-masthead > a, .appearance-picker > summary, .scene-masthead > .sign-out) { display: flex; align-items: center; min-height: 44px; padding: 0 12px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); color: var(--fr-bar-ink); box-shadow: 0 3px 0 #00000040; }
 .scene-shell .scene-masthead > a { gap: 8px; font: 600 1.3rem/1 'After Class Pixel', var(--font); }
 .scene-shell .scene-masthead .bell-mark { width: 22px; height: 28px; }
-.scene-shell :is(.appearance-picker > summary, .scene-masthead > .sign-out) { font: 400 .5rem/1.8 var(--body); }
+.scene-shell :is(.appearance-picker > summary, .scene-masthead > .sign-out) { font: 400 .75rem/1.6 var(--body); }
 .scene-shell :is(.scene-masthead a, .appearance-picker > summary, .scene-masthead > .sign-out):focus-visible { outline: 3px solid var(--fr-bar-ink); outline-offset: 2px; }
 
 /* --fr-nav-reserve is measured by reserveNavSpace(); these values only cover the first paint. */
@@ -55,7 +55,7 @@
 .front-row .front-row-bar .review-navigation { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin: 0; }
 .front-row .front-row-bar .review-phase { display: flex; align-items: center; min-height: 44px; padding: 0 10px; background: var(--fr-chip); border: 2px solid var(--fr-chip-line); color: inherit; font-size: .5rem; line-height: 1.8; }
 .front-row .front-row-bar .actions { margin: 0; gap: 8px; }
-.scene-shell .front-row .front-row-bar button { min-height: 44px; padding: 6px 12px; border: 2px solid var(--fr-chip-line); border-radius: 0; background: var(--fr-chip); color: var(--fr-bar-ink); font: 400 .5rem/1.8 var(--body); box-shadow: 0 3px 0 #00000040; }
+.scene-shell .front-row .front-row-bar button { min-height: 44px; padding: 6px 12px; border: 2px solid var(--fr-chip-line); border-radius: 0; background: var(--fr-chip); color: var(--fr-bar-ink); font: 400 .75rem/1.6 var(--body); box-shadow: 0 3px 0 #00000040; }
 .scene-shell .front-row .front-row-bar button:hover:not(:disabled) { background: var(--fr-bar); }
 .scene-shell .front-row .front-row-bar button[aria-expanded="true"]:not([data-action="end"]) { background: var(--fr-bar-ink); color: var(--fr-bar); }
 .scene-shell .front-row .front-row-bar :is(button, a):focus-visible { outline: 3px solid var(--fr-bar-ink); outline-offset: 2px; }
@@ -72,7 +72,7 @@
 .scene-shell .front-row .front-row-notices .note { margin: 0; border: 3px solid #2c2620; border-radius: 0; box-shadow: 4px 4px 0 #00000040; }
 /* A save that has not landed is a red-edged slip, never the notebook page a saved review is written on. */
 .scene-shell .front-row .front-row-notices .note-error { border-color: var(--danger); border-left-width: 12px; }
-.scene-shell .front-row .front-row-notices .note:not(.review-complete) button { min-height: 44px; margin: 4px 0 0; padding: 6px 14px; border: 2px solid var(--fg); border-radius: 0; background: var(--fr-bar); color: var(--fr-bar-ink); font: 400 .5rem/1.6 var(--body); box-shadow: 0 3px 0 #0000004d; }
+.scene-shell .front-row .front-row-notices .note:not(.review-complete) button { min-height: 44px; margin: 4px 0 0; padding: 6px 14px; border: 2px solid var(--fg); border-radius: 0; background: var(--fr-bar); color: var(--fr-bar-ink); font: 400 .75rem/1.6 var(--body); box-shadow: 0 3px 0 #0000004d; }
 .scene-shell .front-row .front-row-notices .note:not(.review-complete) button:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
 
 .front-row .front-row-layout { display: grid; grid-template-columns: minmax(0, 1fr); }
@@ -101,7 +101,7 @@
    and wraps, breaking a long word if it must, before it can reach the button. The left column holds an invisible copy of the
    button's text in the button's board font, padding and border, so both side columns reserve the same width. */
 .front-row-scene[data-board-align="center"] .front-row-heading { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(0, max-content) minmax(max-content, 1fr); align-items: center; min-height: 44px; }
-.front-row-scene[data-board-align="center"] .front-row-heading::before { content: "Show diagram"; grid-column: 1; grid-row: 1; visibility: hidden; white-space: nowrap; padding: 6px 12px; border: 2px solid transparent; font: 400 .5rem/1.6 var(--body); }
+.front-row-scene[data-board-align="center"] .front-row-heading::before { content: "Show diagram"; grid-column: 1; grid-row: 1; visibility: hidden; white-space: nowrap; padding: 6px 12px; border: 2px solid transparent; font: 400 .75rem/1.6 var(--body); }
 .front-row-scene[data-board-align="center"] .front-row-heading .front-row-eyebrow { grid-column: 2; grid-row: 1; min-width: 0; overflow-wrap: anywhere; text-align: center; }
 .front-row-scene[data-board-align="center"] .front-row-heading .show-diagram { grid-column: 3; grid-row: 1; justify-self: end; }
 /* A board too narrow for the label between two button-wide columns puts the label on its own centred line and Show diagram under it.
@@ -132,7 +132,7 @@
 /* A note under the tutor's line (a held or failed turn) reads at note size, not at the size of the question it sits with. */
 .scene-shell .front-row-scene .current-exchange .lines .line p.note { margin: .8em 0 0; font: 400 1rem/1.7 var(--body); }
 .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) .note-error { color: var(--fr-board-ink); border-left-width: 10px; }
-.front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) :is(button, .citation) { min-height: 40px; padding: 6px 12px; border: 2px solid var(--fr-board-ink-soft); border-radius: 0; background: transparent; color: var(--fr-board-ink); font: 400 .5rem/1.6 var(--body); text-decoration: none; }
+.front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) :is(button, .citation) { min-height: 40px; padding: 6px 12px; border: 2px solid var(--fr-board-ink-soft); border-radius: 0; background: transparent; color: var(--fr-board-ink); font: 400 .75rem/1.6 var(--body); text-decoration: none; }
 .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) .citation::before { filter: var(--fr-board-icon-filter, none); }
 .front-row-scene[data-board-tone="dark"] { --fr-board-icon-filter: invert(1); }
 
@@ -153,15 +153,15 @@
 
 /* Your thinking. */
 .front-row-scene .composer { display: grid; gap: 8px 12px; margin: 0; padding: 0; border: 0; }
-.front-row-scene[data-mat-actions="below"] .composer { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "status status status" "label label more" "field field field" "share assist speak" "short short short"; }
-.front-row-scene[data-mat-actions="beside"] .composer { grid-template-columns: auto minmax(0, 1fr) minmax(13rem, 36%); grid-template-areas: "status status status" "label label more" "field field share" "field field assist" "speak speak speak" "short short short"; }
+.front-row-scene[data-mat-actions="below"] .composer { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "status status status" "label more more" "field field field" "share assist speak" "short short short"; }
+.front-row-scene[data-mat-actions="beside"] .composer { grid-template-columns: auto minmax(0, 1fr) minmax(13rem, 36%); grid-template-areas: "status status status" "label more more" "field field share" "field field assist" "speak speak speak" "short short short"; }
 .front-row-scene .composer > .actions:not(.primary-actions):empty { display: none; }
 .front-row-scene .composer-status { grid-area: status; display: grid; gap: 6px; }
 .front-row-scene .composer-status:empty { display: none; }
 .front-row-scene .composer-status .note { margin: 0; padding: 6px 10px; border: 2px solid currentColor; border-radius: 0; font-size: 1rem; }
 .front-row-scene .composer-status .note-error { border-left-width: 10px; }
 .scene-shell .front-row-scene .composer > label { grid-area: label; display: block; margin: 0; color: var(--fr-mat-ink); font: 400 1rem/1.7 var(--body); }
-.scene-shell .front-row-scene :is(.composer, .setup-start) textarea { grid-area: field; width: 100%; height: clamp(4.6rem, 7.6cqw, 7.5rem); min-height: 4.6rem; margin: 0; padding: 10px 14px; resize: none; border: 3px solid var(--fr-field-border); border-radius: 0; background: var(--fr-field); color: var(--fr-field-ink); caret-color: var(--fr-field-ink); box-shadow: inset 3px 3px 0 #0000001a; font: 400 1rem/1.7 var(--body); }
+.scene-shell .front-row-scene :is(.composer, .setup-start) textarea { grid-area: field; width: 100%; height: clamp(4.6rem, 7.6cqw, 7.5rem); min-height: 4.6rem; margin: 0; padding: 10px 14px; resize: none; border: 3px solid var(--fr-field-border); border-radius: 0; background: var(--fr-field); color: var(--fr-field-ink); caret-color: var(--fr-field-ink); box-shadow: inset 3px 3px 0 #0000001a; font: 400 .75rem/1.7 var(--body); }
 .scene-shell .front-row-scene :is(.composer, .setup-start) textarea::placeholder { color: color-mix(in srgb, var(--fr-field-ink) 70%, var(--fr-field)); opacity: 1; }
 .scene-shell .front-row-scene :is(.composer, .setup-start) textarea:focus-visible { outline: 3px solid var(--fr-focus); outline-offset: 3px; }
 .front-row-scene .composer > .actions:not(.primary-actions) { grid-area: speak; justify-self: end; margin: 0; }
@@ -173,10 +173,10 @@
 .front-row-scene[data-mat-actions="beside"] .composer .assist-actions > * { flex: 1 1 0; }
 .front-row-scene .composer-shortcut { grid-area: short; align-self: center; justify-self: start; margin: 0; color: var(--fr-mat-ink-soft); font: 400 .5rem/1.8 var(--body); }
 .front-row-scene .composer .review-help { grid-area: more; justify-self: end; margin: 0; border: 0; }
-.scene-shell .front-row-scene .composer .review-help summary { min-height: 32px; padding: 4px 0; color: var(--fr-mat-ink-soft); font: 400 .5rem/1.8 var(--body); font-style: normal; text-decoration: underline; }
+.scene-shell .front-row-scene .composer .review-help summary { min-height: 32px; padding: 4px 0; color: var(--fr-mat-ink-soft); font: 400 .75rem/1.6 var(--body); font-style: normal; text-decoration: underline; }
 .front-row-scene .composer .review-help[open] .actions { justify-content: flex-end; margin: 6px 0 0; }
-.scene-shell .front-row-scene :is(.composer, .setup-start) button { min-height: 44px; padding: 8px 16px; border: 3px solid var(--fr-mat-ink); border-radius: 0; background: var(--fr-quiet); color: var(--fr-quiet-ink); font: 400 .5rem/1.6 var(--body); box-shadow: inset -3px -3px 0 #00000026, 0 3px 0 #00000059; }
-.scene-shell .front-row-scene :is(.composer, .setup-start) .primary-action { padding-inline: 22px; background: var(--fr-accent); color: var(--fr-accent-ink); border-color: color-mix(in srgb, var(--fr-accent) 55%, #000); font-size: .5rem; }
+.scene-shell .front-row-scene :is(.composer, .setup-start) button { min-height: 44px; padding: 8px 16px; border: 3px solid var(--fr-mat-ink); border-radius: 0; background: var(--fr-quiet); color: var(--fr-quiet-ink); font: 400 .75rem/1.6 var(--body); box-shadow: inset -3px -3px 0 #00000026, 0 3px 0 #00000059; }
+.scene-shell .front-row-scene :is(.composer, .setup-start) .primary-action { padding-inline: 22px; background: var(--fr-accent); color: var(--fr-accent-ink); border-color: color-mix(in srgb, var(--fr-accent) 55%, #000); font-size: .75rem; }
 .scene-shell .front-row-scene :is(.composer, .setup-start) button:not(:disabled):active { translate: 0 2px; box-shadow: inset 2px 2px 0 #00000033, 0 1px 0 #00000059; }
 .scene-shell .front-row-scene :is(.composer, .setup-start) button:disabled { opacity: .55; }
 .scene-shell .front-row-scene .composer .turn-status { background: var(--fr-field); color: var(--fr-field-ink); border: 2px solid var(--fr-field-border); }
@@ -197,7 +197,7 @@
 .front-row-object .front-row-object-art { position: absolute; inset: 0; background: var(--fr-object-art) 50% 100% / contain no-repeat; filter: drop-shadow(0 4px 0 #00000052); transition: translate 120ms ease-out, filter 120ms ease-out; }
 .front-row-object[data-object="source"] { --fr-object-art: url('./assets/front-row-v2/closed-folio.webp'); }
 .front-row-object[data-object="history"] { --fr-object-art: url('./assets/front-row-v2/closed-notebook.webp'); }
-.front-row-object .front-row-object-tag { position: relative; padding: 3px 8px; background: var(--fr-bar); color: var(--fr-bar-ink); border: 2px solid var(--fr-bar-ink); font: 400 .5rem/1.8 var(--body); white-space: nowrap; }
+.front-row-object .front-row-object-tag { position: relative; padding: 3px 8px; background: var(--fr-bar); color: var(--fr-bar-ink); border: 2px solid var(--fr-bar-ink); font: 400 .75rem/1.6 var(--body); white-space: nowrap; }
 .front-row-object:is(:hover, :focus-visible) .front-row-object-art { translate: 0 -4px; filter: drop-shadow(0 8px 0 #00000052) brightness(1.08); }
 .front-row-object:is(:hover, :focus-visible) .front-row-object-tag { background: var(--fr-bar-ink); color: var(--fr-bar); }
 .scene-shell .front-row-scene .front-row-object:focus-visible { outline: 3px solid var(--fr-bar-ink); outline-offset: 2px; }
@@ -262,7 +262,7 @@
 .scene-shell .review .room-notebook-dialog .notebook-views button[aria-pressed="true"] { border-color: var(--fr-bar); background: var(--fr-bar); color: var(--fr-bar-ink); box-shadow: inset 0 0 0 2px var(--fr-bar-ink); }
 
 /* Controls are drawn in the page's ink. Close and Back to the question wear the room's own navigation colour. */
-.scene-shell .review .room-object button { min-height: 44px; margin: 0; padding: 6px 14px; border: 2px solid var(--obj-ink); border-radius: 0; background: color-mix(in srgb, var(--obj-ink) 7%, transparent); color: var(--obj-ink); font: 400 .5rem/1.6 var(--body); text-align: left; text-decoration: none; box-shadow: 0 3px 0 color-mix(in srgb, var(--obj-ink) 30%, transparent); }
+.scene-shell .review .room-object button { min-height: 44px; margin: 0; padding: 6px 14px; border: 2px solid var(--obj-ink); border-radius: 0; background: color-mix(in srgb, var(--obj-ink) 7%, transparent); color: var(--obj-ink); font: 400 .75rem/1.6 var(--body); text-align: left; text-decoration: none; box-shadow: 0 3px 0 color-mix(in srgb, var(--obj-ink) 30%, transparent); }
 .scene-shell .review .room-object button:hover:not(:disabled) { background: color-mix(in srgb, var(--obj-ink) 16%, transparent); }
 .scene-shell .review .room-object :is(.room-object-tools > button:last-child, .source-return) { background: var(--fr-bar); border-color: var(--fr-bar); color: var(--fr-bar-ink); }
 .scene-shell .review .room-object :is(.room-object-tools > button:last-child, .source-return):hover { background: var(--obj-ink); }
@@ -290,7 +290,7 @@
 .scene-shell .review .room-object .diagram-lines li { font: 400 1rem/1.7 var(--body); }
 .scene-shell .review .room-object .tutor-diagram:focus-visible { outline: 3px dashed var(--obj-ink); outline-offset: 4px; }
 .scene-shell .review .room-object details { margin: 14px 0 0; padding: 0; border: 0; border-top: 2px dashed var(--border); }
-.scene-shell .review .room-object summary { padding: 10px 0; color: var(--obj-ink); font: 400 .5rem/1.8 var(--body); }
+.scene-shell .review .room-object summary { padding: 10px 0; color: var(--obj-ink); font: 400 .75rem/1.6 var(--body); }
 .scene-shell .review .room-object :is(.review-topics, .review-observations) ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .scene-shell .review .room-object .review-topics li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .scene-shell .review .room-object .scope-source-list { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 10px 0; }
@@ -337,9 +337,9 @@
   /* Your thinking: the label 26, the field 20 and the buttons 21 plate pixels. */
   .scene-shell .front-row-scene .composer > label { font-size: 1rem; }
   .scene-shell .front-row-scene .composer { gap: calc(var(--fr-s) * 10) calc(var(--fr-s) * 14); }
-  .scene-shell .front-row-scene .composer textarea { padding: calc(var(--fr-s) * 10) calc(var(--fr-s) * 14); font-size: 1rem; line-height: 1.7; }
-  .scene-shell .front-row-scene .composer button { padding: calc(var(--fr-s) * 8) calc(var(--fr-s) * 20); font-size: .5rem; }
-  .scene-shell .front-row-scene .composer .primary-action { font-size: .5rem; }
+  .scene-shell .front-row-scene .composer textarea { padding: calc(var(--fr-s) * 4) calc(var(--fr-s) * 14); font-size: .75rem; line-height: 1.7; }
+  .scene-shell .front-row-scene .composer button { padding: calc(var(--fr-s) * 8) calc(var(--fr-s) * 20); font-size: .75rem; }
+  .scene-shell .front-row-scene .composer .primary-action { font-size: .75rem; }
   .front-row-scene[data-board-align="center"] .front-row-area[data-area="board"] { display: flex; flex-direction: column; justify-content: safe center; }
   /* The field takes the height the mat has left once the label and buttons are placed. */
   .front-row-scene .front-row-area[data-area="desk"] > .composer { height: 100%; }
@@ -357,7 +357,7 @@
   .scene-shell .front-row-scene .front-row-object { min-height: 0; padding: 0; }
   .scene-shell .front-row-scene .front-row-object[data-object="source"] { z-index: 9; }
   .front-row-scene .front-row-object .front-row-object-art { display: none; }
-  .front-row-scene .front-row-object .front-row-object-tag { padding: calc(var(--fr-s) * 4) calc(var(--fr-s) * 8); font-size: .5rem; }
+  .front-row-scene .front-row-object .front-row-object-tag { padding: calc(var(--fr-s) * 4) calc(var(--fr-s) * 8); font-size: .75rem; }
   .front-row-scene .room-progress { position: absolute; z-index: 9; top: calc(var(--fr-nav-reserve) + 4px); right: 12px; width: min(22rem, calc(100% - 24px)); max-height: calc(100% - var(--fr-nav-reserve) - 16px); }
 }
 
@@ -380,13 +380,13 @@
   .scene-shell .scene-masthead:has(> .sign-out) { flex-wrap: wrap; row-gap: 6px; }
   .scene-shell :is(.scene-masthead > a, .appearance-picker > summary, .scene-masthead > .sign-out) { padding: 0 10px; }
   .scene-shell .scene-masthead > a { font-size: 1.15rem; }
-  .scene-shell :is(.appearance-picker > summary, .scene-masthead > .sign-out) { font-size: .5rem; }
+  .scene-shell :is(.appearance-picker > summary, .scene-masthead > .sign-out) { font-size: .75rem; }
   .scene-shell .front-row .front-row-bar { padding: 0 8px; gap: 6px; }
   .front-row .front-row-title { flex: 1 1 100%; }
   .front-row .front-row-bar .review-navigation { justify-content: flex-start; gap: 6px; }
   .front-row .front-row-bar .bar-menu { margin-left: 0; }
   .front-row .front-row-bar .bar-menu-panel { left: 0; right: auto; max-width: calc(100vw - 16px); }
-  .scene-shell .front-row .front-row-bar button { padding: 6px 10px; font-size: .5rem; }
+  .scene-shell .front-row .front-row-bar button { padding: 6px 10px; font-size: .75rem; }
   .scene-shell .front-row .front-row-notices { margin: 8px 8px 0; }
   .front-row-scene { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "board board board" "desk desk desk" "buddy source history" "progress progress progress"; gap: 8px; padding: 8px 8px 0; }
   .front-row-scene .room-progress { grid-area: progress; margin-bottom: 8px; }
@@ -398,7 +398,7 @@
   .scene-shell .front-row-scene .current-exchange .line p { font-size: 1rem; }
   .front-row-scene .composer, .front-row-scene[data-mat-actions] .composer { grid-template-columns: minmax(0, 1fr); grid-template-areas: "status" "label" "field" "share" "assist" "more" "speak" "short"; }
   .front-row-scene .composer .review-help { justify-self: start; }
-  .scene-shell .front-row-scene :is(.composer, .setup-start) textarea { height: 7.5rem; min-height: 7.5rem; font-size: 1rem; }
+  .scene-shell .front-row-scene :is(.composer, .setup-start) textarea { height: 7.5rem; min-height: 7.5rem; font-size: .75rem; }
   .front-row-scene .composer .primary-actions > * { flex: 1 1 100%; }
   .front-row-scene .composer .assist-actions > * { flex: 1 1 0; }
   .front-row-scene .composer > .actions:not(.primary-actions) { justify-self: start; }
@@ -413,7 +413,7 @@
   .front-row-scene .front-row-object[data-object="source"] { grid-area: source; }
   .front-row-scene .front-row-object[data-object="history"] { grid-area: history; }
   .front-row-object .front-row-object-art { bottom: 22px; }
-  .front-row-object .front-row-object-tag { padding: 1px 6px; font-size: .5rem; }
+  .front-row-object .front-row-object-tag { padding: 1px 6px; font-size: .75rem; }
   /* The object takes most of a phone's width and height with a margin of room around it. Its frame is drawn at a fixed
      scale, so the page keeps nearly all the width and the text keeps its size. */
   .scene-shell .review .room-object { --u: .22px; width: calc(100vw - 20px); height: calc(100dvh - 28px); max-width: calc((100dvh - 28px) * 1.6); }

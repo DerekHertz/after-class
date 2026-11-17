@@ -19,7 +19,7 @@ a { color: var(--link); text-underline-offset: 3px; }
 code { font-family: var(--mono); font-size: 13px; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
-button { min-height: 44px; padding: 6px 14px; border: 2px solid var(--ink); border-radius: 0; background: var(--paper-deep); color: var(--ink); font: 400 8px/1.6 var(--body); box-shadow: 0 3px 0 #2a1a0b4d; cursor: pointer; }
+button { min-height: 44px; padding: 6px 14px; border: 2px solid var(--ink); border-radius: 0; background: var(--paper-deep); color: var(--ink); font: 400 12px/1.6 var(--body); box-shadow: 0 3px 0 #2a1a0b4d; cursor: pointer; }
 button:hover:not(:disabled) { background: #e6d1a6; }
 button:active:not(:disabled) { translate: 0 2px; box-shadow: 0 1px 0 #2a1a0b4d; }
 button.primary { border-color: var(--bar); background: var(--bar); color: var(--bar-ink); }

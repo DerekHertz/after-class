@@ -24,7 +24,7 @@
 .appearance-options fieldset { min-width: 0; border: 0; padding: 0; margin: 16px 0; }
 .appearance-options legend { padding: 0 0 8px; color: var(--paper-ink-soft); font: 400 .5rem/1.8 var(--body); text-transform: uppercase; }
 .room-choices, .companion-choices { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
-.appearance-options button { display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 44px; padding: 8px; border: 2px solid var(--paper-ink); border-radius: 0; background: #f4e6c8; color: var(--paper-ink); font: 400 .5rem/1.6 var(--body); text-align: center; box-shadow: 0 3px 0 #2a1a0b40; }
+.appearance-options button { display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 44px; padding: 8px; border: 2px solid var(--paper-ink); border-radius: 0; background: #f4e6c8; color: var(--paper-ink); font: 400 .75rem/1.6 var(--body); text-align: center; box-shadow: 0 3px 0 #2a1a0b40; }
 .appearance-options button:hover { background: #ead6ad; }
 .appearance-options button[aria-pressed="true"] { border-color: var(--fr-bar); background: var(--fr-bar); color: var(--fr-bar-ink); box-shadow: inset 0 0 0 2px var(--fr-bar-ink), 0 3px 0 #00000059; }
 .appearance-options small { color: var(--paper-ink-soft); font: 400 .78rem/1.35 var(--font); }

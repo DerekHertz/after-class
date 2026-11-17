@@ -13,7 +13,7 @@
 .review .tutor-diagram:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 .review .review-help summary { font-style: italic; }
 .source-heading button { margin: 4px 8px 4px 0; }
-.review .notebook-heading button { font-size: .5rem; }
+.review .notebook-heading button { font-size: .75rem; }
 /* The starting point is a compact setup form, shown in place of the conversation until the first turn. */
 .review .topic-checklist { display: grid; gap: 10px; max-width: 44rem; }
 .review .topic-checklist h2 { margin: 0; font-size: 1.35rem; }
