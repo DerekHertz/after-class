@@ -1,6 +1,9 @@
 /**
  * `bun run build:ext` (W2). Bun.build per entry (content, main-world, worker,
  * popup, options), target "browser", minify off (inspectable), sourcemap linked.
+ * The built manifest's version is package.json's, so the extension and the app release together. The source
+ * manifest's "0.0.0" is never shipped.
+ *
  * Copies manifest.json, the popup/options HTML, their stylesheet and its bundled
  * font and licence to dist/extension/. Fails if
  * any entry's bundle graph contains src/backend/ or a node:/bun: import.
@@ -93,6 +96,18 @@ export function hostedOriginFrom(value: string | undefined): string | null {
   return url.origin;
 }
 
+/** The app's release version from package.json. The extension ships with the same version as the app it talks to. */
+export const PACKAGE_VERSION = (JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { version: string }).version;
+
+/** Chrome takes one to four dot-separated integers from 0 to 65535, so a version such as "1.2.3-beta" is refused here, not by the store. */
+export function extensionVersion(version: string): string {
+  const parts = version.split(".");
+  if (parts.length < 1 || parts.length > 4 || !parts.every((p) => /^(0|[1-9]\d{0,4})$/.test(p) && Number(p) <= 65535)) {
+    throw new Error(`package.json version "${version}" is not a Chrome extension version: one to four dot-separated integers from 0 to 65535`);
+  }
+  return version;
+}
+
 type Manifest = Record<string, unknown> & { name: string; host_permissions: string[] };
 
 /** The hosted build's public key, base64 DER, as Chrome reads a manifest `key`. */
@@ -171,8 +186,9 @@ export async function buildExtension(outDir: string, options: BuildOptions = {})
   }
 
   for (const { from, to } of STATIC_FILES) cpSync(join(SRC, from), join(out, to));
-  if (testAutostart || hostedOrigin !== null) {
+  {
     let manifest = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8")) as Manifest;
+    manifest.version = extensionVersion(PACKAGE_VERSION);
     if (testAutostart) manifest.name = "After Class (TEST autostart)";
     if (hostedOrigin !== null) manifest = hostedManifest(manifest, hostedOrigin, { withKey: !store });
     writeFileSync(join(out, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
