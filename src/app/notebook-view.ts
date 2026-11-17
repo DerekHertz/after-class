@@ -134,6 +134,21 @@ export function withDraft(drafts: NoteDrafts, id: NoteId, text: string | null): 
   return next;
 }
 
+/**
+ * The tutor's help on one topic: the wrap-up summary written about it. The tutor's closing line is not help on a topic.
+ * It has a turn id and names no thread, so the record keeps it on every note, and it moves no status (R12).
+ */
+export function topicHelp(notes: readonly Note[]): Note["generated"] {
+  return notes.flatMap((n) => n.generated.filter((s) => s.author === "tutor" && s.turnId === null));
+}
+
+/** The tutor's closing line for a lecture, once, however many topic notes carry it. */
+export function closingLines(topics: readonly NotebookTopic[]): readonly string[] {
+  const seen = new Map<string, string>();
+  for (const t of topics) for (const n of t.notes) for (const s of n.generated) if (s.author === "tutor" && s.turnId !== null && !seen.has(s.turnId)) seen.set(s.turnId, s.text);
+  return [...seen.values()];
+}
+
 /** The name a topic is shown by. Until a review names it, its place in the lecture says which one it is. */
 export function topicName(topic: NotebookTopic, index: number, loading: boolean): string {
   if (topic.label !== null) return topic.label;

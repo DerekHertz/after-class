@@ -509,7 +509,9 @@ async function ownCapture(captureId: CaptureId): Promise<void> {
 
 /** Trades the connect page's code for a device token and keeps it with its account. Captures of another account stay where they are. */
 async function connect(code: string): Promise<ConnectReply> {
-  const r = await backendFetch("POST", "/devices/exchange", { code }, { bearer: false });
+  // Connecting again from an install that already holds a token hands it over, so the backend replaces that device.
+  const held = await storedConnection();
+  const r = await backendFetch("POST", "/devices/exchange", { code, ...(held?.token ? { replaces: held.token } : {}) }, { bearer: false });
   if (!r.ok) return { ok: false, error: r.error.includes("HTTP 401") ? "the connect code was not accepted." : `${r.error}.` };
   const reply = r.json as { token?: unknown; userId?: unknown } | null;
   if (typeof reply?.token !== "string" || typeof reply.userId !== "string") return { ok: false, error: "the backend sent an unexpected answer." };

@@ -9,6 +9,10 @@
  *
  * Only a SHA-256 of a code or a token is stored. Revoking a device keeps its row, so a revoked token stays refused.
  *
+ * A browser that connects again sends the token it already holds, and a Connect that proves it (a live device of the same
+ * user) revokes that device as it makes the new one. So reconnecting an install replaces its device instead of adding one.
+ * The old token only ever loses access this way, and a token of another user, an unknown one or none changes nothing.
+ *
  * A token that has gone DEVICE_IDLE_TTL_MS without a use is refused, counted from its last use or, never used, its creation.
  * A user has at most MAX_DEVICES_PER_USER live devices: a Connect past that revokes the least recently used one, because
  * the cap is there to bound leaked tokens, not to stop the learner connecting the browser in front of them.
@@ -71,7 +75,7 @@ export type DeviceView = { readonly id: DeviceId; readonly label: string; readon
 export type Devices = {
   createCode(userId: UserId, label: string): { readonly code: string; readonly expiresMs: number };
   /** `client` is the caller's network address (see `clientAddress`): wrong codes are counted per client, so one client's guesses cannot lock another out. */
-  exchange(code: string, client: string): Exchange;
+  exchange(code: string, client: string, replaces?: string): Exchange;
   /** How many clients the connect-code throttle is tracking, which EXCHANGE_MAX_CLIENTS bounds. */
   trackedClients(): number;
   /** The user's devices that are neither revoked nor expired, oldest first. */
@@ -113,6 +117,7 @@ export function createDevices(db: Db, options: DevicesOptions = {}): Devices {
   const evict = db.sql.query(
     `UPDATE devices SET revoked_ms = ? WHERE id IN (SELECT id FROM devices WHERE user_id = ? AND revoked_ms IS NULL AND ${ACTIVITY} > ? ORDER BY ${ACTIVITY} DESC, id DESC LIMIT -1 OFFSET ?)`,
   );
+  const replace = db.sql.query("UPDATE devices SET revoked_ms = ? WHERE token_hash = ? AND user_id = ? AND revoked_ms IS NULL");
   const owned = db.sql.query<{ id: string }, [string, string]>("SELECT id FROM devices WHERE id = ? AND user_id = ?");
   const revoke = db.sql.query("UPDATE devices SET revoked_ms = ? WHERE id = ? AND user_id = ? AND revoked_ms IS NULL");
   const byToken = db.sql.query<{ id: string; user_id: UserId; last_used_ms: number | null }, [string, number]>(
@@ -152,7 +157,7 @@ export function createDevices(db: Db, options: DevicesOptions = {}): Devices {
 
     trackedClients: () => attempts.size,
 
-    exchange(code, client) {
+    exchange(code, client, replaces) {
       const at = now();
       const window = windowOf(client, at);
       const refuse = (): Exchange => {
@@ -167,6 +172,7 @@ export function createDevices(db: Db, options: DevicesOptions = {}): Devices {
         if (!row || row.expires_ms <= at) return refuse();
         const token = secret("acd_");
         const deviceId = stableId("dev", row.user_id, crypto.randomUUID());
+        if (replaces !== undefined && isDeviceToken(replaces)) replace.run(at, hash(replaces), row.user_id);
         evict.run(at, row.user_id, liveAfter(at), MAX_DEVICES_PER_USER - 1);
         insertDevice.run(deviceId, row.user_id, hash(token), row.label, at);
         return { kind: "connected", token, userId: row.user_id, deviceId };

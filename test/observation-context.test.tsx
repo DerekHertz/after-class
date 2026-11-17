@@ -124,14 +124,14 @@ describe("observation rows", () => {
     expect(html).toContain(">Resource ordering</h5>");
     expect(html).toContain("Status: Disputed");
     expect(html).toContain("not counted as a learning gap");
-    const order = ["How does taking locks in one global order prevent a deadlock?", "If every thread takes A before B", "That is the global order the lecture gave.", "Proposed &quot;Unresolved&quot;.", "Show lecture evidence (1)", "Correct status", "Settle the dispute about Resource ordering", "Keep unresolved", "My explanation was supported", "I want to revisit this", "Save decision"];
+    const order = ["How does taking locks in one global order prevent a deadlock?", "If every thread takes A before B", "That is the global order the lecture gave.", "Show lecture evidence (1)", "Change status", "Settle the dispute about Resource ordering", "Keep unresolved", "My explanation was supported", "I want to revisit this", "Save decision"];
     for (let i = 1; i < order.length; i++) expect(html.indexOf(order[i - 1]!)).toBeLessThan(html.indexOf(order[i]!));
-    expect(html).toContain('aria-label="Correct status for Resource ordering"');
+    expect(html).toContain('aria-label="Change status for Resource ordering"');
     expect(html).not.toContain("The tutor was wrong");
     expect(html).not.toContain("It was my gap");
     expect(html).toContain('checked="" value="keep"');
     expect(html).toMatch(/<button type="button" disabled="">Save decision/);
-    expect(html).not.toContain('<select aria-label="Correct status for Resource ordering" disabled=""');
+    expect(html).not.toContain('<select aria-label="Change status for Resource ordering" disabled=""');
     expect(html).not.toMatch(/<fieldset class="dispute-decision" disabled=""/);
   });
 
@@ -147,7 +147,7 @@ describe("observation rows", () => {
       const { fixture, observations } = await disputes();
       const html = item(fixture, observations[1]!, context, 2);
       expect(html).toContain(">Observation 2</h5>");
-      expect(html).toContain('<select aria-label="Correct status for Observation 2" disabled=""');
+      expect(html).toContain('<select aria-label="Change status for Observation 2" disabled=""');
       expect(html).toMatch(/<fieldset class="dispute-decision" disabled="">/);
       expect(html).toContain("You can change this observation once its topic, question and answer are shown.");
       if (name === "failed") expect(html).toContain('Fixture review lookup failed. <button type="button">Retry</button>');

@@ -290,9 +290,9 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
         </p>
       )}
       <section className="capture-source-paper" aria-labelledby="capture-evidence-heading">
-        <h2 id="capture-evidence-heading">Capture evidence</h2>
-        <p className="muted">Inspect the watched intervals, source material, and any missing coverage.</p>
-        <button type="button" aria-expanded={showEvidence} aria-controls="capture-evidence" onClick={() => setShowEvidence((v) => !v)}>{showEvidence ? "Hide" : "Inspect"} evidence bundle</button>
+        <h2 id="capture-evidence-heading">What was captured</h2>
+        <p className="muted">See the parts you watched, the captions and frames we kept, and anything we missed.</p>
+        <button type="button" aria-expanded={showEvidence} aria-controls="capture-evidence" onClick={() => setShowEvidence((v) => !v)}>{showEvidence ? "Hide what was captured" : "See what was captured"}</button>
         <div id="capture-evidence" hidden={!showEvidence}>{showEvidence && <CaptureEvidence api={api} captureId={captureId} titles={titles} />}</div>
       </section>
     </main>

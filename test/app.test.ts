@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { AppApi } from "../src/app/api";
 import { ApiError } from "../src/app/api";
 import { OptionsView, checkAgain } from "../src/app/capture";
-import { availableActions, captureStatusLabel, citedInWatchOrder, conversationLines, coveredLines, currentEvidenceIds, estimateText, formatClock, groupGaps, inspectBundle, laterNote, lectureHeading, liveText, noteView, observationRow, optionsScreen, parseRoute, partialLines, reduceLive, routePath, softTargetPrompt, sourceWatchOrder, startLive, strandedEndTurn, toAct, unansweredLearnerTurn, usageRows } from "../src/app/core";
+import { questionsAsked, availableActions, captureStatusLabel, citedInWatchOrder, conversationLines, coveredLines, currentEvidenceIds, estimateText, formatClock, groupGaps, inspectBundle, laterNote, lectureHeading, liveText, noteView, observationRow, optionsScreen, parseRoute, partialLines, reduceLive, routePath, softTargetPrompt, sourceWatchOrder, startLive, strandedEndTurn, toAct, unansweredLearnerTurn, usageRows } from "../src/app/core";
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { UsageTable } from "../src/app/record";
 import { BundleInspector, EvidencePane } from "../src/app/ui";
@@ -392,10 +392,10 @@ describe("routes and clocks", () => {
 
 describe("laterNote", () => {
   test("promises the next invitation only while capture can still bring one", () => {
-    expect(laterNote({ state: "capturing" })).toContain("invited again at the next boundary");
-    expect(laterNote({ state: "paused", reason: "idle" })).toContain("invited again at the next boundary");
-    expect(laterNote({ state: "stopped" })).toBe("Keeps preparing. Capture has stopped, so no new invitation will come.");
-    expect(laterNote({ state: "stopped", reason: "video_ended" })).not.toContain("invited again");
+    expect(laterNote({ state: "capturing" })).toContain("offer a review again after the next part");
+    expect(laterNote({ state: "paused", reason: "idle" })).toContain("offer a review again after the next part");
+    expect(laterNote({ state: "stopped" })).toBe("Keep preparing. Capture has stopped, so no new review will be offered.");
+    expect(laterNote({ state: "stopped", reason: "video_ended" })).not.toContain("offer a review again");
   });
 });
 
@@ -437,5 +437,13 @@ describe("citedInWatchOrder", () => {
     // A late upload puts A's capture first in the newest-first list, but A was still watched first.
     expect(sourceWatchOrder([{ sourceIds: [a], firstSeq: 1 }, { sourceIds: [b], firstSeq: 2 }])).toEqual([a, b]);
     expect(sourceWatchOrder(null)).toEqual([]);
+  });
+});
+
+describe("questionsAsked", () => {
+  test("counts every question the learner was asked, quick checks included, so the Menu matches what they saw", () => {
+    expect(questionsAsked({ mainQuestions: 1, quickChecks: 3 })).toBe(4);
+    expect(questionsAsked({ mainQuestions: 0, quickChecks: 0 })).toBe(0);
+    expect(questionsAsked({ mainQuestions: 3, quickChecks: 0 })).toBe(3);
   });
 });

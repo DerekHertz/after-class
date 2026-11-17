@@ -10,7 +10,7 @@ import type { Env } from "./worker-harness";
 const ORIGIN = "https://useafterclass.test";
 const g = globalThis as { __AFTERCLASS_HOSTED_ORIGIN__?: string; fetch: typeof fetch };
 
-type Sent = { readonly path: string; readonly authorization: string | null; readonly body: { captureId?: string; facts?: unknown[]; code?: string } };
+type Sent = { readonly path: string; readonly authorization: string | null; readonly body: { captureId?: string; facts?: unknown[]; code?: string; replaces?: string } };
 
 /** The hosted backend as the worker sees it: codes that name an account, device tokens, and ingest that answers 401 to a token it does not hold. */
 function hostedBackend() {
@@ -115,6 +115,14 @@ describe("connecting a hosted build", () => {
     expect(await w.connection()).toEqual({ kind: "connected" });
     expect(await w.connect("acc_unknown")).toEqual({ handled: true, reply: { ok: false, error: "the connect code was not accepted." } });
     expect(w.env.local.connection).toEqual({ token: "acd_usr_alice_1", userId: "usr_alice" });
+  });
+
+  test("connecting again from an install that holds a token hands that token over, so the backend can replace its device", async () => {
+    const w = await hostedWorker();
+    await w.connect("acc_alice");
+    expect(await w.connect("acc_alice2")).toEqual({ handled: true, reply: { ok: true } });
+    expect(w.backend.sent[1]?.body).toEqual({ code: "acc_alice2", replaces: "acd_usr_alice_1" });
+    expect(w.env.local.connection).toEqual({ token: "acd_usr_alice_2", userId: "usr_alice" });
   });
 
   test("a URL-only sender from the configured origin is taken, for a Chrome that sets no sender.origin", async () => {

@@ -67,7 +67,7 @@ export function DiagramSummaryView({ topic, onRequest, onCite, initialSources = 
     case "not_requested":
       return (
         <p className="diagram-summary-note">
-          <span className="muted">{SUMMARY_NOTE.not_requested}</span> <button type="button" onClick={onRequest}>Write the summary</button>
+          <span className="muted">{SUMMARY_NOTE.not_requested}</span> <button type="button" onClick={onRequest}>Write a step-by-step summary</button>
         </p>
       );
     case "preparing":
@@ -95,24 +95,23 @@ export function DiagramSummaryView({ topic, onRequest, onCite, initialSources = 
 }
 
 /** The diagram panel in the review's source column: the frame, then the summary, beside the always-visible conversation. */
-export function DiagramPanel({ api, topic, error, onRequest, onCite, onClose }: {
+export function DiagramPanel({ api, topic, error, onRequest, onCite }: {
   readonly api: AppApi;
   readonly topic: TopicDiagram;
   readonly error: string | null;
   readonly onRequest: () => void;
   readonly onCite: CiteHandler;
-  readonly onClose: () => void;
 }) {
   const heading = topic.summary.state === "ready" ? topic.summary.title : topic.label;
   return (
     <section className="diagram-panel" aria-label={`Diagram: ${topic.label}`}>
       <div className="source-heading">
-        <p className="diagram-provenance"><strong>Tutor diagram · {topic.label}</strong> Written by the tutor, not captured from the lecture.</p>
-        <button type="button" onClick={onClose}>Close diagram</button>
+        <p className="diagram-provenance"><strong>Diagram · {topic.label}</strong></p>
       </div>
       <ErrorNote error={error} />
       <DiagramFrameView api={api} topic={topic} />
       <h3>{heading}</h3>
+      {topic.summary.state === "ready" && <p className="muted diagram-provenance">Summary written by the tutor from what you watched.</p>}
       <DiagramSummaryView topic={topic} onRequest={onRequest} onCite={onCite} />
     </section>
   );

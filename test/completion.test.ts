@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createReviewController } from "../src/app/controller";
 import type { SessionState } from "../src/app/controller";
 import { completionOf, NOT_REACHED } from "../src/app/completion-view";
+import { statusStory } from "../src/app/core";
 import { SaveBanner } from "../src/app/review";
 import { createMemoryUnsent } from "../src/app/unsent";
 import type { Observation, ReviewView } from "../src/shared/domain";
@@ -101,6 +102,39 @@ describe("completion summary from saved observations", () => {
     const html = banner(controller.getState());
     expect(html).toContain("For each one, you can mark your explanation as supported, choose to revisit it, or leave it disputed for now.");
     expect(html).not.toMatch(/tutor was wrong|your gap/i);
+  });
+
+  test("a topic asked about twice is one entry that says how its status changed, and both observations are still counted", async () => {
+    const { fixture } = await load("record");
+    const view = await savedWith(fixture, (o) => (o.threadId === ids.thread ? [
+      { ...o, status: "after_help", dispute: { kind: "none" } },
+      { ...o, id: `${o.id}2` as Observation["id"], threadId: `${o.threadId}2` as Observation["threadId"], status: "independent", dispute: { kind: "none" } },
+    ] : []));
+    const outcome = completionOf(view);
+    expect(outcome.observations).toBe(2);
+    const entries = outcome.groups.flatMap((g) => g.items.map((i) => [g.group, i.label, i.status]));
+    expect(entries.filter(([, label]) => label === "Circular wait")).toEqual([["independent", "Circular wait", "After help, then on your own in the follow-up"]]);
+    expect(outcome.revisit).toEqual([]);
+    expect(statusStory(["after_help", "after_help"])).toBe("After help");
+    expect(statusStory(["partial", "after_help", "independent"])).toBe("In part, then after help, then on your own in the later questions");
+  });
+
+  test("a topic with an open dispute stays in the disputed group even when a later question went well", async () => {
+    const { fixture } = await load("record");
+    const view = await savedWith(fixture, (o) => (o.threadId === ids.thread ? [
+      { ...o, status: "disputed" },
+      { ...o, id: `${o.id}2` as Observation["id"], threadId: `${o.threadId}2` as Observation["threadId"], status: "independent", dispute: { kind: "none" } },
+    ] : []));
+    expect(completionOf(view).groups.filter((g) => g.group !== "not_reached").map((g) => g.group)).toEqual(["disputed"]);
+  });
+
+  test("the not-reached group lists its topics in the open when the list is short, so a count never heads nothing", async () => {
+    const { fixture } = await load("record");
+    const view = await savedWith(fixture, () => []);
+    const html = banner({ view, loadError: null, live: null, unsent: [], storageDegraded: false, busy: false, sendError: null, saving: false, saveError: null, savedSummary: null });
+    expect(html).toMatch(/<details[^>]*data-outcome="not_reached"[^>]*open=""/);
+    expect(html).toContain("Circular wait");
+    expect(html).toContain("Resource ordering");
   });
 
   test("with no saved observations every topic reads as not reached and the panel says so", async () => {

@@ -178,6 +178,8 @@
 .scene-shell .front-row-scene :is(.composer, .setup-start) .primary-action { padding-inline: 22px; background: var(--fr-accent); color: var(--fr-accent-ink); border-color: color-mix(in srgb, var(--fr-accent) 55%, #000); font-size: .75rem; }
 .scene-shell .front-row-scene :is(.composer, .setup-start) button:not(:disabled):active { translate: 0 2px; box-shadow: inset 2px 2px 0 #00000033, 0 1px 0 #00000059; }
 .scene-shell .front-row-scene :is(.composer, .setup-start) button:disabled { opacity: .55; }
+/* The disabled main button keeps full opacity. Fading it blended its dark ink into the navy desk mat. A mix of the accent into the field keeps the field's own ink readable in every room. */
+.scene-shell .front-row-scene :is(.composer, .setup-start) .primary-action:disabled { opacity: 1; background: color-mix(in srgb, var(--fr-accent) 40%, var(--fr-field)); color: var(--fr-field-ink); border-color: color-mix(in srgb, var(--fr-accent) 40%, var(--fr-field-border)); }
 .scene-shell .front-row-scene .composer .turn-status { background: var(--fr-field); color: var(--fr-field-ink); border: 2px solid var(--fr-field-border); }
 
 /* The companion beside the mat, and the notebook drawn on the desk. */

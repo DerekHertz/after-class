@@ -143,6 +143,8 @@ type EvidenceProps = {
   readonly grouped?: boolean;
   /** A frame the panel already draws elsewhere (the topic diagram's), so it is not drawn a second time. */
   readonly shownFrame?: DiagramFrame | null;
+  /** Draw nothing, rather than the hint, when no evidence is selected. The diagram beside it already fills the page. */
+  readonly quietWhenEmpty?: boolean;
 };
 
 type Loaded = EvidenceProps & { readonly bundle: Pick<EvidenceBundle, "passages" | "frames"> };
@@ -154,7 +156,7 @@ export function EvidencePane(props: EvidenceProps) {
 function EvidenceContents(props: EvidenceProps) {
   const { api, ids } = props;
   const bundle = useAsync(useCallback(() => (ids.length === 0 ? Promise.resolve(null) : api.evidence({ ids })), [api, ids]));
-  if (ids.length === 0) return <p className="muted">Source evidence appears here when the tutor explains or checks something.</p>;
+  if (ids.length === 0) return props.quietWhenEmpty === true ? null : <p className="muted">Source evidence appears here when the tutor explains or checks something.</p>;
   if (bundle.error !== null) return <ErrorNote error={bundle.error} retry={bundle.reload} />;
   if (bundle.data === null) return <p className="muted">Loading evidence...</p>;
   return props.grouped === true ? <EvidenceGroups {...props} bundle={bundle.data} /> : <EvidenceList {...props} bundle={bundle.data} />;
@@ -192,7 +194,7 @@ export function EvidenceGroups(props: Loaded) {
         <section className="evidence-group" aria-label="Lecture frame">
           <p className="evidence-kind">Lecture frame</p>
           {frames.map((f) => <FrameFigure key={f.id} frame={f} {...props} />)}
-          {alreadyShown && shownFrame !== null && <p className="muted">The frame at {formatClock(shownFrame.mediaS)} is shown with the tutor diagram.</p>}
+          {alreadyShown && shownFrame !== null && <p className="muted">The frame at {formatClock(shownFrame.mediaS)} is shown with the diagram.</p>}
         </section>
       )}
       {missingNote(props)}

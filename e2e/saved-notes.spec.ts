@@ -80,6 +80,7 @@ test("source evidence retries once and renders a loaded frame", async ({ page })
 
 test("evidence deletion explains retention before the learner confirms", async ({ page }) => {
   await page.goto("/?scenario=record");
+  await page.getByText(/^Lecture evidence \(\d+\)$/).first().click();
   const source = page.getByRole("button", { name: /^Open transcript / }).first();
   await source.click();
   const remove = page.getByRole("button", { name: "Delete this evidence" });

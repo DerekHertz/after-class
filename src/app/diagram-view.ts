@@ -30,7 +30,7 @@ export const shouldPollDiagrams = (topics: readonly TopicDiagram[] | null): bool
 
 export const SUMMARY_NOTE = {
   no_claims: "No claim about this topic is usable right now, so there is nothing cited to summarize.",
-  not_requested: "The state-change summary has not been written yet.",
+  not_requested: "There is no step-by-step summary yet.",
   preparing: "Writing the summary… this usually takes 20–30 seconds.",
 } as const;
 
