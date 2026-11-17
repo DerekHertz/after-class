@@ -180,7 +180,8 @@ describe("hosted requests", () => {
 
   test("/privacy names who processes the data, canonicalises to itself and links back", async () => {
     const r = await raw(s.port, "/privacy", {});
-    for (const name of ["Clerk", "Anthropic", "TypeSafe", "us-east-2", "speech recognition", "search the web", "cookies", "14 days", "database keeps its text", "not built yet"]) expect(r.body).toContain(name);
+    for (const name of ["Clerk", "Anthropic", "TypeSafe", "us-east-2", "speech recognition", "Limited Use", "30 days", "cookies", "14 days", "database keeps its text", "not built yet"]) expect(r.body).toContain(name);
+    expect(r.body).not.toContain("search the web");
     expect(r.body).toContain(`<link rel="canonical" href="${PUBLIC_ORIGIN}/privacy">`);
     expect(r.body).toContain('href="/"');
     expect(r.body).not.toMatch(/@[a-z0-9-]+\.[a-z]|mailto:/);
