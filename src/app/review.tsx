@@ -13,7 +13,7 @@ import { roomRecord } from "./room/room-record";
 import type { RoomRecord } from "./room/room-record";
 import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
-import { ACTION_LABEL, END_CONFIRM_TEXT, composerActions, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow, softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, strandedEndTurn, selectedEvidenceIds, shouldSubmitAnswer, questionScrollTop, } from "./core";
+import { ACTION_LABEL, END_CONFIRM_TEXT, composerActions, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow, softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, strandedEndTurn, selectedEvidenceIds, shouldSubmitAnswer, questionScrollTop, questionsAsked, } from "./core";
 import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, StartHandoff, TurnStatus } from "./core";
 import type { Speaker, SpeechInput } from "./speech";
 import type { UnsentStore } from "./unsent";
@@ -232,7 +232,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const waitingLine = showsWaitingLine(awaitingReply, handoff);
   const canRetry = !streaming && !awaitingReply && state.live?.status !== "held" && (state.unsent.length > 0 || unanswered !== null || owedLearnerTurn(view) !== null || strandedEndTurn(view) !== null || state.live?.status === "failed");
 
-  const questionMarker = view.state.mainQuestions > 0 ? `Question ${view.state.mainQuestions}` : null;
+  const asked = questionsAsked(view.state);
+  const questionMarker = asked > 0 ? `Question ${asked}` : null;
 
   const boardContent = <>
     {(lines.current.length > 0 || live !== null) && (
@@ -364,10 +365,10 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           )}
         </>}
         {inspecting === "source" && <>
-          <EvidencePane key={evidenceIds.join(",")} api={api} ids={evidenceIds} titles={titles} videos={videos} grouped shownFrame={shownDiagram?.frame ?? null} />
+          <EvidencePane key={evidenceIds.join(",")} api={api} ids={evidenceIds} titles={titles} videos={videos} grouped shownFrame={shownDiagram?.frame ?? null} quietWhenEmpty={diagramTopic !== null} />
           {diagramTopic !== null && <div ref={diagramSection} tabIndex={-1} className="tutor-diagram">{shownDiagram
-            ? <DiagramPanel key={shownDiagram.topicId} api={api} topic={shownDiagram} error={diagrams.error} onRequest={() => void diagrams.request(diagramTopic)} onCite={openSource} onClose={() => setDiagramTopic(null)} />
-            : <div className="diagram-panel">{diagrams.error !== null ? <ErrorNote error={diagrams.error} retry={diagrams.reload} /> : <p className="muted" role="status">Loading the diagram...</p>}<button type="button" onClick={() => setDiagramTopic(null)}>Close diagram</button></div>}</div>}
+            ? <DiagramPanel key={shownDiagram.topicId} api={api} topic={shownDiagram} error={diagrams.error} onRequest={() => void diagrams.request(diagramTopic)} onCite={openSource} />
+            : <div className="diagram-panel">{diagrams.error !== null ? <ErrorNote error={diagrams.error} retry={diagrams.reload} /> : <p className="muted" role="status">Loading the diagram...</p>}</div>}</div>}
           <ScopeEvidence api={api} view={view} titles={titles} onSource={openSource} />
         </>}
       </RoomInspector>

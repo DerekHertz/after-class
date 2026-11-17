@@ -4,11 +4,11 @@ import type { ConceptId, EvidenceId, NoteId, ReviewId, SourceId } from "../share
 import type { DiagramFrame, EvidenceBundle, LinkDecision, LinkType, Note, Observation, ObservationStatus, RecordView, TopicDiagram, UsageSummary } from "../shared/domain";
 import type { LecturesResponse } from "../shared/wire";
 import type { AppApi } from "./api";
-import { allowanceView, citedInWatchOrder, sourceWatchOrder, formatClock, formatInterval, noteView, observationRow, STATUS_LABEL, usageRows } from "./core";
+import { allowanceView, AUTHOR_LABEL, citedInWatchOrder, sourceWatchOrder, formatClock, formatInterval, noteView, observationRow, STATUS_LABEL, statusStory, usageRows } from "./core";
 import type { SourceTitles } from "./core";
 import { canChangeObservation, changeObservation, DISPUTE_CHOICES, loadReviewContext, observationContext } from "./observation-view";
 import type { DisputeChoice, ObservationContext, ReviewContext } from "./observation-view";
-import { focusLectures, notebookLectures, NOTEBOOK_VIEWS, TOPIC_SECTIONS, topicName, viewCounts, withDraft } from "./notebook-view";
+import { closingLines, focusLectures, notebookLectures, NOTEBOOK_VIEWS, TOPIC_SECTIONS, topicHelp, topicName, viewCounts, withDraft } from "./notebook-view";
 import type { NoteDrafts, NotebookLecture, NotebookTopic, NotebookViewName } from "./notebook-view";
 import { objectFrame } from "./room-object";
 import { ErrorNote, EvidencePane, FrameImage, Link, useAsync } from "./ui";
@@ -220,6 +220,7 @@ const startedAt = (ms: number): string => new Date(ms).toLocaleString();
 
 function LectureSection({ lecture, children }: { readonly lecture: NotebookLecture; readonly children: ReactNode }) {
   const headingId = useId();
+  const closing = closingLines(lecture.topics);
   return (
     <section className="record-section notebook-lecture" aria-labelledby={headingId}>
       <header className="record-note-heading">
@@ -235,6 +236,12 @@ function LectureSection({ lecture, children }: { readonly lecture: NotebookLectu
         </ul>
       </header>
       {children}
+      {closing.length > 0 && (
+        <section className="topic-part notebook-closing" aria-label="The tutor's closing message">
+          <h4>The tutor's closing message</h4>
+          {closing.map((text, i) => <p key={i} className="author-tutor">{text}</p>)}
+        </section>
+      )}
     </section>
   );
 }
@@ -273,14 +280,14 @@ export function TopicSection({ api, topic, name, headingId, contexts, retry, dia
   readonly setDraft: SetDraft;
   readonly run: Run;
 }) {
-  const help = topic.notes.flatMap((n) => noteView(n).segments.filter((s) => s.author === "tutor"));
-  const statuses = [...new Set(topic.observations.map((o) => STATUS_LABEL[o.status]))];
+  const help = topicHelp(topic.notes);
+  const statuses = topic.observations.length === 0 ? "" : topic.observations.length === 1 ? STATUS_LABEL[topic.observations[0]!.status] : statusStory(topic.observations.map((o) => o.status));
   return (
     <article className="notebook-topic" aria-labelledby={headingId}>
       <h3 id={headingId} tabIndex={-1}>{name}</h3>
-      {statuses.length > 0 && (
+      {statuses !== "" && (
         <p className="topic-status">
-          <strong>Status: </strong>{statuses.join(", ")}
+          <strong>Status: </strong>{statuses}
           {topic.revisit && <span className="topic-flag"> · To revisit</span>}
           {topic.disputed && <span className="topic-flag"> · Disputed, not counted as a gap</span>}
         </p>
@@ -294,7 +301,7 @@ export function TopicSection({ api, topic, name, headingId, contexts, retry, dia
       {help.length > 0 && (
         <section className="topic-part" aria-label={`${TOPIC_SECTIONS.help}: ${name}`}>
           <h4>{TOPIC_SECTIONS.help}</h4>
-          {help.map((s, i) => <p key={i} className="author-tutor"><strong>{s.label}: </strong>{s.text}</p>)}
+          {help.map((s, i) => <p key={i} className="author-tutor"><strong>{AUTHOR_LABEL.tutor}: </strong>{s.text}</p>)}
         </section>
       )}
       {topic.observations.length > 0 && (
@@ -379,8 +386,9 @@ function TopicSource({ api, notes, name, diagram, deleted, citations, watchOrder
       <h4>{TOPIC_SECTIONS.source}</h4>
       {lecture.map((s, i) => <p key={i} className="author-source"><strong>{s.label}: </strong>{s.text}</p>)}
       {cited.length > 0 && (
-        <p>
-          Evidence:{" "}
+        <details className="topic-evidence">
+          <summary>Lecture evidence ({cited.length})</summary>
+          <p>
           {cited.map((id, i) => {
             if (deleted.has(id)) return <span key={id} className="muted">[{i + 1}: deleted by you] </span>;
             const frame = citations.data?.frames.find((frame) => frame.id === id);
@@ -388,7 +396,8 @@ function TopicSource({ api, notes, name, diagram, deleted, citations, watchOrder
             const label = frame ? `Captured frame ${formatClock(frame.mediaS)}` : passage ? `Transcript ${formatInterval(passage.interval)}` : citations.loading ? "Loading evidence details…" : "Evidence details unavailable";
             return <button key={id} type="button" aria-label={frame || passage ? `Open ${label.toLowerCase()}` : "Open cited evidence"} aria-pressed={isOpen(id)} onClick={(e) => (isOpen(id) ? setOpen(null) : setOpen({ ids: [id], origin: e.currentTarget }))}>{label}</button>;
           })}
-        </p>
+          </p>
+        </details>
       )}
       {cited.some((id) => !deleted.has(id)) && !citations.loading && (citations.error !== null || missingDetails) && <p className="muted">Some evidence details could not be loaded. <button type="button" onClick={citations.reload}>Retry evidence details</button></p>}
       {diagram.kind === "failed" && <ErrorNote error={`The frame and summary could not be loaded: ${diagram.error}`} retry={diagram.retry} />}
@@ -537,7 +546,7 @@ export function ObservationItem({ api, observation: o, number, context, deleted,
           <dt>{details.kind}</dt><dd>{details.question}</dd>
           <dt>Your answer</dt><dd className="author-learner">{details.answers.length > 0 ? details.answers.map((a, i) => <p key={i}>{a}</p>) : "No answer recorded."}</dd>
           {details.dispute !== null && <><dt>Your dispute</dt><dd className="author-learner">{details.dispute}</dd></>}
-          <dt>Tutor's judgment</dt><dd className="author-tutor">Proposed "{details.proposed}".{details.reasoning !== null && <> {details.reasoning}</>}</dd>
+          {details.reasoning !== null && <><dt>Tutor's note</dt><dd className="author-tutor">{details.reasoning}</dd></>}
         </dl>
       )}
       {details && (evidence.length > 0 ? (
@@ -545,17 +554,18 @@ export function ObservationItem({ api, observation: o, number, context, deleted,
           <button type="button" aria-expanded={showEvidence} onClick={() => setShowEvidence(!showEvidence)}>{showEvidence ? "Hide lecture evidence" : `Show lecture evidence (${evidence.length})`}</button>
           {showEvidence && <section className="record-evidence" aria-label={`Lecture evidence for ${details.topic}`}><EvidencePane api={api} ids={evidence} titles={noTitles} /></section>}
         </>
-      ) : <p className="muted">{details.evidence.length > 0 ? "You deleted the evidence the tutor cited here." : "The tutor cited no lecture evidence on this question."}</p>)}
+      ) : details.evidence.length > 0 ? <p className="muted">You deleted the evidence the tutor cited here.</p> : null)}
       {!ready && <p className="muted">You can change this observation once its topic, question and answer are shown.</p>}
-      <div className="actions">
+      <details className="change-status">
+        <summary>Change status</summary>
         <label>
-          Correct status{" "}
-          <select aria-label={`Correct status for ${name}`} value="" disabled={!ready} onChange={(e) => { const status = e.target.value as ObservationStatus | ""; if (status) void change(() => api.overrideObservation(o.id, status)); }}>
+          Status{" "}
+          <select aria-label={`Change status for ${name}`} value="" disabled={!ready} onChange={(e) => { const status = e.target.value as ObservationStatus | ""; if (status) void change(() => api.overrideObservation(o.id, status)); }}>
             <option value="">Choose...</option>
             {OVERRIDES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
           </select>
         </label>
-      </div>
+      </details>
       {row.disputeOpen && (
         <fieldset className="dispute-decision" disabled={!ready}>
           <legend>Settle the dispute about {name}</legend>

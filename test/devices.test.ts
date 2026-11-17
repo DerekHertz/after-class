@@ -48,6 +48,42 @@ describe("devices", () => {
     expect(devices.list(alice)).toHaveLength(1);
   });
 
+  test("connecting again with the token the browser already holds replaces its device instead of adding one", () => {
+    const db = testDb();
+    const [alice] = users(db);
+    const devices = createDevices(db);
+    const first = connected(devices, alice, "Chrome on Windows");
+    const again = devices.exchange(devices.createCode(alice, "Chrome on Windows").code, "c", first.token);
+    if (again.kind !== "connected") throw new Error("expected a connection");
+    expect(devices.list(alice).map((d) => d.id)).toEqual([again.deviceId]);
+    expect(devices.userFor(first.token)).toBeNull();
+    expect(devices.userFor(again.token)).toBe(alice);
+  });
+
+  test("a token that is another user's, unknown or malformed replaces nothing, and its owner keeps working", () => {
+    const db = testDb();
+    const [alice, bob] = users(db);
+    const devices = createDevices(db);
+    const bobs = connected(devices, bob, "Chrome on Mac");
+    const mine = connected(devices, alice, "Chrome on Windows");
+    for (const replaces of [bobs.token, `acd_${"A".repeat(43)}`, "not a token"]) {
+      expect(devices.exchange(devices.createCode(alice, "Chrome on Windows").code, "c", replaces).kind).toBe("connected");
+    }
+    expect(devices.userFor(bobs.token)).toBe(bob);
+    expect(devices.userFor(mine.token)).toBe(alice);
+    expect(devices.list(bob)).toHaveLength(1);
+    expect(devices.list(alice)).toHaveLength(4);
+  });
+
+  test("a wrong code with a real token revokes nothing", () => {
+    const db = testDb();
+    const [alice] = users(db);
+    const devices = createDevices(db);
+    const first = connected(devices, alice);
+    expect(devices.exchange(`acc_${"C".repeat(43)}`, "c", first.token)).toEqual({ kind: "refused" });
+    expect(devices.userFor(first.token)).toBe(alice);
+  });
+
   test("a connect code is refused once it expires, and works until then", () => {
     const db = testDb();
     const [alice] = users(db);

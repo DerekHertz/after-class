@@ -56,9 +56,10 @@ export function CompletionPanel({ view, reviewId, savedSummary, justSaved, onSou
             ))}
           </ul>
         );
-        // Topics nobody asked about can be most of the scope. They stay folded so the list of what was assessed leads.
+        // Topics nobody asked about can be most of the scope, so a long list stays folded and the assessed topics lead.
+        // A short list is open, so its count is never a heading with nothing under it.
         return g.group === "not_reached" ? (
-          <details key={g.group} className="review-complete-group" data-outcome={g.group}>
+          <details key={g.group} className="review-complete-group" data-outcome={g.group} open={g.items.length <= 6}>
             <summary>{g.heading} ({g.items.length})</summary>
             {rows}
           </details>

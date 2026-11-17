@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { countsAsGap, focusLectures, notebookLectures, topicName, viewCounts, withDraft } from "../src/app/notebook-view";
+import { closingLines, countsAsGap, focusLectures, notebookLectures, topicHelp, topicName, viewCounts, withDraft } from "../src/app/notebook-view";
 import type { NoteDrafts } from "../src/app/notebook-view";
 import { loadReviewContext } from "../src/app/observation-view";
 import type { ReviewContext } from "../src/app/observation-view";
@@ -184,6 +184,20 @@ describe("the rendered notebook", () => {
     expect(topic).toContain('<p class="author-tutor"><strong>Tutor: </strong>Look at the order in which resources are acquired.</p>');
     expect(topic).toContain('<p class="author-source"><strong>Lecture: </strong>Circular wait is one condition for deadlock.</p>');
     expect(at("Status: </strong>Disputed")).toBeLessThan(at("<h4>My explanation</h4>"));
+  });
+
+  test("the tutor's closing message sits once under its lecture and is not counted as help on any topic", async () => {
+    const { fixture, record, lectures } = await notebook("record");
+    const closing = "We will stop here. Rewatch the row picture at about 4:30.";
+    const turnId = "turn_closing" as never;
+    const withClosing = { ...record, notes: record.notes.map((n) => ({ ...n, generated: [...n.generated, { author: "tutor" as const, text: closing, turnId, evidence: [] }] })) };
+    expect(withClosing.notes.length).toBeGreaterThan(0);
+    const page = html({ api: fixture.api, data: withClosing, lectures, run });
+    expect(page.split(closing)).toHaveLength(2);
+    expect(page).toContain("<h4>The tutor&#x27;s closing message</h4>");
+    for (const help of page.matchAll(/<h4>Help used<\/h4>(.*?)<\/section>/g)) expect(help[1]).not.toContain(closing);
+    expect(topicHelp(withClosing.notes).map((s) => s.text)).not.toContain(closing);
+    expect(closingLines(notebookLectures(withClosing, lectures, new Map()).flatMap((l) => l.topics))).toEqual([closing]);
   });
 
   test("a contents list names every lecture and topic, and each entry moves focus to a focusable topic heading", async () => {

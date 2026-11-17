@@ -37,7 +37,7 @@ const topic = (over: Partial<TopicDiagram> = {}): TopicDiagram => ({
   ...over,
 });
 
-const panel = (t: TopicDiagram, extra: object = {}) => renderToStaticMarkup(createElement(DiagramPanel, { api, topic: t, error: null, onRequest: noop, onCite: noop, onClose: noop, ...extra }));
+const panel = (t: TopicDiagram, extra: object = {}) => renderToStaticMarkup(createElement(DiagramPanel, { api, topic: t, error: null, onRequest: noop, onCite: noop, ...extra }));
 
 describe("the diagram panel", () => {
   test("shows the frame with its time and a link to that moment, then the title and the lines, sources hidden", () => {
@@ -48,7 +48,7 @@ describe("the diagram panel", () => {
     expect(html).toContain('href="https://www.youtube.com/watch?v=VIDEO000001&amp;t=125s"');
     expect(html).toContain("Open in YouTube at that moment");
     expect(html).toContain("Node P: local +1, global -1.");
-    expect(html).toContain("Close diagram");
+    expect(html).not.toContain("Close diagram");
     expect(html.indexOf("Captured frame")).toBeLessThan(html.indexOf("How do clocks order events?"));
     expect(html.indexOf("How do clocks order events?")).toBeLessThan(html.indexOf("Node P: local"));
   });
@@ -107,7 +107,7 @@ describe("the diagram panel", () => {
   test("no usable claims: says so, offers no summary", () => {
     const html = panel(topic({ summary: { state: "no_claims" }, frame: null }));
     expect(html).toContain(SUMMARY_NOTE.no_claims);
-    expect(html).not.toContain("Write the summary");
+    expect(html).not.toContain("Write a step-by-step summary");
     expect(html).not.toContain('class="citation"');
   });
 
@@ -121,7 +121,7 @@ describe("the diagram panel", () => {
   test("not written yet: a button to write it", () => {
     const html = panel(topic({ summary: { state: "not_requested" } }));
     expect(html).toContain(SUMMARY_NOTE.not_requested);
-    expect(html).toContain("Write the summary");
+    expect(html).toContain("Write a step-by-step summary");
   });
 
   test("Claude failure: the error and a retry button; the frame stays", () => {
@@ -240,7 +240,7 @@ describe("a notebook topic: its question, answer and status before its frame and
     expect(html).toContain("<strong>Status: Looks fine (quick check)</strong>");
     expect(html).not.toMatch(/Status: (<\/strong>)?Independent/);
     expect(html).toContain(NO_FRAME_NOTE);
-    expect(html).toContain("Write the summary");
+    expect(html).toContain("Write a step-by-step summary");
     expect(html).toContain("(skipped this question)");
   });
 

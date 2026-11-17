@@ -18,7 +18,8 @@ type Edges = { readonly top: number; readonly right: number; readonly bottom: nu
 export type ObjectArt = {
   readonly eyebrow: string | null;
   readonly title: string;
-  readonly close: string;
+  /** The header button that puts the object down, or null when the footer's Back to the question is its one way back. */
+  readonly close: string | null;
   /**
    * Nine-slice cuts. Each corner holds a whole ornament (the folio's clips, spine motifs and first tab; the notebook's
    * ribbon and moon), so only plain wood, cover or parchment stretches when a phone makes the frame tall.
@@ -44,7 +45,7 @@ export const ROOM_OBJECTS = {
   source: {
     eyebrow: "From the lecture",
     title: "Lecture evidence",
-    close: "Close source",
+    close: null,
     slice: { top: 345, right: 308, bottom: 270, left: 340 },
     repeat: "stretch",
     page: { left: 0.12, top: 0.15, right: 0.91, bottom: 0.88 },
@@ -130,7 +131,7 @@ export function RoomInspector({ object, headingRef, pageRef, onPageScroll, onPut
           </div>
           <div className="room-object-tools">
             {tools}
-            <button type="button" onClick={() => onPutDown("origin")}>{art.close}</button>
+            {art.close !== null && <button type="button" onClick={() => onPutDown("origin")}>{art.close}</button>}
           </div>
         </header>
         <div key={object} ref={pageRef} className="room-object-page" role="region" aria-labelledby={headingId} tabIndex={0} onScroll={onPageScroll}>{children}</div>

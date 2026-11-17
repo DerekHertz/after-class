@@ -5,7 +5,7 @@
  */
 import type { Observation, RecordedStatus, ReviewView } from "../shared/domain";
 import type { EvidenceId } from "../shared/ids";
-import { moveEvidence, STATUS_LABEL } from "./core";
+import { moveEvidence, STATUS_LABEL, statusStory } from "./core";
 
 export type OutcomeGroup = "independent" | "with_help" | "looks_fine" | "supported" | "unresolved" | "disputed" | "not_assessed" | "not_reached";
 
@@ -77,17 +77,30 @@ export function completionOf(view: Pick<ReviewView, "topics" | "turns" | "observ
   const items = new Map<OutcomeGroup, OutcomeItem[]>(OUTCOME_GROUPS.map((g) => [g, []]));
   const seen = new Set<string>();
 
+  // One entry per topic. A topic asked about twice (a quick check, then a follow-up) keeps both observations, and its
+  // entry says how the status changed. Observations that name no topic stay one entry each.
+  const byTopic = new Map<string, Observation[]>();
   for (const o of view.observations) {
-    const named = o.conceptIds.flatMap((id) => labels.get(id) ?? []);
     for (const id of o.conceptIds) seen.add(id);
-    const evidence = [...new Set(view.turns.flatMap((t) => (t.actor === "tutor" && t.threadId === o.threadId ? moveEvidence(t.move) : [])))];
-    const group = groupOf(o);
+    const key = o.conceptIds.length > 0 ? [...o.conceptIds].sort().join("|") : `observation:${o.id}`;
+    byTopic.set(key, [...(byTopic.get(key) ?? []), o]);
+  }
+  for (const observations of byTopic.values()) {
+    const last = observations[observations.length - 1]!;
+    const named = last.conceptIds.flatMap((id) => labels.get(id) ?? []);
+    const threads = new Set(observations.map((o) => o.threadId));
+    const evidence = [...new Set(view.turns.flatMap((t) => (t.actor === "tutor" && t.threadId !== null && threads.has(t.threadId) ? moveEvidence(t.move) : [])))];
+    // The topic sits where it ended up, except that an open dispute keeps it in the disputed group (R14).
+    const disputed = observations.find((o) => o.status === "disputed");
+    const group = groupOf(disputed ?? last);
+    const resolved = observations.findLast((o) => o.dispute.kind === "resolved_by_learner");
+    const status = group === "supported" ? `The tutor assessed it as ${STATUS_LABEL[last.status]}` : observations.length === 1 ? STATUS_LABEL[last.status] : statusStory(observations.map((o) => o.status));
     items.get(group)!.push({
-      key: o.id,
+      key: observations[0]!.id,
       label: named.length > 0 ? named.join(" · ") : "A question in this review",
-      status: group === "supported" ? `The tutor assessed it as ${STATUS_LABEL[o.status]}` : STATUS_LABEL[o.status],
+      status,
       evidence,
-      resolution: o.dispute.kind === "resolved_by_learner" ? RESOLUTION[o.dispute.outcome] : null,
+      resolution: resolved !== undefined && resolved.dispute.kind === "resolved_by_learner" ? RESOLUTION[resolved.dispute.outcome] : null,
     });
   }
   for (const t of view.topics) {

@@ -7,7 +7,7 @@ import { availableActions, composerActions, distinctFrames } from "../src/app/co
 import type { ActionId } from "../src/app/core";
 import { DiagramPanel } from "../src/app/diagram";
 import { Composer } from "../src/app/review";
-import { EvidenceGroups } from "../src/app/ui";
+import { EvidenceGroups, EvidencePane } from "../src/app/ui";
 import { RoomInspector, returnTarget, sourceButtonLabel } from "../src/app/room-object";
 import type { Inspecting } from "../src/app/room-object";
 import type { SpeechInput } from "../src/app/speech";
@@ -89,7 +89,7 @@ describe("one source panel, no indistinguishable duplicate frames", () => {
   test("with the diagram open, its frame is named instead of drawn a second time", () => {
     const html = groups({ passages: [passage], frames: [frame(F1, 402)] }, [P1, F1], diagramFrame);
     expect(html).not.toContain("Captured frame");
-    expect(html).toContain("The frame at 6:42 is shown with the tutor diagram.");
+    expect(html).toContain("The frame at 6:42 is shown with the diagram.");
     expect(html).toContain("Each thread holds a lock");
   });
 
@@ -100,12 +100,28 @@ describe("one source panel, no indistinguishable duplicate frames", () => {
     expect(html).not.toContain("Lecture frame");
   });
 
-  test("the diagram says it was written by the tutor, not captured from the lecture", () => {
+  test("the diagram labels the captured frame as captured and only the summary as written by the tutor", () => {
+    const summary = { state: "ready", title: "Row picture", lines: [{ text: "Each equation is a line.", evidence: [P1] }] } as const;
+    const topic: TopicDiagram = { topicId: id<ConceptId>("cpt", "t"), label: "Circular wait", claimIds: [id<ClaimId>("clm", "c")], frame: diagramFrame, summary };
+    const html = renderToStaticMarkup(createElement(DiagramPanel, { api, topic, error: null, onRequest: noop, onCite: noop }));
+    expect(html).toContain("Diagram · Circular wait");
+    expect(html).not.toContain("not captured from the lecture");
+    expect(html).toContain("Captured frame · Locks &amp; deadlocks at 6:42");
+    expect(html).toContain("Summary written by the tutor from what you watched.");
+    expect(html.indexOf("Captured frame")).toBeLessThan(html.indexOf("Summary written by the tutor"));
+  });
+
+  test("while the summary is still being written, nothing claims the tutor wrote it yet, and the panel has no close button of its own", () => {
     const topic: TopicDiagram = { topicId: id<ConceptId>("cpt", "t"), label: "Circular wait", claimIds: [id<ClaimId>("clm", "c")], frame: diagramFrame, summary: { state: "preparing" } };
-    const html = renderToStaticMarkup(createElement(DiagramPanel, { api, topic, error: null, onRequest: noop, onCite: noop, onClose: noop }));
-    expect(html).toContain("Tutor diagram · Circular wait");
-    expect(html).toContain("Written by the tutor, not captured from the lecture.");
-    expect(html.indexOf("Written by the tutor")).toBeLessThan(html.indexOf("Captured frame"));
+    const html = renderToStaticMarkup(createElement(DiagramPanel, { api, topic, error: null, onRequest: noop, onCite: noop }));
+    expect(html).not.toContain("written by the tutor");
+    expect(html).not.toContain("Close diagram");
+  });
+
+  test("the filler line is dropped when a diagram is open and kept when nothing else is on the page", () => {
+    const empty = (quietWhenEmpty: boolean) => renderToStaticMarkup(createElement(EvidencePane, { api, ids: [], titles, quietWhenEmpty }));
+    expect(empty(false)).toContain("Source evidence appears here");
+    expect(empty(true)).toBe("");
   });
 });
 
@@ -130,7 +146,9 @@ describe("the folio and the notebook open over the room, one at a time, only whe
     const source = held("source", "Each thread holds a lock");
     expect(source).toContain('data-object="source"');
     expect(source).toContain(">Lecture evidence</h2>");
-    expect(source).toContain(">Close source</button>");
+    expect(source).not.toContain("Close source");
+    expect(source).toContain(">Back to the question</button>");
+    expect(source.match(/<button/g)).toHaveLength(1);
     expect(source).toContain("Each thread holds a lock");
     expect(source).not.toContain("Earlier in this review");
     const history = held("history", "What is a deadlock?");

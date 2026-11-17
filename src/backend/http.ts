@@ -708,7 +708,8 @@ const DEVICE_ROUTES: ReadonlySet<RouteName> = new Set(["createConnectCode", "exc
 async function deviceRoute(name: RouteName, matched: { readonly params: Record<string, string> }, req: Request, peer: string | null, devices: Devices, userId: UserId | null, cors: Record<string, string>): Promise<Response> {
   try {
     if (name === "exchangeConnectCode") {
-      const result = devices.exchange(parseExchangeRequest(await readJson(req)).code, clientAddress(peer, req.headers.get("x-forwarded-for")));
+      const body = parseExchangeRequest(await readJson(req));
+      const result = devices.exchange(body.code, clientAddress(peer, req.headers.get("x-forwarded-for")), body.replaces);
       if (result.kind === "limited") return failure(429, "too many connect attempts; try again shortly", { ...cors, "Retry-After": String(result.retryAfterS) });
       if (result.kind === "refused") return failure(401, "that connect code is not valid; press Connect again", cors);
       return reply("exchangeConnectCode", { token: result.token, userId: result.userId }, cors);

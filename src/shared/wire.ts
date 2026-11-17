@@ -604,10 +604,13 @@ export function parseConnectCodeRequest(raw: unknown): { readonly label: string 
   return parseWith(connectCodeRequest, raw);
 }
 
-/** Body of POST /devices/exchange. The code is the only credential. */
-export const exchangeRequest = z.object({ code: z.string().max(200) });
+/**
+ * Body of the connect-code exchange. The code is the credential. `replaces` is the device token the extension already holds,
+ * sent when it connects again, so the new device takes the old one's place instead of sitting beside it.
+ */
+export const exchangeRequest = z.object({ code: z.string().max(200), replaces: z.string().max(200).optional() });
 
-export function parseExchangeRequest(raw: unknown): { readonly code: string } {
+export function parseExchangeRequest(raw: unknown): { readonly code: string; readonly replaces?: string | undefined } {
   return parseWith(exchangeRequest, raw);
 }
 

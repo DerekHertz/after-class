@@ -92,7 +92,9 @@ test.describe("the Your room panel follows the saved record", () => {
     await inMenu(page, "Saved notes");
     const dialog = page.getByRole("dialog", { name: "Saved notes" });
     await expect(dialog.getByRole("heading", { name: "My notebook" })).toBeVisible();
-    const select = dialog.locator("li.record-observation").filter({ hasText: "Status: Independent" }).getByRole("combobox", { name: /Correct status for/ }).first();
+    const row = dialog.locator("li.record-observation").filter({ hasText: "Status: Independent" }).first();
+    await row.getByText("Change status").click();
+    const select = row.getByRole("combobox", { name: /Change status for/ });
     await expect(select).toBeEnabled();
     await select.selectOption({ label: "After help" });
     await expect(settled(dialog)).toBeVisible();

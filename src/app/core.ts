@@ -20,7 +20,7 @@ export function captureStatusLabel(s: CaptureStatus): string {
 
 /** What the lecture page says Later does. After capture stops there is no next boundary, so it promises no invitation. */
 export function laterNote(s: CaptureStatus | null): string {
-  return s?.state === "stopped" ? "Keeps preparing. Capture has stopped, so no new invitation will come." : "Keeps preparing; you will be invited again at the next boundary.";
+  return s?.state === "stopped" ? "Keep preparing. Capture has stopped, so no new review will be offered." : "Keep preparing. We'll offer a review again after the next part.";
 }
 
 // ───────────────────────────── Time ─────────────────────────────────────────
@@ -693,6 +693,32 @@ export const STATUS_LABEL: Readonly<Record<RecordedStatus, string>> = {
   disputed: "Disputed",
   looks_fine: "Looks fine (quick check)",
 };
+
+const STORY_PHRASE: Readonly<Record<RecordedStatus, string>> = {
+  independent: "on your own",
+  partial: "in part",
+  after_help: "after help",
+  looks_fine: "a quick check looked fine",
+  unresolved: "still unresolved",
+  disputed: "disputed",
+  not_assessed: "not assessed",
+};
+
+/** The questions a learner was asked: every main question and every quick check, so the count matches what they saw. */
+export const questionsAsked = (state: { readonly mainQuestions: number; readonly quickChecks: number }): number => state.mainQuestions + state.quickChecks;
+
+/**
+ * What a topic asked about more than once reads as, in the order the questions came: "After help, then on your own in the
+ * follow-up". Every observation is still saved with its own status. This only words them for the learner.
+ */
+export function statusStory(statuses: readonly RecordedStatus[]): string {
+  const distinct = statuses.filter((s, i) => s !== statuses[i - 1]);
+  if (distinct.length === 1) return STATUS_LABEL[distinct[0]!];
+  const [first, ...rest] = distinct.map((s) => STORY_PHRASE[s]);
+  const head = `${first![0]!.toUpperCase()}${first!.slice(1)}`;
+  if (rest.length === 0) return head;
+  return `${head}, then ${rest.join(", then ")} in the ${rest.length === 1 ? "follow-up" : "later questions"}`;
+}
 
 export type ObservationRow = { readonly id: Observation["id"]; readonly status: string; readonly note: string | null; readonly disputeOpen: boolean };
 

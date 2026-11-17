@@ -366,6 +366,10 @@ describe("the learning record", () => {
     await silent.record.save(REVIEW);
     const statuses = (v: typeof view) => v.observations.map((o) => [o.threadId, o.status]);
     expect(statuses(view)).toEqual(statuses(silent.record.view({ reviewId: REVIEW })));
+    // R12: the closing turn names no thread, so it is never help on one, and it never moves a first-help or first-answer mark.
+    const facts = (v: typeof view) => v.observations.map((o) => [o.facts.firstHelpSeq, o.facts.firstSubstantiveAnswerSeq, o.facts.helpTurns]);
+    expect(facts(view)).toEqual(facts(silent.record.view({ reviewId: REVIEW })));
+    for (const o of view.observations) expect(o.facts.helpTurns).not.toContain(closingTurn.id);
   });
 
   test("a closing line code speaks itself teaches nothing, so no note keeps it", async () => {
