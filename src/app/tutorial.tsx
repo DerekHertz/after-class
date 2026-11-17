@@ -191,18 +191,26 @@ function useBoxes(selectors: readonly string[]): Box[] {
 const ANSWER_CONTROLS = [".composer textarea", ".composer button", ".composer .review-help summary"];
 
 /**
- * Brings the ringed controls into view when a step starts, if any is out of view or under the bubble. `inset` is the bottom of
- * the window the bubble takes. `also` lists controls that must clear the bubble even when they are not ringed.
+ * Brings the ringed controls into view when a step starts. The step's own ring comes first: its controls are scrolled fully
+ * into view above the bubble. Then the page scrolls further, as far as the ringed controls stay in view, to keep the controls in
+ * `also` clear of the bubble. `inset` is the bottom of the window the bubble takes.
  */
 function useReveal(selectors: readonly string[], key: string, inset: number, also: readonly string[]): void {
   useEffect(() => {
     const shown = visible(selectors);
     const first = shown[0];
     if (first === undefined) return;
-    if (first.getBoundingClientRect().top < 0) first.scrollIntoView({ block: "start", behavior: "auto" });
-    const bottom = Math.max(...[...shown, ...visible(also)].map((e) => e.getBoundingClientRect().bottom));
-    const over = bottom - (window.innerHeight - inset);
+    const limit = window.innerHeight - inset;
+    const edges = (list: readonly HTMLElement[]) => list.map((e) => e.getBoundingClientRect());
+    if (first.getBoundingClientRect().top < 0) {
+      first.scrollIntoView({ block: "start", behavior: "auto" });
+      window.scrollBy({ top: -MARGIN, behavior: "auto" });
+    }
+    const over = Math.max(...edges(shown).map((r) => r.bottom)) - limit;
     if (over > 0) window.scrollBy({ top: over, behavior: "auto" });
+    const room = Math.min(...edges(shown).map((r) => r.top));
+    const more = Math.max(...edges(visible(also)).map((r) => r.bottom)) - limit;
+    if (more > 0 && room > MARGIN) window.scrollBy({ top: Math.min(more, room - MARGIN), behavior: "auto" });
   }, [selectors, key, inset, also]);
 }
 

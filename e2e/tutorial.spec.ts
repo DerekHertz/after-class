@@ -182,7 +182,7 @@ test("the notebook inside a review's Saved notes is not a tutorial place", async
 });
 
 for (const size of [{ width: 390, height: 844 }, { width: 320, height: 844 }]) {
-  test(`at ${size.width}x${size.height} no answer control is under the bubble on any first-question step`, async ({ page }) => {
+  test(`at ${size.width}x${size.height} no answer control is under the bubble on steps 1 to 3, and Menu is in view on step 4`, async ({ page }) => {
     await page.setViewportSize(size);
     await page.goto("/?scenario=review&tutorial=1");
     const bubble = bubbleOf(page);
@@ -196,7 +196,14 @@ for (const size of [{ width: 390, height: 844 }, { width: 320, height: 844 }]) {
     ];
     for (let step = 0; step < 4; step++) {
       await page.waitForTimeout(300);
-      for (const control of controls) expect(await overlap(bubble, control)).toBe(false);
+      if (step < 3) for (const control of controls) expect(await overlap(bubble, control)).toBe(false);
+      else {
+        // The last step points at Menu, so Menu is in view and clear of the bubble. The lower answer controls may sit under it.
+        const menu = page.getByRole("button", { name: "Menu", exact: true });
+        await expect(menu).toBeInViewport({ ratio: 1 });
+        expect(await overlap(bubble, menu)).toBe(false);
+        await expect(page.locator(".tutorial-ring")).toHaveCount(1);
+      }
       if (step < 3) await bubble.getByRole("button", { name: "Next" }).click();
     }
   });
