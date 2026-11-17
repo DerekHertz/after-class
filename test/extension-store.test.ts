@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildExtension, storeFrom } from "../scripts/build-extension";
+import { buildExtension, extensionVersion, PACKAGE_VERSION, storeFrom } from "../scripts/build-extension";
 import type { AppApi } from "../src/app/api";
 import { connectExtension, extensionIdOf, storeListing } from "../src/app/connect";
 import type { PageRuntime } from "../src/app/connect";
@@ -119,11 +119,20 @@ describe("store build", () => {
     expect(readdirSync(out).filter((f) => f.endsWith(".map"))).toEqual([]);
     for (const f of readdirSync(out).filter((f) => f.endsWith(".js"))) expect(readFileSync(join(out, f), "utf8"), f).not.toContain("sourceMappingURL");
 
+    expect(manifest.version).toBe(PACKAGE_VERSION);
     const zip = join(root, "build", `after-class-extension-${manifest.version}.zip`);
     expect(existsSync(zip)).toBe(true);
     expect(readFileSync(zip).subarray(0, 2).toString()).toBe("PK");
     const listing = Bun.spawnSync(["zip", "-sf", zip]);
     expect(listing.stdout.toString()).toContain("manifest.json");
+  });
+
+  test("the extension's version is the app's, and Chrome's format is enforced", async () => {
+    const out = join(root, "local", "extension");
+    await buildExtension(out);
+    expect(JSON.parse(readFileSync(join(out, "manifest.json"), "utf8")).version).toBe(PACKAGE_VERSION);
+    expect(extensionVersion("0.1.10")).toBe("0.1.10");
+    for (const bad of ["1.2.3-beta", "1.2.3.4.5", "01.2", "1.65536", ""]) expect(() => extensionVersion(bad), bad).toThrow(/Chrome extension version/);
   });
 
   test("a plain hosted build still carries the key and icons, and makes no zip", async () => {

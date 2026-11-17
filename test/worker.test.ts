@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildExtension, copyBuild, extensionIdFromKey, HOSTED_EXTENSION_ID, HOSTED_KEY, hostedOriginFrom, manifestFiles } from "../scripts/build-extension";
+import { buildExtension, copyBuild, extensionIdFromKey, HOSTED_EXTENSION_ID, HOSTED_KEY, hostedOriginFrom, manifestFiles, PACKAGE_VERSION } from "../scripts/build-extension";
 import type { CaptureFactBody } from "../src/shared/domain";
 import type { CaptureId } from "../src/shared/ids";
 import { randomId } from "../src/shared/ids";
@@ -610,9 +610,9 @@ describe("extension build", () => {
     expect(JSON.parse(readFileSync(join(test, "manifest.json"), "utf8")).name).toBe("After Class (TEST autostart)");
   });
 
-  test("the local build's manifest is the source manifest, and its code names no hosted origin", () => {
+  test("the local build's manifest is the source manifest with the app's version, and its code names no hosted origin", () => {
     const source = JSON.parse(readFileSync(join(import.meta.dir, "../src/extension/manifest.json"), "utf8"));
-    expect(JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"))).toEqual(source);
+    expect(JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"))).toEqual({ ...source, version: PACKAGE_VERSION });
     expect(readFileSync(join(out, "worker.js"), "utf8")).not.toContain("__AFTERCLASS_HOSTED_ORIGIN__");
   });
 
