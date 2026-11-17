@@ -149,8 +149,9 @@ describe("the home page", () => {
     expect(EMPTY_HOME).toBe("No lectures captured yet. Start capture from the extension while watching a lecture.");
     for (const step of FIRST_CAPTURE_STEPS) expect(html).toContain(step);
     expect(html).toContain("Start capture");
-    expect(html).toContain("can&#x27;t tell whether the extension is connected");
+    expect(html).toContain("Extension can&#x27;t connect?");
     expect(html).toContain("Save and test");
+    expect(html).not.toContain("backend answered this page");
     expect(html).not.toContain("Continue review");
   });
 
@@ -162,6 +163,8 @@ describe("the home page", () => {
     expect(html).toContain(`href="https://chromewebstore.google.com/detail/${ext}"`);
     expect(html).not.toContain("pairing token");
     expect(html).not.toContain("Save and test");
+    expect(html).toContain("Already connected? Your lectures show up here after your first capture.");
+    expect(html).not.toContain("can&#x27;t tell whether");
     const unnamed = renderToStaticMarkup(createElement(HomeBody, { api: noReads, data: { lectures: [] }, extensionId: "" }));
     expect(unnamed).toContain('href="/app/connect-extension"');
     expect(unnamed).not.toContain("chromewebstore");
