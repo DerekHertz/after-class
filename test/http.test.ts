@@ -73,6 +73,18 @@ describe("health and the API", () => {
     expect((await raw(port, "/health", { Host: `localhost:${port}` })).body).toBe(HEALTH);
   });
 
+  test("/favicon.ico answers without a token in local mode once the app is built, and is a 404 before", async () => {
+    const dir = fixtureApp();
+    const { port } = start(dir);
+    expect((await raw(port, "/favicon.ico", {})).status).toBe(404);
+    writeFileSync(join(dir, "favicon-0a1b2c3d.ico"), "ico-bytes");
+    const r = await raw(port, "/favicon.ico", {});
+    expect(r.status).toBe(200);
+    expect(r.body).toBe("ico-bytes");
+    expect(r.headers.get("content-type")).toBe("image/x-icon");
+    expect(r.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
   test("GET /health answers exactly the bytes the release tool accepts", async () => {
     const { base } = start();
     const body = new Uint8Array(await (await fetch(`${base}/health`)).arrayBuffer());

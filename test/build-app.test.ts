@@ -46,6 +46,17 @@ describe("the review app bundle", () => {
     expect(urls.filter((u) => !existsSync(join(out, u)))).toEqual([]);
   });
 
+  test("the app page links the favicons, and each is a hashed file in the bundle", () => {
+    const { out } = built();
+    const html = readFileSync(join(out, "index.html"), "utf8");
+    for (const stem of ["favicon-16", "favicon-32", "apple-touch-icon"]) {
+      const file = new RegExp(`href="/app/(${stem}-[a-z0-9]{8}\\.png)"`).exec(html)?.[1];
+      expect(file, stem).toBeDefined();
+      expect(existsSync(join(out, file!)), stem).toBe(true);
+    }
+    expect(/<link rel="icon" href="\/app\/(favicon-[a-z0-9]{8}\.ico)"/.test(html)).toBe(true);
+  });
+
   test("every stylesheet and script the page loads is a file in the bundle", () => {
     const { out } = built();
     const page = readFileSync(join(out, "index.html"), "utf8");

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EMPTY_HOME, FIRST_CAPTURE_STEPS, HOSTED_FIRST_CAPTURE_STEPS, HomeBody, OpenById, ResumeTopicLine, loadResumeTopic, resumable, reviewAction, reviewTarget } from "../src/app/home";
+import { EMPTY_HOME, FIRST_CAPTURE_STEPS, HOSTED_FIRST_CAPTURE_STEPS, HomeBody, HomeScreen, OpenById, ResumeTopicLine, loadResumeTopic, resumable, reviewAction, reviewTarget } from "../src/app/home";
 import type { ResumeApi } from "../src/app/home";
 import { createFixture, ids } from "../scripts/ui-preview/fixtures";
 import { EndConfirm } from "../src/app/review";
@@ -173,6 +173,14 @@ describe("the home page", () => {
     expect(html).not.toContain("open=");
     expect(html).toContain("<summary>Troubleshooting: open a capture by ID</summary>");
     expect(html).toContain("disabled");
+  });
+
+  test("the capture ID form shows on the local home screen and is hidden when hosted", () => {
+    const api = { ...noReads, lectures: () => new Promise<LecturesResponse>(() => {}) } as unknown as Parameters<typeof HomeScreen>[0]["api"];
+    expect(renderToStaticMarkup(createElement(HomeScreen, { api }))).toContain("open a capture by ID");
+    for (const extensionId of ["", "abcdefghijklmnopabcdefghijklmnop"]) {
+      expect(renderToStaticMarkup(createElement(HomeScreen, { api, extensionId })), extensionId).not.toContain("capture by ID");
+    }
   });
 });
 
