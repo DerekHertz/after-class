@@ -117,11 +117,21 @@ function privacy(origin: string, signIn: string, files: Files): string {
 <h2>Who processes it</h2>
 <ul>
 <li>Clerk runs sign-in with Google or email. It keeps your sign-in details and session, and sets cookies for them on the sign-in and app pages.</li>
-<li>Anthropic, whose Claude model prepares each lecture for review and plays the tutor. It receives the captions and frames it needs, and your answers. While it prepares a lecture, it can search the web and read public pages about the lecture's topics to suggest resources.</li>
+<li>Anthropic, whose Claude model prepares each lecture for review and plays the tutor. It receives the captions and frames it needs, and your answers.</li>
 <li>TypeSafe, which runs Jev. Jev answers short yes or no questions about the lecture, such as where one topic ends and whether the evidence supports a claim, and it can receive captions and frames for them.</li>
 <li>Your browser, if you answer by voice. The microphone button uses the browser's own speech recognition, which in Chrome can send the audio to Google. After Class receives only the recognized text.</li>
 <li>Amazon Web Services. The server and its database run in the us-east-2 region (Ohio). A daily snapshot of the disk keeps the last 7, and server logs are kept for 14 days.</li>
 </ul>
+<h2>The Chrome extension</h2>
+<ul>
+<li>It reads YouTube pages only. It captures captions, frames and watched intervals only after you press Start, and stops when you pause or stop capture, when the video ends, or when the tab leaves a YouTube watch page.</li>
+<li>It uses Chrome's tab access to know which tab is capturing and to open the app, and its storage to hold captured data until the server has it. It sends that data only to ${escape(origin)}.</li>
+<li>It reads no other sites and no browsing history, and it runs no code downloaded from elsewhere.</li>
+</ul>
+<h2>How long it keeps it</h2>
+<p>Captured captions and frames are deleted after 30 days, except what a saved review cites, which stays until you delete it.</p>
+<h2>How it is used</h2>
+<p>Your data is used only to prepare your lectures and run your reviews. It is not sold, not used for advertising, and not shared with anyone beyond the processors above. Its use of data from Chrome extension APIs follows the Chrome Web Store User Data Policy, including the Limited Use requirements.</p>
 <h2>Deleting</h2>
 <p>Deleting a note in the app hides it, but the database keeps its text. Deleting a piece of captured evidence removes its frames from the server and from your reviews, but the database keeps its caption text and the AI results made from it. Backup copies can remain until the snapshots containing them rotate out. Full erasure of your data is not built yet.</p>
 <h2>This site</h2>
