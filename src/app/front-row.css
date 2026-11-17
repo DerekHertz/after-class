@@ -363,7 +363,7 @@
 
 /* Wide windows, signed in: the review's navigation also leaves room for Sign out beside the picker. */
 @media (min-width: 1360px) and (min-height: 560px) {
-  .scene-shell:has(.scene-masthead > .sign-out) .front-row .front-row-bar { right: calc(20px + 21rem); }
+  .scene-shell:has(.scene-masthead > .sign-out) .front-row .front-row-bar { right: calc(20px + 24rem); }
 }
 
 /* Mid-width windows: the review's navigation takes a second row under the masthead chips. */
