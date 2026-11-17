@@ -7,12 +7,6 @@ import type { FrontRowRoom, PlatePoint, PlateRect } from "./rooms";
 export type Size = { readonly width: number; readonly height: number };
 export type Rect = { readonly left: number; readonly top: number; readonly width: number; readonly height: number };
 
-/** A side of the plate that the window shows more of than the plate covers. */
-export type Edge = "left" | "right" | "top" | "bottom";
-
-/** The part of the window a plate edge's colours fill, which runs a little under the plate so no seam shows between them. */
-export type EdgeFill = { readonly edge: Edge; readonly rect: Rect };
-
 /**
  * The room as a window at least `FULL_ROOM_MIN` shows it: one wide plate drawn at one scale, with its text, companion and
  * notebook placed on it. Every rectangle is in CSS pixels from the window's top left. `s` is the screen pixels of one plate
@@ -22,11 +16,15 @@ export type FullRoomLayout = {
   readonly composition: "full";
   readonly window: Size;
   readonly s: number;
-  /** Where the whole plate is drawn. A wide window crops its side strips, and a narrow or tall one leaves the fills below. */
+  /** Where the whole plate is drawn. A wide window crops its side strips, and a narrow or tall one leaves the backdrop showing. */
   readonly plate: Rect;
   /** Where the 16:10 core of the plate is: the part every window shows whole. */
   readonly core: Rect;
-  readonly fills: readonly EdgeFill[];
+  /**
+   * Whether the plate leaves part of the window bare. The stage then paints a blurred, darkened, mirrored continuation of the
+   * plate under it, so the bare rows or columns carry the room's own colours in soft shapes, never stretched edge pixels.
+   */
+  readonly backdrop: boolean;
   /** Where the board's and the mat's text go. */
   readonly text: { readonly board: Rect; readonly desk: Rect };
   /** The companion's painted cell. */
@@ -49,8 +47,8 @@ export type Composition = RoomLayout["composition"];
 /** The tags on the desk, in plate pixels: the notebook's stack the tag sits under, and the source tag above the notebook's tag. */
 const NOTEBOOK = { width: 200, height: 266, tagBelow: 16 } as const;
 const SOURCE = { width: 150, height: 34, above: 52 } as const;
-/** The fills run this far, in CSS pixels, under the plate. */
-const TUCK = 2;
+/** The plate covers the window when it falls short of an edge by no more than this many CSS pixels, a rounding error. */
+const COVERED = 1e-6;
 
 /**
  * The scale at which the plate's 16:10 core just fits `window` on its shorter side: s = min(H / plate height, W / core width).
@@ -78,15 +76,10 @@ export function layoutRoom(scene: SceneId, window: Size, composition: Compositio
   const rect = ({ x, y, width, height }: PlateRect): Rect => ({ left: drawn.left + x * s, top: drawn.top + y * s, width: width * s, height: height * s });
   const point = ({ x, y }: PlatePoint) => ({ left: drawn.left + x * s, top: drawn.top + y * s });
 
-  // An edge is filled wherever the plate ends within a pixel of the window's own edge, too, so rounding to device pixels can
-  // never leave the last row or column unpainted.
-  const fills: EdgeFill[] = [];
-  const [right, bottom] = [drawn.left + drawn.width, drawn.top + drawn.height];
-  const [rowTop, rowBottom] = [Math.max(0, drawn.top), Math.min(H, bottom)];
-  if (drawn.top > -1) fills.push({ edge: "top", rect: { left: 0, top: 0, width: W, height: Math.max(0, drawn.top) + TUCK } });
-  if (bottom < H + 1) fills.push({ edge: "bottom", rect: { left: 0, top: Math.min(H, bottom) - TUCK, width: W, height: H - Math.min(H, bottom) + TUCK } });
-  if (drawn.left > -1) fills.push({ edge: "left", rect: { left: 0, top: rowTop, width: Math.max(0, drawn.left) + TUCK, height: rowBottom - rowTop } });
-  if (right < W + 1) fills.push({ edge: "right", rect: { left: Math.min(W, right) - TUCK, top: rowTop, width: W - Math.min(W, right) + TUCK, height: rowBottom - rowTop } });
+  // Covering the window with the plate itself is not possible for a window narrower than the core: the core's width is what
+  // must stay in view, so a taller window has bare rows above and below. Those rows, and any column a window wider than the
+  // plate leaves bare, show a blurred mirror of the plate instead of its stretched edge pixels.
+  const backdrop = drawn.left > COVERED || drawn.top > COVERED || drawn.left + drawn.width < W - COVERED || drawn.top + drawn.height < H - COVERED;
 
   const { companion, notebook } = room.plate;
   const tag = point(notebook);
@@ -94,7 +87,7 @@ export function layoutRoom(scene: SceneId, window: Size, composition: Compositio
   const source = { left: tag.left - (SOURCE.width / 2) * s, top: tag.top - SOURCE.above * s, width: SOURCE.width * s, height: SOURCE.height * s };
 
   return {
-    composition, window, s, plate: drawn, core: rect(core), fills,
+    composition, window, s, plate: drawn, core: rect(core), backdrop,
     text: { board: rect(room.plate.board), desk: rect(room.plate.mat) },
     companion: { box: rect({ x: companion.x - companion.height / 2, y: companion.bottom - companion.height, width: companion.height, height: companion.height }) },
     objects: { source, history },

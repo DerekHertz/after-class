@@ -107,7 +107,7 @@
 /* A board too narrow for the label between two button-wide columns puts the label on its own centred line and Show diagram under it.
    Only the heading's box is the container, so the board's other text keeps sizing against the scene. The box takes the label's
    size from the scene, where its own font-size resolves, and the label inherits it. */
-.front-row-scene .front-row-heading-box { container: heading / inline-size; font-size: clamp(.9rem, 1.25cqw, 1.2rem); }
+.front-row-scene .front-row-heading-box { container: heading / inline-size; font-size: clamp(1rem, 1.25cqw, 1.2rem); }
 .front-row-scene .front-row-heading-box .front-row-eyebrow { font-size: 1em; }
 @container heading (max-width: 32rem) {
   .front-row-scene[data-board-align="center"] .front-row-heading { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 8px; }
@@ -326,8 +326,9 @@
   .front-row-scene :is(.front-row-area[data-area="board"], .setup-choices) { position: absolute; z-index: 4; inset: var(--fr-board-text); overflow: auto; overscroll-behavior: contain; }
   .front-row-scene :is(.front-row-area[data-area="desk"], .setup-start) { position: absolute; z-index: 7; inset: var(--fr-desk-text); overflow: auto; overscroll-behavior: contain; }
   /* The room's type follows its scale, s CSS pixels per plate pixel, from the sizes the mockup set in plate pixels: the question
-     42 bold, the explanation 24, the topic label 20 and the small label 15. A floor keeps a small window's type readable. */
-  .front-row-scene .front-row-eyebrow, .front-row-scene .front-row-heading-box { font-size: max(.8rem, calc(var(--fr-s) * var(--fr-fit, 1) * 20)); }
+     42 bold, the explanation 24, the topic label 20 and the small label 15. Floors keep the words at their designed size: a short
+     window shrinks the room, never the type, and the board and desk scroll when their text no longer fits. */
+  .front-row-scene .front-row-eyebrow, .front-row-scene .front-row-heading-box { font-size: max(1rem, calc(var(--fr-s) * var(--fr-fit, 1) * 20)); }
   .front-row-scene .front-row-heading-box .front-row-eyebrow { font-size: 1em; }
   .front-row-scene .front-row-heading { margin-bottom: calc(var(--fr-s) * var(--fr-fit, 1) * 10); }
   .front-row-scene .current-exchange .lines { gap: calc(var(--fr-s) * var(--fr-fit, 1) * 12); }

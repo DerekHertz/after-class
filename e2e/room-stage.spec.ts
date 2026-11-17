@@ -250,3 +250,25 @@ test("a room whose plate fails to load still shows its question and answer contr
   const fill = await page.locator('.front-row-area[data-area="board"]').evaluate((node) => getComputedStyle(node).backgroundColor);
   expect(fill).toBe("rgb(251, 225, 197)");
 });
+
+for (const scene of scenes) {
+  test(`in ${scene} a window taller than the plate fills its bare rows with a blurred backdrop, not stretched edge pixels`, async ({ page }, info) => {
+    test.skip(info.project.name === "narrow", "a phone draws the backdrop, not the plate");
+    const size = { width: 1200, height: 1600 };
+    await page.setViewportSize(size);
+    await openRoom(page, scene);
+    await page.addStyleTag({ content: "body * { visibility: hidden !important } .front-row-canvas { visibility: visible !important } .scene-shell::before { display: none !important }" });
+    const layout = layoutRoom(scene, size, "full");
+    if (layout.composition !== "full") throw new Error("a desktop window lays out the full room");
+    expect(layout.backdrop).toBe(true);
+    const shot = decodePng(await page.screenshot(), "screenshot");
+    const row = (y: number) => Array.from({ length: shot.width }, (_, x) => [0, 1, 2].map((c) => shot.rgba[(y * shot.width + x) * 4 + c]!));
+    const [far, near] = [row(4), row(Math.floor(layout.plate.top) - 8)];
+    const mean = far.reduce((sum, px, x) => sum + Math.max(...px.map((v, c) => Math.abs(v - near[x]![c]!))), 0) / far.length;
+    // Stretched edge pixels would make every row above the plate the same row. A mirrored, blurred backdrop changes down the page.
+    expect(mean).toBeGreaterThan(2);
+    // The backdrop is soft: neighbouring pixels along a row differ by a few levels, where the sharp plate's pixels jump.
+    const jump = far.slice(1).reduce((sum, px, x) => sum + Math.max(...px.map((v, c) => Math.abs(v - far[x]![c]!))), 0) / far.length;
+    expect(jump).toBeLessThan(4);
+  });
+}

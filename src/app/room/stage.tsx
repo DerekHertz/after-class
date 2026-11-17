@@ -349,7 +349,7 @@ type Live = { readonly key: string; readonly boxes: readonly DeviceBox[] };
 /** The bands and live draws of the last frame of a room in motion, back to front. */
 type Moving = { readonly bands: readonly Band[]; readonly live: readonly Live[] };
 
-const isPicture = (draw: Draw): draw is PictureDraw => draw.kind === "image" || draw.kind === "edge";
+const isPicture = (draw: Draw): draw is PictureDraw => draw.kind === "image" || draw.kind === "backdrop";
 
 /** `draws` with each run of pictures gathered into an array, and each live draw on its own. */
 function runs(draws: readonly Draw[]): readonly (LiveDraw | readonly PictureDraw[])[] {
@@ -401,6 +401,7 @@ function paintDraw(context: CanvasRenderingContext2D, draw: Draw, scale: Scale):
   if (draw.kind === "balloon") return paintBalloon(context, draw, scale);
   const { image, state } = pictures.get(draw.src)!;
   if (state !== "decoded") return;
+  if (draw.kind === "backdrop") return paintBackdrop(context, draw, image, scale);
   const smooth = draw.kind === "image" && draw.sampling === "smooth";
   context.imageSmoothingEnabled = smooth;
   if (smooth) context.imageSmoothingQuality = "high";
@@ -434,4 +435,67 @@ function paintBalloon(context: CanvasRenderingContext2D, { rect }: BalloonDraw, 
     context.fillStyle = colour;
     context.fillRect(x(c), y(r), x(c + 1) - x(c), y(r + 1) - y(r));
   }
+}
+
+/** The backdrop's tint, over the blurred plate: dark enough that the sharp plate reads as the room and the backdrop as its surroundings. */
+const BACKDROP_TINT = "rgba(10, 8, 20, 0.35)";
+/** The blur works on the plate shrunk to this many pixels wide, so each of its pixels is a soft blob once stretched back up. */
+const BLUR_WIDTH = 56;
+
+/** The blurred, tinted backdrop last made, so a repaint at the same size is one `drawImage` rather than a new blur. */
+let backdropCache: { readonly key: string; readonly canvas: HTMLCanvasElement } | null = null;
+
+/**
+ * Paints the plate's surroundings: the plate shrunk to a few dozen pixels, mirrored out to the stage's edges so each side of
+ * the plate continues into its own colours, and stretched back up smoothly, which is the blur. Plain smooth sampling draws the
+ * same in every browser, unlike `context.filter`. It runs once per size and the result is kept.
+ */
+function paintBackdrop(context: CanvasRenderingContext2D, draw: Extract<PictureDraw, { kind: "backdrop" }>, image: HTMLImageElement, scale: Scale): void {
+  const [piece] = pieces(draw, { width: image.naturalWidth, height: image.naturalHeight }, scale);
+  if (piece === undefined || piece.dw <= 0 || piece.dh <= 0) return;
+  const { plate } = draw;
+  const key = `${draw.src}|${piece.dw}x${piece.dh}|${[plate.left, plate.top, plate.width, plate.height].map((v) => Math.round(v * scale.x)).join(",")}`;
+  if (backdropCache?.key !== key) {
+    // Shrink in two steps, so the small picture averages every source pixel rather than sampling a few.
+    let [from, width, height]: [CanvasImageSource, number, number] = [image, image.naturalWidth, image.naturalHeight];
+    const small = { width: BLUR_WIDTH, height: Math.max(1, Math.round((BLUR_WIDTH * image.naturalHeight) / image.naturalWidth)) };
+    for (const to of [{ width: Math.round(image.naturalWidth / 4), height: Math.round(image.naturalHeight / 4) }, small]) {
+      const step = document.createElement("canvas");
+      [step.width, step.height] = [to.width, to.height];
+      const stepContext = step.getContext("2d");
+      if (stepContext === null) return;
+      stepContext.imageSmoothingQuality = "high";
+      stepContext.drawImage(from, 0, 0, width, height, 0, 0, to.width, to.height);
+      [from, width, height] = [step, to.width, to.height];
+    }
+    // The mirrored tiles are laid out on a canvas as small as the blur, in the stage's proportions, around the plate's place.
+    const k = small.width / plate.width;
+    const tiles = document.createElement("canvas");
+    [tiles.width, tiles.height] = [Math.max(1, Math.ceil(draw.rect.width * k)), Math.max(1, Math.ceil(draw.rect.height * k))];
+    const tilesContext = tiles.getContext("2d");
+    const canvas = document.createElement("canvas");
+    [canvas.width, canvas.height] = [piece.dw, piece.dh];
+    const target = canvas.getContext("2d");
+    if (tilesContext === null || target === null) return;
+    const [x0, y0] = [(plate.left - draw.rect.left) * k, (plate.top - draw.rect.top) * k];
+    for (let i = Math.floor(-x0 / small.width); i < Math.ceil((tiles.width - x0) / small.width); i++) {
+      for (let j = Math.floor(-y0 / small.height); j < Math.ceil((tiles.height - y0) / small.height); j++) {
+        // A neighbouring tile is the plate flipped about the edge they share, so its colours run on across that edge.
+        const [flipX, flipY] = [Math.abs(i) % 2 === 1, Math.abs(j) % 2 === 1];
+        tilesContext.save();
+        tilesContext.translate(x0 + (i + (flipX ? 1 : 0)) * small.width, y0 + (j + (flipY ? 1 : 0)) * small.height);
+        tilesContext.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+        tilesContext.drawImage(from, 0, 0);
+        tilesContext.restore();
+      }
+    }
+    target.imageSmoothingQuality = "high";
+    target.drawImage(tiles, 0, 0, tiles.width, tiles.height, 0, 0, piece.dw, piece.dh);
+    target.fillStyle = BACKDROP_TINT;
+    target.fillRect(0, 0, piece.dw, piece.dh);
+    if (backdropCache !== null) backdropCache.canvas.width = backdropCache.canvas.height = 0;
+    backdropCache = { key, canvas };
+  }
+  context.imageSmoothingEnabled = false;
+  context.drawImage(backdropCache.canvas, piece.dx, piece.dy);
 }
