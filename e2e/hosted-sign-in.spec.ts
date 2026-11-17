@@ -29,6 +29,9 @@ test("hosted sign-in: signed out shows the sign-in screen, signing in shows the 
   await expect(page.getByRole("heading", { name: "Sign in to After Class" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign out" })).toHaveCount(0);
   await page.screenshot({ path: `test-results/hosted-sign-in/signed-out-${info.project.name}.png` });
+  // Clerk's card sits under the centred title, not at the left of the panel.
+  const centre = async (selector: string) => page.locator(selector).first().evaluate((el) => { const r = el.getBoundingClientRect(); return r.left + r.width / 2; });
+  expect(Math.abs((await centre(".cl-card")) - (await centre(".sign-in-page h1")))).toBeLessThan(4);
 
   await page.getByRole("button", { name: "Continue with Google" }).click();
   await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();

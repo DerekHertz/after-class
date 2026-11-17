@@ -99,9 +99,11 @@ export function describePopup(
     headline = state.pauseReason === "video_ended" ? "Stopped: the video ended" : "Stopped";
   }
 
-  const health = (capture?.health ?? []).map((h) => ({
+  // A channel that has not reported yet is no news while the others are fine, so its row shows only beside a real problem.
+  const troubled = (capture?.health ?? []).some((x) => x.health === "failed" || x.health === "stalled");
+  const health = (capture?.health ?? []).filter((h) => troubled || h.health !== "unknown").map((h) => ({
     label: h.channel === "frames" ? "Frames" : h.channel === "transcript" ? "Transcript" : "Playback",
-    text: h.detail ? `${h.health}: ${h.detail}` : h.health,
+    text: h.health === "ok" ? (h.detail ? `${h.detail[0]!.toUpperCase()}${h.detail.slice(1)}` : "OK") : h.detail ? `${h.health}: ${h.detail}` : h.health,
     tone: h.health === "ok" ? ("ok" as const) : h.health === "unknown" ? ("neutral" as const) : h.health === "stalled" ? ("warn" as const) : ("bad" as const),
   }));
 
@@ -251,7 +253,7 @@ export function renderPopup(
         : null,
       invite,
       v.invite.state === "invited" ? null : inviteButtons(),
-      v.reviewUrl === null ? null : h("button", { text: "Open the review page", onclick: () => openTab(v.reviewUrl!) }),
+      v.reviewUrl === null ? null : h("button", { text: "Open the lecture page", onclick: () => openTab(v.reviewUrl!) }),
       retryButtons,
       v.problem ? h("div", { class: "error", text: v.problem }) : null,
       v.deadLetters ? h("div", { class: "error", text: v.deadLetters }) : null,

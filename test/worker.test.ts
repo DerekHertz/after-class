@@ -495,6 +495,13 @@ describe("popup view", () => {
     expect(v.watched).toBe("2 min 5 s");
   });
 
+  test("a channel that has not reported is hidden while capture is fine, and shown beside a real problem; an ok channel reads as its detail", () => {
+    const channels = [{ channel: "transcript", health: "ok", detail: "captions received" }, { channel: "frames", health: "unknown", detail: "" }, { channel: "playback", health: "unknown", detail: "" }];
+    expect(describePopup(withAck(state(), { health: channels }), watch).health).toEqual([{ label: "Transcript", text: "Captions received", tone: "ok" }]);
+    const stalled = [channels[0]!, { channel: "frames", health: "stalled", detail: "no frames for 6 s" }, channels[2]!];
+    expect(describePopup(withAck(state(), { health: stalled }), watch).health.map((x) => x.text)).toEqual(["Captions received", "stalled: no frames for 6 s", "unknown"]);
+  });
+
   test("the review link is the capture screen, the backend's reviewAppUrl when it is that, otherwise built from the capture id", () => {
     const url = (ack: Partial<IngestAck>) => describePopup({ ...withAck(state(), {}), lastAck: { ...withAck(state(), {}).lastAck!, ...ack } }, watch).reviewUrl;
     const mine = `http://127.0.0.1:4317/app/capture/${CAP}`;
@@ -594,7 +601,6 @@ describe("extension build", () => {
     const loaded = [...packagedResources(out, ["popup.html", "options.html"])];
     expect(loaded.some((file) => file.endsWith(".css"))).toBe(true);
     expect(loaded.some((file) => file.endsWith(".ttf"))).toBe(true);
-    expect(existsSync(join(out, "fonts/OFL-PixelifySans.txt"))).toBe(true);
     expect(existsSync(join(out, "fonts/press-start-2p.ttf"))).toBe(true);
     expect(existsSync(join(out, "fonts/OFL-PressStart2P.txt"))).toBe(true);
   });

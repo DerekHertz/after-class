@@ -10,11 +10,16 @@ import type { ReactNode } from "react";
 import { usePrefetchReviewArt } from "./art-prefetch";
 import { objectFrame } from "./room-object";
 
+/** The part of Clerk's `appearance` this app sets: the card draws in the app's one typeface, Press Start 2P. */
+export type ClerkAppearance = { readonly variables?: { readonly fontFamily?: string; readonly fontSize?: string } };
+
+export const CLERK_APPEARANCE: ClerkAppearance = { variables: { fontFamily: "'After Class Body', system-ui, sans-serif", fontSize: "0.75rem" } };
+
 export type ClerkClient = {
   load(options: { readonly ui: { readonly ClerkUI: unknown } }): Promise<void>;
   readonly user: { readonly id: string } | null | undefined;
   readonly session: { getToken(): Promise<string | null> } | null | undefined;
-  mountSignIn(node: HTMLDivElement, props?: { readonly fallbackRedirectUrl?: string }): void;
+  mountSignIn(node: HTMLDivElement, props?: { readonly fallbackRedirectUrl?: string; readonly appearance?: ClerkAppearance }): void;
   unmountSignIn(node: HTMLDivElement): void;
   signOut(): Promise<void>;
   addListener(listener: () => void): () => void;
@@ -104,7 +109,7 @@ function SignInCard({ clerk }: { readonly clerk: ClerkClient }) {
   const mount = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const node = mount.current!;
-    clerk.mountSignIn(node, { fallbackRedirectUrl: location.href });
+    clerk.mountSignIn(node, { fallbackRedirectUrl: location.href, appearance: CLERK_APPEARANCE });
     return () => clerk.unmountSignIn(node);
   }, [clerk]);
   return (

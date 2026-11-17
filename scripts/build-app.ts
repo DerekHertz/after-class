@@ -22,12 +22,12 @@ const DATA_URL = /url\((["']?)data:([a-z]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]
 const EXTENSIONS: Record<string, string> = { "image/webp": "webp", "image/svg+xml": "svg", "font/ttf": "ttf" };
 
 /**
- * The fonts the signed-out screen draws with. A font file is only requested once text that uses it is on the page, which
- * is after the script has run, so index.html preloads these two and they download beside the script, not after it. Their
+ * The font the signed-out screen draws with. A font file is only requested once text that uses it is on the page, which
+ * is after the script has run, so index.html preloads it and it downloads beside the script, not after it. Its
  * @font-face rules say `font-display: block`, so the screen waits for the file the few milliseconds it takes instead of
  * drawing in a fallback face and then jumping.
  */
-const FIRST_SCREEN_FONTS = ["pixelify-sans", "dm-sans-400"];
+const FIRST_SCREEN_FONTS = ["press-start-2p"];
 
 /**
  * The art a room needs, as bundle URLs, found by name: Bun and `externalizeDataUrls` both emit `<source name>-<8 hash chars>.<ext>`.
@@ -148,7 +148,6 @@ export async function buildApp(outDir: string, root = REPO): Promise<void> {
     ["Feather icons", "src/app/assets/icons-v2/LICENSE"],
     ["Young Serif", "src/app/assets/fonts-v2/young-serif-OFL.txt"],
     ["DM Sans", "src/app/assets/fonts-v2/dm-sans-OFL.txt"],
-    ["Pixelify Sans", "src/app/assets/fonts-v2/OFL-PixelifySans.txt"],
     ["Press Start 2P", "src/app/assets/fonts-v2/OFL-PressStart2P.txt"],
     ["Companion animation frames and room unlock objects", "src/app/assets/meshy-CC-BY-4.0.txt"],
   ];

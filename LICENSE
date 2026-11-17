@@ -9,7 +9,6 @@ Third-party material keeps its own license:
 - Feather icons: MIT, src/app/assets/icons-v2/LICENSE
 - DM Sans: SIL Open Font License 1.1, src/app/assets/fonts-v2/dm-sans-OFL.txt
 - Young Serif: SIL Open Font License 1.1, src/app/assets/fonts-v2/young-serif-OFL.txt
-- Pixelify Sans: SIL Open Font License 1.1, src/app/assets/fonts-v2/OFL-PixelifySans.txt
 - Press Start 2P: SIL Open Font License 1.1, src/app/assets/fonts-v2/OFL-PressStart2P.txt
 - React, React DOM, Scheduler and Zod, bundled into the app: MIT, in each
   package's own LICENSE file. The build copies them into asset-notices.txt.

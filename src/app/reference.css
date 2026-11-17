@@ -3,7 +3,7 @@
 @font-face { font-family: 'After Class Sans'; src: url('./assets/fonts-v2/dm-sans-500.ttf') format('truetype'); font-weight: 500; font-display: swap; }
 @font-face { font-family: 'After Class Sans'; src: url('./assets/fonts-v2/dm-sans-600.ttf') format('truetype'); font-weight: 600; font-display: swap; }
 @font-face { font-family: 'After Class Sans'; src: url('./assets/fonts-v2/dm-sans-700.ttf') format('truetype'); font-weight: 700; font-display: swap; }
-.scene-shell { --font: 'After Class Sans', system-ui, sans-serif; font-family: var(--font); }
+.scene-shell { --font: 'After Class Body', system-ui, sans-serif; font-family: var(--font); }
 .bell-mark { display: inline-block; width: 30px; height: 38px; background: url('./assets/scenes-v2/bell.webp') center / contain no-repeat; }
 .review .line { margin: 12px 0 16px; padding: 0 0 0 14px; border-left: 4px solid #b3b0a2; }
 .review .line.tutor { border-color: #cd8f6b; }.review .line.you { border-color: #3159a1; }
@@ -14,7 +14,7 @@
 .review .citation::before { content: ""; display: inline-block; width: 17px; height: 17px; margin-right: 8px; vertical-align: middle; background: url('./assets/icons-v2/external-link.svg') center / contain no-repeat; }
 .review .source-heading { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
 .review .source-heading .eyebrow { display: none; }
-.review .source-heading h2 { font: 400 1.5rem/1.25 'After Class Serif', Georgia, serif; margin: 0 0 4px; }
+.review .source-heading h2 { font: 400 1rem/1.5 var(--body); margin: 0 0 4px; }
 .review .source-selection-label { margin: 0 0 6px; font-size: .82rem; line-height: 1.4; }
 .review .source-heading button { padding: 0; min-height: 32px; font-size: .85rem; background: transparent; border: 0; color: var(--accent); text-decoration: underline; }
 .review > .note { position: relative; z-index: 5; max-width: 94%; margin: 0 auto 12px; }
