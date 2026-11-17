@@ -43,6 +43,7 @@ describe("the review app bundle", () => {
     const urls = [...css.matchAll(/url\(["']?(\/app\/[^"')]+)["']?\)/g)].map((m) => m[1]!.slice("/app/".length));
     expect(urls.filter((u) => u.endsWith(".ttf")).length).toBeGreaterThanOrEqual(6);
     expect(urls.filter((u) => /^pixelify-sans-[a-z0-9]{8}\.ttf$/.test(u))).toHaveLength(1);
+    expect(urls.filter((u) => /^press-start-2p-[a-z0-9]{8}\.ttf$/.test(u))).toHaveLength(1);
     expect(urls.filter((u) => !existsSync(join(out, u)))).toEqual([]);
   });
 
@@ -150,7 +151,7 @@ describe("the review app bundle", () => {
   test("the shipped notices credit Meshy for the companion frames under CC BY 4.0, beside the font, icon and bundled package licenses", () => {
     const { out } = built();
     const notices = readFileSync(join(out, "asset-notices.txt"), "utf8");
-    for (const name of ["Feather icons", "Young Serif", "DM Sans", "Pixelify Sans", "Companion animation frames and room unlock objects", "react", "react-dom", "scheduler", "zod"]) expect(notices).toContain(`${name}\n\n`);
+    for (const name of ["Feather icons", "Young Serif", "DM Sans", "Pixelify Sans", "Press Start 2P", "Companion animation frames and room unlock objects", "react", "react-dom", "scheduler", "zod"]) expect(notices).toContain(`${name}\n\n`);
     expect(notices).toContain("Credit: Meshy (https://www.meshy.ai)");
     expect(notices).toContain("https://creativecommons.org/licenses/by/4.0/");
   });
