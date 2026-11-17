@@ -118,8 +118,7 @@ function FirstCapture({ extensionId }: { readonly extensionId: string | null }) 
         <>
           <ol>{FIRST_CAPTURE_STEPS.map((step) => <li key={step}>{step}</li>)}</ol>
           <p className="muted">
-            The After Class backend answered this page, so it is running. This page can't tell whether the extension is connected to it.
-            If the extension says it can't reach the backend, open the extension's options, paste the pairing token the backend printed, and choose Save and test.
+            Extension can't connect? Open its options, paste the pairing token from the terminal where the backend runs, and choose Save and test.
           </p>
         </>
       ) : (
@@ -129,7 +128,7 @@ function FirstCapture({ extensionId }: { readonly extensionId: string | null }) 
             {extensionId !== "" && <><a href={storeListing(extensionId)} target="_blank" rel="noreferrer">Get the extension from the Chrome Web Store</a>{" · "}</>}
             <Link to={{ page: "connect_extension" }}>Connect this browser</Link>
           </p>
-          <p className="muted">This page can't tell whether the extension is connected. The Connect page connects it, and Connected browsers lists every browser on your account.</p>
+          <p className="muted">Already connected? Your lectures show up here after your first capture.</p>
         </>
       )}
     </section>
