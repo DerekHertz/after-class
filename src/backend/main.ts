@@ -50,6 +50,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { buildApp } from "../../scripts/build-app";
+import { parseExtensionIds } from "../shared/extension-ids";
 import { stableId } from "../shared/ids";
 import type { CaptureId, EvidenceId, ReviewId, UserId } from "../shared/ids";
 import { memoDep } from "./deps";
@@ -477,7 +478,8 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   // Hosted mode has no pairing token: sign-in replaces it.
   const token = auth.kind === "local" ? loadPairingToken(join(configDir, "pairing-token")) : "";
   const port = options.port ?? parsePort(env.AFTERCLASS_PORT) ?? DEFAULT_PORT;
-  const extensionId = env.AFTERCLASS_EXTENSION_ID ?? "";
+  // One id or a comma-separated list, first id primary. A malformed id stops startup.
+  const extensionId = parseExtensionIds(env.AFTERCLASS_EXTENSION_ID).join(",");
 
   const dataDir = resolve(env.AFTERCLASS_DATA ?? "data");
   mkdirSync(dataDir, { recursive: true });

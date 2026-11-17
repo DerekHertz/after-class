@@ -100,13 +100,13 @@ variable "log_retention_days" {
 }
 
 variable "extension_id" {
-  description = "Chrome Web Store id of the hosted extension. Null lets no extension connect."
+  description = "Id of the hosted extension, or a comma-separated list of ids. The first is the Chrome Web Store id the store link names. Null lets no extension connect."
   type        = string
   default     = null
 
   validation {
-    condition     = var.extension_id == null ? true : can(regex("^[a-p]{32}$", var.extension_id))
-    error_message = "extension_id must be 32 letters from a to p."
+    condition     = var.extension_id == null ? true : alltrue([for id in split(",", var.extension_id) : can(regex("^[a-p]{32}$", trimspace(id)))])
+    error_message = "extension_id must be one id or a comma-separated list of ids, each 32 letters from a to p."
   }
 }
 

@@ -11,12 +11,13 @@ import type { AppApi } from "./api";
 import type { DeviceId } from "../shared/ids";
 import type { ConnectMessage, ConnectReply } from "../shared/wire";
 import { ErrorNote, Link, useAsync } from "./ui";
+import { splitExtensionIds } from "../shared/extension-ids";
 import { objectFrame } from "./room-object";
 
 /** Where friends install the extension. A placeholder until the listing is published: the store's address for the pinned id. */
-export const storeListing = (extensionId: string) => `https://chromewebstore.google.com/detail/${encodeURIComponent(extensionId)}`;
+export const storeListing = (extensionIds: string) => `https://chromewebstore.google.com/detail/${encodeURIComponent(splitExtensionIds(extensionIds)[0] ?? "")}`;
 
-/** The pinned extension's id, which the hosted page carries; null on the local page. */
+/** The pinned extension ids, comma-separated with the primary first, which the hosted page carries; null on the local page. */
 export const extensionIdOf = (doc: Document): string | null => doc.querySelector<HTMLMetaElement>('meta[name="afterclass-extension-id"]')?.content ?? null;
 
 /** The part of `chrome.runtime` a web page can reach. */
@@ -80,7 +81,13 @@ export async function connectExtension(deps: {
     return { kind: "failed", detail: e instanceof Error ? e.message : String(e) };
   }
   if (!deps.alive()) return null;
-  return sendToExtension(deps.runtime, deps.extensionId, { type: "afterclass_connect", code });
+  // The first id with an installed extension answers. An id with none fails fast as not_installed, so try the next.
+  let outcome: ConnectOutcome = { kind: "not_installed" };
+  for (const id of splitExtensionIds(deps.extensionId)) {
+    outcome = await sendToExtension(deps.runtime, id, { type: "afterclass_connect", code });
+    if (outcome.kind !== "not_installed") return outcome;
+  }
+  return outcome;
 }
 
 /** How the connected browser is named in the list, from what the browser says about itself. */
