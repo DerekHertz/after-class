@@ -595,6 +595,8 @@ describe("extension build", () => {
     expect(loaded.some((file) => file.endsWith(".css"))).toBe(true);
     expect(loaded.some((file) => file.endsWith(".ttf"))).toBe(true);
     expect(existsSync(join(out, "fonts/OFL-PixelifySans.txt"))).toBe(true);
+    expect(existsSync(join(out, "fonts/press-start-2p.ttf"))).toBe(true);
+    expect(existsSync(join(out, "fonts/OFL-PressStart2P.txt"))).toBe(true);
   });
 
   test("the product build has no autostart code and keeps its name; only the test build has it, under a name that says so", async () => {

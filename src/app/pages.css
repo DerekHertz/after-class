@@ -23,7 +23,7 @@
 .scene-content > .room-paper > * { image-rendering: auto; }
 
 /* The writing on the sheet, standalone or inside the Saved notes notebook. */
-.notebook-page { color: var(--fg); font: 400 1.05rem/1.55 var(--pixel); overflow-wrap: anywhere; }
+.notebook-page { color: var(--fg); font: 400 .75rem/1.8 var(--body); overflow-wrap: anywhere; }
 .notebook-page :is(h1, h2, h3, h4, h5) { color: var(--fg); font-family: var(--pixel); font-weight: 600; line-height: 1.2; }
 .notebook-page h1 { margin: 2px 0 0; font-size: clamp(1.7rem, 3.2vw, 2.4rem); }
 .notebook-page h2 { margin: 0 0 8px; font-size: clamp(1.3rem, 2.2vw, 1.6rem); }
@@ -41,14 +41,14 @@
 .page-loading { color: var(--muted); padding-block: 12px; }
 
 /* Controls are square and drawn in the page's ink; the one main action wears the room's navigation colour. */
-.notebook-page :is(button, select), .notebook-page .page-heading nav a, .home-primary a { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin: 0; padding: 6px 14px; border: 2px solid var(--fg); border-radius: 0; background: var(--note-bg); color: var(--fg); font: 600 1rem/1.15 var(--pixel); text-align: left; text-decoration: none; box-shadow: 0 3px 0 color-mix(in srgb, var(--fg) 30%, transparent); cursor: pointer; }
+.notebook-page :is(button, select), .notebook-page .page-heading nav a, .home-primary a { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin: 0; padding: 6px 14px; border: 2px solid var(--fg); border-radius: 0; background: var(--note-bg); color: var(--fg); font: 400 .5rem/1.6 var(--body); text-align: left; text-decoration: none; box-shadow: 0 3px 0 color-mix(in srgb, var(--fg) 30%, transparent); cursor: pointer; }
 .notebook-page button:hover:not(:disabled), .notebook-page .page-heading nav a:hover { background: color-mix(in srgb, var(--fg) 16%, transparent); }
 .notebook-page button:not(:disabled):active { translate: 0 2px; box-shadow: 0 1px 0 color-mix(in srgb, var(--fg) 30%, transparent); }
 .notebook-page button:disabled { opacity: .55; cursor: not-allowed; }
 .notebook-page :is(.page-primary, .home-primary a, .notebook-views button[aria-pressed="true"]) { border-color: var(--fr-bar); background: var(--fr-bar); color: var(--fr-bar-ink); }
 .notebook-page :is(.page-primary, .home-primary a):hover:not(:disabled) { border-color: var(--fg); background: var(--fg); }
 .notebook-page .notebook-views button[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--fr-bar-ink), 0 3px 0 #00000059; }
-.notebook-page :is(textarea, input:not([type="checkbox"], [type="radio"])) { min-height: 44px; padding: 8px 12px; border: 2px solid var(--fg); border-radius: 0; background: color-mix(in srgb, #fffaf0 70%, transparent); color: var(--fg); font: 400 1rem/1.55 var(--pixel); box-shadow: inset 2px 2px 0 #0000001a; }
+.notebook-page :is(textarea, input:not([type="checkbox"], [type="radio"])) { min-height: 44px; padding: 8px 12px; border: 2px solid var(--fg); border-radius: 0; background: color-mix(in srgb, #fffaf0 70%, transparent); color: var(--fg); font: 400 1rem/1.7 var(--body); box-shadow: inset 2px 2px 0 #0000001a; }
 .notebook-page :is(input[type="checkbox"], input[type="radio"]) { width: 18px; height: 18px; accent-color: var(--fg); }
 .notebook-page summary { min-height: 44px; padding: 10px 0; color: var(--fg); font-weight: 600; cursor: pointer; }
 .notebook-page .note { margin: 12px 0; padding: 8px 12px; border: 2px solid var(--border); border-radius: 0; background: var(--note-bg); }
@@ -64,7 +64,7 @@
 .invitation-offers { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 20px; }
 .invitation-offer { flex: 1 1 14rem; max-width: 24rem; }
 .invitation-offer button { margin-bottom: 8px; }
-.invitation-offer .muted { display: block; font-size: .95rem; }
+.invitation-offer .muted { display: block; font-size: .5rem; }
 .invitation-more { flex: 1 1 100%; }
 .invitation-more p { margin-block: 8px 0; }
 .scope-topics { margin-block: 8px 12px; padding-left: 1.2em; }
@@ -74,7 +74,7 @@
 .home-page .lecture-list > li + li { margin-top: 12px; }
 .home-empty ol { padding-left: 24px; }
 .home-empty li + li { margin-top: 8px; }
-.home-troubleshoot { margin-block: 12px 0; color: var(--muted); font-size: .95rem; }
+.home-troubleshoot { margin-block: 12px 0; color: var(--muted); font-size: .5rem; }
 .home-troubleshoot form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .home-troubleshoot input { max-width: 100%; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
 
@@ -84,7 +84,7 @@
 .record-note:last-child { border-bottom: 0; padding-bottom: 0; }
 .record-note-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .record-note-heading h3, .record-note-heading h4 { margin: 0; }
-.note-reference { font-size: .8rem; color: var(--muted); margin: 8px 0 20px; }
+.note-reference { font-size: .5rem; color: var(--muted); margin: 8px 0 20px; }
 :is(.record-note, .topic-part) :is(.author-learner, .author-tutor, .author-source) { padding-left: 14px; border-left: 3px solid var(--border); white-space: pre-wrap; }
 :is(.record-note, .topic-part, .observation-context) .author-learner { border-color: var(--accent); }
 :is(.record-note, .topic-part, .observation-context) .author-tutor { border-color: #b27d55; }
@@ -114,7 +114,7 @@
 .notebook-lecture h2 { margin: 0; }
 .notebook-topic { padding: 20px 0; border-top: 2px dashed var(--border); }
 .notebook-topic h3 { margin: 0 0 8px; font-size: 1.4rem; }
-.notebook-topic h4 { margin: 20px 0 8px; color: var(--muted); font-size: .85rem; letter-spacing: .12em; text-transform: uppercase; }
+.notebook-topic h4 { margin: 20px 0 8px; color: var(--muted); font-size: .5rem; text-transform: uppercase; }
 .topic-status { margin: 0 0 8px; }
 .topic-part > .record-note { padding: 0 0 12px; border-bottom: 0; }
 .topic-frame { margin: 12px 0; }
@@ -126,15 +126,15 @@
 /* Usage: the numbers stay in the plain face with tabular figures; headings are written in the page's hand. */
 .usage-table-scroll { max-width: 100%; overflow-x: auto; }
 .usage-table-scroll table { width: 100%; border-collapse: collapse; font: 400 1rem/1.4 var(--font); font-variant-numeric: tabular-nums; }
-.usage-table-scroll caption { padding: 12px 0; color: var(--muted); font: 400 1rem/1.4 var(--pixel); text-align: left; }
-.usage-table-scroll th { color: var(--muted); font: 600 .85rem/1.3 var(--pixel); letter-spacing: .1em; text-transform: uppercase; border-bottom: 2px solid var(--fg); }
+.usage-table-scroll caption { padding: 12px 0; color: var(--muted); font: 400 .5rem/1.8 var(--body); text-align: left; }
+.usage-table-scroll th { color: var(--muted); font: 400 .5rem/1.8 var(--body); overflow-wrap: normal; white-space: nowrap; padding-right: 12px; text-transform: uppercase; border-bottom: 2px solid var(--fg); }
 .usage-table-scroll :is(th, td) { padding: 10px 14px; text-align: left; }
 .usage-table-scroll td { border-bottom: 1px dashed var(--border); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 @media (max-width: 600px) {
   .scene-content > .room-paper { --u: .22px; width: calc(100% - 16px); }
-  .notebook-page { font-size: 1rem; }
+  .notebook-page { font-size: .75rem; }
   .page-heading { align-items: flex-start; }
   .invitation-offer { max-width: none; }
   .record-note-heading { align-items: flex-start; }

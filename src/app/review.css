@@ -1,4 +1,4 @@
-.source-selection-label, .composer-shortcut { font-size: .85rem; color: var(--muted); }
+.source-selection-label, .composer-shortcut { font-size: .5rem; color: var(--muted); }
 .review .citation { color: var(--accent); background: transparent; border: 0; text-decoration: underline; padding-inline: 0; text-align: left; }
 .scope-source-list { display: flex; flex-direction: column; gap: 8px; margin-block: 16px; }
 .scope-source-list button { text-align: left; }
@@ -9,11 +9,11 @@
 .review .composer .assist-actions button { min-height: 40px; padding: 6px 14px; font: .95rem/1.2 'After Class Sans', system-ui, sans-serif; }
 /* One source panel: captured transcript and frames, then the tutor-written diagram, each labelled with where it came from. */
 .review .evidence-kind { margin: 12px 0 4px; color: var(--muted); font: bold .75rem/1.3 'After Class Sans', system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
-.review .diagram-provenance { margin: 0 0 4px; font-size: .85rem; }
+.review .diagram-provenance { margin: 0 0 4px; font-size: .5rem; }
 .review .tutor-diagram:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 .review .review-help summary { font-style: italic; }
 .source-heading button { margin: 4px 8px 4px 0; }
-.review .notebook-heading button { font-size: .85rem; }
+.review .notebook-heading button { font-size: .5rem; }
 /* The starting point is a compact setup form, shown in place of the conversation until the first turn. */
 .review .topic-checklist { display: grid; gap: 10px; max-width: 44rem; }
 .review .topic-checklist h2 { margin: 0; font-size: 1.35rem; }
@@ -30,11 +30,11 @@
 .diagram-frame .frame { max-width: 100%; height: auto; }
 .diagram-lines { padding-left: 20px; }
 .diagram-lines li { margin: 6px 0; }
-.diagram-lines .citation { font-size: .8rem; margin-left: 8px; }
-.diagram-sources-toggle { font-size: .85rem; margin: 4px 0; }
+.diagram-lines .citation { font-size: .5rem; margin-left: 8px; }
+.diagram-sources-toggle { font-size: .5rem; margin: 4px 0; }
 /* The diagram's frame is never cropped or height-capped; the folio's page scrolls to it (front-row.css). */
 .scene-shell .review .room-object .diagram-panel .diagram-frame .frame { display: block; width: 100%; height: auto; max-height: none; object-fit: contain; }
-.review .review-topics { flex: 0 0 auto; font-size: .85rem; margin-top: 8px; }
+.review .review-topics { flex: 0 0 auto; font-size: .5rem; margin-top: 8px; }
 .review .review-topics ul { list-style: none; padding-left: 0; }
 .review .current-exchange .eyebrow { margin: 10px 0 0; font-weight: bold; }
 .review .current-exchange .line { margin: 8px 0 12px; }

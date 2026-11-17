@@ -50,6 +50,8 @@ const STATIC_FILES: readonly { readonly from: string; readonly to: string }[] = 
   ...[16, 32, 48, 128].map((n) => ({ from: `icons/icon-${n}.png`, to: `icons/icon-${n}.png` })),
   { from: "../app/assets/fonts-v2/pixelify-sans.ttf", to: "fonts/pixelify-sans.ttf" },
   { from: "../app/assets/fonts-v2/OFL-PixelifySans.txt", to: "fonts/OFL-PixelifySans.txt" },
+  { from: "../app/assets/fonts-v2/press-start-2p.ttf", to: "fonts/press-start-2p.ttf" },
+  { from: "../app/assets/fonts-v2/OFL-PressStart2P.txt", to: "fonts/OFL-PressStart2P.txt" },
 ];
 
 const keepExtensionOnly: Bun.BunPlugin = {
