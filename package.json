@@ -9,6 +9,7 @@
     "test": "bun test",
     "dev": "bun run src/backend/main.ts",
     "build:ext": "bun run scripts/build-extension.ts",
+    "build:ext:store": "AFTERCLASS_EXT_STORE=1 AFTERCLASS_EXT_BACKEND=https://useafterclass.com bun run scripts/build-extension.ts",
     "build:app": "bun run scripts/build-app.ts",
     "build:art": "bun run scripts/build-art.ts",
     "lint": "oxlint src scripts test e2e --max-warnings 0",

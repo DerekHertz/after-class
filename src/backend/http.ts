@@ -36,6 +36,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import packageJson from "../../package.json" with { type: "json" };
+import { isExtensionOrigin } from "../shared/extension-ids";
 import { parseId } from "../shared/ids";
 import type { IdKind } from "../shared/ids";
 import type { CaptureId, ConceptId, DeviceId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, SourceId, TurnId, UserId } from "../shared/ids";
@@ -117,7 +118,7 @@ export function authorize(headers: Headers, expected: AuthConfig, opts: { readon
   if (origin === null) {
     const site = headers.get("sec-fetch-site");
     if (site === "cross-site" || site === "same-site") return { ok: false, status: 403 };
-  } else if (origin === `chrome-extension://${extensionId}`) kind = "extension";
+  } else if (isExtensionOrigin(origin, extensionId)) kind = "extension";
   else if (origin === `http://127.0.0.1:${port}` || origin === `http://localhost:${port}`) kind = "review_app";
   else return { ok: false, status: 403 };
 
@@ -781,7 +782,7 @@ export function hostedOrigin(headers: Headers, hosted: Pick<HostedAuth, "publicO
     return site === "cross-site" || site === "same-site" ? { ok: false, status: 403 } : { ok: true, origin: "none" };
   }
   if (origin === hosted.publicOrigin) return { ok: true, origin: "review_app" };
-  if (hosted.extensionId !== "" && origin === `chrome-extension://${hosted.extensionId}`) return { ok: true, origin: "extension" };
+  if (isExtensionOrigin(origin, hosted.extensionId)) return { ok: true, origin: "extension" };
   return { ok: false, status: 403 };
 }
 
