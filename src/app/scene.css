@@ -1,6 +1,6 @@
 .scene-shell {
   --bg: #f7efdd; --fg: #30271f; --muted: #706352; --border: #cbb99b; --surface: #fff6e3; --accent: #244c9c; --danger: #a52f28; --note-bg: #f0e3cb;
-  --pixel: 'After Class Pixel', var(--font); --body: 'After Class Body', var(--font);
+  --body: 'After Class Body', var(--font);
   min-height: 100dvh; color: var(--fg); position: relative; isolation: isolate;
 }
 .scene-shell[data-scene="projection-booth"] { --bg: #2c292e; --fg: #f4e6c9; --muted: #cfbfa3; --border: #72604d; --surface: #fff2d8; --accent: #b7d0ff; }
@@ -12,6 +12,11 @@
 .scene-masthead > .sign-out { margin-left: 8px; border-radius: 0; cursor: pointer; white-space: nowrap; }
 .sign-in-page { text-align: center; }
 .sign-in-widget { display: flex; justify-content: center; margin-top: 16px; }
+/* Clerk's own card sits at the left of its root box unless told otherwise, so the root box spans the panel and centres the card. */
+.sign-in-widget :is(.cl-rootBox, .cl-cardBox) { width: 100% !important; max-width: 25rem; margin-inline: auto !important; }
+.sign-in-widget .cl-rootBox { display: flex; flex-direction: column; align-items: center !important; justify-content: center; }
+.sign-in-widget .cl-card { margin-inline: auto !important; max-width: 100%; }
+.sign-in-widget :is(.cl-rootBox, .cl-card) :is(h1, h2, h3, h4, p, button, input, a, label, span, div) { font-family: var(--body) !important; overflow-wrap: anywhere; }
 
 /* Room & companion opens as a sheet of the room's parchment, in the same ink, type and square controls as the pages. */
 .appearance-options {

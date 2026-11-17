@@ -1,6 +1,5 @@
 /* The popup and the options page are written on the same parchment, ink and pixel hand as the app's pages. The font is
    bundled with the extension (scripts/build-extension.ts), so neither page makes a network request for it. */
-@font-face { font-family: 'After Class Pixel'; src: url('fonts/pixelify-sans.ttf') format('truetype'); font-weight: 400 700; font-display: swap; }
 @font-face { font-family: 'After Class Body'; src: url('fonts/press-start-2p.ttf') format('truetype'); font-weight: 400; font-display: swap; }
 
 :root {
@@ -8,13 +7,12 @@
   --paper: #fbf3e2; --paper-deep: #f1e2c2; --ink: #2a1a0b; --ink-soft: #563719; --rule: #56371966; --link: #1b3a7a;
   --bar: #1a2b3b; --bar-ink: #f6ecd8; --focus: #c2410c;
   --ok: #1f6b3a; --warn: #8a4b00; --bad: #821a12;
-  --pixel: 'After Class Pixel', system-ui, sans-serif;
   --body: 'After Class Body', system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--paper); color: var(--ink); font: 400 8px/1.8 var(--body); font-synthesis: none; }
-h1 { margin: 0; font: 600 20px/1.2 var(--pixel); }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 400 12px/1.6 var(--body); font-synthesis: none; }
+h1 { margin: 0; font: 400 16px/1.5 var(--body); }
 a { color: var(--link); text-underline-offset: 3px; }
 code { font-family: var(--mono); font-size: 13px; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -27,15 +25,16 @@ button.primary:hover:not(:disabled) { border-color: var(--ink); background: var(
 button:disabled { opacity: .55; cursor: default; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; }
 
-/* Popup: a 340 px slip, topped with the room's navigation colour. */
-[data-page="popup"] body { width: 340px; }
+/* Popup: a 380 px slip, topped with the room's navigation colour. */
+[data-page="popup"] body { width: 380px; }
 [data-page="popup"] main { display: grid; gap: 10px; padding: 12px 14px 14px; border-top: 6px solid var(--bar); }
 .status { justify-self: start; padding: 4px 10px; border: 2px solid currentColor; border-left-width: 8px; color: var(--ink-soft); }
 :is(.status, dd)[data-tone="ok"] { color: var(--ok); }
 :is(.status, dd)[data-tone="warn"] { color: var(--warn); }
 :is(.status, dd)[data-tone="bad"] { color: var(--bad); }
-dl { display: grid; grid-template-columns: 9em 1fr; gap: 4px 8px; margin: 0; padding-top: 8px; border-top: 2px dashed var(--rule); }
+dl { display: grid; grid-template-columns: 1fr; gap: 2px; /* each label stacks above its value, so no label column has to fit the longest label */ margin: 0; padding-top: 8px; border-top: 2px dashed var(--rule); }
 dt { color: var(--ink-soft); }
+dt:not(:first-child) { margin-top: 8px; }
 dd { margin: 0; overflow-wrap: anywhere; }
 .invite { display: grid; gap: 8px; padding: 8px 10px; border: 2px solid var(--warn); border-left-width: 8px; background: #fbe9c8; }
 .note { color: var(--ink-soft); }

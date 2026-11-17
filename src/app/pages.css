@@ -24,16 +24,16 @@
 
 /* The writing on the sheet, standalone or inside the Saved notes notebook. */
 .notebook-page { color: var(--fg); font: 400 .75rem/1.8 var(--body); overflow-wrap: anywhere; }
-.notebook-page :is(h1, h2, h3, h4, h5) { color: var(--fg); font-family: var(--pixel); font-weight: 600; line-height: 1.2; }
-.notebook-page h1 { margin: 2px 0 0; font-size: clamp(1.7rem, 3.2vw, 2.4rem); }
-.notebook-page h2 { margin: 0 0 8px; font-size: clamp(1.3rem, 2.2vw, 1.6rem); }
-.notebook-page h3 { margin: 16px 0 6px; font-size: 1.2rem; }
+.notebook-page :is(h1, h2, h3, h4, h5) { color: var(--fg); font-family: var(--body); font-weight: 400; line-height: 1.5; }
+.notebook-page h1 { margin: 2px 0 0; font-size: 1rem; line-height: 1.5; }
+.notebook-page h2 { margin: 0 0 8px; font-size: 1rem; }
+.notebook-page h3 { margin: 16px 0 6px; font-size: .75rem; }
 .notebook-page .muted { color: var(--muted); }
 .notebook-page a { color: var(--accent); text-underline-offset: 3px; }
 .notebook-page :focus-visible { outline: 3px solid var(--fg); outline-offset: 3px; }
 .page-heading { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px 20px; margin: 0 0 8px; padding: 0 0 12px; border-bottom: 2px dashed var(--border); }
 .page-heading nav { display: flex; flex-wrap: wrap; gap: 8px; }
-.page-kicker { margin: 0 0 4px; color: var(--muted); font: 600 .85rem/1.3 var(--pixel); letter-spacing: .12em; text-transform: uppercase; }
+.page-kicker { margin: 0 0 4px; color: var(--muted); font: 400 .625rem/1.5 var(--body); letter-spacing: .12em; text-transform: uppercase; }
 .notebook-page :is(.invitation-paper, .capture-source-paper, .record-section) { margin: 0; padding: 20px 0; border-bottom: 2px dashed var(--border); }
 .notebook-page :is(.invitation-paper, .capture-source-paper, .record-section):last-child { border-bottom: 0; padding-bottom: 4px; }
 .notebook-page :is(.invitation-paper, .capture-source-paper, .record-section) > h2 { margin-top: 0; }
@@ -57,7 +57,7 @@
 .notebook-page .frame { display: block; max-width: 100%; height: auto; border: 3px solid var(--fg); border-radius: 0; background: var(--note-bg); }
 /* Watched intervals, gaps and IDs are data, kept in the plain face so times and numbers read exactly. */
 .notebook-page .inspector { font: 400 .95rem/1.5 var(--font); font-variant-numeric: tabular-nums; }
-.notebook-page .inspector h4 { margin: 12px 0 4px; font-size: 1rem; }
+.notebook-page .inspector h4 { margin: 12px 0 4px; font-size: .75rem; }
 
 /* Home and capture. */
 .invitation-paper p { max-width: 65ch; }
@@ -69,7 +69,7 @@
 .invitation-more p { margin-block: 8px 0; }
 .scope-topics { margin-block: 8px 12px; padding-left: 1.2em; }
 .home-continue + .home-continue { border-top: 2px dashed var(--border); margin-top: 16px; padding-top: 16px; }
-.home-continue h3 { margin: 0 0 4px; font-size: 1.3rem; }
+.home-continue h3 { margin: 0 0 4px; font-size: .75rem; }
 .home-page .lecture-list { padding-left: 20px; }
 .home-page .lecture-list > li + li { margin-top: 12px; }
 .home-empty ol { padding-left: 24px; }
@@ -113,7 +113,7 @@
 .notebook-reviews { list-style: none; padding: 0; margin: 0; }
 .notebook-lecture h2 { margin: 0; }
 .notebook-topic { padding: 20px 0; border-top: 2px dashed var(--border); }
-.notebook-topic h3 { margin: 0 0 8px; font-size: 1.4rem; }
+.notebook-topic h3 { margin: 0 0 8px; font-size: 1rem; }
 .notebook-topic h4 { margin: 20px 0 8px; color: var(--muted); font-size: .5rem; text-transform: uppercase; }
 .topic-status { margin: 0 0 8px; }
 .topic-part > .record-note { padding: 0 0 12px; border-bottom: 0; }

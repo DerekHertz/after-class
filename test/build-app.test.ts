@@ -42,7 +42,7 @@ describe("the review app bundle", () => {
     const { out, css } = built();
     const urls = [...css.matchAll(/url\(["']?(\/app\/[^"')]+)["']?\)/g)].map((m) => m[1]!.slice("/app/".length));
     expect(urls.filter((u) => u.endsWith(".ttf")).length).toBeGreaterThanOrEqual(6);
-    expect(urls.filter((u) => /^pixelify-sans-[a-z0-9]{8}\.ttf$/.test(u))).toHaveLength(1);
+    expect(urls.filter((u) => /^press-start-2p-[a-z0-9]{8}\.ttf$/.test(u))).toHaveLength(1);
     expect(urls.filter((u) => /^press-start-2p-[a-z0-9]{8}\.ttf$/.test(u))).toHaveLength(1);
     expect(urls.filter((u) => !existsSync(join(out, u)))).toEqual([]);
   });
@@ -66,11 +66,11 @@ describe("the review app bundle", () => {
     expect(loaded.filter((f) => !existsSync(join(out, f)))).toEqual([]);
   });
 
-  test("the signed-out screen's two fonts are preloaded by the page and hidden, not swapped, until they arrive", () => {
+  test("the signed-out screen's font is preloaded by the page and hidden, not swapped, until it arrives", () => {
     const { out, css } = built();
     const page = readFileSync(join(out, "index.html"), "utf8");
     const preloaded = [...page.matchAll(/<link rel="preload" href="\/app\/([^"]+\.ttf)" as="font" type="font\/ttf" crossorigin>/g)].map((m) => m[1]!);
-    expect(preloaded.map((f) => f.replace(/-[a-z0-9]{8}\.ttf$/, ""))).toEqual(["pixelify-sans", "dm-sans-400"]);
+    expect(preloaded.map((f) => f.replace(/-[a-z0-9]{8}\.ttf$/, ""))).toEqual(["press-start-2p"]);
     for (const file of preloaded) {
       expect(existsSync(join(out, file))).toBe(true);
       const face = css.match(new RegExp(`@font-face\\{[^}]*${file}[^}]*\\}`))?.[0];
@@ -151,7 +151,7 @@ describe("the review app bundle", () => {
   test("the shipped notices credit Meshy for the companion frames under CC BY 4.0, beside the font, icon and bundled package licenses", () => {
     const { out } = built();
     const notices = readFileSync(join(out, "asset-notices.txt"), "utf8");
-    for (const name of ["Feather icons", "Young Serif", "DM Sans", "Pixelify Sans", "Press Start 2P", "Companion animation frames and room unlock objects", "react", "react-dom", "scheduler", "zod"]) expect(notices).toContain(`${name}\n\n`);
+    for (const name of ["Feather icons", "Young Serif", "DM Sans", "Press Start 2P", "Companion animation frames and room unlock objects", "react", "react-dom", "scheduler", "zod"]) expect(notices).toContain(`${name}\n\n`);
     expect(notices).toContain("Credit: Meshy (https://www.meshy.ai)");
     expect(notices).toContain("https://creativecommons.org/licenses/by/4.0/");
   });

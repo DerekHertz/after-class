@@ -12,7 +12,7 @@ export type PublicPage = "landing" | "privacy";
 
 type Files = {
   readonly plate: string | null;
-  readonly pixel: string | null;
+  readonly heading: string | null;
   readonly sans: string | null;
   readonly icon16: string | null;
   readonly icon32: string | null;
@@ -44,7 +44,7 @@ export function appFiles(appDir: string): Files {
   }
   return {
     plate: stemFile(names, "last-desk", "webp"),
-    pixel: stemFile(names, "pixelify-sans", "ttf"),
+    heading: stemFile(names, "press-start-2p", "ttf"),
     sans: stemFile(names, "dm-sans-400", "ttf"),
     icon16: stemFile(names, "favicon-16", "png"),
     icon32: stemFile(names, "favicon-32", "png"),
@@ -68,8 +68,8 @@ const CSS = `
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;font:1.0625rem/1.6 'After Class Sans',system-ui,sans-serif;color:#1c1917;background:#2a2622;display:flex;align-items:center;justify-content:center;padding:24px 16px}
 main{max-width:40rem;width:100%;background:#fafaf9;border:3px solid #1c1917;border-radius:10px;padding:32px 28px;box-shadow:0 8px 0 rgba(28,25,23,.35)}
-h1,h2{font-family:'After Class Pixel',system-ui,sans-serif;font-weight:700;line-height:1.15;margin:0 0 .5em}
-h1{font-size:2.4rem}h2{font-size:1.4rem;margin-top:1.6em}
+h1,h2{font-family:'After Class Heading',system-ui,sans-serif;font-weight:400;line-height:1.5;margin:0 0 .75em;overflow-wrap:break-word}
+h1{font-size:1.5rem}h2{font-size:1rem;margin-top:1.6em}
 p,li{margin:0 0 .9em}ul{padding-left:1.2em;margin:0 0 .9em}
 .lede{font-size:1.2rem}
 .button{display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;font-weight:700;padding:12px 26px;border-radius:6px;border:2px solid #1c1917}
@@ -78,16 +78,16 @@ p,li{margin:0 0 .9em}ul{padding-left:1.2em;margin:0 0 .9em}
 a{color:#1d4ed8}
 nav{margin-top:1.6em}
 @media (min-width:700px){body{background-image:var(--plate);background-position:50% 100%;background-size:cover;background-repeat:no-repeat;background-attachment:fixed}}
-@media (max-width:480px){h1{font-size:2rem}main{padding:24px 18px}}
+@media (max-width:480px){h1{font-size:1rem}main{padding:24px 18px}}
 `;
 
 function shell(title: string, description: string, canonical: string, files: Files, body: string): string {
   const fonts = [
-    files.pixel === null ? "" : `@font-face{font-family:'After Class Pixel';src:url('${files.pixel}') format('truetype');font-weight:400 700;font-display:swap}`,
+    files.heading === null ? "" : `@font-face{font-family:'After Class Heading';src:url('${files.heading}') format('truetype');font-weight:400;font-display:swap}`,
     files.sans === null ? "" : `@font-face{font-family:'After Class Sans';src:url('${files.sans}') format('truetype');font-weight:400;font-display:swap}`,
   ].join("");
   const plate = files.plate === null ? "" : `:root{--plate:url('${files.plate}')}`;
-  const preloads = [files.pixel, files.sans].flatMap((f) => (f === null ? [] : [`<link rel="preload" href="${f}" as="font" type="font/ttf" crossorigin>`])).join("");
+  const preloads = [files.heading, files.sans].flatMap((f) => (f === null ? [] : [`<link rel="preload" href="${f}" as="font" type="font/ttf" crossorigin>`])).join("");
   const icons = [
     files.icon32 === null ? "" : `<link rel="icon" type="image/png" sizes="32x32" href="${files.icon32}">`,
     files.icon16 === null ? "" : `<link rel="icon" type="image/png" sizes="16x16" href="${files.icon16}">`,

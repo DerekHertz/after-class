@@ -170,11 +170,11 @@ describe("hosted requests", () => {
   test("the public pages draw with the built app's room art and fonts when it has them, and read fine without", async () => {
     expect((await raw(s.port, "/", {})).body).not.toContain("url('/app/");
     writeFileSync(join(s.appDir, "last-desk-0a1b2c3d.webp"), "x");
-    writeFileSync(join(s.appDir, "pixelify-sans-0a1b2c3d.ttf"), "x");
+    writeFileSync(join(s.appDir, "press-start-2p-0a1b2c3d.ttf"), "x");
     writeFileSync(join(s.appDir, "dm-sans-400-0a1b2c3d.ttf"), "x");
     const page = (await raw(s.port, "/", {})).body;
     expect(page).toContain("--plate:url('/app/last-desk-0a1b2c3d.webp')");
-    expect(page).toContain("url('/app/pixelify-sans-0a1b2c3d.ttf')");
+    expect(page).toContain("url('/app/press-start-2p-0a1b2c3d.ttf')");
     expect(page).toContain("url('/app/dm-sans-400-0a1b2c3d.ttf')");
   });
 

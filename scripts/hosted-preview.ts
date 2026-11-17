@@ -49,7 +49,7 @@ const STUB = `(() => {
     async load(options) { if (ui === undefined) ui = options?.ui?.ClerkUI ?? null; sync(); },
     mountSignIn(node) {
       if (!ui) throw new Error("Clerk was not loaded with Ui components");
-      node.innerHTML = '<div class="stub-clerk"><p><strong>Test stub</strong>, not Clerk. Clerk\\'s sign-in card appears here.</p><button type="button">Continue with Google</button></div>';
+      node.innerHTML = '<div class="cl-rootBox" style="display:flex;flex-direction:column;align-items:flex-start"><div class="cl-cardBox stub-clerk" style="width:25rem;max-width:100%"><div class="cl-card"><p><strong>Test stub</strong>, not Clerk. Clerk\\'s sign-in card appears here.</p><button type="button">Continue with Google</button></div></div></div>';
       node.querySelector("button").addEventListener("click", () => { sessionStorage.setItem(KEY, "user_preview"); sync(); });
     },
     unmountSignIn(node) { node.innerHTML = ""; },
