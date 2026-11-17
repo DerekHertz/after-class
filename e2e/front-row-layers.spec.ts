@@ -148,9 +148,9 @@ for (const size of [{ width: 1568, height: 744 }, { width: 1366, height: 768 }, 
       const px = (selector: string) => parseFloat(getComputedStyle(document.querySelector(selector)!).fontSize);
       return { heading: px(".front-row-eyebrow"), question: px(".current-exchange .line[data-question] p"), explanation: px(".current-exchange .line p") };
     });
-    // The question's and heading's sizes follow the room's scale, with floors of 1.15rem and 1rem. The explanation never scales.
+    // The question follows the room's scale with a 1rem floor, Press Start 2P's own grid size, and the heading is 1rem. The explanation never scales.
     expect(sizes.heading).toBeGreaterThanOrEqual(16);
-    expect(sizes.question).toBeGreaterThanOrEqual(18.4);
+    expect(sizes.question).toBeGreaterThanOrEqual(16);
     expect(sizes.explanation).toBeGreaterThanOrEqual(12);
   });
 }
