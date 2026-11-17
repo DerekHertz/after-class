@@ -15,6 +15,7 @@ import { ErrorNote, EvidencePane, FrameImage, Link, useAsync } from "./ui";
 import { DiagramSummaryView, POLL_MS } from "./diagram";
 import { ConnectedBrowsers } from "./connect";
 import { frameLink, NO_FRAME_NOTE, shouldPollDiagrams } from "./diagram-view";
+import { TutorialPlace } from "./tutorial";
 
 
 const LINK_TYPES: readonly LinkType[] = ["prerequisite_of", "part_of", "example_of", "contrasts_with", "related_to"];
@@ -63,6 +64,7 @@ export function RecordScreen({ api, reviewId }: { readonly api: AppApi; readonly
         <div><p className="page-kicker">Kept in your own words</p><h1 tabIndex={-1}>My notebook</h1></div>
         <nav aria-label="Notebook navigation"><Link to={{ page: "home" }}>Your lectures</Link> <Link to={{ page: "usage" }}>Usage</Link></nav>
       </header>
+      <TutorialPlace report={reviewId === null && record.data !== null && grouped && record.data.notes.length + record.data.observations.length > 0 ? { place: "notebook" } : null} />
       <p className="muted">{reviewId === null ? "Every lecture you saved a review of, topic by topic." : "The topics from this review."} Your words, the tutor's help and the lecture's source stay labelled.</p>
       {reviewId !== null && <p><Link to={{ page: "review", id: reviewId }}>Return to review</Link> · <Link to={{ page: "record", reviewId: null }}>All lectures</Link></p>}
       <ErrorNote error={record.error} retry={record.reload} />

@@ -17,6 +17,8 @@ import { HomeScreen } from "./home";
 import { objectFrame } from "./room-object";
 import { SignInScreen, SignInUnavailable, SignOutButton, clerkScripts, loadClerk } from "./sign-in";
 import { ConnectExtensionScreen, extensionIdOf } from "./connect";
+import { TutorialProvider } from "./tutorial";
+import { tutorialKey } from "./tutorial-view";
 import type { ClerkClient } from "./sign-in";
 
 /** The backend writes the pairing token into the served HTML; it is never in the URL or in storage. */
@@ -73,16 +75,18 @@ function App({ services: { api, speaker, speech, unsent }, extensionId }: { read
 function Hosted({ clerk, accounts }: { readonly clerk: ClerkClient; readonly accounts: Accounts }) {
   const account = useSyncExternalStore(accounts.subscribe, accounts.current);
   return (
-    <SceneShell account={account && <SignOutButton clerk={clerk} />}>
-      {account ? <App key={account.userId} services={account.services} extensionId={extensionIdOf(document) ?? ""} /> : <SignInScreen clerk={clerk} />}
-    </SceneShell>
+    <TutorialProvider key={account?.userId ?? ""} storageKey={tutorialKey(account?.userId ?? null)}>
+      <SceneShell account={account && <SignOutButton clerk={clerk} />}>
+        {account ? <App key={account.userId} services={account.services} extensionId={extensionIdOf(document) ?? ""} /> : <SignInScreen clerk={clerk} />}
+      </SceneShell>
+    </TutorialProvider>
   );
 }
 
 const root = createRoot(document.getElementById("root")!);
 const scripts = clerkScripts(document);
 if (scripts === null) {
-  root.render(<AppearanceProvider><SceneShell><App services={servicesFor(readToken(), LOCAL_UNSENT_DB, browser)} extensionId={null} /></SceneShell></AppearanceProvider>);
+  root.render(<AppearanceProvider><TutorialProvider storageKey={tutorialKey(null)}><SceneShell><App services={servicesFor(readToken(), LOCAL_UNSENT_DB, browser)} extensionId={null} /></SceneShell></TutorialProvider></AppearanceProvider>);
 } else {
   loadClerk(scripts).then(
     (clerk) => root.render(<AppearanceProvider><Hosted clerk={clerk} accounts={followAccount(clerk, browser)} /></AppearanceProvider>),

@@ -11,6 +11,7 @@ import { ReviewRow } from "./home";
 import type { LectureReview } from "./home";
 import { usePolled } from "./poll";
 import { objectFrame } from "./room-object";
+import { useCaptureTutorial } from "./tutorial";
 import { BundleInspector, ErrorNote, EvidencePane, Link, navigate, useAsync } from "./ui";
 
 
@@ -202,6 +203,8 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
   const titles = sourceTitles(capture.data?.capture ?? null);
   const videos = sourceVideos(capture.data?.capture ?? null);
   const shown = refused ?? options.data;
+  const screen = shown === null ? null : optionsScreen(shown, titles, videos);
+  useCaptureTutorial(capture.data === null ? null : screen);
 
   async function start(choice: StartChoice) {
     if (actionPending.current) return;
@@ -262,7 +265,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
       {held !== null && shown !== null && shown.kind !== "ready" && <p className="note" role="status">{held}</p>}
       {shown && (
         <OptionsView
-          screen={optionsScreen(shown, titles, videos)}
+          screen={screen!}
           busy={starting}
           onStart={start}
           onRetry={() => {
@@ -277,12 +280,12 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
         />
       )}
       {shown?.kind === "ready" && (
-        <p>
+        <p className="capture-answer">
           <button type="button" disabled={starting} onClick={() => answer("later")}>Later</button> <span className="muted">{laterNote(capture.data?.capture.status ?? null)}</span>
         </p>
       )}
       {shown?.kind === "processing" && (
-        <p>
+        <p className="capture-answer">
           <button type="button" disabled={starting} onClick={() => answer("wait")}>Wait</button> <span className="muted">Stay here until it is ready.</span>
         </p>
       )}
