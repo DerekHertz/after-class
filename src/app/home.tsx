@@ -8,6 +8,7 @@ import type { Route } from "./core";
 import { currentQuestionTopic, isQuestion } from "./diagram-view";
 import { objectFrame } from "./room-object";
 import { storeListing } from "./connect";
+import { HomeTutorial } from "./tutorial";
 import { ErrorNote, Link, navigate, useAsync } from "./ui";
 
 type Lecture = LecturesResponse["lectures"][number];
@@ -198,6 +199,7 @@ export function HomeScreen({ api, extensionId = null }: { readonly api: AppApi; 
       {lectures.error !== null && <ErrorNote error={lectures.error} retry={lectures.reload} />}
       {lectures.data === null && lectures.error === null && <p className="page-loading" role="status">Loading your lectures...</p>}
       {lectures.data && <HomeBody api={api} data={lectures.data} extensionId={extensionId} />}
+      {lectures.data && <HomeTutorial api={api} extensionId={extensionId} lectures={lectures.data.lectures.length} />}
       {extensionId === null && <OpenById />}
     </main>
   );

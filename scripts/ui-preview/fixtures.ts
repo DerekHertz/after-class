@@ -26,7 +26,7 @@ export const ids = {
   chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait"), ordering: id("cpt", "ordering"), earlierCapture: id("cap", "earlier-capture"),
   otherCapture: id("cap", "other-capture"), pendingReview: id("rvw", "pending-review"), unsavedReview: id("rvw", "unsaved-review"),
 };
-export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "reload-unanswered", "reload-in-flight", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-split", "capture-processing", "capture-held", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "review-record-stale", "review-record-slow", "usage", "usage-held", "usage-reserved", "usage-uncapped", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-error", "room-grown"] as const;
+export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "reload-unanswered", "reload-in-flight", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-split", "capture-processing", "capture-held", "capture-empty", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "review-record-stale", "review-record-slow", "usage", "usage-held", "usage-reserved", "usage-uncapped", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-connected", "first-run", "home-error", "room-grown"] as const;
 export type Scenario = typeof scenarios[number];
 export const scenarioFrom = (search: string): Scenario => scenarios.find(s => s === new URLSearchParams(search).get("scenario")) ?? "review";
 
@@ -76,7 +76,7 @@ export function createFixture(scenario: Scenario): Fixture {
     }
     // The fuzzy-topic checklist shows only before the first turn (flow D), so that scenario starts with none.
     let observations: object[] = [];
-    if (s !== "fuzzy-checklist" && s !== "home-setup") {
+    if (s !== "fuzzy-checklist" && s !== "home-setup" && s !== "first-run") {
       turns.push(ask(turns.length + 1, firstQuestion));
       const mainAnswer = answer(turns.length + 1, "One holds lock A and wants B. The other holds B and wants A.");
       turns.push(mainAnswer);
@@ -112,7 +112,7 @@ export function createFixture(scenario: Scenario): Fixture {
     }
     if (s === "soft-target") turns.push(turn("code", turns.length + 1, { notice: { kind: "soft_target_reached", elapsedS: 600 } }));
     if (s === "correction") turns.push(turn("code", turns.length + 1, { notice: { kind: "correction_pending", correctionId: "fixture-correction", affectedClaims: [ids.claim] } }));
-    const checklist = s === "fuzzy-checklist" || s === "home-setup";
+    const checklist = s === "fuzzy-checklist" || s === "home-setup" || s === "first-run";
     return {
       reviewId, captureId: reviewId === ids.earlierReview ? ids.earlierCapture : ids.capture,
       topics,
@@ -131,7 +131,9 @@ export function createFixture(scenario: Scenario): Fixture {
   const capture = captureResponsez.parse({ capture: { captureId: ids.capture, status: { state: "stopped" }, sources: [{ id: ids.source, videoId: "fixture", title: "Locks & deadlocks", url: "", channelName: "Deterministic preview", durationS: 1200 }], currentSourceId: ids.source, transcript: "available", health: [], watchedSeconds: 760 }, invite: { state: "invited", atChunk: ids.chunk } });
   const evidence = evidenceBundlez.parse({ material, passages: [{ kind: "passage", id: ids.passage, sourceId: ids.source, transcriptRevId: id("trv", "captions"), interval: { start: 402, end: 423 }, text: "Each thread holds a lock while waiting for the other.", origin: "panel" }, { kind: "passage", id: ids.laterPassage, sourceId: ids.source, transcriptRevId: id("trv", "captions"), interval: { start: 480, end: 505 }, text: "Acquiring resources in the same order removes this circular wait.", origin: "panel" }], frames: [{ kind: "frame", id: ids.frame, sourceId: ids.source, mediaS: 402, width: 800, height: 450, teaching: "kept" }], gaps: [gap], ads: [] });
   // With no lectures captured ("home-empty"), the notebook has nothing in it either.
-  const empty = scenario === "record-empty" || scenario === "home-empty";
+  // "first-run": a learner with nothing captured yet, so the tutorial can be walked from home through the first question. The lecture and review pages are still reachable.
+  const noLectures = scenario === "home-empty" || scenario === "home-connected" || scenario === "first-run";
+  const empty = scenario === "record-empty" || noLectures;
   const lectures = scenario === "record-lectures";
   // "record-lectures": the earlier lecture's note cites a passage the learner has since deleted.
   const earlierNote = { id: id("note", "earlier-note"), reviewId: ids.earlierReview, conceptId: ids.ordering, generated: [{ author: "learner", text: "Taking locks in one order means nobody waits in a circle.", turnId: null, evidence: [] }, { author: "source", text: "Acquiring resources in the same order removes this circular wait.", turnId: null, evidence: [ids.laterPassage] }], userEdit: null, evidence: [ids.laterPassage] };
@@ -161,7 +163,7 @@ export function createFixture(scenario: Scenario): Fixture {
   // Home lists this lecture's open review with two ended ones (save not finished, ended without notes), a lecture still
   // capturing, and the earlier lecture whose saved review the notebook holds. Notebook and Home read this one list.
   const at = (hour: number) => Date.UTC(2026, 10, 6, hour, 4);
-  const lectureList = lecturesResponse.parse({ lectures: scenario === "home-empty" ? [] : [
+  const lectureList = lecturesResponse.parse({ lectures: noLectures ? [] : [
     { captureId: ids.capture, sourceTitles: ["Locks & deadlocks"], sourceIds: [ids.source], firstSeq: 2000, videos: 1, watchedSeconds: 760, status: { state: "stopped" }, reviews: [
       { reviewId: ids.review, startedMs: at(15), phase: view.state.phase, saved: view.saved, mainQuestions: view.state.mainQuestions },
       ...(scenario === "capture-split" ? [] : [
@@ -230,7 +232,8 @@ export function createFixture(scenario: Scenario): Fixture {
     async voiceAvailable() { return false; },
     async speech() { throw new Error("the preview has no voice"); },
     async createConnectCode() { throw new ApiError("The preview has no connected browsers.", 501); },
-    async devices() { return []; },
+    // "home-connected": a hosted account whose extension is connected but has captured nothing yet.
+    async devices() { return scenario === "home-connected" ? [{ id: id("dev", "browser"), label: "Chrome on Windows", createdMs: at(9), lastUsedMs: null }] : []; },
     async revokeDevice() { log("device.revoke"); },
     async evidence(query) {
       log("evidence.read");

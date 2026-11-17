@@ -23,6 +23,7 @@ import { DiagramPanel, ShowDiagramButton, useDiagrams } from "./diagram";
 import { currentQuestionTopic } from "./diagram-view";
 import { RoomInspector, objectFrame, returnTarget } from "./room-object";
 import type { Inspecting, PutDown, RoomObject } from "./room-object";
+import { ShowTutorialAgain, useTutorialPlace } from "./tutorial";
 
 export type ReviewDeps = { readonly api: AppApi; readonly speaker: Speaker; readonly speech: SpeechInput; readonly unsent: UnsentStore };
 
@@ -112,6 +113,8 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
   const roomStanding = useSyncExternalStore(room.subscribe, room.getState);
   useEffect(() => { room.read(); }, [room]);
   useEffect(() => { if (saved) room.read(); }, [saved, room]);
+  // The tutorial's two review places: the topic checklist, then the first question the learner can answer.
+  useTutorialPlace(checklist ? { place: "checklist" } : state.view?.state.phase === "active" && state.view.state.detour.kind === "none" && question && !saved ? { place: "question" } : null);
   useSceneActivity(state.saving ? "saving" : listening ? "listening" : state.view?.state.phase === "paused" ? "paused" : state.live?.status === "streaming" ? "waiting" : "idle");
 
   /** Picks up an object. Switching from one object to the other keeps the control that picked up the first. */
@@ -299,6 +302,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
           <HeaderActions ids={actions.filter(id => id === "pause" || id === "resume" || id === "end")} state={state} send={id => void controller.send(toAct(id, "", "text"))} />
           <button type="button" aria-haspopup="dialog" onClick={() => setNotebookOpen(true)}>Saved notes</button>
           {roomStanding !== null && <button type="button" aria-expanded={roomOpen} onClick={() => setRoomOpen(!roomOpen)}>Your room</button>}
+          <ShowTutorialAgain />
         </BarMenu>
       </header>
       <div className="front-row-notices">

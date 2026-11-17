@@ -10,6 +10,9 @@ import { Link, usePathname } from "../../src/app/ui";
 import { createMemoryUnsent } from "../../src/app/unsent";
 import type { AppApi } from "../../src/app/api";
 import { SignOutButton } from "../../src/app/sign-in";
+import { TutorialProvider } from "../../src/app/tutorial";
+import { tutorialKey } from "../../src/app/tutorial-view";
+import type { SeenStorage } from "../../src/app/tutorial-view";
 import type { ClerkClient } from "../../src/app/sign-in";
 import { createFixture, ids, scenarioFrom, scenarios } from "./fixtures";
 import { clearReaction, play } from "../../src/app/room/reaction-store";
@@ -32,6 +35,14 @@ const clean = new URLSearchParams(location.search).get("clean") === "1";
 /** `?account=1` previews the hosted app: the sign-out control, so its place in each layout can be checked, and the learner's usage page. */
 const hosted = new URLSearchParams(location.search).get("account") === "1";
 const account = hosted ? <SignOutButton clerk={{ signOut: async () => {} } as unknown as ClerkClient} /> : undefined;
+/**
+ * `?tutorial=1` turns the companion's tutorial on, with its seen state in memory so every page load starts from the first step.
+ * `?tutorial=local` keeps the seen state in the browser's localStorage, as the app does.
+ */
+const tutorialMode = new URLSearchParams(location.search).get("tutorial");
+const tutorial = tutorialMode === "1" || tutorialMode === "local";
+const seen = new Map<string, string>();
+const memoryStorage: SeenStorage = { getItem: (key) => seen.get(key) ?? null, setItem: (key, value) => void seen.set(key, value), removeItem: (key) => void seen.delete(key) };
 function Preview() {
   const path = usePathname();
   const calls = useSyncExternalStore(requestLedger.subscribe, requestLedger.snapshot);
@@ -40,18 +51,19 @@ function Preview() {
   return <>
     <aside className="fixture-toolbar" aria-label="Preview fixtures" hidden={clean}>
       <strong>Deterministic UI fixture</strong><span>No live lecture or model calls.</span>
-      <label>Scenario <select value={scenario} onChange={event => { location.href = `/?scenario=${event.target.value}`; }}>{scenarios.map(value => <option key={value}>{value}</option>)}</select></label>
+      <label>Scenario <select value={scenario} onChange={event => { location.href = `/?scenario=${event.target.value}${tutorial ? `&tutorial=${tutorialMode}` : ""}${hosted ? "&account=1" : ""}`; }}>{scenarios.map(value => <option key={value}>{value}</option>)}</select></label>
       <button type="button" onClick={() => { continueFixture(); releaseReview?.(); releaseReview = undefined; }}>Finish pending fixture operation</button>
       <button type="button" onClick={dictateFixture}>Simulate speech transcript</button>
+      <label><input type="checkbox" checked={tutorial} onChange={event => { const next = new URLSearchParams(location.search); if (event.target.checked) next.set("tutorial", "1"); else next.delete("tutorial"); location.search = next.toString(); }} /> Tutorial</label>
       <Link to={{ page: "home" }}>Home</Link>
       <Link to={{ page: "review", id: ids.review }}>Review</Link>
       <Link to={{ page: "capture", id: ids.capture }}>Capture</Link>
       <Link to={{ page: "record", reviewId: null }}>Notebook</Link>
       <details><summary>Request ledger</summary><pre>{calls || "No requests"}</pre></details>
     </aside>
-    <AppearanceProvider><SceneShell account={account}>
+    <AppearanceProvider><TutorialProvider storageKey={tutorialKey("preview")} storage={tutorialMode === "local" ? undefined : memoryStorage} enabled={tutorial}><SceneShell account={account}>
       {page === "home" ? <HomeScreen api={api} extensionId={hosted ? "abcdefghijklmnopabcdefghijklmnop" : null} /> : page === "capture" ? <CaptureScreen api={api} captureId={ids.capture} /> : page === "record" ? <RecordScreen api={api} reviewId={recordReviewId} /> : page === "usage" ? <UsageScreen api={api} hosted={hosted} /> : <ReviewScreen api={api} reviewId={ids.review} speaker={speaker} speech={speech} unsent={unsent} />}
-    </SceneShell></AppearanceProvider>
+    </SceneShell></TutorialProvider></AppearanceProvider>
   </>;
 }
 createRoot(document.getElementById("root")!).render(<Preview />);

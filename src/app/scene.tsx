@@ -7,6 +7,7 @@ import { ReviewStageClaim, roomStyle, useFullRoom } from "./front-row";
 import { useMotion } from "./room/motion";
 import { useReaction } from "./room/reaction-store";
 import { RoomStage } from "./room/stage";
+import { ShowTutorialAgain, TutorialBubble } from "./tutorial";
 import { Link } from "./ui";
 
 export function RoomDrawing({ id }: { readonly id: SceneId }) {
@@ -33,6 +34,7 @@ function AppearancePicker() {
         <label><input type="checkbox" checked={appearance.motion === "reduced"} onChange={e => update({ motion: e.target.checked ? "reduced" : "system" })} /> Reduce motion</label>
         <label><input type="checkbox" checked={voice} onChange={e => setVoice(e.target.checked)} /> Voice (the tutor speaks, and you can speak back)</label>
       </div>
+      <p className="appearance-tutorial"><ShowTutorialAgain /></p>
       <p className="appearance-footnote">Room and companion choices are independent. Your system's reduced-motion setting is always respected. Preferences stay in this browser.</p>
       {!persistent && <p className="appearance-storage-note" role="status">Appearance works for this visit. This browser could not save your preferences.</p>}
     </div>
@@ -60,5 +62,6 @@ export function SceneShell({ children, account }: { readonly children: ReactNode
       {appearance.visible ? <Companion id={appearance.companion} activity={activity} /> : <span className="quiet-status">{COMPANION_STATUS[activity]}</span>}
       <p>A little space to make sense of what you watched.</p>
     </footer>
+    <TutorialBubble />
   </div></ReviewStageClaim.Provider>;
 }

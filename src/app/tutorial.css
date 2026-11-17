@@ -1,0 +1,51 @@
+/* The companion's tutorial: a speech bubble on cream stationery and a ring on the control it is about. Neither takes a click:
+   the ring ignores the pointer, and the bubble covers only its own box, which stays clear of what the learner types and presses. */
+.tutorial-ring {
+  position: fixed; z-index: 20; box-sizing: border-box; pointer-events: none;
+  border: 3px solid #e0a02a; outline: 2px solid #2c2620; outline-offset: 0;
+  box-shadow: 0 0 0 4px #fbf3e2b3;
+  animation: tutorial-ring 1.8s ease-in-out infinite;
+}
+@keyframes tutorial-ring { 50% { box-shadow: 0 0 0 8px #fbf3e266; } }
+
+.tutorial-bubble {
+  position: fixed; z-index: 21; box-sizing: border-box; width: min(18rem, calc(100vw - 16px)); padding: 8px 12px 10px;
+  background: #fbf3e2; color: #2c2620; border: 3px solid #2c2620;
+  box-shadow: 0 4px 0 #00000040, inset 0 0 0 2px #fbf3e2, inset 0 0 0 3px #c9b896;
+  font: 400 1rem/1.4 'After Class Pixel', var(--font);
+  animation: tutorial-in 180ms ease-out both;
+}
+.tutorial-bubble:focus { outline: none; }
+@keyframes tutorial-in { from { opacity: 0; translate: 0 6px; } }
+/* The tail points down at the companion. */
+.tutorial-bubble[data-tail]::after {
+  content: ""; position: absolute; left: 3.25rem; bottom: -11px; width: 14px; height: 14px; box-sizing: border-box;
+  background: #fbf3e2; border: solid #2c2620; border-width: 0 3px 3px 0; rotate: 45deg;
+}
+.tutorial-bubble[data-mode="wide"] { width: min(36rem, calc(100vw - 16px)); }
+.tutorial-bubble[data-compact] { left: 8px; right: 8px; bottom: 8px; width: auto; max-height: calc(100dvh - 16px); overflow-y: auto; }
+
+.tutorial-kicker { margin: 0 0 2px; color: #5e5446; font-size: .8rem; letter-spacing: .06em; text-transform: uppercase; }
+.tutorial-text { margin: 0 0 8px; font-size: 1.05rem; }
+.tutorial-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tutorial-actions button {
+  min-height: 44px; margin: 0; padding: 6px 10px; border: 2px solid #2c2620; border-radius: 0; background: #f0e3cb; color: #2c2620;
+  font: 600 .95rem/1.1 'After Class Pixel', var(--font); box-shadow: 0 3px 0 #0000003d; cursor: pointer;
+}
+.tutorial-actions button:not(.tutorial-next, .tutorial-skip):hover:not(:disabled) { background: #e6d6b6; }
+.tutorial-actions button:disabled { opacity: .5; cursor: not-allowed; }
+.tutorial-actions .tutorial-next { background: var(--fr-bar, #2c2620); border-color: var(--fr-bar, #2c2620); color: var(--fr-bar-ink, #fbf3e2); }
+.tutorial-actions .tutorial-next:hover { background: #2c2620; border-color: #2c2620; }
+.tutorial-actions .tutorial-skip { margin-left: auto; padding: 6px 2px; border-color: transparent; background: none; box-shadow: none; font-weight: 400; text-decoration: underline; text-underline-offset: 3px; }
+.tutorial-actions .tutorial-skip:hover { background: none; }
+/* In the full room a button is a little shorter, so the bubble stays small enough to sit above the companion. */
+.tutorial-bubble:not([data-compact]) .tutorial-actions button { min-height: 38px; }
+.tutorial-actions button:focus-visible { outline: 3px solid #b77a20; outline-offset: 2px; }
+.tutorial-spacer { pointer-events: none; }
+
+/* The "Show the tutorial again" control in the Room & companion panel. */
+.appearance-tutorial { margin: 8px 0 0; }
+.appearance-tutorial button { min-height: 44px; padding: 6px 14px; border: 2px solid var(--paper-ink, #2c2620); border-radius: 0; background: transparent; color: var(--paper-ink, #2c2620); font: inherit; cursor: pointer; }
+
+.scene-shell[data-motion="reduced"] :is(.tutorial-bubble, .tutorial-ring) { animation: none; }
+@media (prefers-reduced-motion: reduce) { .tutorial-bubble, .tutorial-ring { animation: none; } }
