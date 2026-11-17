@@ -6,10 +6,18 @@
  * A page built without one of them still reads fine.
  */
 import { readdirSync } from "node:fs";
+import { join } from "node:path";
 
 export type PublicPage = "landing" | "privacy";
 
-type Files = { readonly plate: string | null; readonly pixel: string | null; readonly sans: string | null };
+type Files = {
+  readonly plate: string | null;
+  readonly pixel: string | null;
+  readonly sans: string | null;
+  readonly icon16: string | null;
+  readonly icon32: string | null;
+  readonly apple: string | null;
+};
 
 /** No script, no frames, no forms and no network beyond this origin. The inline style is the page's own. */
 export const PUBLIC_CSP = [
@@ -34,7 +42,24 @@ export function appFiles(appDir: string): Files {
   } catch {
     // an unbuilt app leaves the pages without art or fonts
   }
-  return { plate: stemFile(names, "last-desk", "webp"), pixel: stemFile(names, "pixelify-sans", "ttf"), sans: stemFile(names, "dm-sans-400", "ttf") };
+  return {
+    plate: stemFile(names, "last-desk", "webp"),
+    pixel: stemFile(names, "pixelify-sans", "ttf"),
+    sans: stemFile(names, "dm-sans-400", "ttf"),
+    icon16: stemFile(names, "favicon-16", "png"),
+    icon32: stemFile(names, "favicon-32", "png"),
+    apple: stemFile(names, "apple-touch-icon", "png"),
+  };
+}
+
+/** The built favicon.ico, which browsers ask for at /favicon.ico whatever the page says. Null in an unbuilt app. */
+export function faviconIco(appDir: string): string | null {
+  try {
+    const found = readdirSync(appDir).find((n) => /^favicon-[a-z0-9]{8}\.ico$/.test(n));
+    return found === undefined ? null : join(appDir, found);
+  } catch {
+    return null;
+  }
 }
 
 const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -63,6 +88,11 @@ function shell(title: string, description: string, canonical: string, files: Fil
   ].join("");
   const plate = files.plate === null ? "" : `:root{--plate:url('${files.plate}')}`;
   const preloads = [files.pixel, files.sans].flatMap((f) => (f === null ? [] : [`<link rel="preload" href="${f}" as="font" type="font/ttf" crossorigin>`])).join("");
+  const icons = [
+    files.icon32 === null ? "" : `<link rel="icon" type="image/png" sizes="32x32" href="${files.icon32}">`,
+    files.icon16 === null ? "" : `<link rel="icon" type="image/png" sizes="16x16" href="${files.icon16}">`,
+    files.apple === null ? "" : `<link rel="apple-touch-icon" href="${files.apple}">`,
+  ].join("");
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -72,7 +102,7 @@ function shell(title: string, description: string, canonical: string, files: Fil
 <meta name="description" content="${escape(description)}">
 <link rel="canonical" href="${escape(canonical)}">
 <meta name="robots" content="index, follow">
-${preloads}<style>${fonts}${plate}${CSS}</style>
+${icons}${preloads}<style>${fonts}${plate}${CSS}</style>
 </head>
 <body>
 <main>

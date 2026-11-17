@@ -63,7 +63,7 @@ import type { Ledger } from "./providers/ledger";
 import type { Memo } from "./providers/memo";
 import type { Voice } from "./providers/elevenlabs";
 import type { Diagrams } from "./diagram";
-import { PUBLIC_CSP, publicPage as publicPageHtml } from "./landing";
+import { PUBLIC_CSP, faviconIco, publicPage as publicPageHtml } from "./landing";
 
 export type Modules = {
   readonly evidence: EvidenceStore;
@@ -827,6 +827,14 @@ async function handle(req: Request, peer: string | null, opts: ServeOptions, gat
   if (req.method === "GET" && path === "/health") {
     const v = gate.health(req.headers);
     return v.ok ? json(200, { ok: true, version: packageJson.version }) : failure(v.status, "forbidden");
+  }
+
+  // Browsers ask for /favicon.ico with no credentials, on every page, so it is public in local and hosted mode alike.
+  if (path === "/favicon.ico") {
+    if (req.method !== "GET" && req.method !== "HEAD") return failure(405, "method not allowed", { Allow: "GET, HEAD" });
+    const ico = faviconIco(opts.appDir);
+    if (ico === null) return failure(404, "not found");
+    return new Response(req.method === "HEAD" ? null : Bun.file(ico), { headers: { "Content-Type": "image/x-icon", "Cache-Control": "public, max-age=86400", ...SECURITY_HEADERS } });
   }
 
   if (path === "/app" || path.startsWith("/app/")) {

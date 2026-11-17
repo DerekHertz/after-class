@@ -178,6 +178,25 @@ describe("hosted requests", () => {
     expect(page).toContain("url('/app/dm-sans-400-0a1b2c3d.ttf')");
   });
 
+  test("the public pages link the built favicons, and /favicon.ico answers without a login", async () => {
+    expect((await raw(s.port, "/", {})).body).not.toContain('rel="icon"');
+    expect((await raw(s.port, "/favicon.ico", {})).status).toBe(404);
+    for (const name of ["favicon-16-0a1b2c3d.png", "favicon-32-0a1b2c3d.png", "apple-touch-icon-0a1b2c3d.png"]) writeFileSync(join(s.appDir, name), "x");
+    writeFileSync(join(s.appDir, "favicon-0a1b2c3d.ico"), "ico-bytes");
+    for (const path of ["/", "/privacy"]) {
+      const body = (await raw(s.port, path, {})).body;
+      expect(body, path).toContain('<link rel="icon" type="image/png" sizes="32x32" href="/app/favicon-32-0a1b2c3d.png">');
+      expect(body, path).toContain('<link rel="icon" type="image/png" sizes="16x16" href="/app/favicon-16-0a1b2c3d.png">');
+      expect(body, path).toContain('<link rel="apple-touch-icon" href="/app/apple-touch-icon-0a1b2c3d.png">');
+    }
+    const ico = await raw(s.port, "/favicon.ico", { "Sec-Fetch-Site": "cross-site" });
+    expect(ico.status).toBe(200);
+    expect(ico.body).toBe("ico-bytes");
+    expect(ico.headers.get("content-type")).toBe("image/x-icon");
+    expect(ico.headers.get("cache-control")).toBe("public, max-age=86400");
+    expect((await raw(s.port, "/favicon.ico", {}, "POST")).status).toBe(405);
+  });
+
   test("/privacy names who processes the data, canonicalises to itself and links back", async () => {
     const r = await raw(s.port, "/privacy", {});
     for (const name of ["Clerk", "Anthropic", "TypeSafe", "us-east-2", "speech recognition", "Limited Use", "30 days", "cookies", "14 days", "database keeps its text", "not built yet"]) expect(r.body).toContain(name);

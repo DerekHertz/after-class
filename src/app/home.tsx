@@ -167,7 +167,7 @@ export function HomeBody({ api, data, extensionId = null }: { readonly api: Resu
   );
 }
 
-/** Opening a capture by its ID is for troubleshooting, so it stays folded away under the lecture list. */
+/** Opening a capture by its ID is for troubleshooting, so it stays folded away under the lecture list. HomeScreen shows it in local mode only, since hosted users never see a capture ID. */
 export function OpenById() {
   const [id, setId] = useState("");
   const valid = parseId("cap", id.trim()) !== null;
@@ -198,7 +198,7 @@ export function HomeScreen({ api, extensionId = null }: { readonly api: AppApi; 
       {lectures.error !== null && <ErrorNote error={lectures.error} retry={lectures.reload} />}
       {lectures.data === null && lectures.error === null && <p className="page-loading" role="status">Loading your lectures...</p>}
       {lectures.data && <HomeBody api={api} data={lectures.data} extensionId={extensionId} />}
-      <OpenById />
+      {extensionId === null && <OpenById />}
     </main>
   );
 }
