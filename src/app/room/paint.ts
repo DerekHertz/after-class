@@ -26,23 +26,15 @@ export type Piece = {
 
 /**
  * The `drawImage` calls that paint `draw` from a picture of `natural` size at `scale`, on the device pixels Chrome painted
- * the same layer on when CSS drew it, so the canvas keeps the room's pixels. An edge fill takes its one row or column of source pixels.
+ * the same layer on when CSS drew it, so the canvas keeps the room's pixels. A backdrop is the whole picture in its rect.
  */
 export function pieces(draw: PictureDraw | CompanionDraw, natural: Size, scale: Scale): readonly Piece[] {
   const box = snap(draw, scale);
   const { width: w, height: h } = natural;
   const [dx, dy, dw, dh] = [box.left, box.top, box.right - box.left, box.bottom - box.top];
-  if (draw.kind === "image") return [{ sx: 0, sy: 0, sw: w, sh: h, dx, dy, dw, dh }];
-  if (draw.kind === "companion") {
-    const sw = w / draw.columns;
-    return [{ sx: sw * draw.column, sy: 0, sw, sh: h, dx, dy, dw, dh }];
-  }
-  switch (draw.edge) {
-    case "left": return [{ sx: 0, sy: 0, sw: 1, sh: h, dx, dy, dw, dh }];
-    case "right": return [{ sx: w - 1, sy: 0, sw: 1, sh: h, dx, dy, dw, dh }];
-    case "top": return [{ sx: 0, sy: 0, sw: w, sh: 1, dx, dy, dw, dh }];
-    case "bottom": return [{ sx: 0, sy: h - 1, sw: w, sh: 1, dx, dy, dw, dh }];
-  }
+  if (draw.kind === "image" || draw.kind === "backdrop") return [{ sx: 0, sy: 0, sw: w, sh: h, dx, dy, dw, dh }];
+  const sw = w / draw.columns;
+  return [{ sx: sw * draw.column, sy: 0, sw, sh: h, dx, dy, dw, dh }];
 }
 
 /**
@@ -60,8 +52,8 @@ function snapSpan(start: number, size: number, scale: number, image: boolean): r
   return [from, image ? Math.min(to, from + round(length)) : to];
 }
 
-function snap({ rect, kind }: PictureDraw | CompanionDraw, s: Scale) {
-  const [left, right] = snapSpan(rect.left, rect.width, s.x, kind !== "edge");
-  const [top, bottom] = snapSpan(rect.top, rect.height, s.y, kind !== "edge");
+function snap({ rect }: PictureDraw | CompanionDraw, s: Scale) {
+  const [left, right] = snapSpan(rect.left, rect.width, s.x, true);
+  const [top, bottom] = snapSpan(rect.top, rect.height, s.y, true);
   return { left, right, top, bottom };
 }

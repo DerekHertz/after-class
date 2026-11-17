@@ -9,7 +9,7 @@ import { ROOM_LAYER_ART } from "../src/app/room/art";
 import { FRONT_ROW_ROOMS } from "../src/app/room/rooms";
 
 const rooms = Object.keys(FRONT_ROW_ROOMS) as SceneId[];
-const isPicture = (draw: Draw): draw is PictureDraw => draw.kind === "image" || draw.kind === "edge";
+const isPicture = (draw: Draw): draw is PictureDraw => draw.kind === "image" || draw.kind === "backdrop";
 const full = (scene: SceneId, window: Size) => {
   const list = buildScene(scene, layoutRoom(scene, window, "full"));
   return { ...list, draws: list.draws.filter(isPicture) };
@@ -27,12 +27,21 @@ describe("the stage's draw list", () => {
     }
   });
 
-  test("the plate's edge fills come first and use the plate's own picture, so the plate is painted over them", () => {
-    const { draws } = full("study-bench", { width: 3440, height: 1440 });
-    expect(draws.at(-1)!.kind).toBe("image");
-    const edges = draws.filter((d) => d.kind === "edge");
-    expect(edges.map((d) => d.kind === "edge" && d.edge).sort()).toEqual(["bottom", "left", "right", "top"]);
-    expect(edges.every((d) => d.src === ROOM_LAYER_ART["study-bench"].plate)).toBe(true);
+  test("a bare edge gets one backdrop first, of the plate's own picture over the whole window, so the plate is painted over it", () => {
+    for (const window of [{ width: 3440, height: 1440 }, { width: 1900, height: 1900 }]) {
+      const { draws } = full("study-bench", window);
+      expect(draws.at(-1)!.kind).toBe("image");
+      const backdrops = draws.filter((d) => d.kind === "backdrop");
+      expect(backdrops.length).toBe(1);
+      expect(draws[0]).toBe(backdrops[0]!);
+      expect(backdrops[0]).toMatchObject({ src: ROOM_LAYER_ART["study-bench"].plate, rect: { left: 0, top: 0, ...window } });
+    }
+  });
+
+  test("a window the plate covers has no backdrop", () => {
+    for (const window of [{ width: 1440, height: 900 }, { width: 1586, height: 992 }, { width: 2314, height: 992 }]) {
+      expect(full("study-bench", window).draws.some((d) => d.kind === "backdrop")).toBe(false);
+    }
   });
 
   test("a phone draws only the background, smooth, covering the window", () => {
@@ -79,12 +88,9 @@ describe("the stage paints each picture on the device pixels Chrome painted its 
     expect(piece!.dx + piece!.dw).toBeLessThanOrEqual(from + Math.floor(plate!.rect.width + 0.5));
   });
 
-  test("an edge fill takes one row or column of the plate's pixels", () => {
-    const edge = (name: "left" | "right" | "top" | "bottom") => pieces({ kind: "edge", src: "", edge: name, rect: { left: 0, top: 0, width: 10, height: 10 } }, { width: 2314, height: 992 }, { x: 1, y: 1 })[0]!;
-    expect([edge("left").sx, edge("left").sw, edge("left").sh]).toEqual([0, 1, 992]);
-    expect([edge("right").sx, edge("right").sw]).toEqual([2313, 1]);
-    expect([edge("top").sy, edge("top").sh, edge("top").sw]).toEqual([0, 1, 2314]);
-    expect([edge("bottom").sy, edge("bottom").sh]).toEqual([991, 1]);
+  test("a backdrop is the whole picture over its rect", () => {
+    const [piece] = pieces({ kind: "backdrop", src: "", rect: { left: 0, top: 0, width: 30, height: 20 }, plate: { left: 5, top: 0, width: 20, height: 20 } }, { width: 2314, height: 992 }, { x: 1, y: 1 });
+    expect([piece!.sx, piece!.sy, piece!.sw, piece!.sh, piece!.dx, piece!.dy, piece!.dw, piece!.dh]).toEqual([0, 0, 2314, 992, 0, 0, 30, 20]);
   });
 
   test("an image ends no later than its rounded size from its start", () => {

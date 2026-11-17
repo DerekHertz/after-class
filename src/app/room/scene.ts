@@ -5,7 +5,7 @@ import { companionAt, companionDraw } from "./companion";
 import { FRONT_ROW_ROOMS } from "./rooms";
 import type { CompanionCue, Frame, Idle } from "./companion";
 import { BALLOON_AT, BALLOON_CELLS } from "./balloon";
-import type { Edge, Rect, RoomLayout } from "./layout";
+import type { Rect, RoomLayout } from "./layout";
 
 /**
  * How a picture is resampled to its box. The room's plate file is twice its plate pixels, so it is drawn smoothly down to
@@ -15,14 +15,15 @@ export type Sampling = "pixelated" | "smooth";
 
 /**
  * One thing the stage paints, in CSS pixels of the stage. `src` names the picture by its bundle URL. `image` draws the whole
- * picture into `rect`. `edge` stretches the plate's outermost row or column of pixels over `rect`, to fill what the plate
- * does not cover with its own edge colours. `companion` draws column `column` of `columns` equal cells of its picture,
+ * picture into `rect`. `backdrop` fills `rect`, the whole stage, with a blurred, darkened copy of the picture mirrored out
+ * from where the plate sits at `plate`, to fill what the plate does not cover with the room's own colours. The stage blurs it
+ * once per size and keeps it. `companion` draws column `column` of `columns` equal cells of its picture,
  * pixelated, with the companion's drop shadow. It never holds the room back: until its picture decodes the stage draws
  * `standIn` in its place, or nothing.
  */
 export type PictureDraw =
   | { readonly kind: "image"; readonly src: string; readonly rect: Rect; readonly sampling: Sampling }
-  | { readonly kind: "edge"; readonly src: string; readonly edge: Edge; readonly rect: Rect };
+  | { readonly kind: "backdrop"; readonly src: string; readonly rect: Rect; readonly plate: Rect };
 export type CompanionDraw = {
   readonly kind: "companion"; readonly frame: Frame; readonly src: string; readonly rect: Rect; readonly column: number; readonly columns: number;
   readonly standIn: CompanionDraw | null;
@@ -54,7 +55,7 @@ export type CompanionScene = { readonly cue: CompanionCue; readonly idle: Idle; 
 const DEPTH = { plate: 0 } as const;
 
 /**
- * The draw list of `scene` laid out as `layout`: the plate's edge fills, the plate, the ambient life, then the companion and
+ * The draw list of `scene` laid out as `layout`: the plate's backdrop, the plate, the ambient life, then the companion and
  * its balloon. `now` is the `performance.now()` time of the frame, or null while the room is still (see motion.ts): the
  * room's ambient life is drawn only for a time. Unlocked objects are not drawn for now (room/unlocks.ts keeps their slots).
  */
@@ -63,7 +64,7 @@ export function buildScene(scene: SceneId, layout: RoomLayout, now: number | nul
   if (layout.composition === "compact") {
     return { draws: [{ kind: "image", src: art.background, rect: layout.layers.background, sampling: "smooth" }], next: null };
   }
-  const fills = layout.fills.map(({ edge, rect }): Draw => ({ kind: "edge", src: art.plate, edge, rect }));
+  const fills: Draw[] = !layout.backdrop ? [] : [{ kind: "backdrop", src: art.plate, rect: { left: 0, top: 0, ...layout.window }, plate: layout.plate }];
   const layered: { readonly z: number; readonly draw: Draw }[] = [{ z: DEPTH.plate, draw: { kind: "image", src: art.plate, rect: layout.plate, sampling: "smooth" } }];
   const ambient = now === null ? null : ambientDraws(scene, layout, now);
   if (ambient !== null) layered.push(...ambient.draws);

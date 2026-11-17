@@ -4,7 +4,7 @@ import type { SceneId } from "../src/app/appearance";
 import { layoutRoom } from "../src/app/room/layout";
 import type { Rect } from "../src/app/room/layout";
 
-const windows = [{ width: 1440, height: 900 }, { width: 1470, height: 1270 }, { width: 1920, height: 1080 }];
+const windows = [{ width: 1440, height: 900 }, { width: 1470, height: 1270 }, { width: 1920, height: 1080 }, { width: 1900, height: 1900 }];
 
 type Box = { left: number; top: number; right: number; bottom: number };
 const within = (inner: Box, outer: Box) => inner.left >= outer.left - 1 && inner.top >= outer.top - 1 && inner.right <= outer.right + 1 && inner.bottom <= outer.bottom + 1;
@@ -134,5 +134,23 @@ for (const scene of Object.keys(SCENES)) {
       return found;
     });
     expect(containers).toEqual([]);
+  });
+}
+
+for (const size of [{ width: 1568, height: 744 }, { width: 1366, height: 768 }, { width: 1280, height: 720 }]) {
+  test(`at ${size.width}x${size.height} a short window shrinks the room, not the board's type`, async ({ page }, info) => {
+    test.skip(info.project.name === "narrow", "the phone layout stacks flat surfaces");
+    await page.setViewportSize(size);
+    await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: APPEARANCE_KEY, value: { ...DEFAULT_APPEARANCE, scene: "study-bench" } });
+    await page.goto("/?scenario=review&clean=1");
+    await expect(page.locator('.front-row-area[data-area="board"]')).toContainText("What would have to change");
+    const sizes = await page.evaluate(() => {
+      const px = (selector: string) => parseFloat(getComputedStyle(document.querySelector(selector)!).fontSize);
+      return { heading: px(".front-row-eyebrow"), question: px(".current-exchange .line[data-question] p"), explanation: px(".current-exchange .line p") };
+    });
+    // The question's and heading's sizes follow the room's scale, with floors of 1.15rem and 1rem. The explanation never scales.
+    expect(sizes.heading).toBeGreaterThanOrEqual(16);
+    expect(sizes.question).toBeGreaterThanOrEqual(18.4);
+    expect(sizes.explanation).toBeGreaterThanOrEqual(12);
   });
 }

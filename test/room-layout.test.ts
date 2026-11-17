@@ -67,13 +67,23 @@ describe("the plate is drawn at one scale and the board is never cropped", () =>
     expect(tight.core.width).toBeCloseTo(1586, 9);
   });
 
-  test("past 21:9 the plate's side edges are filled, and a window narrower than 16:10 is filled above and below", () => {
-    for (const edges of [full("study-bench", { width: 3440, height: 1440 }).fills, full("study-bench", { width: 3840, height: 1080 }).fills]) {
-      expect(edges.map((f) => f.edge)).toEqual(expect.arrayContaining(["left", "right"]));
+  test("past 21:9 and below 16:10 the bare rows and columns show the backdrop, and a window the plate covers has none", () => {
+    for (const window of [{ width: 3440, height: 1440 }, { width: 3840, height: 1080 }, { width: 1000, height: 900 }, { width: 1900, height: 1900 }, { width: 1200, height: 1600 }]) {
+      expect({ window, backdrop: full("study-bench", window).backdrop }).toEqual({ window, backdrop: true });
     }
-    const tall = full("study-bench", { width: 1000, height: 900 });
-    expect(tall.fills.map((f) => f.edge)).toEqual(expect.arrayContaining(["top", "bottom"]));
-    expect(tall.plate.top).toBeGreaterThan(0);
+    for (const window of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 1920, height: 1080 }, { width: 2314, height: 992 }]) {
+      expect({ window, backdrop: full("study-bench", window).backdrop }).toEqual({ window, backdrop: false });
+    }
+    expect(full("study-bench", { width: 1000, height: 900 }).plate.top).toBeGreaterThan(0);
+  });
+
+  test("the plate is never cropped past the core to fill a tall window: its scale and place do not change with the backdrop", () => {
+    for (const scene of rooms) for (const window of [{ width: 1900, height: 1900 }, { width: 1200, height: 1600 }, { width: 900, height: 1500 }]) {
+      const layout = full(scene, window);
+      expect(layout.s).toBeCloseTo(window.width / 1586, 9);
+      expect(layout.core.left).toBeCloseTo(0, 9);
+      expect(layout.plate.top + layout.plate.height / 2).toBeCloseTo(window.height / 2, 9);
+    }
   });
 });
 
@@ -114,7 +124,7 @@ describe("the text areas and objects", () => {
 });
 
 describe("every column and row of the window is painted, at fractional sizes and device pixel ratios too", () => {
-  const isPicture = (draw: Draw): draw is PictureDraw => draw.kind === "image" || draw.kind === "edge";
+  const isPicture = (draw: Draw): draw is PictureDraw => draw.kind === "image" || draw.kind === "backdrop";
   /** Whether the device pixels the draw list's pictures cover include every column and every row of the window's backing store. */
   const covered = (scene: SceneId, window: Size, ratio: number) => {
     const [W, H] = [Math.round(window.width * ratio), Math.round(window.height * ratio)];
