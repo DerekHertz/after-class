@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createAsks } from "../src/backend/preparation/asks";
 import { createReviews } from "../src/backend/review";
 import type { InviteEvent } from "../src/backend/review/core";
 import { corrections, foldInvites, freezeScope, takeSentences } from "../src/backend/review/core";
@@ -7,7 +8,7 @@ import type { ClaimId, ConceptId, ReviewId } from "../src/shared/ids";
 import { randomId, stableId } from "../src/shared/ids";
 import { Material, interval } from "../src/shared/time";
 import { testUserDb } from "./fakes";
-import { CONCEPT, SRC, World, kit, reviewRows, rig, seq, started, startedRig } from "./review-fixtures";
+import { CONCEPT, SRC, World, answer, collect, kit, reply, reviewRows, rig, seq, started, startedRig } from "./review-fixtures";
 
 // ───────────────────────────── core: invite fold ─────────────────────────────
 
@@ -304,17 +305,14 @@ describe("options", () => {
 // ───────────────────────────── start ─────────────────────────────
 
 describe("asking for a lecture's review (flow C, 2026-11-18)", () => {
-  /** A rig whose preparation records each ask, as preparation's prep_asks does. */
+  /** A rig with preparation's real ask record on the same database. */
   function asking() {
-    const r = rig(undefined, { estimateS: (n) => n * 40 });
-    const asks: string[] = [];
-    const reviews = createReviews(r.db, {
-      ...r.world.deps, runTutor: r.tutor.runTutor, clearFailures: r.tutor.clearFailures,
-      asks: { ask: (captureId) => void asks.push(captureId), asked: (captureId) => asks.includes(captureId) },
-    }, { tutor: kit, estimateS: (n) => n * 40 });
-    const held = r.world.close(0, 0, 300);
-    r.world.pendingChunks.add(held.id);
-    return { ...r, reviews, asks };
+    // The tutor answers an end by wrapping up, so a review can finish.
+    const r = rig(() => reply({ kind: "wrap_up" }, "Done."), { estimateS: (n) => n * 40 });
+    const asks = createAsks(r.db);
+    const reviews = createReviews(r.db, { ...r.world.deps, runTutor: r.tutor.runTutor, clearFailures: r.tutor.clearFailures, asks }, { tutor: kit, estimateS: (n) => n * 40 });
+    const askRows = () => r.db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM prep_asks").get()!.n;
+    return { ...r, reviews, asks, askRows, askOf: () => reviews.options(r.capture).ask };
   }
 
   test("only Review now and Wait ask; Later and Stop early do not, and reading the options asks nothing", () => {
@@ -322,45 +320,90 @@ describe("asking for a lecture's review (flow C, 2026-11-18)", () => {
       const r = asking();
       r.reviews.options(r.capture);
       r.reviews.answerInvite(r.capture, answer);
-      expect(r.asks).toEqual([]);
+      expect(r.asks.asked(r.capture)).toBe(false);
     }
     for (const answer of ["review_now", "wait"] as const) {
       const r = asking();
       r.reviews.answerInvite(r.capture, answer);
-      expect(r.asks).toEqual([r.capture]);
+      expect(r.asks.latestAsk(r.capture)?.state).toBe("open");
     }
   });
 
-  test("a stored Review now or Wait names the review it starts, until a review of the lecture starts after it", () => {
-    const r = rig();
+  test("an ask made before any chunk closed starts the review once a prepared chunk has a supported claim", () => {
+    const r = asking();
+    r.reviews.answerInvite(r.capture, "review_now");
+    // Nothing has closed: the options say nothing to review, and the ask waits, open, in that answer too.
+    expect(r.reviews.options(r.capture)).toMatchObject({ kind: "nothing_to_review", ask: { state: "open" } });
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    const chunk = r.world.close(0, 0, 300);
+    r.world.pendingChunks.add(chunk.id);
+    const claim = r.world.claim(1, 10, 20, "awaiting_check");
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    r.world.pendingChunks.delete(chunk.id);
+    r.world.check(claim, "supported_by_check");
+    const reviewId = r.reviews.startAsked(r.capture)!;
+    expect(reviewId).not.toBeNull();
+    expect(r.reviews.view(reviewId).scope.chunkRevisions).toEqual([chunk.id]);
+    expect(r.askOf()).toEqual({ state: "started", reviewId });
+    expect(r.asks.latestAsk(r.capture)).toMatchObject({ state: "closed", reviewId });
+  });
+
+  test("Wait, finish the review, then Wait again starts a second review on the section prepared since", async () => {
+    const r = asking();
     r.world.close(0, 0, 300);
     r.world.claim(1, 10, 20);
-    r.world.pendingChunks.add(r.world.close(1, 300, 600).id);
-    const askedOf = (): ReviewId | undefined => {
-      const o = r.reviews.options(r.capture);
-      return o.kind === "nothing_to_review" ? undefined : o.askedReview;
-    };
-    r.reviews.answerInvite(r.capture, "later");
-    expect(askedOf()).toBeUndefined();
-    r.reviews.answerInvite(r.capture, "review_now");
-    const first = askedOf()!;
-    // Every read names the same review, so two tabs that start it start one review.
-    expect(askedOf()).toBe(first);
-    started(r.reviews.start(r.capture, "prepared_only", first));
-    started(r.reviews.start(r.capture, "prepared_only", askedOf() ?? first));
-    expect(reviewRows(r.db)).toBe(1);
-    expect(askedOf()).toBeUndefined();
-    // A later Wait asks again, for a new review.
     r.reviews.answerInvite(r.capture, "wait");
-    expect(askedOf()).toBeDefined();
-    expect(askedOf()).not.toBe(first);
+    const first = r.reviews.startAsked(r.capture)!;
+    expect(first).not.toBeNull();
+    await collect(r.reviews.turn(first, randomId("turn"), answer()));
+    await collect(r.reviews.turn(first, randomId("turn"), { kind: "end" }));
+    expect(r.reviews.view(first).state.phase).toBe("ended");
+    const next = r.world.close(1, 300, 600);
+    r.world.pendingChunks.add(next.id);
+    r.world.claim(2, 310, 320);
+    // The same answer to the same invite stores no new answer, yet it opens a new ask.
+    r.reviews.answerInvite(r.capture, "wait");
+    expect(r.askOf()).toEqual({ state: "open" });
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    r.world.pendingChunks.delete(next.id);
+    const second = r.reviews.startAsked(r.capture)!;
+    expect(second).not.toBeNull();
+    expect(second).not.toBe(first);
+    expect(r.reviews.view(second).scope.chunkRevisions).toEqual([next.id]);
+    expect(reviewRows(r.db)).toBe(2);
+  });
+
+  test("asking twice while an ask is open starts one review, however often the start runs", () => {
+    const r = asking();
+    r.world.close(0, 0, 300);
+    r.world.claim(1, 10, 20);
+    r.reviews.answerInvite(r.capture, "wait");
+    r.reviews.answerInvite(r.capture, "review_now");
+    expect(r.askRows()).toBe(1);
+    const reviewId = r.reviews.startAsked(r.capture)!;
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    expect(reviewRows(r.db)).toBe(1);
+    expect(r.askOf()).toEqual({ state: "started", reviewId });
+  });
+
+  test("a review the learner starts by hand answers the open ask, so no second review starts from it", () => {
+    const r = asking();
+    r.world.close(0, 0, 300);
+    r.world.claim(1, 10, 20);
+    r.reviews.answerInvite(r.capture, "wait");
+    const mine = randomId("rvw");
+    started(r.reviews.start(r.capture, "prepared_only", mine));
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    expect(r.askOf()).toEqual({ state: "started", reviewId: mine });
+    expect(reviewRows(r.db)).toBe(1);
   });
 
   test("a lecture nobody asked for says so, with no time estimate, and says it is preparing once asked", () => {
     const r = asking();
+    r.world.pendingChunks.add(r.world.close(0, 0, 300).id);
     expect(r.reviews.options(r.capture)).toMatchObject({ kind: "processing", asked: false, pendingChunks: 1, estimateS: null, readyNow: null });
     r.reviews.answerInvite(r.capture, "wait");
-    expect(r.reviews.options(r.capture)).toMatchObject({ kind: "processing", asked: true, pendingChunks: 1, estimateS: 40 });
+    expect(r.reviews.options(r.capture)).toMatchObject({ kind: "processing", asked: true, pendingChunks: 1, estimateS: 40, ask: { state: "open" } });
   });
 });
 

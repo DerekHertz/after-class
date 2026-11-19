@@ -5,14 +5,11 @@ stateDiagram-v2
   state "Capture Not capturing" as s0 {
     state "Preparation Nothing closed yet" as s1 {
       s2: Review No review
-      [*] --> s2
     }
-    [*] --> s1
   }
   state "Capture Capturing" as s3 {
     state "Preparation Nothing closed yet" as s4 {
       s5: Review No review
-      [*] --> s5
     }
     state "Preparation Prepared" as s6 {
       s7: Review No review
@@ -25,15 +22,14 @@ stateDiagram-v2
       s13: Review Reviewing
       s14: Review Question paused
     }
-    [*] --> s4
   }
-  [*] --> s0
-  s2 --> s3: Next
+  [*] --> s2
+  s2 --> s5: Next
   s5 --> s7: Next
-  s5 --> s12: Next
   s7 --> s12: YouAskForAReview or Next
+  s5 --> s12: Next
   s12 --> s7: Next
-  s7 --> s8: Next
+  s7 --> s8: you press Review now
   s8 --> s7: Next
   s8 --> s9: Next
   s9 --> s8: Next

@@ -376,14 +376,21 @@ export type ScopePreview = {
 export type HeldBack = readonly { readonly reviewId: ReviewId; readonly material: Material }[];
 
 /**
- * `askedReview`: the review a stored Review now or Wait starts on its own once a prepared chunk has a supported claim. Absent when no
- * answer waits, or a review of this lecture started after it (flow C, 2026-11-18).
+ * A lecture's latest ask for its review (flow C, 2026-11-18). Review now or Wait opens one; the backend starts a review once a prepared
+ * chunk has a supported claim, and that start closes the ask with the review's id. `reviewId` is null only for a lecture asked before
+ * asks were stored one per review (preparation/004-prep-asks).
  */
+export type LectureAsk = { readonly state: "open"; readonly seq: Seq } | { readonly state: "closed"; readonly seq: Seq; readonly reviewId: ReviewId | null };
+
+/** What a page reads of the lecture's latest ask: still open, so it shows Processing, or the review that started from it, so it opens that. */
+export type AskView = { readonly state: "open" } | { readonly state: "started"; readonly reviewId: ReviewId };
+
+/** `ask`: the lecture's latest ask, absent when nobody asked (flow C, 2026-11-18). */
 export type ReviewOptions =
-  | { readonly kind: "ready"; readonly scope: ScopePreview; readonly heldBack: HeldBack; readonly askedReview?: ReviewId | undefined }
+  | { readonly kind: "ready"; readonly scope: ScopePreview; readonly heldBack: HeldBack; readonly ask?: AskView | undefined }
   /** `asked` false: nobody has asked for this lecture's review yet, so its `pendingChunks` are held, not preparing (flow C, 2026-11-18). */
-  | { readonly kind: "processing"; readonly asked: boolean; readonly readyNow: ScopePreview | null; readonly pendingChunks: number; readonly estimateS: number | null; readonly heldBack: HeldBack; readonly askedReview?: ReviewId | undefined }
-  | { readonly kind: "nothing_to_review"; readonly gaps: readonly Gap[]; readonly unverified: readonly Claim[]; readonly rewatch: readonly { readonly sourceId: SourceId; readonly interval: Interval }[]; readonly heldBack: HeldBack };
+  | { readonly kind: "processing"; readonly asked: boolean; readonly readyNow: ScopePreview | null; readonly pendingChunks: number; readonly estimateS: number | null; readonly heldBack: HeldBack; readonly ask?: AskView | undefined }
+  | { readonly kind: "nothing_to_review"; readonly gaps: readonly Gap[]; readonly unverified: readonly Claim[]; readonly rewatch: readonly { readonly sourceId: SourceId; readonly interval: Interval }[]; readonly heldBack: HeldBack; readonly ask?: AskView | undefined };
 
 /** "prepared_only": start on what's ready, other chunks keep preparing. "stop_early": cancel pending in-scope work first. */
 export type StartChoice = "prepared_only" | "stop_early";

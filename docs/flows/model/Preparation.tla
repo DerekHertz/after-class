@@ -34,10 +34,11 @@ VARIABLES
     reviewed,       \* chunks whose review has ended
     question,       \* NoQuestion, or the claim the open question judges my answer against
     paused,         \* NoQuestion, or the claim whose question paused while it is rechecked
-    requested       \* the learner asked for this lecture's review (Review now or Wait), amendment 2026-11-18
+    requested,      \* the learner ever asked for this lecture's review (Review now or Wait), amendment 2026-11-18
+    askOpen         \* the latest ask waits for its review; the review that starts closes it
 
 vars == <<capture, watched, closed, boundary, boundaryFixed, status, revisions, late,
-          resources, invite, review, scope, reviewed, question, paused, requested>>
+          resources, invite, review, scope, reviewed, question, paused, requested, askOpen>>
 CaptureVars == <<capture, watched, closed, boundary, boundaryFixed>>
 PrepVars == <<status, revisions, late, resources>>
 ReviewVars == <<invite, review, scope, reviewed, question, paused>>
@@ -64,6 +65,7 @@ TypeOK ==
     /\ boundaryFixed \in BOOLEAN
     /\ status \in [Claims -> {"none", "held"} \union Pending \union Finished]
     /\ requested \in BOOLEAN
+    /\ askOpen \in BOOLEAN
     /\ revisions \in [Claims -> 0..2]
     /\ late \in [Claims -> SUBSET {"cancelled", "outdated"}]
     /\ resources \in {"not started", "searching", "found", "failed"}
@@ -91,6 +93,7 @@ Init ==
     /\ question = NoQuestion
     /\ paused = NoQuestion
     /\ requested = FALSE
+    /\ askOpen = FALSE
 
 \* The chunk that is open now, or 0 when both are closed.
 OpenChunk == IF 1 \notin closed THEN 1 ELSE IF 2 \notin closed THEN 2 ELSE 0
@@ -275,13 +278,15 @@ YouChooseWait ==
 
 \* [user] Review now ... (Review now always available.)
 \* [code] Freeze review scope = prepared chunks now; new viewing queues for later.
+\* A review that starts, whichever way, answers the open ask.
 YouStartAReview ==
     /\ review \in {"none", "nothing to review"}
     /\ HasSupported(ReadyScope)
     /\ review' = "active"
     /\ scope' = ReadyScope
     /\ invite' = "none"
-    /\ UNCHANGED <<reviewed, question, paused>>
+    /\ askOpen' = FALSE
+    /\ UNCHANGED <<reviewed, question, paused, requested>>
     /\ UNCHANGED CaptureVars /\ UNCHANGED PrepVars
 
 \* [code] No supported claims in scope -> don't start; show gaps and unverified claims with evidence.
@@ -324,8 +329,9 @@ YouStopEarly ==
                         THEN late[c] \union {"cancelled"} ELSE late[c]]
           /\ review' = IF ok THEN "active" ELSE "nothing to review"
           /\ scope' = IF ok THEN closed \ reviewed ELSE scope
+          /\ askOpen' = IF ok THEN FALSE ELSE askOpen
     /\ invite' = "none"
-    /\ UNCHANGED <<reviewed, question, paused>>
+    /\ UNCHANGED <<reviewed, question, paused, requested>>
     /\ UNCHANGED CaptureVars /\ UNCHANGED <<revisions, resources>>
 
 \* ---------------- D. Review ----------------
@@ -380,18 +386,25 @@ YouEndTheReview ==
 \* [code] Review now or Wait on a lecture not yet asked for -> ask for it, show
 \*        Processing, and start the review once a prepared chunk has a supported
 \*        claim. Its scope is the chunks prepared at that moment.             (amendment 2026-11-18)
-\* Asking queues every held chunk. Starting the review is YouStartAReview, whose scope is ReadyScope.
+\* Asking opens an ask and queues every held chunk; asking while one is open changes nothing. The code,
+\* not the learner's page, starts the review: CodeStartsTheAskedReview, whose scope is ReadyScope.
 \* [code] A review ends while more chunks are prepared or preparing -> offer the
 \*        next section as a new review.                                      (amendment 2026-11-18)
-\* That offer is YouStartAReview again after YouEndTheReview, over the chunks not yet reviewed.
+\* Taking that offer with Review now or Wait is another ask once the last one has closed, so the
+\* next section's review starts the same way, over the chunks not yet reviewed.
 YouAskForAReview ==
-    /\ ~requested
-    /\ review = "none"
+    /\ ~askOpen
+    /\ review \in {"none", "nothing to review"}
     /\ requested' = TRUE
+    /\ askOpen' = TRUE
     /\ status' = [c \in Claims |-> IF status[c] = "held" THEN "queued" ELSE status[c]]
     /\ invite' = "waiting"
     /\ UNCHANGED CaptureVars /\ UNCHANGED <<revisions, late, resources>>
     /\ UNCHANGED <<review, scope, reviewed, question, paused>>
+
+CodeStartsTheAskedReview ==
+    /\ askOpen
+    /\ YouStartAReview
 
 OldNext ==
     \/ YouStartCapture
@@ -411,10 +424,8 @@ OldNext ==
     \/ ResourceSearchEnds
     \/ YouChooseLater
     \/ YouChooseWait
-    \/ YouStartAReview
     \/ YouPressReviewNowWithNothingSupported
     \/ YouRewatchOrRetry
-    \/ YouStopEarly
     \/ \E c \in Claims : TutorAsksAboutAClaim(c)
     \/ TutorResumesThePausedQuestion
     \/ YouAnswer
@@ -423,12 +434,18 @@ OldNext ==
 \* Code, agent and Jev preparation steps keep running once they can.
 Fairness ==
     \A c \in Claims :
-        /\ WF_vars(AgentWritesAClaim(c) /\ UNCHANGED requested)
-        /\ WF_vars(JevChecksAClaim(c) /\ UNCHANGED requested)
-        /\ WF_vars(AgentRevisesAClaim(c) /\ UNCHANGED requested)
-        /\ WF_vars(JevRechecksAClaim(c) /\ UNCHANGED requested)
+        /\ WF_vars(AgentWritesAClaim(c) /\ UNCHANGED <<requested, askOpen>>)
+        /\ WF_vars(JevChecksAClaim(c) /\ UNCHANGED <<requested, askOpen>>)
+        /\ WF_vars(AgentRevisesAClaim(c) /\ UNCHANGED <<requested, askOpen>>)
+        /\ WF_vars(JevRechecksAClaim(c) /\ UNCHANGED <<requested, askOpen>>)
+    \* The backend tries the start whenever the lecture's preparation changes.
+    /\ WF_vars(CodeStartsTheAskedReview)
 
-Next == (OldNext /\ UNCHANGED requested) \/ YouAskForAReview
+Next ==
+    \/ OldNext /\ UNCHANGED <<requested, askOpen>>
+    \/ YouStartAReview
+    \/ YouStopEarly
+    \/ YouAskForAReview
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -458,7 +475,7 @@ R5_OnlyStopEarlyCancels ==
 
 \* R6: A pending resource search never blocks a review that is otherwise ready.
 R6_ResourcesNeverBlockReview ==
-    (review \in {"none", "nothing to review"} /\ HasSupported(ReadyScope)) => ENABLED (YouStartAReview /\ UNCHANGED requested)
+    (review \in {"none", "nothing to review"} /\ HasSupported(ReadyScope)) => ENABLED YouStartAReview
 
 \* R7: Once a review starts, its scope never grows; corrections can change claims inside it but can't add material.
 R7_ScopeNeverGrows ==
@@ -486,5 +503,11 @@ Lazy_AskedLeavesNothingHeld ==
     requested => \A c \in Claims : status[c] # "held"
 Lazy_AskedLecturesFinish ==
     \A c \in Claims : [](requested /\ status[c] \in Pending => <>(status[c] \in Finished))
+\* An ask closes only when a review starts, so no state drops it (an ask made before any chunk closed, for one).
+Lazy_AskClosesOnlyByAStart ==
+    [][askOpen /\ ~askOpen' => review' = "active"]_vars
+\* An open ask never waits on while its review could start.
+Lazy_OpenAskStarts ==
+    [](ENABLED CodeStartsTheAskedReview => <>(~askOpen \/ ~ENABLED CodeStartsTheAskedReview))
 
 ====

@@ -4,7 +4,7 @@
  */
 import { heldMessage, resetDay } from "../shared/allowance";
 import type {
-  Allowance, Author, CaptureStatus, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, HeldBack, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
+  Allowance, AskView, Author, CaptureStatus, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, HeldBack, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
   ReviewState, ReviewView, ScopePreview, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
 } from "../shared/domain";
 import type { EvidenceId, ReviewId, SourceId } from "../shared/ids";
@@ -253,12 +253,20 @@ export function nextSection(options: ReviewOptions): "prepared" | "preparing" | 
 }
 
 /**
- * Flow C, 2026-11-18: after Review now or Wait "the review starts on its own once a prepared chunk has a supported claim". The review to start
- * now, read from the stored answer, or null while no answer waits or nothing prepared has a supported claim.
+ * What a lecture page knows of the lecture's ask. `waiting`: the page asked, was opened by an ask (`#asked`), or read the ask open.
+ * `seen`: the review of the latest started ask that this page has already read, which it never opens on its own.
  */
-export function askedStart(options: ReviewOptions): ReviewId | null {
-  if (options.kind === "ready" || (options.kind === "processing" && options.readyNow !== null)) return options.askedReview ?? null;
-  return null;
+export type AskFollow = { readonly waiting: boolean; readonly seen: ReviewId | null };
+
+/**
+ * Flow C, 2026-11-18: the backend starts an asked review "once a prepared chunk has a supported claim". A lecture page follows it: one
+ * read of the latest ask gives the page's next state and the review to open now, if any. A page opens only a review that started while
+ * it waited, so a review that started before the learner came back, or one a stale read still reports, is not forced on them.
+ */
+export function followAsk(state: AskFollow, ask: AskView | undefined): { readonly state: AskFollow; readonly open: ReviewId | null } {
+  if (ask?.state === "open") return { state: { ...state, waiting: true }, open: null };
+  if (ask?.state !== "started" || ask.reviewId === state.seen) return { state, open: null };
+  return { state: { waiting: false, seen: ask.reviewId }, open: state.waiting ? ask.reviewId : null };
 }
 
 export function optionsScreen(options: ReviewOptions, titles: SourceTitles = new Map(), videos: SourceVideos = new Map()): OptionsScreen {

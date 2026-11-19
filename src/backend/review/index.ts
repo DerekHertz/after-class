@@ -19,8 +19,8 @@
 import { stableId } from "../../shared/ids";
 import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, ConceptId, EvidenceId, ReviewId, ThreadId, TurnId } from "../../shared/ids";
 import type {
-  AssessableClaim, BudgetHold, ChunkPrep, ChunkRevision, Claim, CodeNotice, Concept, Correction, EvidenceBundle, FrozenScope, HeldBack, InviteAnswer, InviteState,
-  LearnerAct, ReviewOptions, ReviewView, ScopePreview, Seq, StartChoice, StartResult, Turn, TurnEvent, TutorMove,
+  AskView, AssessableClaim, BudgetHold, ChunkPrep, ChunkRevision, Claim, CodeNotice, Concept, Correction, EvidenceBundle, FrozenScope, HeldBack, InviteAnswer, InviteState,
+  LearnerAct, LectureAsk, ReviewOptions, ReviewView, ScopePreview, Seq, StartChoice, StartResult, Turn, TurnEvent, TutorMove,
 } from "../../shared/domain";
 import { Material } from "../../shared/time";
 import { asSeq } from "../db";
@@ -54,6 +54,13 @@ export type Reviews = {
    * Claims empty → nothing_to_review, and no review row is written.
    */
   start(captureId: CaptureId, choice: StartChoice, reviewId: ReviewId): StartResult;
+  /**
+   * Flow C, 2026-11-18: "start the review once a prepared chunk has a supported claim. Its scope is the chunks prepared at that moment."
+   * The backend calls this whenever the lecture's preparation may have changed. With an open ask and a supported claim it starts the
+   * review the ask names, which closes the ask in the same transaction, so a retry or a restart never starts a second one. Returns the
+   * review started, or null when no ask is open or nothing prepared has a supported claim yet (the ask stays open).
+   */
+  startAsked(captureId: CaptureId): ReviewId | null;
   /**
    * Header-first (SYNTHESIS graft 1). The learner turn is committed before any
    * model call, so a failed call never loses what the learner said, and a
@@ -115,9 +122,15 @@ export type ReviewsDeps = {
   startWrapUp(reviewId: ReviewId): void;
   nextSeq(): Seq;
   /**
-   * Preparation's ask record (flow C, 2026-11-18). Absent: every lecture counts as asked, which is how a test of a prepared lecture runs.
+   * Preparation's ask record (flow C, 2026-11-18). Absent: every lecture counts as asked and no review starts on its own, which is how a
+   * test of a prepared lecture runs.
    */
-  asks?: { ask(captureId: CaptureId): void; asked(captureId: CaptureId): boolean };
+  asks?: {
+    ask(captureId: CaptureId): void;
+    asked(captureId: CaptureId): boolean;
+    latestAsk(captureId: CaptureId): LectureAsk | null;
+    closeAsk(captureId: CaptureId, reviewId: ReviewId): void;
+  };
   /** The record's markEndedInTx, run in the transaction that stores the wrap_up turn, so an ended review always has a save row (#138). */
   endedInTx?(reviewId: ReviewId): void;
 };
@@ -333,22 +346,28 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     const asOf = cands.reduce((s, c) => Math.max(s, c.rev.closedAtSeq), 0);
     const scope = asOf > 0 ? freezeScope(cands, (m) => deps.assessableIn(captureId, m), gapsOf, asSeq(asOf)) : null;
     const pending = cands.filter((c) => !c.prep.finished).length;
-    const ask = askedReview(captureId);
+    const ask = askView(captureId);
     if (pending > 0) {
       const asked = deps.asks?.asked(captureId) ?? true;
       return { kind: "processing", asked, readyNow: scope && preview(captureId, scope), pendingChunks: pending, estimateS: asked ? config.estimateS?.(pending) ?? null : null, heldBack: heldBack(cands, captureId), ...ask };
     }
-    return scope ? { kind: "ready", scope: preview(captureId, scope), heldBack: heldBack(cands, captureId), ...ask } : nothingToReview(cands, captureId);
+    return scope ? { kind: "ready", scope: preview(captureId, scope), heldBack: heldBack(cands, captureId), ...ask } : { ...nothingToReview(cands, captureId), ...ask };
   }
 
-  /**
-   * Flow C, 2026-11-18: after Review now or Wait, "the review starts on its own once a prepared chunk has a supported claim". The latest such
-   * answer waits until a review of this lecture starts after it. Its review id comes from the answer, so every open tab starts the same review.
-   */
-  function askedReview(captureId: CaptureId): { askedReview: ReviewId } | null {
-    const last = q.answers.all(userId, captureId).reduce((s, a) => (a.answer === "review_now" || a.answer === "wait" ? Math.max(s, a.seq) : s), 0);
-    if (last === 0 || q.reviewsOf.all(userId, captureId).some((r) => r.frozen_at_seq > last)) return null;
-    return { askedReview: stableId("rvw", captureId, last) };
+  /** The latest ask as a page reads it. A lecture asked before asks named their review has none to open. */
+  function askView(captureId: CaptureId): { ask: AskView } | null {
+    const ask = deps.asks?.latestAsk(captureId) ?? null;
+    if (ask === null) return null;
+    if (ask.state === "open") return { ask: { state: "open" } };
+    return ask.reviewId === null ? null : { ask: { state: "started", reviewId: ask.reviewId } };
+  }
+
+  function startAsked(captureId: CaptureId): ReviewId | null {
+    const ask = deps.asks?.latestAsk(captureId) ?? null;
+    if (ask?.state !== "open") return null;
+    // The ask names its review, so a start retried after a crash finds the review it already stored.
+    const result = start(captureId, "prepared_only", stableId("rvw", captureId, ask.seq));
+    return result.kind === "started" ? result.reviewId : null;
   }
 
   function start(captureId: CaptureId, choice: StartChoice, reviewId: ReviewId): StartResult {
@@ -376,6 +395,8 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
       const scope: FrozenScope = dropped > 0 ? { ...frozen, partial: [...frozen.partial, { kind: "stopped_early", droppedClaims: dropped }] } : frozen;
       const texts = new Map(deps.assessableIn(captureId, scope.material).map((c) => [c.id, c.text] as const));
       q.insertReview.run(reviewId, userId, captureId, choice, encodeScope(scope, texts), scope.frozenAtSeq, Math.round(now()));
+      // Whichever way it started, this review answers the lecture's open ask.
+      deps.asks?.closeAsk(captureId, reviewId);
       return { kind: "started", reviewId, scope };
     });
   }
@@ -765,5 +786,5 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     yield { type: "turn_complete", turnId: completeId() };
   }
 
-  return { invite, answerInvite, options, start, turn, view, list, heldByAnotherUser };
+  return { invite, answerInvite, options, start, startAsked, turn, view, list, heldByAnotherUser };
 }

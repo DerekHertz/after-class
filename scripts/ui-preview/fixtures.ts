@@ -26,7 +26,7 @@ export const ids = {
   chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait"), ordering: id("cpt", "ordering"), earlierCapture: id("cap", "earlier-capture"),
   otherCapture: id("cap", "other-capture"), pendingReview: id("rvw", "pending-review"), unsavedReview: id("rvw", "unsaved-review"),
 };
-export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "reload-unanswered", "reload-in-flight", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-split", "capture-processing", "capture-held", "capture-empty", "capture-unasked", "capture-leave", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "record-double-status", "double-status", "review-record-stale", "review-record-slow", "usage", "usage-held", "usage-reserved", "usage-uncapped", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-connected", "first-run", "home-error", "room-grown"] as const;
+export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "reload-unanswered", "reload-in-flight", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-split", "capture-processing", "capture-held", "capture-empty", "capture-unasked", "capture-empty-asked", "capture-leave", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "record-double-status", "double-status", "review-record-stale", "review-record-slow", "usage", "usage-held", "usage-reserved", "usage-uncapped", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-connected", "first-run", "home-error", "room-grown"] as const;
 export type Scenario = typeof scenarios[number];
 export const scenarioFrom = (search: string): Scenario => scenarios.find(s => s === new URLSearchParams(search).get("scenario")) ?? "review";
 
@@ -198,6 +198,7 @@ export function createFixture(scenario: Scenario): Fixture {
   let inFlightReads = 0;
   let topicReads = 0;
   let unaskedReads = 0;
+  let askedReads = 0;
   let askedHere = false;
   const api: AppApi = {
     async review(reviewId) {
@@ -223,12 +224,19 @@ export function createFixture(scenario: Scenario): Fixture {
       const scope = { chunkRevisions: [ids.chunk], supportedClaims: 3, topics, material, partial: [{ kind: "capture_gap", gap }] };
       // "capture-split": the review above holds the first 4:18 of the lecture, which this answer leaves out of the next review.
       const heldBack = scenario === "capture-split" ? [{ reviewId: ids.review, material: [[ids.source, [[0, 258]]]] }] : [];
-      // "capture-unasked": another tab or the extension asks after the page's second read. "capture-leave": the page's own ask, whose
-      // first prepared section is read slowly. Once asked, a prepared section has a supported claim and the stored ask names the review.
-      if (scenario === "capture-unasked" || scenario === "capture-leave") {
-        if (!askedHere && !(scenario === "capture-unasked" && ++unaskedReads > 2)) return reviewOptionsz.parse({ kind: "processing", asked: false, readyNow: null, pendingChunks: 2, estimateS: null, heldBack });
-        if (scenario === "capture-leave") await new Promise((r) => setTimeout(r, 1500));
-        return reviewOptionsz.parse({ kind: "processing", asked: true, readyNow: scope, pendingChunks: 1, estimateS: null, heldBack, askedReview: ids.review });
+      // "capture-unasked": another tab or the extension asks after the page's second read; the next read sees the ask open, and the one
+      // after that the review the backend started from it. "capture-empty-asked": the same, on a lecture with nothing closed yet.
+      // "capture-leave": the page's own ask, whose started review is read slowly.
+      if (scenario === "capture-unasked" || scenario === "capture-empty-asked") {
+        const nothing = { kind: "nothing_to_review", heldBack, gaps: [], unverified: [], rewatch: [] };
+        if (++unaskedReads <= 2) return reviewOptionsz.parse(scenario === "capture-empty-asked" ? nothing : { kind: "processing", asked: false, readyNow: null, pendingChunks: 2, estimateS: null, heldBack });
+        const ask = ++askedReads === 1 ? { state: "open" } : { state: "started", reviewId: ids.review };
+        return reviewOptionsz.parse(scenario === "capture-empty-asked" && ask.state === "open" ? { ...nothing, ask } : { kind: "processing", asked: true, readyNow: null, pendingChunks: 1, estimateS: null, heldBack, ask });
+      }
+      if (scenario === "capture-leave") {
+        if (!askedHere) return reviewOptionsz.parse({ kind: "processing", asked: false, readyNow: null, pendingChunks: 2, estimateS: null, heldBack });
+        await new Promise((r) => setTimeout(r, 1500));
+        return reviewOptionsz.parse({ kind: "processing", asked: true, readyNow: null, pendingChunks: 1, estimateS: null, heldBack, ask: { state: "started", reviewId: ids.review } });
       }
       return reviewOptionsz.parse(scenario === "capture-empty" ? { kind: "nothing_to_review", heldBack: [], gaps: [gap], unverified: [], rewatch: [{ sourceId: ids.source, interval: { start: 600, end: 640 } }] } : scenario === "capture-processing" || scenario === "capture-held" ? { kind: "processing", asked: true, readyNow: scope, pendingChunks: 2, estimateS: null, heldBack } : { kind: "ready", scope, heldBack });
     },

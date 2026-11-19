@@ -119,14 +119,15 @@ async function newReview(): Promise<string> {
     { kind: "control", action: "stop", reason: "user" },
   ].map((f, clientSeq) => ({ ...f, clientSeq, wallMs: 1000 + clientSeq }));
   await call("/ingest", { captureId, facts });
-  // The learner's Wait asks for this lecture's review, so it is prepared (flow C, 2026-11-18).
+  // The learner's Wait asks for this lecture's review, so it is prepared and the backend starts the review (flow C, 2026-11-18).
   await call(`/captures/${captureId}/invite`, { answer: "wait" });
-  const reviewId = randomId("rvw");
-  for (let i = 0; i < 300; i++) {
-    const started = JSON.parse(await call(`/captures/${captureId}/reviews`, { reviewId, choice: "prepared_only" })) as { kind: string };
-    if (started.kind === "started") break;
-    await Bun.sleep(100);
+  let reviewId: string | null = null;
+  for (let i = 0; i < 300 && reviewId === null; i++) {
+    const options = (await (await fetch(`${base}/captures/${captureId}/review-options`, { headers })).json()) as { ask?: { state: string; reviewId?: string } };
+    if (options.ask?.state === "started") reviewId = options.ask.reviewId!;
+    else await Bun.sleep(100);
   }
+  if (reviewId === null) throw new Error(`the asked review of ${captureId} never started`);
   await call(`/reviews/${reviewId}/turns`, { turnId: randomId("turn"), act: { kind: "begin", fuzzy: [] } });
   await call(`/reviews/${reviewId}/turns`, { turnId: randomId("turn"), act: { kind: "answer", text: "It says the topic first.", modality: "text" } });
   return reviewId;

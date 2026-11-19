@@ -389,15 +389,21 @@ chrome.tabs.onRemoved.addListener((tabId) => {
  * Answer an invite. Review now opens the lecture page and never touches capture state.
  * R9: "Starting a review doesn't stop capture, and stopping capture doesn't end a review."
  * Every answer is also posted to the backend, which records it as a fact. Review now is posted whatever the invite state, since it asks for
- * the lecture's review, and the lecture page starts that review from the stored answer (flow C, 2026-11-18).
+ * the lecture's review, and the backend starts that review once a prepared chunk has a supported claim (flow C, 2026-11-18). The lecture
+ * page opens after the ask is stored, marked `#asked`, so its first read sees this ask and it follows the review the ask starts.
  */
 export async function answerInvite(tabId: number, answer: InviteAnswer): Promise<InviteState> {
   const state = await readState(tabId);
-  const lecturePage = state === null ? `${BACKEND.origin}/app/` : `${BACKEND.origin}/app/capture/${state.captureId}`;
-  if (answer === "review_now" || answer === "stop_early") await chrome.tabs.create({ url: safeReviewUrl(state?.lastAck?.reviewAppUrl, lecturePage) });
+  const app = new URL(safeReviewUrl(state?.lastAck?.reviewAppUrl, `${BACKEND.origin}/app/`));
+  const page = (asked: boolean) => (state === null ? app.href : new URL(`/app/capture/${encodeURIComponent(state.captureId)}${asked ? "#asked" : ""}`, app.origin).href);
+  const opensPage = answer === "review_now" || answer === "stop_early";
   const current: InviteState = state?.lastAck?.invite ?? { state: "none" };
-  if (state === null) return current;
+  if (state === null) {
+    if (opensPage) await chrome.tabs.create({ url: page(false) });
+    return current;
+  }
   const r = await backendFetch("POST", `/captures/${state.captureId}/invite`, { answer }, { capture: state.captureId });
+  if (opensPage) await chrome.tabs.create({ url: page(r.ok && answer === "review_now") });
   if (!r.ok) throw new Error(r.error);
   const s = (r.json as { state?: unknown } | null)?.state;
   return s === "none" || s === "invited" || s === "later" || s === "waiting" ? (r.json as InviteState) : current;

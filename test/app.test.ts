@@ -4,12 +4,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { AppApi } from "../src/app/api";
 import { ApiError } from "../src/app/api";
 import { OptionsView, checkAgain } from "../src/app/capture";
-import { questionsAsked, availableActions, captureStatusLabel, citedInWatchOrder, conversationLines, coveredLines, currentEvidenceIds, estimateText, formatClock, groupGaps, inspectBundle, laterNote, lectureHeading, liveText, nextSection, noteView, observationRow, optionsScreen, parseRoute, partialLines, reduceLive, routePath, softTargetPrompt, sourceWatchOrder, startLive, strandedEndTurn, toAct, unansweredLearnerTurn, usageRows } from "../src/app/core";
+import { questionsAsked, availableActions, captureStatusLabel, citedInWatchOrder, conversationLines, coveredLines, currentEvidenceIds, estimateText, followAsk, formatClock, groupGaps, inspectBundle, laterNote, lectureHeading, liveText, nextSection, noteView, observationRow, optionsScreen, parseRoute, partialLines, reduceLive, routePath, softTargetPrompt, sourceWatchOrder, startLive, strandedEndTurn, toAct, unansweredLearnerTurn, usageRows } from "../src/app/core";
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { UsageTable } from "../src/app/record";
 import { BundleInspector, EvidencePane } from "../src/app/ui";
 import type { ScopePreview, TurnEvent, UsageSummary } from "../src/shared/domain";
 import { stableId } from "../src/shared/ids";
+import type { ReviewId } from "../src/shared/ids";
 import { media } from "../src/shared/time";
 import { Material, interval } from "../src/shared/time";
 import { captureId, claimJson, clm, cpt, crv, ev1, ev2, findElements, learnerAnswer, parsedReview, reviewId, reviewJson, sentence, src, stored, thr, tid, turnJson, tutorAsk } from "./app-fixtures";
@@ -466,5 +467,25 @@ describe("a lecture nobody asked for (flow C, 2026-11-18)", () => {
     expect(nextSection({ kind: "processing", asked: true, readyNow: null, pendingChunks: 1, estimateS: null, heldBack: [] })).toBe("preparing");
     expect(nextSection({ kind: "processing", asked: false, readyNow: null, pendingChunks: 2, estimateS: null, heldBack: [] })).toBeNull();
     expect(nextSection({ kind: "nothing_to_review", gaps: [], unverified: [], rewatch: [], heldBack: [] })).toBeNull();
+  });
+
+  test("a lecture page opens the review the backend started only when it waited for that ask", () => {
+    const old = stableId("rvw", "earlier") as ReviewId;
+    const fresh = stableId("rvw", "asked") as ReviewId;
+    const loaded = { waiting: false, seen: null };
+    // A review that had started before the page loaded is the learner's to open from the list.
+    const first = followAsk(loaded, { state: "started", reviewId: old });
+    expect(first.open).toBeNull();
+    // An ask made elsewhere: the page reads it open, then the review it started, and opens that one.
+    const waiting = followAsk(first.state, { state: "open" });
+    expect(waiting.open).toBeNull();
+    expect(followAsk(waiting.state, { state: "started", reviewId: fresh }).open).toBe(fresh);
+    // The page asked itself: a stale read that still names the old review opens nothing; the new one opens.
+    const asked = { ...first.state, waiting: true };
+    expect(followAsk(asked, { state: "started", reviewId: old }).open).toBeNull();
+    expect(followAsk(asked, { state: "started", reviewId: fresh }).open).toBe(fresh);
+    // The popup opened the page marked as asked, after the ask was stored: its first read may already name the review.
+    expect(followAsk({ waiting: true, seen: null }, { state: "started", reviewId: fresh }).open).toBe(fresh);
+    expect(followAsk({ waiting: true, seen: null }, undefined).open).toBeNull();
   });
 });

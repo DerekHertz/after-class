@@ -97,7 +97,7 @@ describe("a fact the backend refuses", () => {
 });
 
 describe("Review now from the popup (flow C, 2026-11-18)", () => {
-  test("asks for the lecture's review whatever the invite state, and opens the lecture page", async () => {
+  test("asks for the lecture's review whatever the invite state, then opens that lecture's page marked as asked", async () => {
     const env = newEnv();
     const { c } = await boot(env);
     connectPort(c, 1);
@@ -106,6 +106,6 @@ describe("Review now from the popup (flow C, 2026-11-18)", () => {
     const captureId = [...env.backend.stored.keys()][0]!;
     await sendPopup(c, { type: "invite_answer", tabId: 1, answer: "review_now" });
     expect(env.backend.invites).toEqual([`${captureId} review_now`]);
-    expect(c.created).toHaveLength(1);
+    expect(c.created).toEqual([`http://127.0.0.1:4317/app/capture/${captureId}#asked`]);
   });
 });

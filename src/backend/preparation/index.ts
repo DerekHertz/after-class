@@ -22,9 +22,8 @@
  *
  * Lazy preparation, flow C as amended 2026-11-18: "[code] Chunk closed → valid cache hit? reuse : hold it until I ask for this
  * lecture's review. Once asked, queue interpretation at once, earliest chunk first, and queue every chunk that closes later."
- * The ask is one stored row per lecture (prep_asks), written by `ask` and never removed. Until it exists demand() asks for
- * nothing and every chunk's interpretation is "held". Capture, frames and Jev's boundary and frame checks are other modules'
- * demand and run regardless.
+ * The asks are asks.ts. Until a lecture has any ask, demand() asks for nothing and every chunk's interpretation is "held". Capture, frames and Jev's boundary and frame checks are other modules' demand and run
+ * regardless.
  *
  *   const prep = preparation.prep(chunkRevisionId);   // { finished, supportedCount, claims }
  *   preparation.stopEarly(captureId, ids);             // a fact; cancels by derivation
@@ -46,15 +45,14 @@ import { slotDep } from "../deps";
 import type { Dep, ReadDep } from "../deps";
 import type { FramePin } from "../evidence";
 import type { WorkItem } from "../scheduler";
+import { createAsks } from "./asks";
+import type { Asks } from "./asks";
 import { assessable, checkVerdict, claimInside, cutoffFor, deriveClaimStatus, isFinished, locate, normalizeLabel, validateDraft } from "./core";
 import type { Check, ControlFact, Located } from "./core";
 import type { InterpretationInput, InterpretationOutput, PreparationTasks, ResourceSearchInput, RevisionInput } from "./tasks";
 
-export type Preparation = {
+export type Preparation = Asks & {
   prep(chunkRevisionId: ChunkRevisionId): ChunkPrep;
-  /** The learner asked for this lecture's review (Review now or Wait). Idempotent: the first ask is the one stored. */
-  ask(captureId: CaptureId): void;
-  asked(captureId: CaptureId): boolean;
   /** Interpretation, claim checks, revisions, rechecks still needed. Resource searches are paused: nothing demands them (see docs/flows/after-class.md, Amendment 2026-11-14). Excludes cancelled scope. */
   demand(captureId: CaptureId): readonly WorkItem[];
   /** Flow C Stop early: one fact. Pending work in these chunks stops being demanded; late results are ignored. */
@@ -178,6 +176,7 @@ export function createPreparation(db: UserDb, deps: {
 }): Preparation {
   const { tasks } = deps;
   const { userId } = db;
+  const asks = createAsks(db);
   /** In process only: after a restart an interpretation waiting for frames is ready again with the bundle of that moment. */
   const holds = new Map<CaptureId, readonly Held[]>();
   const frozenSlot = (kind: FrozenKind, subject: string) => {
@@ -195,8 +194,6 @@ export function createPreparation(db: UserDb, deps: {
       `SELECT seq, action, chunk_revision_id FROM prep_controls WHERE user_id = ? AND capture_id = ? ORDER BY seq`,
     ),
     control: db.sql.query(`INSERT INTO prep_controls (user_id, seq, capture_id, action, chunk_revision_id, at_ms) VALUES (?, ?, ?, ?, ?, ?)`),
-    asked: db.sql.query<{ n: number }, [string, string]>(`SELECT 1 AS n FROM prep_asks WHERE user_id = ? AND capture_id = ?`),
-    ask: db.sql.query(`INSERT OR IGNORE INTO prep_asks (user_id, capture_id, at_ms) VALUES (?, ?, ?)`),
     claimIndexed: db.sql.query<{ n: number }, [string, string]>(`SELECT 1 AS n FROM claim_index WHERE user_id = ? AND id = ?`),
     indexClaim: db.sql.query(
       `INSERT INTO claim_index (user_id, id, capture_id, source_chunk_id, interpretation_key, ordinal, concept_id, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -359,7 +356,7 @@ export function createPreparation(db: UserDb, deps: {
     const frozen = units.reduce((m, u) => Material.union(m, u.unit.material), Material.empty);
     const held = (holds.get(captureId) ?? []).filter((h) => !Material.contains(frozen, h.material) && cutoffFor((m) => Material.contains(m, h.material), controls) === null);
     holds.set(captureId, held);
-    return { asked: asked(captureId), controls, units, held, claims, covered: held.reduce((m, h) => Material.union(m, h.material), frozen) };
+    return { asked: asks.asked(captureId), controls, units, held, claims, covered: held.reduce((m, h) => Material.union(m, h.material), frozen) };
   }
 
   /** Records applied interpretations, which stay applied: any later stop-early has a larger Seq. */
@@ -440,7 +437,6 @@ export function createPreparation(db: UserDb, deps: {
     return [...frames, ...needs.filter((n) => !seen.has(n.key) && !!seen.add(n.key)).map((n) => workItem(captureId, n))];
   }
 
-  const asked = (captureId: CaptureId): boolean => q.asked.get(userId, captureId) !== null;
 
   function control(captureId: CaptureId, action: ControlFact["action"], ids: readonly ChunkRevisionId[]): Seq {
     return db.tx(() => {
@@ -476,8 +472,7 @@ export function createPreparation(db: UserDb, deps: {
 
   return {
     prep,
-    ask: (captureId) => void q.ask.run(userId, captureId, Date.now()),
-    asked,
+    ...asks,
     demand,
     stopEarly: (captureId, ids) => control(captureId, "stop_early", ids),
     retry,

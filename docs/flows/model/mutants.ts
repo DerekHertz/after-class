@@ -121,7 +121,7 @@ const mutants: Mutant[] = [
     rule: "R5_PreparationFinishesAfterLater",
     kind: "PROPERTY",
     removes: "Later -> keep preparing (the Jev check keeps running)",
-    from: `        /\\ WF_vars(JevChecksAClaim(c) /\\ UNCHANGED requested)\n`,
+    from: `        /\\ WF_vars(JevChecksAClaim(c) /\\ UNCHANGED <<requested, askOpen>>)\n`,
     to: ``,
   },
   {
@@ -139,8 +139,8 @@ const mutants: Mutant[] = [
     rule: "R9_ReviewAndCaptureIndependent",
     kind: "PROPERTY",
     removes: "Review now leaves capture alone",
-    from: `    /\\ invite' = "none"\n    /\\ UNCHANGED <<reviewed, question, paused>>\n    /\\ UNCHANGED CaptureVars /\\ UNCHANGED PrepVars\n`,
-    to: `    /\\ invite' = "none"\n    /\\ UNCHANGED <<reviewed, question, paused>>\n    /\\ capture' = IF capture = "not started" THEN capture ELSE "stopped"\n    /\\ UNCHANGED <<watched, closed, boundary, boundaryFixed>> /\\ UNCHANGED PrepVars\n`,
+    from: `    /\\ askOpen' = FALSE\n    /\\ UNCHANGED <<reviewed, question, paused, requested>>\n    /\\ UNCHANGED CaptureVars /\\ UNCHANGED PrepVars\n`,
+    to: `    /\\ askOpen' = FALSE\n    /\\ UNCHANGED <<reviewed, question, paused, requested>>\n    /\\ capture' = IF capture = "not started" THEN capture ELSE "stopped"\n    /\\ UNCHANGED <<watched, closed, boundary, boundaryFixed>> /\\ UNCHANGED PrepVars\n`,
   },
   {
     name: "stop capture ends review",
@@ -177,6 +177,24 @@ const mutants: Mutant[] = [
     removes: "hold it until I ask for this lecture's review (amendment 2026-11-18, not a rule)",
     from: `(IF requested THEN "queued" ELSE "held")`,
     to: `"queued"`,
+  },
+  {
+    name: "an ask dropped when nothing is supported yet",
+    module: "Preparation",
+    rule: "Lazy_AskClosesOnlyByAStart",
+    kind: "PROPERTY",
+    removes: "start the review once a prepared chunk has a supported claim (amendment 2026-11-18): the ask waits until then",
+    from: `/\\ askOpen' = IF ok THEN FALSE ELSE askOpen`,
+    to: `/\\ askOpen' = FALSE`,
+  },
+  {
+    name: "the backend never starts the asked review",
+    module: "Preparation",
+    rule: "Lazy_OpenAskStarts",
+    kind: "PROPERTY",
+    removes: "start the review once a prepared chunk has a supported claim (amendment 2026-11-18)",
+    from: `    /\\ WF_vars(CodeStartsTheAskedReview)\n`,
+    to: ``,
   },
 ];
 

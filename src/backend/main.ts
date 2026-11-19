@@ -727,14 +727,10 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       },
       endedInTx: (reviewId) => record.markEndedInTx(reviewId),
       nextSeq: () => db.nextSeq(),
-      // An ask is a fact that makes preparation demand work; the next pump starts it, shared with any upload in the same burst.
+      // An ask makes preparation demand work and may start a review; the next pump does both, shared with any upload in the same burst.
       asks: {
-        ask: (captureId) => {
-          preparation.ask(captureId);
-          wake(captureId);
-          pumpSoon();
-        },
-        asked: preparation.asked,
+        asked: preparation.asked, latestAsk: preparation.latestAsk, closeAsk: preparation.closeAsk,
+        ask: (captureId) => void (preparation.ask(captureId), wake(captureId), pumpSoon()),
       },
     });
 
@@ -813,7 +809,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   if (auth.kind === "local") graphFor(ensureLocalUser(rawDb));
   else for (const userId of signedInUsers(rawDb)) graphFor(userId);
 
-  /** Per capture, the three derivations that can ask for work. A failing one is reported and leaves the others running. */
+  /** Per capture, the three derivations that can ask for work, then the asked review's start. A failing one is reported and leaves the others running. */
   const DEMAND: readonly (readonly [string, (graph: UserGraph, captureId: CaptureId) => readonly WorkItem[]])[] = [
     ["segmentation", ({ segmentation, memo, tasks }, captureId) =>
       segmentation.sync(captureId).demand.map((input): WorkItem => ({
@@ -824,6 +820,9 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       }))],
     ["frame demand", ({ evidence }, captureId) => evidence.frameDemand(captureId)],
     ["preparation", ({ preparation }, captureId) => preparation.demand(captureId)],
+    // Flow C, 2026-11-18: the backend starts an asked review once a prepared chunk has a supported claim. It asks for no work, and what it
+    // reads wakes a sleeping capture, so it runs again when a check it waits for lands.
+    ["asked review", ({ reviews }, captureId) => (reviews.startAsked(captureId), [])],
   ];
 
   /**

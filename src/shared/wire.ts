@@ -352,6 +352,7 @@ const scopePreviewz = z.object({
 });
 
 const heldBackz = z.array(z.object({ reviewId: idOf("rvw"), material: materialWire }));
+const askz = z.discriminatedUnion("state", [z.object({ state: z.literal("open") }), z.object({ state: z.literal("started"), reviewId: idOf("rvw") })]);
 
 const nothingToReviewz = z.object({
   kind: z.literal("nothing_to_review"),
@@ -359,11 +360,12 @@ const nothingToReviewz = z.object({
   gaps: z.array(gapz),
   unverified: z.array(claimz),
   rewatch: z.array(z.object({ sourceId: idOf("src"), interval: intervalz })),
+  ask: askz.optional(),
 });
 
 export const reviewOptionsResponse = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("ready"), scope: scopePreviewz, heldBack: heldBackz, askedReview: idOf("rvw").optional() }),
-  z.object({ kind: z.literal("processing"), asked: z.boolean(), readyNow: scopePreviewz.nullable(), pendingChunks: z.number(), estimateS: z.number().nullable(), heldBack: heldBackz, askedReview: idOf("rvw").optional() }),
+  z.object({ kind: z.literal("ready"), scope: scopePreviewz, heldBack: heldBackz, ask: askz.optional() }),
+  z.object({ kind: z.literal("processing"), asked: z.boolean(), readyNow: scopePreviewz.nullable(), pendingChunks: z.number(), estimateS: z.number().nullable(), heldBack: heldBackz, ask: askz.optional() }),
   nothingToReviewz,
 ]) satisfies z.ZodType<ReviewOptions>;
 

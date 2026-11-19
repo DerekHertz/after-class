@@ -5,8 +5,8 @@ import type { CaptureId, ReviewId } from "../shared/ids";
 import type { ReviewOptions, StartChoice, UsageSummary } from "../shared/domain";
 import type { AppApi } from "./api";
 import { usePrefetchReviewArt } from "./art-prefetch";
-import { askedStart, captureStatusLabel, coveredLines, earlierReviewsNote, formatClock, inspectBundle, laterNote, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
-import type { OptionsScreen, ScopeSummary, SourceTitles, StartOffer } from "./core";
+import { captureStatusLabel, coveredLines, earlierReviewsNote, followAsk, formatClock, inspectBundle, laterNote, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
+import type { AskFollow, OptionsScreen, ScopeSummary, SourceTitles, StartOffer } from "./core";
 import { ReviewRow } from "./home";
 import type { LectureReview } from "./home";
 import { usePolled } from "./poll";
@@ -16,8 +16,10 @@ import { BundleInspector, ErrorNote, EvidencePane, Link, navigate, useAsync } fr
 
 
 const POLL_MS = 3000;
-/** Read again while processing, asked or not, so an ask from another tab or the extension reaches this page. */
-const isProcessing = (options: ReviewOptions): boolean => options.kind === "processing";
+/** Read again whatever the options say, so an ask from another tab or the extension reaches this page in every state (flow C, 2026-11-18). */
+const always = (): boolean => true;
+/** The popup's Review now opens the lecture page with this mark once the ask is stored, so the page follows the review it starts. */
+const ASKED_MARK = "#asked";
 const isHeld = (usage: UsageSummary): boolean => usage.allowance?.held != null;
 
 export type OptionsViewProps = {
@@ -200,7 +202,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
   const capture = useAsync(useCallback(() => api.captureView(captureId), [api, captureId]));
   // Read once on arrival, only for the rows the note links to: a review started from this page navigates away, so the list cannot go stale here.
   const reviews = useAsync(useCallback(() => loadLectureReviews(api, captureId), [api, captureId]));
-  const options = usePolled(useCallback(() => api.reviewOptions(captureId), [api, captureId]), isProcessing, POLL_MS);
+  const options = usePolled(useCallback(() => api.reviewOptions(captureId), [api, captureId]), always, POLL_MS);
   // A budget that holds back new model calls holds back preparation too. Read again while it does, so the note goes when it lifts.
   const usage = usePolled(useCallback(() => api.usage(), [api]), isHeld, POLL_MS);
   const allowance = usage.data?.allowance ?? null;
@@ -241,22 +243,19 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
     }
   }
 
-  // Flow C, 2026-11-18: a stored Review now or Wait starts its review once a prepared section has a supported claim, from whichever tab
-  // shows this lecture. The answer, not this page, names the review, so two tabs start the same one. Leaving the page cancels the start.
-  const asked = shown === null ? null : askedStart(shown);
+  // Flow C, 2026-11-18: the backend starts an asked review once a prepared section has a supported claim. This page opens it if it
+  // waited for it. A page that has unmounted reads nothing, so leaving the page never navigates.
+  const follow = useRef<AskFollow>({ waiting: location.hash === ASKED_MARK, seen: null });
   useEffect(() => {
-    if (asked === null) return;
-    let live = true;
-    api.startReview(captureId, "prepared_only", asked).then(
-      (result) => {
-        if (!live) return;
-        if (result.kind === "started") navigate({ page: "review", id: result.reviewId });
-        else setRefused(result);
-      },
-      (e: unknown) => { if (live) setStartError(e instanceof Error ? e.message : String(e)); },
-    );
-    return () => { live = false; };
-  }, [api, captureId, asked]);
+    if (location.hash === ASKED_MARK) history.replaceState(history.state, "", location.pathname + location.search);
+  }, []);
+  useEffect(() => {
+    if (options.data === null) return;
+    const next = followAsk(follow.current, options.data.ask);
+    follow.current = next.state;
+    if (next.open !== null) navigate({ page: "review", id: next.open });
+  }, [options.data]);
+  const askOpen = options.data?.ask?.state === "open";
 
   async function answer(kind: "review_now" | "later" | "wait") {
     if (actionPending.current) return;
@@ -265,6 +264,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
     setStartError(null);
     try {
       await api.answerInvite(captureId, kind);
+      if (kind !== "later") follow.current = { ...follow.current, waiting: true };
       capture.reload();
       options.reload();
     } catch (e) {
@@ -294,7 +294,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
       {options.data === null && options.error === null && <p className="page-loading" role="status">Looking for prepared lecture material...</p>}
       {starting && <p className="page-loading" role="status">Saving your choice...</p>}
       {held !== null && shown !== null && shown.kind !== "ready" && <p className="note" role="status">{held}</p>}
-      {shown && (
+      {shown && !(askOpen && shown.kind === "nothing_to_review" && shown.gaps.length === 0 && shown.unverified.length === 0 && shown.rewatch.length === 0) && (
         <OptionsView
           screen={screen!}
           busy={starting}
@@ -322,9 +322,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
           <span className="muted">Either one prepares this lecture. It takes about two minutes for the first section.</span>
         </p>
       )}
-      {shown?.kind === "processing" && shown.readyNow === null && shown.askedReview !== undefined && (
-        <p className="page-loading" role="status">Preparing your lecture. The review starts when the first section is ready.</p>
-      )}
+      {askOpen && <p className="page-loading" role="status">Preparing your lecture. The review starts when a section is ready.</p>}
       {shown?.kind === "processing" && shown.asked && (
         <p className="capture-answer">
           <button type="button" disabled={starting} onClick={() => answer("wait")}>Wait</button> <span className="muted">Stay here until it is ready.</span>
