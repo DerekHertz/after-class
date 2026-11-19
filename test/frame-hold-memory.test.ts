@@ -13,7 +13,7 @@ const {tmpDir}=await import(`${root}/test/tmp.ts`);
 function world(o:any={}) {
  const db=o.db??testUserDb(),dir=o.dir??tmpDir('frame3-life-'),s=o.s??stream(),clock={wall:1_000_000,mono:0};
  const memo=createMemo(db,'live',{retryDelayMs:()=>0});
- const script={answer:o.answer??(()=>ok('yes')),interpret:o.interpret??(()=>ok({concepts:[],links:[],supersedes:[]}))};
+ const script={answer:o.answer??(()=>ok({verdict:'yes',p:.9})),interpret:o.interpret??(()=>ok({concepts:[],links:[],supersedes:[]}))};
  const frameTask=Object.assign(fakeTask({purpose:'frame_change',answer:(i:any)=>script.answer(i)}),{canonicalInput:productFrameChangeTask({}).canonicalInput});
  const interpret=Object.assign(fakeTask({purpose:'interpretation',provider:'claude',answer:(i:any)=>script.interpret(i)}),{canonicalInput:canonicalInterpretation});
  const unused=fakeTask({answer:()=>ok({verdict:'yes',p:.9})});

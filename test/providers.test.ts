@@ -356,7 +356,7 @@ describe("Jev failures reach the caller as failed, never as a no-verdict", () =>
   test("a transient error followed by an answer is a hit", async () => {
     const { jev } = fakeJev((_, n) => (n === 1 ? new ProviderError("jev 429", null, true) : { teaching_change: p(0.9) }));
     const { result } = await run(frameChangeTask(jev), { before: withBytes(frame("a")), after: withBytes(frame("b")), nearbyPassages: [] } satisfies FrameChangeInput);
-    expect(result).toMatchObject({ kind: "hit", value: "yes" });
+    expect(result).toMatchObject({ kind: "hit", value: { verdict: "yes", p: 0.9 } });
   });
 
   test("an out-of-bounds frame fails the call before any Jev request is made", async () => {
@@ -378,16 +378,34 @@ describe("frameChangeTask", () => {
   test("sends both frames as named images and maps the probability", async () => {
     const { jev, requests } = fakeJev(() => ({ teaching_change: p(0.2) }));
     const { output } = await frameChangeTask(jev).attempt(input(), ctx);
-    expect(output).toBe("no");
+    expect(output).toEqual({ verdict: "no", p: 0.2 });
     expect(requests[0]!.images.map((i) => i.ref)).toEqual(["frame_before", "frame_after"]);
     expect(requests[0]!.state).toEqual({ before: "frame_before", after: "frame_after", captions: [{ t: 40.3, text: "so we add the second row" }] });
+  });
+
+  test("the stored judgment keeps the probability, and a missing one is stored as null, not 0", async () => {
+    const memo = createMemo(testUserDb(), "live");
+    const answered = frameChangeTask(fakeJev(() => ({ teaching_change: p(0.42) })).jev);
+    await memo.run(answered, input());
+    expect(memo.lookup(answered, input())).toMatchObject({ kind: "hit", value: { verdict: "uncertain", p: 0.42 } });
+    const silent = frameChangeTask(fakeJev(() => ({})).jev);
+    const missing = input({ after: withBytes(frame("ev_c")) });
+    await memo.run(silent, missing);
+    expect(memo.lookup(silent, missing)).toMatchObject({ kind: "hit", value: { verdict: "uncertain", p: null } });
+  });
+
+  test("a verdict stored before probabilities were kept still decodes, with the probability unknown", () => {
+    const task = frameChangeTask(fakeJev(() => ({})).jev);
+    expect(task.decode("no")).toEqual({ verdict: "no", p: null });
+    expect(task.decode({ verdict: "yes", p: 0.8 })).toEqual({ verdict: "yes", p: 0.8 });
+    expect(() => task.decode({ verdict: "yes", p: 2 })).toThrow();
   });
 
   test("the first frame of a source is kept without a call, and the empty call is labelled as such", async () => {
     const { jev, requests } = fakeJev(() => ({}));
     const { output, usage } = await frameChangeTask(jev).attempt(input({ before: null }), ctx);
     expect(requests).toEqual([]);
-    expect(output).toBe("uncertain");
+    expect(output).toEqual({ verdict: "uncertain", p: null });
     expect(usage.cost).toEqual({ kind: "unknown", reason: "no provider call was made" });
   });
 });

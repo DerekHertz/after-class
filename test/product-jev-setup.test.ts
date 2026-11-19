@@ -56,12 +56,12 @@ describe("product Jev setup, round 1", () => {
     expect(SEGMENTATION_DEFAULTS.windowNewS).toBe(30);
     expect(QUESTIONS.boundary.version).toBe("1");
     expect(boundaryTask(NO_JEV).version).toBe("boundary.1@0.7/0.3");
-    expect(frameChangeTask(NO_JEV).version).toBe("frame_change.1@0.7/0.3");
+    expect(frameChangeTask(NO_JEV).version).toBe("frame_change.1@0.7/0.3#2");
   });
 
   test("product task versions are stable and distinct from the lab's", () => {
     expect(productBoundaryTask(NO_JEV).version).toBe("boundary.exp7-fable-1-r1+lesson_framing.exp7-fable-1-r1@0.5/0.3");
-    expect(productFrameChangeTask(NO_JEV).version).toBe("frame_change.exp7-fable-1-r1@0.5/0.3");
+    expect(productFrameChangeTask(NO_JEV).version).toBe("frame_change.exp7-fable-1-r1@0.5/0.3#2");
     expect(productBoundaryTask(NO_JEV).version).not.toBe(boundaryTask(NO_JEV).version);
     const memo = createMemo(testUserDb(), "live");
     expect(memo.key(productBoundaryTask(NO_JEV), boundaryInput())).not.toBe(memo.key(boundaryTask(NO_JEV), boundaryInput()));
@@ -83,9 +83,9 @@ describe("product Jev setup, round 1", () => {
     const input: FrameChangeInput = { before: { frame: frameAt("ev_a", 10), bytes }, after: { frame: frameAt("ev_b", 20), bytes }, nearbyPassages: [] };
     const { output } = await productFrameChangeTask(jev).attempt(input, ctx);
     expect(requests[0]!.questions.teaching_change!.instructions).toBe(PRODUCT_JEV_SETUP.questions.teachingChange);
-    expect(output).toBe("yes");
+    expect(output).toEqual({ verdict: "yes", p: 0.5 });
     const lab = fakeJev({ teaching_change: p(0.5) });
-    expect((await frameChangeTask(lab.jev).attempt(input, ctx)).output).toBe("uncertain");
+    expect((await frameChangeTask(lab.jev).attempt(input, ctx)).output).toEqual({ verdict: "uncertain", p: 0.5 });
   });
 });
 

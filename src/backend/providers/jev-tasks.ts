@@ -89,7 +89,9 @@ export function frameChangeWordingVersion(q?: FrameChangeQuestions): string {
 }
 
 const MAX_ATTEMPTS = 3;
-const versionOf = (wording: string, t: VerdictThresholds = THRESHOLDS) => `${wording}@${t.yesAtOrAbove}/${t.noAtOrBelow}`;
+/** `revision` changes when a task's request or stored output changes with its wording and thresholds unchanged. */
+const versionOf = (wording: string, t: VerdictThresholds = THRESHOLDS, revision = 1) =>
+  `${wording}@${t.yesAtOrAbove}/${t.noAtOrBelow}${revision === 1 ? "" : `#${revision}`}`;
 
 type FrameWithBytes = { readonly frame: Frame; readonly bytes: () => Uint8Array };
 
@@ -150,6 +152,15 @@ type BoundaryQuestionKey = "new_concept" | "stopping_point" | "lesson_framing";
 
 const claimOutputSchema = z.object({ verdict: verdictSchema, p: probabilitySchema });
 
+/** A frame-change verdict and the probability behind it; `p` is null when no probability came back. */
+export type FrameChangeJudgment = { readonly verdict: Verdict; readonly p: number | null };
+
+/** Revision 1 stored the bare verdict and no probability; those rows still decode, with `p` unknown. */
+const frameChangeOutputSchema = z.union([
+  z.object({ verdict: verdictSchema, p: probabilitySchema }),
+  verdictSchema.transform((verdict): FrameChangeJudgment => ({ verdict, p: null })),
+]);
+
 /**
  * state = { context: [{t, text}], passage: [{t, text}], frames: ["frame_0", …] }
  * Both questions share one request, so the pair costs one round trip and one copy of the state.
@@ -168,7 +179,7 @@ export function productBoundaryTask(jev: JevClient): Task<BoundaryInput, Boundar
 }
 
 /** The product's frame-change (dedupe) task: round 1's teachingChange at round 1's thresholds. */
-export function productFrameChangeTask(jev: JevClient): Task<FrameChangeInput, Verdict> {
+export function productFrameChangeTask(jev: JevClient): Task<FrameChangeInput, FrameChangeJudgment> {
   const s = PRODUCT_JEV_SETUP;
   return frameChangeTask(jev, { teachingChange: s.questions.teachingChange }, { thresholds: s.thresholds, wording: s.version });
 }
@@ -237,18 +248,18 @@ const NO_CALL: UsageReport = {
  * Caller maps yes→kept, no→dropped, uncertain/failed→uncertain (kept): "Uncertain visual → keep the frame."
  * The first frame of a source has nothing to compare with and resolves to uncertain without a call.
  */
-export function frameChangeTask(jev: JevClient, questions?: FrameChangeQuestions, product?: ProductSetup): Task<FrameChangeInput, Verdict> {
+export function frameChangeTask(jev: JevClient, questions?: FrameChangeQuestions, product?: ProductSetup): Task<FrameChangeInput, FrameChangeJudgment> {
   const text = questions ?? QUESTIONS.frameChange;
   const th = product?.thresholds ?? THRESHOLDS;
   return {
     provider: "jev",
     purpose: "frame_change",
     model: JEV_MODEL,
-    version: versionOf(`frame_change.${product?.wording ?? frameChangeWordingVersion(questions)}`, th),
+    version: versionOf(`frame_change.${product?.wording ?? frameChangeWordingVersion(questions)}`, th, 2),
     maxAttempts: MAX_ATTEMPTS,
     canonicalInput: (i) => ({ before: i.before?.frame.id ?? null, after: i.after.frame.id, nearby: ids(i.nearbyPassages) }),
     async attempt(i, ctx) {
-      if (i.before === null) return { output: "uncertain", usage: NO_CALL };
+      if (i.before === null) return { output: { verdict: "uncertain", p: null }, usage: NO_CALL };
       const images = [image("frame_before", i.before), image("frame_after", i.after)];
       const admitted = ctx.admit();
       const { answers, usage } = await jev.ask(
@@ -261,9 +272,10 @@ export function frameChangeTask(jev: JevClient, questions?: FrameChangeQuestions
         ctx.signal,
         admitted,
       );
-      return { output: toVerdictAt(probability(answers.teaching_change), th), usage };
+      const p = probability(answers.teaching_change);
+      return { output: { verdict: toVerdictAt(p, th), p }, usage };
     },
-    decode: (stored) => verdictSchema.parse(stored),
+    decode: (stored) => frameChangeOutputSchema.parse(stored),
   };
 }
 

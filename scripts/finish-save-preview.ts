@@ -36,7 +36,7 @@ function scripted<I, O>(purpose: Purpose, provider: Provider, canonical: (i: I) 
 }
 
 const boundary = scripted("boundary", "jev", (i: any) => ({ window: i.window.id, new: i.newPassages.map((p: any) => p.id) }), () => ok({ boundary: false } as never));
-const frameChange = scripted("frame_change", "jev", () => "frame", () => ok("yes" as const));
+const frameChange = scripted("frame_change", "jev", () => "frame", () => ok({ verdict: "yes" as const, p: 0.9 }));
 const interpret = scripted("interpretation", "claude", canonicalInterpretation as never, (i: any) =>
   ok({ concepts: [{ label: "Topic", summary: "What the lecture is about", claims: [{ text: "The lecture states its topic first.", evidence: [i.newMaterial.passages[0].id], visualDependent: false, assumptions: [] }], confusions: [] }], links: [], supersedes: [] }));
 const revise = scripted("claim_revision", "claude", canonicalRevision as never, () => ok(null as never));

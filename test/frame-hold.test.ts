@@ -3,7 +3,7 @@ import { FRAME_HOLD_MS, createEvidence } from "../src/backend/evidence";
 import { main } from "../src/backend/main";
 import { canonicalInterpretation } from "../src/backend/preparation/tasks";
 import type { InterpretationInput, InterpretationOutput } from "../src/backend/preparation/tasks";
-import type { FrameChangeInput } from "../src/backend/providers/jev-tasks";
+import type { FrameChangeInput, FrameChangeJudgment } from "../src/backend/providers/jev-tasks";
 import type { JevClient } from "../src/backend/providers/jev";
 import { productFrameChangeTask } from "../src/backend/providers/jev-tasks";
 import { createMemo } from "../src/backend/providers/memo";
@@ -18,9 +18,10 @@ import { deferred, fakeTask, ok, testUserDb } from "./fakes";
 import { tmpDir } from "./tmp";
 
 const frameCanonical = productFrameChangeTask({} as JevClient).canonicalInput;
-type Answer = (input: FrameChangeInput) => FakeStep<Verdict> | Promise<FakeStep<Verdict>>;
-const frameTask = (answer: Answer = () => ok("yes")) =>
-  Object.assign(fakeTask({ purpose: "frame_change", answer: answer as never }), { canonicalInput: frameCanonical }) as unknown as FakeTask<FrameChangeInput, Verdict>;
+type Answer = (input: FrameChangeInput) => FakeStep<FrameChangeJudgment> | Promise<FakeStep<FrameChangeJudgment>>;
+const said = (verdict: Verdict) => ok<FrameChangeJudgment>({ verdict, p: verdict === "yes" ? 0.9 : 0.1 });
+const frameTask = (answer: Answer = () => said("yes")) =>
+  Object.assign(fakeTask({ purpose: "frame_change", answer: answer as never }), { canonicalInput: frameCanonical }) as unknown as FakeTask<FrameChangeInput, FrameChangeJudgment>;
 
 /** Evidence over a real memo and a counting fake Jev that answers "yes". */
 function world(o: { db?: UserDb; clock?: { t: number; mono: number }; answer?: Answer } = {}) {
@@ -252,11 +253,11 @@ describe("a server clock that steps back does not stretch a frame's wait", () =>
 
 /** Captions every 5 s, watched to 225 s, the end of the window that crosses the product's 210 s first-chunk cap. Frame "b" at 215 s and "c" at 220 s are "no" once caption 45 (225 to 230 s) is near them. */
 function lateLecture(o: { held?: string } = {}) {
-  const gate = deferred<FakeStep<Verdict>>();
+  const gate = deferred<FakeStep<FrameChangeJudgment>>();
   const s = stream();
   const id = (name: string) => stableId("ev", s.captureId, name);
   const answer: Answer = (i) =>
-    i.after.frame.id === (o.held === undefined ? null : id(o.held)) ? gate.promise : ok(i.nearbyPassages.some((p) => p.text === "caption 45") ? "no" : "yes");
+    i.after.frame.id === (o.held === undefined ? null : id(o.held)) ? gate.promise : said(i.nearbyPassages.some((p) => p.text === "caption 45") ? "no" : "yes");
   const play = () => {
     s.control("start");
     s.source();
@@ -284,7 +285,7 @@ describe("an interpretation that waits for frames only gains frames", () => {
     w.evidence.ingest({ captureId: l.s.captureId, facts: l.playOn() });
     expect(w.evidence.bundle(material).frames.map((f) => f.id)).toEqual([l.id("a")]);
     expect(pin.settle().kind).toBe("waiting");
-    l.gate.resolve(ok("yes"));
+    l.gate.resolve(said("yes"));
     await Promise.all(asked);
     const settled = pin.settle();
     expect(settled.kind === "ready" ? settled.bundle.frames.map((f) => f.id) : []).toEqual([l.id("a"), l.id("b"), l.id("c")]);
@@ -402,7 +403,7 @@ describe("composition", () => {
       r.modules.evidence.ingest({ captureId: l.s.captureId, facts: l.playOn() });
       await Bun.sleep(100);
       expect(f.preparation.interpret.calls).toHaveLength(0);
-      l.gate.resolve(ok("yes"));
+      l.gate.resolve(said("yes"));
       await until(() => f.preparation.interpret.calls.length === 1);
       expect(f.preparation.interpret.calls[0]!.newMaterial.frames.map((fr) => fr.id)).toEqual([l.id("a"), l.id("b"), l.id("c")]);
     } finally {
