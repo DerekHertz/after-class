@@ -24,7 +24,7 @@ export type FrameSamplerConfig = {
   readonly sampleEveryMediaS: number; // 1.0
   readonly changeThreshold: number; // mean abs gray diff vs LAST KEPT thumb (catches slow handwriting cumulatively)
   readonly settleThreshold: number; // diff vs previous sample below this ⇒ the change has settled
-  readonly maxSettleWaitMediaS: number; // 4.0: keep anyway if the board never settles (animation)
+  readonly maxSettleWaitMediaS: number; // 4.0: keep anyway if the board never settles (animation) and still differs from the last kept frame
   readonly keyframeEveryMediaS: number; // 30.0
   readonly thumb: { readonly w: number; readonly h: number }; // 64 × 36
   readonly jpegQuality: number; // 0.85; PNG is a one-line switch if equations soften
@@ -122,8 +122,8 @@ export function stepFrame(st: FrameStepState, t: number, thumb: Uint8Array, cfg:
   } else if (pendingT !== null) {
     const timedOut = t - pendingT > cfg.maxSettleWaitMediaS;
     if (timedOut || dPrev < cfg.settleThreshold) {
-      if (timedOut || dKept > cfg.changeThreshold) keep = { trigger: "change_settled", diff: dKept };
-      else pendingT = null; // settled back to what we already kept: motion or an occlusion, not a new board
+      if (dKept > cfg.changeThreshold) keep = { trigger: "change_settled", diff: dKept };
+      else pendingT = null; // back to what we already kept, settled or not: motion or an occlusion, not a new board
     }
   } else if (dKept > cfg.changeThreshold) {
     pendingT = t;

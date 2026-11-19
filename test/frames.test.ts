@@ -139,6 +139,16 @@ describe("stepFrame", () => {
     expect(settled[0]!.t).toBeLessThanOrEqual(1 + CFG.maxSettleWaitMediaS + 1);
   });
 
+  test("a change still moving when the wait runs out, but back under the change threshold, sends nothing", () => {
+    let flip = false;
+    const moving = every(1, 5, () => { flip = !flip; return board(flip ? 500 : 300); });
+    const nearlyKept = board(20);
+    expect(meanAbsDiff(nearlyKept, board(0))).toBeLessThanOrEqual(CFG.changeThreshold);
+    expect(meanAbsDiff(nearlyKept, board(500))).toBeGreaterThanOrEqual(CFG.settleThreshold);
+    const kept = run([[0, board(0)], ...moving, [6, nearlyKept], [7, nearlyKept], [8, nearlyKept]]);
+    expect(kept.map((k) => k.trigger)).toEqual(["first"]);
+  });
+
   test("motion that returns to what was kept (speaker walks past) sends nothing", () => {
     const kept = run([[0, board(0)], [1, board(500)], [2, board(0)], [3, board(0)], [4, board(0)]]);
     expect(kept.map((k) => k.trigger)).toEqual(["first"]);
