@@ -17,7 +17,7 @@
 import { z } from "zod";
 import type { CaptureId, ConceptId, DeviceId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, TurnId } from "../shared/ids";
 import type {
-  EvidenceBundle, InviteAnswer, LearnerAct, TopicDiagram, LinkDecision, ObservationStatus, RecordView, ReviewOptions, ReviewView, SaveResult, StartChoice,
+  EvidenceBundle, InviteAnswer, LearnerAct, TopicDiagram, LinkDecision, ObservationStatus, RecordView, ReviewOptions, ReviewView, SaveResult, Seq, StartChoice,
   StartResult, UsageSummary,
 } from "../shared/domain";
 import type { Material } from "../shared/time";
@@ -27,7 +27,7 @@ import {
   voiceStatusResponse,
 } from "../shared/wire";
 import {
-  captureResponsez, encodeMaterial, evidenceBundlez, recordViewz, reviewOptionsz, reviewViewz, saveResultz, startResultz, usageSummaryz,
+  captureResponsez, encodeMaterial, evidenceBundlez, inviteAnsweredz, recordViewz, reviewOptionsz, reviewViewz, saveResultz, startResultz, usageSummaryz,
 } from "./decode";
 import type { CaptureResponse } from "./decode";
 import { tutorEvents } from "./ndjson";
@@ -51,7 +51,8 @@ export type EvidenceQuery =
 export type AppApi = Api & {
   lectures(): Promise<LecturesResponse>;
   captureView(captureId: CaptureId): Promise<CaptureResponse>;
-  answerInvite(captureId: CaptureId, answer: InviteAnswer): Promise<void>;
+  /** Resolves to the ask this answer opened or joined, which the page then waits on, or null when it opened none. */
+  answerInvite(captureId: CaptureId, answer: InviteAnswer): Promise<Seq | null>;
   evidence(query: EvidenceQuery): Promise<EvidenceBundle>;
   frameImage(id: EvidenceId): Promise<Blob>;
   editNote(id: NoteId, text: string): Promise<void>;
@@ -181,7 +182,7 @@ export function createApi(credential: Credential, options: ApiOptions = {}): App
     usage: () => call(usageSummaryz, "GET", "/usage"),
     lectures: () => call(lecturesResponse, ROUTES.lectures.method, ROUTES.lectures.path),
     captureView: (captureId) => call(captureResponsez, "GET", `/captures/${enc(captureId)}`),
-    answerInvite: (captureId, answer) => command("POST", `/captures/${enc(captureId)}/invite`, { answer }),
+    answerInvite: async (captureId, answer) => (await call(inviteAnsweredz, "POST", `/captures/${enc(captureId)}/invite`, { answer })).ask,
     evidence: (query) => call(evidenceBundlez, "GET", `/evidence?${evidenceParams(query)}`),
     frameImage: async (id) => (await send("GET", `/frames/${enc(id)}`)).blob(),
     editNote: (id, text) => command("PATCH", `/record/notes/${enc(id)}`, { text }),

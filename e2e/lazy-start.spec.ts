@@ -38,3 +38,21 @@ test("leaving the lecture page before the asked review starts never opens it", a
   await expect(page).toHaveURL(/\/record/);
   expect(await calls(page)).not.toContain("review.start");
 });
+
+test("a page an older popup opened with a bare #asked, on a lecture whose review ended, shows nothing to review and opens no old review", async ({ page }) => {
+  await page.goto("/?scenario=capture-reviewed#asked");
+  await expect(page.getByRole("heading", { name: "Nothing to review yet" })).toBeVisible();
+  // Past two more reads of the options.
+  await page.waitForTimeout(7000);
+  await expect(page).not.toHaveURL(/\/review\/rvw_/);
+  await expect(page.getByRole("heading", { name: "Nothing to review yet" })).toBeVisible();
+});
+
+test("Wait on a lecture that stops with every claim unverified ends in nothing to review, not Processing", async ({ page }) => {
+  await page.goto("/?scenario=capture-exhausted");
+  await page.getByRole("button", { name: "Wait" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Preparing your lecture. The review starts when a section is ready." })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("heading", { name: "Nothing to review yet" })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Preparing your lecture")).toHaveCount(0);
+  await expect(page).not.toHaveURL(/\/review\/rvw_/);
+});

@@ -26,7 +26,7 @@ export const ids = {
   chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait"), ordering: id("cpt", "ordering"), earlierCapture: id("cap", "earlier-capture"),
   otherCapture: id("cap", "other-capture"), pendingReview: id("rvw", "pending-review"), unsavedReview: id("rvw", "unsaved-review"),
 };
-export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "reload-unanswered", "reload-in-flight", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-split", "capture-processing", "capture-held", "capture-empty", "capture-unasked", "capture-empty-asked", "capture-leave", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "record-double-status", "double-status", "review-record-stale", "review-record-slow", "usage", "usage-held", "usage-reserved", "usage-uncapped", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-connected", "first-run", "home-error", "room-grown"] as const;
+export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "reload-unanswered", "reload-in-flight", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-split", "capture-processing", "capture-held", "capture-empty", "capture-unasked", "capture-empty-asked", "capture-leave", "capture-reviewed", "capture-exhausted", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "record-double-status", "double-status", "review-record-stale", "review-record-slow", "usage", "usage-held", "usage-reserved", "usage-uncapped", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-connected", "first-run", "home-error", "room-grown"] as const;
 export type Scenario = typeof scenarios[number];
 export const scenarioFrom = (search: string): Scenario => scenarios.find(s => s === new URLSearchParams(search).get("scenario")) ?? "review";
 
@@ -230,18 +230,35 @@ export function createFixture(scenario: Scenario): Fixture {
       if (scenario === "capture-unasked" || scenario === "capture-empty-asked") {
         const nothing = { kind: "nothing_to_review", heldBack, gaps: [], unverified: [], rewatch: [] };
         if (++unaskedReads <= 2) return reviewOptionsz.parse(scenario === "capture-empty-asked" ? nothing : { kind: "processing", asked: false, readyNow: null, pendingChunks: 2, estimateS: null, heldBack });
-        const ask = ++askedReads === 1 ? { state: "open" } : { state: "started", reviewId: ids.review };
+        const ask = ++askedReads === 1 ? { state: "open", seq: 1 } : { state: "started", seq: 1, reviewId: ids.review };
         return reviewOptionsz.parse(scenario === "capture-empty-asked" && ask.state === "open" ? { ...nothing, ask } : { kind: "processing", asked: true, readyNow: null, pendingChunks: 1, estimateS: null, heldBack, ask });
       }
       if (scenario === "capture-leave") {
         if (!askedHere) return reviewOptionsz.parse({ kind: "processing", asked: false, readyNow: null, pendingChunks: 2, estimateS: null, heldBack });
         await new Promise((r) => setTimeout(r, 1500));
-        return reviewOptionsz.parse({ kind: "processing", asked: true, readyNow: null, pendingChunks: 1, estimateS: null, heldBack, ask: { state: "started", reviewId: ids.review } });
+        return reviewOptionsz.parse({ kind: "processing", asked: true, readyNow: null, pendingChunks: 1, estimateS: null, heldBack, ask: { state: "started", seq: 1, reviewId: ids.review } });
+      }
+      // "capture-reviewed": a stopped lecture whose only review, started from ask 1, has ended. Review now asks nothing, so the popup opens
+      // this page unmarked; an older popup's bare "#asked" must not make it open that ended review.
+      if (scenario === "capture-reviewed") {
+        return reviewOptionsz.parse({ kind: "nothing_to_review", heldBack: [], gaps: [], unverified: [], rewatch: [], ask: { state: "started", seq: 1, reviewId: ids.review } });
+      }
+      // "capture-exhausted": the page's Wait opens ask 1. The lecture stopped while its last section was being prepared, and every claim
+      // ended unverified, so the backend ends the ask exhausted.
+      if (scenario === "capture-exhausted") {
+        if (!askedHere) return reviewOptionsz.parse({ kind: "processing", asked: false, readyNow: null, pendingChunks: 1, estimateS: null, heldBack });
+        if (++askedReads === 1) return reviewOptionsz.parse({ kind: "processing", asked: true, readyNow: null, pendingChunks: 1, estimateS: null, heldBack, ask: { state: "open", seq: 1 } });
+        return reviewOptionsz.parse({ kind: "nothing_to_review", heldBack, gaps: [], unverified: [], rewatch: [], ask: { state: "exhausted", seq: 1 } });
       }
       return reviewOptionsz.parse(scenario === "capture-empty" ? { kind: "nothing_to_review", heldBack: [], gaps: [gap], unverified: [], rewatch: [{ sourceId: ids.source, interval: { start: 600, end: 640 } }] } : scenario === "capture-processing" || scenario === "capture-held" ? { kind: "processing", asked: true, readyNow: scope, pendingChunks: 2, estimateS: null, heldBack } : { kind: "ready", scope, heldBack });
     },
     async startReview(_capture, _choice, reviewId) { log("review.start"); return { kind: "started", reviewId, scope: view.scope }; },
-    async answerInvite(_id, answer) { log(`invite.${answer}`); if (answer === "review_now" || answer === "wait") askedHere = true; },
+    async answerInvite(_id, answer) {
+      log(`invite.${answer}`);
+      if (answer !== "review_now" && answer !== "wait") return null;
+      askedHere = true;
+      return 1 as Seq;
+    },
     async retryPreparation() { log("preparation.retry"); },
     async diagrams() {
       log("diagrams.read");

@@ -735,8 +735,13 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       nextSeq: () => db.nextSeq(),
       // An ask makes preparation demand work and may start a review; the next pump does both, shared with any upload in the same burst.
       asks: {
-        asked: preparation.asked, latestAsk: preparation.latestAsk, closeAsk: preparation.closeAsk,
-        ask: (captureId) => void (preparation.ask(captureId), wake(captureId), pumpSoon()),
+        asked: preparation.asked, latestAsk: preparation.latestAsk, closeAsk: preparation.closeAsk, exhaust: preparation.exhaust,
+        ask: (captureId) => {
+          const seq = preparation.ask(captureId);
+          wake(captureId);
+          pumpSoon();
+          return seq;
+        },
       },
     });
 
@@ -826,8 +831,8 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       }))],
     ["frame demand", ({ evidence }, captureId) => evidence.frameDemand(captureId)],
     ["preparation", ({ preparation }, captureId) => preparation.demand(captureId)],
-    // Flow C, 2026-11-18: the backend starts an asked review once a prepared chunk has a supported claim. It asks for no work, and what it
-    // reads wakes a sleeping capture, so it runs again when a check it waits for lands.
+    // Flow C, 2026-11-18: the backend starts an asked review once a prepared chunk has a supported claim, or ends the ask exhausted once
+    // nothing can answer it. It asks for no work, and what it reads wakes a sleeping capture, so it runs again when a check it waits for lands.
     ["asked review", ({ reviews }, captureId) => (reviews.startAsked(captureId), [])],
   ];
 

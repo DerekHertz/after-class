@@ -72,7 +72,7 @@ Each workstream owns its files and nothing else. Everything in the "Frozen" colu
 `ROUTES` in `src/shared/wire.ts` is the only list of HTTP routes. The extension worker and `createApi` call nothing outside it, and `http.ts` serves exactly it. Each entry has a method, a `:param` path, optional query and request schemas, and a reply (`json` schema, `ndjson` event, `jpeg`, or `empty` for 204). Add a route there first; `test/wire.test.ts` fails if a client calls one that is missing.
 
 - `clientSeq` starts at 0 per capture and rises by 1 per fact. `POST /ingest` is idempotent on (captureId, clientSeq) and returns `ackedThroughSeq`, the highest contiguous clientSeq stored, or -1 before clientSeq 0 has arrived.
-- `POST /captures/:captureId/invite` returns the new `InviteState`. The extension reads it back; the app ignores it.
+- `POST /captures/:captureId/invite` returns the new `InviteState` with `ask`, the ask the answer opened or joined (null when it opened none), and `review`, the open review Review now returns. The extension reads the state back and marks the lecture page `#asked=<ask>`; the app page waits on `ask`.
 - The record commands (`PATCH`/`DELETE` notes, link decisions, dispute resolution, override, evidence delete) reply 204 with no body.
 - `POST /captures/:captureId/retry-preparation` (`retryPreparation`) takes no body and replies 204. It re-queues the capture's chunks that are unfinished or have no supported claim; the app's "Check again" is its caller.
 - `POST /reviews/:reviewId/turns` runs one turn per review: a second post with a different `turnId` while one runs answers 409; the same `turnId` joins and replays. A stream still open after 5 minutes ends with `turn_failed` (retryable) while the turn finishes; its resend replays it.

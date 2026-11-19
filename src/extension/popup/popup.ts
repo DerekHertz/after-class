@@ -226,7 +226,9 @@ export function renderPopup(
           ? h("div", { class: "note", text: "Processing before your review. Review now still works, and you can stop early." })
           : v.invite.state === "later"
             ? h("div", { class: "note", text: "Review postponed. You will be invited at the next stopping point." })
-            : null;
+            : v.invite.state === "nothing_to_review"
+              ? h("div", { class: "note", text: "Nothing to review yet" })
+              : null;
 
     const children: Child[] = [
       h("h1", { text: "After Class" }),

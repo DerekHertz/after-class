@@ -86,6 +86,17 @@ describe("main, replay mode with fake tasks", () => {
     expect([...reviews.view(reviewId).scope.chunkRevisions]).toEqual(segmentation.current(CAP).map((c) => c.id));
   }, 30_000);
 
+  test("a stopped lecture whose every claim ends unverified ends its ask exhausted, so it reads nothing to review, not Processing", async () => {
+    const b = await boot({ tasks: fakeTasks({ verdict: "no" }).tasks }, { AFTERCLASS_MODE: "replay" });
+    const { reviews } = b.r.modules;
+    // The capture is stopped when Wait asks, and its only chunk is still to be prepared.
+    await ingest(b, fixture({ frames: false }));
+    await until(() => reviews.options(CAP).ask?.state === "exhausted");
+    expect(reviews.options(CAP)).toMatchObject({ kind: "nothing_to_review", unverified: [{ status: "unverified" }] });
+    expect(reviews.invite(CAP)).toEqual({ state: "nothing_to_review" });
+    expect(reviews.list(CAP)).toEqual([]);
+  }, 30_000);
+
   test("a restart with an open ask starts exactly one review", async () => {
     const fakes = fakeTasks();
     const configDir = dir("afterclass-config-");
@@ -104,7 +115,7 @@ describe("main, replay mode with fake tasks", () => {
     await Bun.sleep(300);
     expect(second.r.modules.reviews.startAsked(CAP)).toBeNull();
     expect(second.r.modules.reviews.list(CAP).map((r) => r.reviewId)).toEqual([reviewId]);
-    expect(second.r.modules.preparation.latestAsk(CAP)).toMatchObject({ state: "closed", reviewId });
+    expect(second.r.modules.preparation.latestAsk(CAP)).toMatchObject({ state: "started", reviewId });
   }, 30_000);
 
   test("a restart resumes: the stored capture is preparing again without a new post", async () => {

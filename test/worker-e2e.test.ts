@@ -106,6 +106,18 @@ describe("Review now from the popup (flow C, 2026-11-18)", () => {
     const captureId = [...env.backend.stored.keys()][0]!;
     await sendPopup(c, { type: "invite_answer", tabId: 1, answer: "review_now" });
     expect(env.backend.invites).toEqual([`${captureId} review_now`]);
-    expect(c.created).toEqual([`http://127.0.0.1:4317/app/capture/${captureId}#asked`]);
+    expect(c.created).toEqual([`http://127.0.0.1:4317/app/capture/${captureId}#asked=1`]);
+  });
+
+  test("on a stopped lecture whose review ended, Review now opens no ask, so the lecture page opens unmarked and follows no old review", async () => {
+    const env = newEnv();
+    const { c } = await boot(env);
+    connectPort(c, 1);
+    await sendPopup(c, { type: "start", tabId: 1 });
+    await wait(60);
+    const captureId = [...env.backend.stored.keys()][0]!;
+    env.backend.inviteAsk = null;
+    await sendPopup(c, { type: "invite_answer", tabId: 1, answer: "review_now" });
+    expect(c.created).toEqual([`http://127.0.0.1:4317/app/capture/${captureId}`]);
   });
 });

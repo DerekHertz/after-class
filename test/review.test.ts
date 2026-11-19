@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createAsks } from "../src/backend/preparation/asks";
+import { followAsk } from "../src/app/core";
 import { createReviews } from "../src/backend/review";
 import type { InviteEvent } from "../src/backend/review/core";
 import { corrections, foldInvites, freezeScope, takeSentences } from "../src/backend/review/core";
@@ -166,12 +167,12 @@ describe("invite", () => {
     expect(r.reviews.invite(r.capture)).toEqual({ state: "none" });
     const a = r.world.close(0, 0, 300);
     expect(r.reviews.invite(r.capture)).toEqual({ state: "invited", atChunk: a.id });
-    expect(r.reviews.answerInvite(r.capture, "later")).toEqual({ state: "later" });
+    expect(r.reviews.answerInvite(r.capture, "later")).toMatchObject({ state: "later" });
     r.world.close(1, 300, 780, "time");
     expect(r.reviews.invite(r.capture)).toEqual({ state: "later" });
     const c = r.world.close(2, 780, 1100);
     expect(r.reviews.invite(r.capture)).toEqual({ state: "invited", atChunk: c.id });
-    expect(r.reviews.answerInvite(r.capture, "wait")).toEqual({ state: "waiting" });
+    expect(r.reviews.answerInvite(r.capture, "wait")).toMatchObject({ state: "waiting" });
   });
 
   test("an outstanding boundary invite survives a revision of that chunk's boundary, and names the new revision", () => {
@@ -194,7 +195,7 @@ describe("invite", () => {
     r.world.close(0, 0, 300);
     r.reviews.answerInvite(r.capture, "later");
     r.world.close(1, 300, 700, "time");
-    expect(r.reviews.answerInvite(r.capture, "later")).toEqual({ state: "later" });
+    expect(r.reviews.answerInvite(r.capture, "later")).toMatchObject({ state: "later" });
     expect(r.db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM invite_answers").get()!.n).toBe(1);
     r.world.close(2, 700, 1250, "time");
     expect(r.reviews.invite(r.capture)).toMatchObject({ state: "invited" });
@@ -222,7 +223,7 @@ describe("invite", () => {
     const pending = r.world.close(0, 0, 300);
     r.world.pendingChunks.add(pending.id);
     const before = r.reviews.options(r.capture);
-    expect(r.reviews.answerInvite(r.capture, "later")).toEqual({ state: "later" });
+    expect(r.reviews.answerInvite(r.capture, "later")).toMatchObject({ state: "later" });
     expect(r.world.stops).toEqual([]);
     expect(r.world.pendingChunks.has(pending.id)).toBe(true);
     expect(r.reviews.options(r.capture)).toEqual(before);
@@ -345,8 +346,8 @@ describe("asking for a lecture's review (flow C, 2026-11-18)", () => {
     const reviewId = r.reviews.startAsked(r.capture)!;
     expect(reviewId).not.toBeNull();
     expect(r.reviews.view(reviewId).scope.chunkRevisions).toEqual([chunk.id]);
-    expect(r.askOf()).toEqual({ state: "started", reviewId });
-    expect(r.asks.latestAsk(r.capture)).toMatchObject({ state: "closed", reviewId });
+    expect(r.askOf()).toMatchObject({ state: "started", reviewId });
+    expect(r.asks.latestAsk(r.capture)).toMatchObject({ state: "started", reviewId });
   });
 
   test("Wait, finish the review, then Wait again starts a second review on the section prepared since", async () => {
@@ -364,7 +365,7 @@ describe("asking for a lecture's review (flow C, 2026-11-18)", () => {
     r.world.claim(2, 310, 320);
     // The same answer to the same invite stores no new answer, yet it opens a new ask.
     r.reviews.answerInvite(r.capture, "wait");
-    expect(r.askOf()).toEqual({ state: "open" });
+    expect(r.askOf()).toMatchObject({ state: "open" });
     expect(r.reviews.startAsked(r.capture)).toBeNull();
     r.world.pendingChunks.delete(next.id);
     const second = r.reviews.startAsked(r.capture)!;
@@ -384,7 +385,7 @@ describe("asking for a lecture's review (flow C, 2026-11-18)", () => {
     const reviewId = r.reviews.startAsked(r.capture)!;
     expect(r.reviews.startAsked(r.capture)).toBeNull();
     expect(reviewRows(r.db)).toBe(1);
-    expect(r.askOf()).toEqual({ state: "started", reviewId });
+    expect(r.askOf()).toMatchObject({ state: "started", reviewId });
   });
 
   test("a review the learner starts by hand answers the open ask, so no second review starts from it", () => {
@@ -395,7 +396,7 @@ describe("asking for a lecture's review (flow C, 2026-11-18)", () => {
     const mine = randomId("rvw");
     started(r.reviews.start(r.capture, "prepared_only", mine));
     expect(r.reviews.startAsked(r.capture)).toBeNull();
-    expect(r.askOf()).toEqual({ state: "started", reviewId: mine });
+    expect(r.askOf()).toMatchObject({ state: "started", reviewId: mine });
     expect(reviewRows(r.db)).toBe(1);
   });
 
@@ -407,12 +408,12 @@ describe("asking for a lecture's review (flow C, 2026-11-18)", () => {
     const first = r.reviews.startAsked(r.capture)!;
     expect(first).not.toBeNull();
     r.reviews.answerInvite(r.capture, "wait");
-    expect(r.askOf()).toEqual({ state: "open" });
+    expect(r.askOf()).toMatchObject({ state: "open" });
     // The section grows with no new supported claim: the grown chunk is offered whole, yet its only claim is the running review's.
     r.world.close(0, 0, 330);
     expect(r.reviews.startAsked(r.capture)).toBeNull();
     expect(reviewRows(r.db)).toBe(1);
-    expect(r.askOf()).toEqual({ state: "open" });
+    expect(r.askOf()).toMatchObject({ state: "open" });
     r.world.claim(2, 310, 320);
     const second = r.reviews.startAsked(r.capture)!;
     expect(second).not.toBeNull();
@@ -427,7 +428,7 @@ describe("asking for a lecture's review (flow C, 2026-11-18)", () => {
     const first = r.reviews.startAsked(r.capture)!;
     r.reviews.answerInvite(r.capture, "review_now");
     expect(r.askRows()).toBe(1);
-    expect(r.askOf()).toEqual({ state: "started", reviewId: first });
+    expect(r.askOf()).toMatchObject({ state: "started", reviewId: first });
   });
 
   test("Review now resent on a fully reviewed, stopped lecture opens no ask and says nothing to review", async () => {
@@ -439,9 +440,51 @@ describe("asking for a lecture's review (flow C, 2026-11-18)", () => {
     await collect(r.reviews.turn(first, randomId("turn"), answer()));
     await collect(r.reviews.turn(first, randomId("turn"), { kind: "end" }));
     expect(r.reviews.view(first).state.phase).toBe("ended");
-    r.reviews.answerInvite(r.capture, "review_now");
+    // The answer names no ask, so the popup opens the lecture page unmarked, and the page waits on none: it never opens the ended review.
+    expect(r.reviews.answerInvite(r.capture, "review_now")).toMatchObject({ ask: null, review: null });
     expect(r.askRows()).toBe(1);
-    expect(r.reviews.options(r.capture)).toMatchObject({ kind: "nothing_to_review", ask: { state: "started", reviewId: first } });
+    const options = r.reviews.options(r.capture);
+    expect(options).toMatchObject({ kind: "nothing_to_review", ask: { state: "started", reviewId: first } });
+    expect(followAsk(null, options.ask)).toEqual({ state: null, open: null });
+  });
+
+  test("a lecture stopped while its last chunk prepares, with every claim unverified, ends in nothing to review, not Processing", () => {
+    const r = asking(true);
+    const chunk = r.world.close(0, 0, 300);
+    r.world.pendingChunks.add(chunk.id);
+    const claim = r.world.claim(1, 10, 20, "awaiting_check");
+    const asked = r.reviews.answerInvite(r.capture, "wait");
+    expect(asked.ask).not.toBeNull();
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    expect(r.askOf()).toMatchObject({ state: "open" });
+    // The last check lands: the claim is unverified, and nothing is left to prepare or close.
+    r.world.pendingChunks.delete(chunk.id);
+    r.world.check(claim, "unverified");
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    expect(r.askOf()).toEqual({ state: "exhausted", seq: asked.ask! });
+    // Again, as every later derivation does: it stays exhausted, and nothing starts.
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    expect(reviewRows(r.db)).toBe(0);
+    // The page that waited stops waiting and shows nothing to review; the popup's Processing turns into nothing to review.
+    const options = r.reviews.options(r.capture);
+    expect(options.kind).toBe("nothing_to_review");
+    expect(followAsk(asked.ask, options.ask)).toEqual({ state: null, open: null });
+    expect(r.reviews.invite(r.capture)).toEqual({ state: "nothing_to_review" });
+  });
+
+  test("the Start review button after a chunk grows with no new supported claim starts no second review", async () => {
+    const r = asking();
+    r.world.close(0, 0, 300);
+    r.world.claim(1, 10, 20);
+    const first = started(r.reviews.start(r.capture, "prepared_only", randomId("rvw")));
+    await collect(r.reviews.turn(first.reviewId, randomId("turn"), answer()));
+    await collect(r.reviews.turn(first.reviewId, randomId("turn"), { kind: "end" }));
+    // The section grows to 5:30 with no new claim: the grown chunk is offered whole, but its only claim is the first review's.
+    r.world.close(0, 0, 330);
+    expect(r.reviews.options(r.capture).kind).toBe("nothing_to_review");
+    expect(r.reviews.start(r.capture, "prepared_only", randomId("rvw")).kind).toBe("nothing_to_review");
+    expect(r.reviews.start(r.capture, "stop_early", randomId("rvw")).kind).toBe("nothing_to_review");
+    expect(reviewRows(r.db)).toBe(1);
   });
 
   test("a lecture nobody asked for says so, with no time estimate, and says it is preparing once asked", () => {

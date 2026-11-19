@@ -19,7 +19,7 @@
 import { stableId } from "../../shared/ids";
 import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, ConceptId, EvidenceId, ReviewId, ThreadId, TurnId } from "../../shared/ids";
 import type {
-  AskView, AssessableClaim, BudgetHold, ChunkPrep, ChunkRevision, Claim, CodeNotice, Concept, Correction, EvidenceBundle, FrozenScope, HeldBack, InviteAnswer, InviteState,
+  AssessableClaim, BudgetHold, ChunkPrep, ChunkRevision, Claim, CodeNotice, Concept, Correction, EvidenceBundle, FrozenScope, HeldBack, InviteAnswer, InviteAnswered, InviteState,
   LearnerAct, LectureAsk, ReviewOptions, ReviewView, ScopePreview, Seq, StartChoice, StartResult, Turn, TurnEvent, TutorMove,
 } from "../../shared/domain";
 import { Material } from "../../shared/time";
@@ -41,9 +41,9 @@ export type Reviews = {
    * User fact.
    * R5: "Choosing Later never cancels preparation."
    * `later` changes only invite state. `review_now` and `wait` also ask for the lecture's review, so its preparation starts
-   * (flow C, 2026-11-18). Starting a review goes through start().
+   * (flow C, 2026-11-18). Starting a review goes through start(). The result names the ask the answer opened or joined, if any.
    */
-  answerInvite(captureId: CaptureId, answer: InviteAnswer): InviteState;
+  answerInvite(captureId: CaptureId, answer: InviteAnswer): InviteAnswered;
   /** "Review now always available": callable any time, regardless of invite state. */
   options(captureId: CaptureId): ReviewOptions;
   /**
@@ -51,14 +51,15 @@ export type Reviews = {
    *   stop_early → stopEarly(pending unreviewed chunks) first.
    *   scope = unreviewed ∧ finished chunk revisions; claims = assessableIn(material)
    * R10: "A review never starts with zero supported claims in scope."
-   * Claims empty → nothing_to_review, and no review row is written.
+   * Claims empty → nothing_to_review, and no review row is written. So is a scope whose every claim an open or answered review of the
+   * lecture already took, or a grown chunk offered whole would start the same review again.
    */
   start(captureId: CaptureId, choice: StartChoice, reviewId: ReviewId): StartResult;
   /**
    * Flow C, 2026-11-18: "start the review once a prepared chunk has a supported claim. Its scope is the chunks prepared at that moment."
    * The backend calls this whenever the lecture's preparation may have changed. With an open ask and a supported claim it starts the
-   * review the ask names, which closes the ask in the same transaction, so a retry or a restart never starts a second one. Returns the
-   * review started, or null when no ask is open or nothing prepared has a supported claim yet (the ask stays open).
+   * review the ask names, which closes the ask in the same transaction, so a retry or a restart never starts a second one. When nothing
+   * can answer the open ask any more, it ends the ask exhausted. Returns the review started, or null.
    */
   startAsked(captureId: CaptureId): ReviewId | null;
   /**
@@ -126,10 +127,11 @@ export type ReviewsDeps = {
    * test of a prepared lecture runs.
    */
   asks?: {
-    ask(captureId: CaptureId): void;
+    ask(captureId: CaptureId): Seq;
     asked(captureId: CaptureId): boolean;
     latestAsk(captureId: CaptureId): LectureAsk | null;
     closeAsk(captureId: CaptureId, reviewId: ReviewId): void;
+    exhaust(captureId: CaptureId): void;
   };
   /** Whether the capture has stopped and every watched passage is in a closed chunk, so no chunk will close. Absent: more may close. */
   allChunksClosed?(captureId: CaptureId): boolean;
@@ -259,19 +261,28 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     return foldInvites(events, timeInviteGapS);
   }
 
-  const invite = (captureId: CaptureId): InviteState => inviteFold(captureId).state;
+  function invite(captureId: CaptureId): InviteState {
+    const state = inviteFold(captureId).state;
+    // Waiting ends in nothing to review once nothing can answer an ask, so the popup never shows Processing for an exhausted ask.
+    const over = state.state === "waiting" && deps.asks !== undefined && deps.asks.latestAsk(captureId)?.state !== "open" && !answerable(captureId);
+    return over ? { state: "nothing_to_review" } : state;
+  }
 
   /** Idempotent per invite: an answer already given to the latest invite is a retry and stores nothing. */
-  function answerInvite(captureId: CaptureId, answer: InviteAnswer): InviteState {
+  function answerInvite(captureId: CaptureId, answer: InviteAnswer): InviteAnswered {
     return db.tx(() => {
       // Only Review now and Wait ask. Later and Stop early never do, and opening the lecture asks nothing. Review now with a review of
-      // the lecture still open returns that review, and nobody asks for what nothing can still answer.
-      const asks = answer === "wait" || (answer === "review_now" && activeReview(captureId) === null);
-      if (asks && answerable(captureId)) deps.asks?.ask(captureId);
+      // the lecture still open returns that review. Nobody asks for what nothing can still answer, and an open ask it finds ends exhausted.
+      const review = answer === "review_now" ? activeReview(captureId) : null;
+      let ask: Seq | null = null;
+      if (answer === "wait" || (answer === "review_now" && review === null)) {
+        if (answerable(captureId)) ask = deps.asks?.ask(captureId) ?? null;
+        else deps.asks?.exhaust(captureId);
+      }
       if (!inviteFold(captureId).answered.has(answer)) {
         q.insertAnswer.run(deps.nextSeq(), userId, captureId, answer, deps.watchedSeconds(captureId), Math.round(now()));
       }
-      return invite(captureId);
+      return { ...invite(captureId), ask, review };
     });
   }
 
@@ -301,17 +312,21 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     return (open.sort((a, b) => a.started_ms - b.started_ms).at(-1)?.id as ReviewId | undefined) ?? null;
   }
 
+  /** Whether the scope holds a supported claim that no review still holding this lecture's material took. Every start needs one. */
+  function takesANewClaim(captureId: CaptureId, scope: FrozenScope): boolean {
+    const taken = new Set(holding(captureId).flatMap((r) => r.claims));
+    return scope.claimsAtStart.some((id) => !taken.has(id));
+  }
+
   /** Whether a review started now would take a supported claim that no review still holding this lecture's material took. */
   function hasNewClaim(captureId: CaptureId, cands: Candidates): boolean {
     const asOf = cands.reduce((s, c) => Math.max(s, c.rev.closedAtSeq), 0);
     const scope = asOf > 0 ? freezeScope(cands, (m) => deps.assessableIn(captureId, m), gapsOf, asSeq(asOf)) : null;
-    const taken = new Set(holding(captureId).flatMap((r) => r.claims));
-    return scope !== null && scope.claimsAtStart.some((id) => !taken.has(id));
+    return scope !== null && takesANewClaim(captureId, scope);
   }
 
   /** Whether an ask could still start a review: a new claim is prepared, a chunk is held or preparing, or more may close. */
-  function answerable(captureId: CaptureId): boolean {
-    const cands = candidates(captureId);
+  function answerable(captureId: CaptureId, cands: Candidates = candidates(captureId)): boolean {
     return !(deps.allChunksClosed?.(captureId) ?? false) || cands.some((c) => !c.prep.finished) || hasNewClaim(captureId, cands);
   }
 
@@ -371,7 +386,9 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     const cands = candidates(captureId);
     // A preview mints no Seq; the latest close stands in for "as of now".
     const asOf = cands.reduce((s, c) => Math.max(s, c.rev.closedAtSeq), 0);
-    const scope = asOf > 0 ? freezeScope(cands, (m) => deps.assessableIn(captureId, m), gapsOf, asSeq(asOf)) : null;
+    const frozen = asOf > 0 ? freezeScope(cands, (m) => deps.assessableIn(captureId, m), gapsOf, asSeq(asOf)) : null;
+    // A scope with no claim new to it would not start, so it is not offered.
+    const scope = frozen && takesANewClaim(captureId, frozen) ? frozen : null;
     const pending = cands.filter((c) => !c.prep.finished).length;
     const ask = askView(captureId);
     if (pending > 0) {
@@ -381,21 +398,22 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     return scope ? { kind: "ready", scope: preview(captureId, scope), heldBack: heldBack(cands, captureId), ...ask } : { ...nothingToReview(cands, captureId), ...ask };
   }
 
-  /** The latest ask as a page reads it. A lecture asked before asks named their review has none to open. */
-  function askView(captureId: CaptureId): { ask: AskView } | null {
+  /** The latest ask as a page reads it. A page follows only the review of the ask it waits on. */
+  function askView(captureId: CaptureId): { ask: LectureAsk } | null {
     const ask = deps.asks?.latestAsk(captureId) ?? null;
-    if (ask === null) return null;
-    if (ask.state === "open") return { ask: { state: "open" } };
-    // Review now while a review is open returns that review, whichever ask started it.
-    const reviewId = activeReview(captureId) ?? ask.reviewId;
-    return reviewId === null ? null : { ask: { state: "started", reviewId } };
+    return ask === null ? null : { ask };
   }
 
   function startAsked(captureId: CaptureId): ReviewId | null {
     const ask = deps.asks?.latestAsk(captureId) ?? null;
     if (ask?.state !== "open") return null;
-    // A review needs a claim no open or answered review took, or a resent ask would start the same review again. Until then the ask waits.
-    if (!hasNewClaim(captureId, candidates(captureId))) return null;
+    // A review needs a claim no open or answered review took, or a resent ask would start the same review again. Until then the ask
+    // waits, unless nothing can answer it any more: then it ends exhausted, so no page shows Processing for it.
+    const cands = candidates(captureId);
+    if (!hasNewClaim(captureId, cands)) {
+      if (!answerable(captureId, cands)) deps.asks?.exhaust(captureId);
+      return null;
+    }
     // The ask names its review, so a start retried after a crash finds the review it already stored.
     const result = start(captureId, "prepared_only", stableId("rvw", captureId, ask.seq));
     return result.kind === "started" ? result.reviewId : null;
@@ -421,7 +439,7 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
         }
       }
       const frozen = freezeScope(cands, (m) => deps.assessableIn(captureId, m), gapsOf, deps.nextSeq());
-      if (!frozen) return nothingToReview(cands, captureId);
+      if (!frozen || !takesANewClaim(captureId, frozen)) return nothingToReview(cands, captureId);
 
       const scope: FrozenScope = dropped > 0 ? { ...frozen, partial: [...frozen.partial, { kind: "stopped_early", droppedClaims: dropped }] } : frozen;
       const texts = new Map(deps.assessableIn(captureId, scope.material).map((c) => [c.id, c.text] as const));

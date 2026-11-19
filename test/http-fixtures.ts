@@ -83,7 +83,7 @@ export function world(limits?: IngestLimits) {
     answerInvite: (_input: unknown, a: InviteAnswer) => {
       invite.answers.push(a);
       if (a === "later") invite.state = { state: "later" };
-      return invite.state;
+      return { ...invite.state, ask: null, review: null };
     },
   } as unknown as Reviews;
   const stored = () => db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM capture_facts").get()!.n;

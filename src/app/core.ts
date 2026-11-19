@@ -4,8 +4,8 @@
  */
 import { heldMessage, resetDay } from "../shared/allowance";
 import type {
-  Allowance, AskView, Author, CaptureStatus, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, HeldBack, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
-  ReviewState, ReviewView, ScopePreview, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
+  Allowance, Author, CaptureStatus, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, HeldBack, LearnerAct, LectureAsk, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
+  ReviewState, ReviewView, ScopePreview, Seq, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
 } from "../shared/domain";
 import type { EvidenceId, ReviewId, SourceId } from "../shared/ids";
 import { IntervalSet, Material } from "../shared/time";
@@ -253,20 +253,26 @@ export function nextSection(options: ReviewOptions): "prepared" | "preparing" | 
 }
 
 /**
- * What a lecture page knows of the lecture's ask. `waiting`: the page asked, was opened by an ask (`#asked`), or read the ask open.
- * `seen`: the review of the latest started ask that this page has already read, which it never opens on its own.
+ * The ask a lecture page waits on, or null: the ask its own Review now or Wait opened or joined, the one the popup's `#asked=<seq>` names,
+ * or one it read open. Never an ask that had ended when the page began to wait (Ask_PageFollowsItsOwnAsk in Preparation.tla).
  */
-export type AskFollow = { readonly waiting: boolean; readonly seen: ReviewId | null };
+export type AskFollow = Seq | null;
+
+/** The ask a lecture page opened by the popup's Review now waits on: `#asked=<seq>`, which the popup adds only when it opened or joined one. */
+export function askedMark(hash: string): AskFollow {
+  const m = /^#asked=([1-9]\d*)$/.exec(hash);
+  return m === null ? null : (Number(m[1]) as Seq);
+}
 
 /**
  * Flow C, 2026-11-18: the backend starts an asked review "once a prepared chunk has a supported claim". A lecture page follows it: one
- * read of the latest ask gives the page's next state and the review to open now, if any. A page opens only a review that started while
- * it waited, so a review that started before the learner came back, or one a stale read still reports, is not forced on them.
+ * read of the latest ask gives the ask the page waits on next and the review to open now, if any. It opens only the review started from
+ * the ask it waits on. An exhausted ask, or a later one, ends the wait, and a read older than the ask it waits on changes nothing.
  */
-export function followAsk(state: AskFollow, ask: AskView | undefined): { readonly state: AskFollow; readonly open: ReviewId | null } {
-  if (ask?.state === "open") return { state: { ...state, waiting: true }, open: null };
-  if (ask?.state !== "started" || ask.reviewId === state.seen) return { state, open: null };
-  return { state: { waiting: false, seen: ask.reviewId }, open: state.waiting ? ask.reviewId : null };
+export function followAsk(waitingOn: AskFollow, ask: LectureAsk | undefined): { readonly state: AskFollow; readonly open: ReviewId | null } {
+  if (ask?.state === "open") return { state: ask.seq, open: null };
+  if (waitingOn === null || ask === undefined || ask.seq < waitingOn) return { state: waitingOn, open: null };
+  return { state: null, open: ask.seq === waitingOn && ask.state === "started" ? ask.reviewId : null };
 }
 
 export function optionsScreen(options: ReviewOptions, titles: SourceTitles = new Map(), videos: SourceVideos = new Map()): OptionsScreen {

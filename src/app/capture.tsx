@@ -5,7 +5,7 @@ import type { CaptureId, ReviewId } from "../shared/ids";
 import type { ReviewOptions, StartChoice, UsageSummary } from "../shared/domain";
 import type { AppApi } from "./api";
 import { usePrefetchReviewArt } from "./art-prefetch";
-import { captureStatusLabel, coveredLines, earlierReviewsNote, followAsk, formatClock, inspectBundle, laterNote, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
+import { askedMark, captureStatusLabel, coveredLines, earlierReviewsNote, followAsk, formatClock, inspectBundle, laterNote, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
 import type { AskFollow, OptionsScreen, ScopeSummary, SourceTitles, StartOffer } from "./core";
 import { ReviewRow } from "./home";
 import type { LectureReview } from "./home";
@@ -18,8 +18,6 @@ import { BundleInspector, ErrorNote, EvidencePane, Link, navigate, useAsync } fr
 const POLL_MS = 3000;
 /** Read again whatever the options say, so an ask from another tab or the extension reaches this page in every state (flow C, 2026-11-18). */
 const always = (): boolean => true;
-/** The popup's Review now opens the lecture page with this mark once the ask is stored, so the page follows the review it starts. */
-const ASKED_MARK = "#asked";
 const isHeld = (usage: UsageSummary): boolean => usage.allowance?.held != null;
 
 export type OptionsViewProps = {
@@ -245,9 +243,9 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
 
   // Flow C, 2026-11-18: the backend starts an asked review once a prepared section has a supported claim. This page opens it if it
   // waited for it. A page that has unmounted reads nothing, so leaving the page never navigates.
-  const follow = useRef<AskFollow>({ waiting: location.hash === ASKED_MARK, seen: null });
+  const follow = useRef<AskFollow>(askedMark(location.hash));
   useEffect(() => {
-    if (location.hash === ASKED_MARK) history.replaceState(history.state, "", location.pathname + location.search);
+    if (location.hash.startsWith("#asked")) history.replaceState(history.state, "", location.pathname + location.search);
   }, []);
   useEffect(() => {
     if (options.data === null) return;
@@ -263,8 +261,8 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
     setStarting(true);
     setStartError(null);
     try {
-      await api.answerInvite(captureId, kind);
-      if (kind !== "later") follow.current = { ...follow.current, waiting: true };
+      const ask = await api.answerInvite(captureId, kind);
+      if (ask !== null) follow.current = ask;
       capture.reload();
       options.reload();
     } catch (e) {

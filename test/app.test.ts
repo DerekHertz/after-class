@@ -4,11 +4,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { AppApi } from "../src/app/api";
 import { ApiError } from "../src/app/api";
 import { OptionsView, checkAgain } from "../src/app/capture";
-import { questionsAsked, availableActions, captureStatusLabel, citedInWatchOrder, conversationLines, coveredLines, currentEvidenceIds, estimateText, followAsk, formatClock, groupGaps, inspectBundle, laterNote, lectureHeading, liveText, nextSection, noteView, observationRow, optionsScreen, parseRoute, partialLines, reduceLive, routePath, softTargetPrompt, sourceWatchOrder, startLive, strandedEndTurn, toAct, unansweredLearnerTurn, usageRows } from "../src/app/core";
+import { askedMark, questionsAsked, availableActions, captureStatusLabel, citedInWatchOrder, conversationLines, coveredLines, currentEvidenceIds, estimateText, followAsk, formatClock, groupGaps, inspectBundle, laterNote, lectureHeading, liveText, nextSection, noteView, observationRow, optionsScreen, parseRoute, partialLines, reduceLive, routePath, softTargetPrompt, sourceWatchOrder, startLive, strandedEndTurn, toAct, unansweredLearnerTurn, usageRows } from "../src/app/core";
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { UsageTable } from "../src/app/record";
 import { BundleInspector, EvidencePane } from "../src/app/ui";
-import type { ScopePreview, TurnEvent, UsageSummary } from "../src/shared/domain";
+import type { ScopePreview, Seq, TurnEvent, UsageSummary } from "../src/shared/domain";
 import { stableId } from "../src/shared/ids";
 import type { ReviewId } from "../src/shared/ids";
 import { media } from "../src/shared/time";
@@ -469,23 +469,31 @@ describe("a lecture nobody asked for (flow C, 2026-11-18)", () => {
     expect(nextSection({ kind: "nothing_to_review", gaps: [], unverified: [], rewatch: [], heldBack: [] })).toBeNull();
   });
 
-  test("a lecture page opens the review the backend started only when it waited for that ask", () => {
+  test("a lecture page opens only the review started from the ask it waits on", () => {
     const old = stableId("rvw", "earlier") as ReviewId;
     const fresh = stableId("rvw", "asked") as ReviewId;
-    const loaded = { waiting: false, seen: null };
+    const [one, two, three] = [1 as Seq, 2 as Seq, 3 as Seq];
     // A review that had started before the page loaded is the learner's to open from the list.
-    const first = followAsk(loaded, { state: "started", reviewId: old });
-    expect(first.open).toBeNull();
+    const first = followAsk(null, { state: "started", seq: one, reviewId: old });
+    expect(first).toEqual({ state: null, open: null });
     // An ask made elsewhere: the page reads it open, then the review it started, and opens that one.
-    const waiting = followAsk(first.state, { state: "open" });
-    expect(waiting.open).toBeNull();
-    expect(followAsk(waiting.state, { state: "started", reviewId: fresh }).open).toBe(fresh);
-    // The page asked itself: a stale read that still names the old review opens nothing; the new one opens.
-    const asked = { ...first.state, waiting: true };
-    expect(followAsk(asked, { state: "started", reviewId: old }).open).toBeNull();
-    expect(followAsk(asked, { state: "started", reviewId: fresh }).open).toBe(fresh);
-    // The popup opened the page marked as asked, after the ask was stored: its first read may already name the review.
-    expect(followAsk({ waiting: true, seen: null }, { state: "started", reviewId: fresh }).open).toBe(fresh);
-    expect(followAsk({ waiting: true, seen: null }, undefined).open).toBeNull();
+    const waiting = followAsk(first.state, { state: "open", seq: two });
+    expect(waiting).toEqual({ state: two, open: null });
+    expect(followAsk(waiting.state, { state: "started", seq: two, reviewId: fresh }).open).toBe(fresh);
+    // The page asked itself: a stale read that still names the old ask's review opens nothing and keeps the wait.
+    expect(followAsk(two, { state: "started", seq: one, reviewId: old })).toEqual({ state: two, open: null });
+    // Its ask was exhausted, or a later ask replaced it: the wait ends with nothing opened.
+    expect(followAsk(two, { state: "exhausted", seq: two })).toEqual({ state: null, open: null });
+    expect(followAsk(two, { state: "started", seq: three, reviewId: fresh })).toEqual({ state: null, open: null });
+    // The popup opened the page marked with its ask, after the ask was stored: its first read may already name the review.
+    expect(followAsk(askedMark("#asked=2"), { state: "started", seq: two, reviewId: fresh }).open).toBe(fresh);
+    expect(followAsk(two, undefined)).toEqual({ state: two, open: null });
+  });
+
+  test("a page opened by an older popup's bare #asked waits on no ask, so it never opens the ended review of an older one", () => {
+    const old = stableId("rvw", "earlier") as ReviewId;
+    expect(askedMark("#asked")).toBeNull();
+    expect(askedMark("#asked=0")).toBeNull();
+    expect(followAsk(askedMark("#asked"), { state: "started", seq: 1 as Seq, reviewId: old }).open).toBeNull();
   });
 });

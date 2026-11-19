@@ -118,7 +118,8 @@ export function scripted<I, O>(purpose: Purpose, provider: Provider, canonical: 
   return Object.assign(t, { canonicalInput: canonical }) as unknown as FakeTask<I, O>;
 }
 
-export function fakeTasks() {
+/** `verdict`: what every claim check answers, "yes" unless a test needs every claim unverified. */
+export function fakeTasks(o: { readonly verdict?: "yes" | "no" } = {}) {
   const frameBytesSeen: number[] = [];
   const boundary = scripted<BoundaryInput, ReturnType<typeof judged>>("boundary", "jev",
     (i) => ({ window: i.window.id, new: i.newPassages.map((p) => p.id), context: i.contextPassages.map((p) => p.id), frames: i.frames.map((f) => f.frame.id) }),
@@ -134,11 +135,11 @@ export function fakeTasks() {
     return ok({ concepts: [{ label: "Topic", summary: "What the lecture is about", claims: drafts, confusions: [] }], links: [], supersedes: [] });
   });
   const revise = scripted("claim_revision", "claude", canonicalRevision, () => fail("no revision expected"));
-  const checkClaim = scripted<ClaimSupportInput, { verdict: "yes"; p: number }>("claim_check", "jev",
+  const checkClaim = scripted<ClaimSupportInput, { verdict: "yes" | "no"; p: number }>("claim_check", "jev",
     (i) => ({ claim: { text: i.claim.text, evidence: [...i.claim.evidence], visualDependent: i.claim.visualDependent, assumptions: [...i.claim.assumptions] }, passages: i.passages.map((p) => p.id), frames: i.frames.map((f) => f.frame.id) }),
     (i) => {
       for (const f of i.frames) frameBytesSeen.push(f.bytes().length);
-      return ok({ verdict: "yes" as const, p: 0.9 });
+      return ok({ verdict: o.verdict ?? "yes", p: 0.9 });
     });
   const searchResources = scripted("resource_search", "claude", canonicalResourceSearch, () => ok([]));
   const tutor = scripted("tutor_turn", "claude", () => "tutor", () => fail("no tutor turn in this test"));
