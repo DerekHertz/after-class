@@ -25,7 +25,7 @@ import { stableId } from "../../shared/ids";
 import type { CaptureId, EvidenceId, MemoKey, SourceId, TranscriptRevId } from "../../shared/ids";
 import type {
   AdRecord, CaptureFact, CaptureStatus, CaptureView, DeletedEvidence, Evidence, EvidenceBundle, Frame, FrameTeaching, Gap, Passage, Seq,
-  TranscriptOrigin, Verdict,
+  TranscriptOrigin,
 } from "../../shared/domain";
 import { Material } from "../../shared/time";
 import type { MediaSeconds } from "../../shared/time";
@@ -35,7 +35,7 @@ import { REMOVALS, captureDep, sourceDep } from "../deps";
 import type { Dep, ReadDep } from "../deps";
 import type { WorkItem } from "../scheduler";
 import type { Lookup } from "../providers/memo";
-import type { FrameChangeInput } from "../providers/jev-tasks";
+import type { FrameChangeInput, FrameChangeJudgment } from "../providers/jev-tasks";
 import { IngestRefused, defaultIngestLimits } from "./ingest-limits";
 import type { IngestLimits } from "./ingest-limits";
 import { jpegSize } from "./jpeg";
@@ -169,7 +169,7 @@ function isFrameJpeg(bytes: Uint8Array, width: number, height: number): boolean 
 
 export function createEvidence(db: UserDb, dataDir: string, deps: {
   /** Frame.teaching derives from this lookup: yes→kept, no→dropped, uncertain/failed→uncertain (kept). */
-  lookupFrameChange(input: FrameChangeInput): Lookup<Verdict>;
+  lookupFrameChange(input: FrameChangeInput): Lookup<FrameChangeJudgment>;
   runFrameChange(input: FrameChangeInput, signal: AbortSignal): Promise<unknown>;
   frameChangeKey(input: FrameChangeInput): MemoKey;
   /**
@@ -318,7 +318,7 @@ export function createEvidence(db: UserDb, dataDir: string, deps: {
   /** "Uncertain visual → keep the frame." */
   function teachingOf(input: FrameChangeInput): FrameTeaching {
     const found = deps.lookupFrameChange(input);
-    if (found.kind === "hit") return found.value === "yes" ? "kept" : found.value === "no" ? "dropped" : "uncertain";
+    if (found.kind === "hit") return found.value.verdict === "yes" ? "kept" : found.value.verdict === "no" ? "dropped" : "uncertain";
     return found.kind === "failed" ? "uncertain" : "unjudged";
   }
 

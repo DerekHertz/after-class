@@ -127,7 +127,7 @@ function fakeTasks() {
     } as const,
     usage: FAKE_JEV,
   }));
-  const frameChange = faked(frameChangeTask(noJev), () => ({ output: "yes" as const, usage: FAKE_JEV }));
+  const frameChange = faked(frameChangeTask(noJev), () => ({ output: { verdict: "yes" as const, p: 0.9 }, usage: FAKE_JEV }));
   const checkClaim = faked(claimSupportTask(noJev), () => ({ output: { verdict: "yes" as const, p: 0.9 }, usage: FAKE_JEV }));
 
   const interpret = faked(interpretTask(noClaude, () => null), (i) => {

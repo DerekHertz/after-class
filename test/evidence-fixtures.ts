@@ -2,7 +2,7 @@ import { asSeq } from "../src/backend/db";
 import { createEvidence } from "../src/backend/evidence";
 import { sourceIdOf } from "../src/backend/evidence/core";
 import type { IngestLimits } from "../src/backend/evidence/ingest-limits";
-import type { FrameChangeInput } from "../src/backend/providers/jev-tasks";
+import type { FrameChangeInput, FrameChangeJudgment } from "../src/backend/providers/jev-tasks";
 import type { Lookup } from "../src/backend/providers/memo";
 import type { CaptureFact, CaptureFactBody, Verdict } from "../src/shared/domain";
 import type { CaptureId, EvidenceId, MemoKey } from "../src/shared/ids";
@@ -23,7 +23,7 @@ export const DAY = 86_400_000;
 export const JPEG = Buffer.from(JPEG_BYTES).toString("base64");
 
 /** Scripted frame-change answers keyed by the `after` frame id. A frame with no entry is unjudged. */
-type Script = Map<EvidenceId, Lookup<Verdict>>;
+type Script = Map<EvidenceId, Lookup<FrameChangeJudgment>>;
 
 export function harness(opts: { clock?: { t: number }; limits?: IngestLimits; runFrameChange?: (input: FrameChangeInput) => Promise<unknown> } = {}) {
   const dir = tmpDir("afterclass-evidence-");
@@ -45,7 +45,7 @@ export function harness(opts: { clock?: { t: number }; limits?: IngestLimits; ru
 
 export const keyOf = (input: FrameChangeInput): MemoKey => stableId("key", "frame_change", input.before?.frame.id ?? null, input.after.frame.id);
 
-export const hit = (value: Verdict, id: EvidenceId): Lookup<Verdict> => ({ kind: "hit", key: stableId("key", id), value, atSeq: asSeq(1) });
+export const hit = (verdict: Verdict, id: EvidenceId): Lookup<FrameChangeJudgment> => ({ kind: "hit", key: stableId("key", id), value: { verdict, p: null }, atSeq: asSeq(1) });
 
 /** Builds a fact stream with consecutive clientSeqs. */
 export function stream(captureId: CaptureId = randomId("cap")) {

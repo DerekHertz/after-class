@@ -55,7 +55,7 @@ import { stableId } from "../shared/ids";
 import type { CaptureId, EvidenceId, ReviewId, UserId } from "../shared/ids";
 import { memoDep } from "./deps";
 import type { Dep, ReadDep } from "./deps";
-import type { AssessableClaim, BoundaryJudgment, BoundaryWindow, Evidence, Frame, Passage, Verdict } from "../shared/domain";
+import type { AssessableClaim, BoundaryJudgment, BoundaryWindow, Evidence, Frame, Passage } from "../shared/domain";
 import { heldMessage } from "../shared/allowance";
 import { LOCAL_USER, ensureLocalUser, openDb, scopeDb, signedInUsers, userForIdentity } from "./db";
 import type { Db, UserDb } from "./db";
@@ -76,7 +76,7 @@ import type { ClaudeCli, SpawnFn } from "./providers/claude";
 import { cliStreamEstimateUsd, createClaudeApi } from "./providers/claude-api";
 import type { ApiClient } from "./providers/claude-api";
 import { claimSupportTask, productBoundaryTask, productFrameChangeTask } from "./providers/jev-tasks";
-import type { BoundaryInput, FrameChangeInput } from "./providers/jev-tasks";
+import type { BoundaryInput, FrameChangeInput, FrameChangeJudgment } from "./providers/jev-tasks";
 import { createEvidence } from "./evidence";
 import { readVolume, startDiskWatch } from "./evidence/disk-watch";
 import { resolveIngestLimits } from "./evidence/ingest-limits";
@@ -114,7 +114,7 @@ export type Mode = "live" | "replay";
 /** Every task the product runs, bound to a provider. Tests inject fakes; replay mode otherwise binds refusing providers. */
 export type TaskSet = {
   readonly boundary: Task<BoundaryInput, BoundaryJudgment>;
-  readonly frameChange: Task<FrameChangeInput, Verdict>;
+  readonly frameChange: Task<FrameChangeInput, FrameChangeJudgment>;
   readonly preparation: PreparationTasks;
   readonly tutor: Task<TutorInput, TutorOutput>;
   readonly wrapUp: Task<WrapUpInput, WrapUpOutput>;

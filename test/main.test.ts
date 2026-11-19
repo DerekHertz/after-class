@@ -20,7 +20,7 @@ import { ProviderError, unbudgeted } from "../src/backend/providers/memo";
 import { reviewState } from "../src/backend/review/tutor";
 import type { TutorInput } from "../src/backend/review/tutor";
 import { claimSupportTask } from "../src/backend/providers/jev-tasks";
-import type { ClaimSupportInput, BoundaryInput, FrameChangeInput } from "../src/backend/providers/jev-tasks";
+import type { ClaimSupportInput, BoundaryInput, FrameChangeInput, FrameChangeJudgment } from "../src/backend/providers/jev-tasks";
 import { canonicalInterpretation, canonicalResourceSearch, canonicalRevision } from "../src/backend/preparation/tasks";
 import type { InterpretationInput, InterpretationOutput } from "../src/backend/preparation/tasks";
 import { UNASKED_CACHE, deferred, fail, fakeTask, ok } from "./fakes";
@@ -109,9 +109,9 @@ function fakeTasks() {
   const boundary = scripted<BoundaryInput, ReturnType<typeof judged>>("boundary", "jev",
     (i) => ({ window: i.window.id, new: i.newPassages.map((p) => p.id), context: i.contextPassages.map((p) => p.id), frames: i.frames.map((f) => f.frame.id) }),
     (i) => ok(judged(i.window.id)));
-  const frameChange = scripted<FrameChangeInput, "yes">("frame_change", "jev",
+  const frameChange = scripted<FrameChangeInput, FrameChangeJudgment>("frame_change", "jev",
     (i) => ({ before: i.before?.frame.id ?? null, after: i.after.frame.id, nearby: i.nearbyPassages.map((p) => p.id) }),
-    () => ok("yes" as const));
+    () => ok({ verdict: "yes", p: 0.9 }));
   const interpret = scripted<InterpretationInput, InterpretationOutput>("interpretation", "claude", canonicalInterpretation, (i) => {
     const drafts: ClaimDraft[] = [
       { text: "The lecture states its topic first.", evidence: [i.newMaterial.passages[0]!.id], visualDependent: false, assumptions: [] },
