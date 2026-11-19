@@ -333,11 +333,22 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     const asOf = cands.reduce((s, c) => Math.max(s, c.rev.closedAtSeq), 0);
     const scope = asOf > 0 ? freezeScope(cands, (m) => deps.assessableIn(captureId, m), gapsOf, asSeq(asOf)) : null;
     const pending = cands.filter((c) => !c.prep.finished).length;
+    const ask = askedReview(captureId);
     if (pending > 0) {
       const asked = deps.asks?.asked(captureId) ?? true;
-      return { kind: "processing", asked, readyNow: scope && preview(captureId, scope), pendingChunks: pending, estimateS: asked ? config.estimateS?.(pending) ?? null : null, heldBack: heldBack(cands, captureId) };
+      return { kind: "processing", asked, readyNow: scope && preview(captureId, scope), pendingChunks: pending, estimateS: asked ? config.estimateS?.(pending) ?? null : null, heldBack: heldBack(cands, captureId), ...ask };
     }
-    return scope ? { kind: "ready", scope: preview(captureId, scope), heldBack: heldBack(cands, captureId) } : nothingToReview(cands, captureId);
+    return scope ? { kind: "ready", scope: preview(captureId, scope), heldBack: heldBack(cands, captureId), ...ask } : nothingToReview(cands, captureId);
+  }
+
+  /**
+   * Flow C, 2026-11-18: after Review now or Wait, "the review starts on its own once a prepared chunk has a supported claim". The latest such
+   * answer waits until a review of this lecture starts after it. Its review id comes from the answer, so every open tab starts the same review.
+   */
+  function askedReview(captureId: CaptureId): { askedReview: ReviewId } | null {
+    const last = q.answers.all(userId, captureId).reduce((s, a) => (a.answer === "review_now" || a.answer === "wait" ? Math.max(s, a.seq) : s), 0);
+    if (last === 0 || q.reviewsOf.all(userId, captureId).some((r) => r.frozen_at_seq > last)) return null;
+    return { askedReview: stableId("rvw", captureId, last) };
   }
 
   function start(captureId: CaptureId, choice: StartChoice, reviewId: ReviewId): StartResult {
