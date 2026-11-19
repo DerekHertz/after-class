@@ -333,7 +333,13 @@ export type InviteState =
   | { readonly state: "later" }
   | { readonly state: "waiting" }
   /** The learner waited, and nothing can answer the lecture's ask any more (flow C, 2026-11-18). */
-  | { readonly state: "nothing_to_review" };
+  | { readonly state: "nothing_to_review" }
+  /** The day's review limit refused the review the learner asked for. The popup shows `REVIEW_LIMIT_MESSAGE`. */
+  | { readonly state: "review_limit" };
+
+/** What a learner who has started too many reviews today that never reached a tutor question is told (#244). */
+export const REVIEW_LIMIT_MESSAGE =
+  "You have started a lot of reviews today that never reached a question from the tutor. Work through the reviews you have started, or try again tomorrow.";
 
 /**
  * An answer's result. `ask`: the ask this answer opened or joined, which the page that answered waits on; null when it opened none.
@@ -386,21 +392,26 @@ export type HeldBack = readonly { readonly reviewId: ReviewId; readonly material
 /**
  * A lecture's latest ask for its review (flow C, 2026-11-18), as docs/flows/model/Preparation.tla models it. Review now or Wait opens one
  * when something can answer it. It ends "started" when a review starts from it, or "exhausted" when the backend sees that nothing can
- * answer it: no chunk held, queued or preparing, none still to close, and no supported claim new to every earlier review. A page shows
+ * answer it: no chunk held, queued or preparing, none still to close, and no supported claim new to every earlier review. It ends
+ * "refused" when the day's review limit refuses the start it asked for; asking again opens a new ask. A page shows
  * Processing only for an open ask, and opens only the review of the ask it waits on. A lecture asked before asks named their review
  * (preparation/004-prep-asks) reads as exhausted, with no review to follow.
  */
 export type LectureAsk =
   | { readonly state: "open"; readonly seq: Seq }
   | { readonly state: "started"; readonly seq: Seq; readonly reviewId: ReviewId }
-  | { readonly state: "exhausted"; readonly seq: Seq };
+  | { readonly state: "exhausted"; readonly seq: Seq }
+  | { readonly state: "refused"; readonly seq: Seq };
+
+/** The latest ask as a lecture page reads it. A started ask says whether its review still runs: a page opens only a running one. */
+export type AskView = Exclude<LectureAsk, { readonly state: "started" }> | (Extract<LectureAsk, { readonly state: "started" }> & { readonly running: boolean });
 
 /** `ask`: the lecture's latest ask, absent when nobody asked (flow C, 2026-11-18). */
 export type ReviewOptions =
-  | { readonly kind: "ready"; readonly scope: ScopePreview; readonly heldBack: HeldBack; readonly ask?: LectureAsk | undefined }
+  | { readonly kind: "ready"; readonly scope: ScopePreview; readonly heldBack: HeldBack; readonly ask?: AskView | undefined }
   /** `asked` false: nobody has asked for this lecture's review yet, so its `pendingChunks` are held, not preparing (flow C, 2026-11-18). */
-  | { readonly kind: "processing"; readonly asked: boolean; readonly readyNow: ScopePreview | null; readonly pendingChunks: number; readonly estimateS: number | null; readonly heldBack: HeldBack; readonly ask?: LectureAsk | undefined }
-  | { readonly kind: "nothing_to_review"; readonly gaps: readonly Gap[]; readonly unverified: readonly Claim[]; readonly rewatch: readonly { readonly sourceId: SourceId; readonly interval: Interval }[]; readonly heldBack: HeldBack; readonly ask?: LectureAsk | undefined };
+  | { readonly kind: "processing"; readonly asked: boolean; readonly readyNow: ScopePreview | null; readonly pendingChunks: number; readonly estimateS: number | null; readonly heldBack: HeldBack; readonly ask?: AskView | undefined }
+  | { readonly kind: "nothing_to_review"; readonly gaps: readonly Gap[]; readonly unverified: readonly Claim[]; readonly rewatch: readonly { readonly sourceId: SourceId; readonly interval: Interval }[]; readonly heldBack: HeldBack; readonly ask?: AskView | undefined };
 
 /** "prepared_only": start on what's ready, other chunks keep preparing. "stop_early": cancel pending in-scope work first. */
 export type StartChoice = "prepared_only" | "stop_early";

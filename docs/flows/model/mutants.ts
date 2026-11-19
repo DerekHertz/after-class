@@ -230,7 +230,7 @@ const mutants: Mutant[] = [
     kind: "PROPERTY",
     removes: "the page waits only on an ask that Review now or Wait opened or joined (not a rule)",
     from: `    /\\ UNCHANGED CaptureVars /\\ UNCHANGED PrepVars /\\ UNCHANGED AskVars\n`,
-    to: `    /\\ UNCHANGED CaptureVars /\\ UNCHANGED PrepVars /\\ UNCHANGED <<askNo, askState, fromAsk, taken>> /\\ waitingOn' = askNo\n`,
+    to: `    /\\ UNCHANGED CaptureVars /\\ UNCHANGED PrepVars /\\ UNCHANGED <<askNo, askState, fromAsk, taken, askedRuns>> /\\ waitingOn' = askNo\n`,
   },
   {
     name: "the page follows whichever ask started",
@@ -240,6 +240,24 @@ const mutants: Mutant[] = [
     removes: "the page opens only the review of the ask it waits on (not a rule)",
     from: `    /\\ askNo = waitingOn\n`,
     to: ``,
+  },
+  {
+    name: "a waiting page opens a review another tab ended",
+    module: "Preparation",
+    rule: "Ask_PageFollowsItsOwnAsk",
+    kind: "PROPERTY",
+    removes: "the page opens the review of its ask only while it runs (not a rule)",
+    from: `    /\\ askedRuns\n`,
+    to: ``,
+  },
+  {
+    name: "the review limit refuses an ask nothing could start",
+    module: "Preparation",
+    rule: "Ask_RefusedOnlyWhenAStartWasDue",
+    kind: "PROPERTY",
+    removes: "the day's review limit refuses only the asked start (not a rule)",
+    from: `    /\\ HasNewClaim\n    /\\ askState' = "refused"\n`,
+    to: `    /\\ askState' = "refused"\n`,
   },
 ];
 

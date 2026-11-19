@@ -413,7 +413,7 @@ export async function answerInvite(tabId: number, answer: InviteAnswer): Promise
   if (opensPage) await chrome.tabs.create({ url: new URL(path, app.origin).href });
   if (!r.ok) throw new Error(r.error);
   const s = body?.state;
-  if (s !== "none" && s !== "invited" && s !== "later" && s !== "waiting" && s !== "nothing_to_review") return current;
+  if (s !== "none" && s !== "invited" && s !== "later" && s !== "waiting" && s !== "nothing_to_review" && s !== "review_limit") return current;
   // Keep only the invite state: the ack it joins carries no ask.
   const { ask: _ask, review: _review, ...invite } = body as InviteState & { ask?: unknown; review?: unknown };
   return invite;

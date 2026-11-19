@@ -54,7 +54,8 @@ const STEPS = {
   YouAskWhileAnAskIsOpen: "the page waits on the open ask",
   CodeExhaustsTheAsk: "nothing can answer the ask, so it ends exhausted",
   PageOpensTheAskedReview: "the page opens the review its ask started",
-  PageShowsNothingToReview: "the page's ask ended with nothing to review",
+  CodeRefusesTheAsk: "the day's review limit refuses the asked start",
+  PageShowsTheLecture: "the page's ask ended without a running review, so it shows the lecture",
 };
 
 export const step = (action, from, to) => {

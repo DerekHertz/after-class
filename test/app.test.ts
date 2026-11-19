@@ -474,19 +474,19 @@ describe("a lecture nobody asked for (flow C, 2026-11-18)", () => {
     const fresh = stableId("rvw", "asked") as ReviewId;
     const [one, two, three] = [1 as Seq, 2 as Seq, 3 as Seq];
     // A review that had started before the page loaded is the learner's to open from the list.
-    const first = followAsk(null, { state: "started", seq: one, reviewId: old });
+    const first = followAsk(null, { state: "started", seq: one, reviewId: old, running: true });
     expect(first).toEqual({ state: null, open: null });
     // An ask made elsewhere: the page reads it open, then the review it started, and opens that one.
     const waiting = followAsk(first.state, { state: "open", seq: two });
     expect(waiting).toEqual({ state: two, open: null });
-    expect(followAsk(waiting.state, { state: "started", seq: two, reviewId: fresh }).open).toBe(fresh);
+    expect(followAsk(waiting.state, { state: "started", seq: two, reviewId: fresh, running: true }).open).toBe(fresh);
     // The page asked itself: a stale read that still names the old ask's review opens nothing and keeps the wait.
-    expect(followAsk(two, { state: "started", seq: one, reviewId: old })).toEqual({ state: two, open: null });
+    expect(followAsk(two, { state: "started", seq: one, reviewId: old, running: true })).toEqual({ state: two, open: null });
     // Its ask was exhausted, or a later ask replaced it: the wait ends with nothing opened.
     expect(followAsk(two, { state: "exhausted", seq: two })).toEqual({ state: null, open: null });
-    expect(followAsk(two, { state: "started", seq: three, reviewId: fresh })).toEqual({ state: null, open: null });
+    expect(followAsk(two, { state: "started", seq: three, reviewId: fresh, running: true })).toEqual({ state: null, open: null });
     // The popup opened the page marked with its ask, after the ask was stored: its first read may already name the review.
-    expect(followAsk(askedMark("#asked=2"), { state: "started", seq: two, reviewId: fresh }).open).toBe(fresh);
+    expect(followAsk(askedMark("#asked=2"), { state: "started", seq: two, reviewId: fresh, running: true }).open).toBe(fresh);
     expect(followAsk(two, undefined)).toEqual({ state: two, open: null });
   });
 
@@ -494,6 +494,6 @@ describe("a lecture nobody asked for (flow C, 2026-11-18)", () => {
     const old = stableId("rvw", "earlier") as ReviewId;
     expect(askedMark("#asked")).toBeNull();
     expect(askedMark("#asked=0")).toBeNull();
-    expect(followAsk(askedMark("#asked"), { state: "started", seq: 1 as Seq, reviewId: old }).open).toBeNull();
+    expect(followAsk(askedMark("#asked"), { state: "started", seq: 1 as Seq, reviewId: old, running: true }).open).toBeNull();
   });
 });

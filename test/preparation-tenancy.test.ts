@@ -263,7 +263,7 @@ describe("migration preparation/003-user-id", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   };
-  const before = { ...MIGRATIONS, preparation: MIGRATIONS.preparation.filter((m) => m.id !== "003-user-id" && m.id !== "004-prep-asks") };
+  const before = { ...MIGRATIONS, preparation: MIGRATIONS.preparation.filter((m) => m.id !== "003-user-id" && !m.id.includes("prep-ask")) };
 
   function seedOld(path: string) {
     const db = openDb(path, before);

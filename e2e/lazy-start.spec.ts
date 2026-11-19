@@ -56,3 +56,34 @@ test("Wait on a lecture that stops with every claim unverified ends in nothing t
   await expect(page.getByText("Preparing your lecture")).toHaveCount(0);
   await expect(page).not.toHaveURL(/\/review\/rvw_/);
 });
+
+test("a waiting page whose asked review another tab already ended shows the lecture and opens nothing", async ({ page }) => {
+  await page.goto("/?scenario=capture-ended-ask#asked=1");
+  await expect(page.getByRole("heading", { name: "Nothing to review yet" })).toBeVisible();
+  // Past two more reads of the options.
+  await page.waitForTimeout(7000);
+  await expect(page).not.toHaveURL(/\/review\/rvw_/);
+  await expect(page.getByRole("heading", { name: "Nothing to review yet" })).toBeVisible();
+});
+
+test("an asked review the day's review limit refuses shows the refusal, not Processing", async ({ page }) => {
+  await page.goto("/?scenario=capture-limit");
+  await page.getByRole("button", { name: "Wait" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Preparing your lecture. The review starts when a section is ready." })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("alert").filter({ hasText: "You have started a lot of reviews today that never reached a question from the tutor." })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Preparing your lecture")).toHaveCount(0);
+  await expect(page).not.toHaveURL(/\/review\/rvw_/);
+});
+
+test("Review now when another tab already started the lecture's review opens that review", async ({ page }) => {
+  await page.goto("/?scenario=capture-joined");
+  await page.getByRole("button", { name: "Review now" }).click();
+  await expect(page).toHaveURL(/\/review\/rvw_/, { timeout: 10_000 });
+  expect(await calls(page)).not.toContain("review.start");
+});
+
+test("a lecture nobody asked for invents no time estimate", async ({ page }) => {
+  await page.goto("/?scenario=capture-unasked");
+  await expect(page.getByText("Either one prepares this lecture.")).toBeVisible();
+  await expect(page.getByText(/minute/)).toHaveCount(0);
+});

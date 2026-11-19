@@ -26,7 +26,7 @@ export const ids = {
   chunk: id("crv", "chunk"), concept: id("cpt", "circular-wait"), ordering: id("cpt", "ordering"), earlierCapture: id("cap", "earlier-capture"),
   otherCapture: id("cap", "other-capture"), pendingReview: id("rvw", "pending-review"), unsavedReview: id("rvw", "unsaved-review"),
 };
-export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "reload-unanswered", "reload-in-flight", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-split", "capture-processing", "capture-held", "capture-empty", "capture-unasked", "capture-empty-asked", "capture-leave", "capture-reviewed", "capture-exhausted", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "record-double-status", "double-status", "review-record-stale", "review-record-slow", "usage", "usage-held", "usage-reserved", "usage-uncapped", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-connected", "first-run", "home-error", "room-grown"] as const;
+export const scenarios = ["review", "long-history", "long-reply", "streaming", "failed-turn", "unfinished-reply", "reload-unanswered", "reload-in-flight", "save-failure", "saving", "paused", "detour", "resource-wait", "correction", "soft-target", "missing-evidence", "evidence-error", "fuzzy-checklist", "diagram", "held-turn", "held-turn-used-up", "capture-ready", "capture-split", "capture-processing", "capture-held", "capture-empty", "capture-unasked", "capture-empty-asked", "capture-leave", "capture-reviewed", "capture-exhausted", "capture-ended-ask", "capture-limit", "capture-joined", "record", "record-illustrated", "record-empty", "record-error", "record-disputes", "record-context-error", "record-lectures", "record-double-status", "double-status", "review-record-stale", "review-record-slow", "usage", "usage-held", "usage-reserved", "usage-uncapped", "home", "home-paused", "home-setup", "home-topic-error", "home-empty", "home-connected", "first-run", "home-error", "room-grown"] as const;
 export type Scenario = typeof scenarios[number];
 export const scenarioFrom = (search: string): Scenario => scenarios.find(s => s === new URLSearchParams(search).get("scenario")) ?? "review";
 
@@ -230,18 +230,30 @@ export function createFixture(scenario: Scenario): Fixture {
       if (scenario === "capture-unasked" || scenario === "capture-empty-asked") {
         const nothing = { kind: "nothing_to_review", heldBack, gaps: [], unverified: [], rewatch: [] };
         if (++unaskedReads <= 2) return reviewOptionsz.parse(scenario === "capture-empty-asked" ? nothing : { kind: "processing", asked: false, readyNow: null, pendingChunks: 2, estimateS: null, heldBack });
-        const ask = ++askedReads === 1 ? { state: "open", seq: 1 } : { state: "started", seq: 1, reviewId: ids.review };
+        const ask = ++askedReads === 1 ? { state: "open", seq: 1 } : { state: "started", seq: 1, reviewId: ids.review, running: true };
         return reviewOptionsz.parse(scenario === "capture-empty-asked" && ask.state === "open" ? { ...nothing, ask } : { kind: "processing", asked: true, readyNow: null, pendingChunks: 1, estimateS: null, heldBack, ask });
       }
       if (scenario === "capture-leave") {
         if (!askedHere) return reviewOptionsz.parse({ kind: "processing", asked: false, readyNow: null, pendingChunks: 2, estimateS: null, heldBack });
         await new Promise((r) => setTimeout(r, 1500));
-        return reviewOptionsz.parse({ kind: "processing", asked: true, readyNow: null, pendingChunks: 1, estimateS: null, heldBack, ask: { state: "started", seq: 1, reviewId: ids.review } });
+        return reviewOptionsz.parse({ kind: "processing", asked: true, readyNow: null, pendingChunks: 1, estimateS: null, heldBack, ask: { state: "started", seq: 1, reviewId: ids.review, running: true } });
+      }
+      // "capture-ended-ask": the popup opened this page marked with ask 1, and the page was suspended while another tab finished the review
+      // that ask started. Its first read names that review, ended.
+      if (scenario === "capture-ended-ask") {
+        return reviewOptionsz.parse({ kind: "nothing_to_review", heldBack: [], gaps: [], unverified: [], rewatch: [], ask: { state: "started", seq: 1, reviewId: ids.review, running: false } });
+      }
+      // "capture-limit": the page's Wait opens ask 1, and the day's review limit refuses the review the backend then starts from it.
+      // "capture-joined": another tab started this lecture's review, so the page's Review now returns that review.
+      if (scenario === "capture-limit" || scenario === "capture-joined") {
+        if (!askedHere) return reviewOptionsz.parse({ kind: "processing", asked: false, readyNow: null, pendingChunks: 1, estimateS: null, heldBack });
+        if (++askedReads === 1) return reviewOptionsz.parse({ kind: "processing", asked: true, readyNow: null, pendingChunks: 1, estimateS: null, heldBack, ask: { state: "open", seq: 1 } });
+        return reviewOptionsz.parse({ kind: "ready", scope, heldBack, ask: { state: "refused", seq: 1 } });
       }
       // "capture-reviewed": a stopped lecture whose only review, started from ask 1, has ended. Review now asks nothing, so the popup opens
       // this page unmarked; an older popup's bare "#asked" must not make it open that ended review.
       if (scenario === "capture-reviewed") {
-        return reviewOptionsz.parse({ kind: "nothing_to_review", heldBack: [], gaps: [], unverified: [], rewatch: [], ask: { state: "started", seq: 1, reviewId: ids.review } });
+        return reviewOptionsz.parse({ kind: "nothing_to_review", heldBack: [], gaps: [], unverified: [], rewatch: [], ask: { state: "started", seq: 1, reviewId: ids.review, running: false } });
       }
       // "capture-exhausted": the page's Wait opens ask 1. The lecture stopped while its last section was being prepared, and every claim
       // ended unverified, so the backend ends the ask exhausted.
@@ -255,9 +267,10 @@ export function createFixture(scenario: Scenario): Fixture {
     async startReview(_capture, _choice, reviewId) { log("review.start"); return { kind: "started", reviewId, scope: view.scope }; },
     async answerInvite(_id, answer) {
       log(`invite.${answer}`);
-      if (answer !== "review_now" && answer !== "wait") return null;
+      if (scenario === "capture-joined" && answer === "review_now") return { ask: null, review: ids.review };
+      if (answer !== "review_now" && answer !== "wait") return { ask: null, review: null };
       askedHere = true;
-      return 1 as Seq;
+      return { ask: 1 as Seq, review: null };
     },
     async retryPreparation() { log("preparation.retry"); },
     async diagrams() {

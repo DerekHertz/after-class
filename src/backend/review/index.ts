@@ -19,9 +19,10 @@
 import { stableId } from "../../shared/ids";
 import type { CaptureId, ChunkId, ChunkRevisionId, ClaimId, ConceptId, EvidenceId, ReviewId, ThreadId, TurnId } from "../../shared/ids";
 import type {
-  AssessableClaim, BudgetHold, ChunkPrep, ChunkRevision, Claim, CodeNotice, Concept, Correction, EvidenceBundle, FrozenScope, HeldBack, InviteAnswer, InviteAnswered, InviteState,
+  AskView, AssessableClaim, BudgetHold, ChunkPrep, ChunkRevision, Claim, CodeNotice, Concept, Correction, EvidenceBundle, FrozenScope, HeldBack, InviteAnswer, InviteAnswered, InviteState,
   LearnerAct, LectureAsk, ReviewOptions, ReviewView, ScopePreview, Seq, StartChoice, StartResult, Turn, TurnEvent, TutorMove,
 } from "../../shared/domain";
+import { REVIEW_LIMIT_MESSAGE } from "../../shared/domain";
 import { Material } from "../../shared/time";
 import { asSeq } from "../db";
 import type { UserDb } from "../db";
@@ -132,6 +133,7 @@ export type ReviewsDeps = {
     latestAsk(captureId: CaptureId): LectureAsk | null;
     closeAsk(captureId: CaptureId, reviewId: ReviewId): void;
     exhaust(captureId: CaptureId): void;
+    refuse(captureId: CaptureId): void;
   };
   /** Whether the capture has stopped and every watched passage is in a closed chunk, so no chunk will close. Absent: more may close. */
   allChunksClosed?(captureId: CaptureId): boolean;
@@ -167,7 +169,7 @@ const DAY_MS = 86_400_000;
 /** Thrown by `start` when the learner has started too many reviews that got no tutoring. The message is for the learner. */
 export class ReviewLimitError extends Error {
   constructor() {
-    super("You have started a lot of reviews today that never reached a question from the tutor. Work through the reviews you have started, or try again tomorrow.");
+    super(REVIEW_LIMIT_MESSAGE);
     this.name = "ReviewLimitError";
   }
 }
@@ -263,6 +265,8 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
 
   function invite(captureId: CaptureId): InviteState {
     const state = inviteFold(captureId).state;
+    // The review the learner asked for was refused by the day's limit: the popup says so, never Processing.
+    if ((state.state === "waiting" || state.state === "none") && refusedNow(captureId, deps.asks?.latestAsk(captureId))) return { state: "review_limit" };
     // Waiting ends in nothing to review once nothing can answer an ask, so the popup never shows Processing for an exhausted ask.
     const over = state.state === "waiting" && deps.asks !== undefined && deps.asks.latestAsk(captureId)?.state !== "open" && !answerable(captureId);
     return over ? { state: "nothing_to_review" } : state;
@@ -306,9 +310,11 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     });
   }
 
+  const runs = (reviewId: ReviewId): boolean => kit.reviewState(reviewId, loadTurns(reviewId), [], softTargetS, now()).phase !== "ended";
+
   /** The lecture's latest review that has not ended, or null. */
   function activeReview(captureId: CaptureId): ReviewId | null {
-    const open = q.reviewsOf.all(userId, captureId).filter((r) => kit.reviewState(r.id as ReviewId, loadTurns(r.id as ReviewId), [], softTargetS, now()).phase !== "ended");
+    const open = q.reviewsOf.all(userId, captureId).filter((r) => runs(r.id as ReviewId));
     return (open.sort((a, b) => a.started_ms - b.started_ms).at(-1)?.id as ReviewId | undefined) ?? null;
   }
 
@@ -398,10 +404,16 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     return scope ? { kind: "ready", scope: preview(captureId, scope), heldBack: heldBack(cands, captureId), ...ask } : { ...nothingToReview(cands, captureId), ...ask };
   }
 
-  /** The latest ask as a page reads it. A page follows only the review of the ask it waits on. */
-  function askView(captureId: CaptureId): { ask: LectureAsk } | null {
+  /** The latest ask as a page reads it. A page follows only the review of the ask it waits on, and only while that review runs. */
+  function askView(captureId: CaptureId): { ask: AskView } | null {
     const ask = deps.asks?.latestAsk(captureId) ?? null;
-    return ask === null ? null : { ask };
+    if (ask === null || (ask.state === "refused" && !refusedNow(captureId, ask))) return null;
+    return { ask: ask.state === "started" ? { ...ask, running: runs(ask.reviewId) } : ask };
+  }
+
+  /** A refused ask stands until a review of the lecture starts after it. */
+  function refusedNow(captureId: CaptureId, ask: LectureAsk | null | undefined): boolean {
+    return ask?.state === "refused" && !q.reviewsOf.all(userId, captureId).some((r) => r.frozen_at_seq > ask.seq);
   }
 
   function startAsked(captureId: CaptureId): ReviewId | null {
@@ -415,8 +427,15 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
       return null;
     }
     // The ask names its review, so a start retried after a crash finds the review it already stored.
-    const result = start(captureId, "prepared_only", stableId("rvw", captureId, ask.seq));
-    return result.kind === "started" ? result.reviewId : null;
+    try {
+      const result = start(captureId, "prepared_only", stableId("rvw", captureId, ask.seq));
+      return result.kind === "started" ? result.reviewId : null;
+    } catch (e) {
+      // The day's review limit refused it: the ask ends refused, and the page and the popup say why. Asking again opens a new ask.
+      if (!(e instanceof ReviewLimitError)) throw e;
+      deps.asks?.refuse(captureId);
+      return null;
+    }
   }
 
   function start(captureId: CaptureId, choice: StartChoice, reviewId: ReviewId): StartResult {

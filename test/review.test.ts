@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { createAsks } from "../src/backend/preparation/asks";
 import { followAsk } from "../src/app/core";
-import { createReviews } from "../src/backend/review";
+import { createReviews, ReviewLimitError, UNTUTORED_REVIEWS_PER_DAY } from "../src/backend/review";
+import { inviteNote } from "../src/extension/popup/popup";
 import type { InviteEvent } from "../src/backend/review/core";
 import { corrections, foldInvites, freezeScope, takeSentences } from "../src/backend/review/core";
 import type { AssessableClaim, ChunkPrep, ChunkProvenance, ChunkRevision, Gap } from "../src/shared/domain";
@@ -470,6 +471,43 @@ describe("asking for a lecture's review (flow C, 2026-11-18)", () => {
     expect(options.kind).toBe("nothing_to_review");
     expect(followAsk(asked.ask, options.ask)).toEqual({ state: null, open: null });
     expect(r.reviews.invite(r.capture)).toEqual({ state: "nothing_to_review" });
+  });
+
+  test("a page that waited on an ask opens its review while it runs, and not once another tab has ended it", async () => {
+    const r = asking();
+    r.world.close(0, 0, 300);
+    r.world.claim(1, 10, 20);
+    const asked = r.reviews.answerInvite(r.capture, "wait").ask;
+    const reviewId = r.reviews.startAsked(r.capture)!;
+    expect(followAsk(asked, r.reviews.options(r.capture).ask).open).toBe(reviewId);
+    await collect(r.reviews.turn(reviewId, randomId("turn"), answer()));
+    await collect(r.reviews.turn(reviewId, randomId("turn"), { kind: "end" }));
+    expect(r.reviews.view(reviewId).state.phase).toBe("ended");
+    expect(followAsk(asked, r.reviews.options(r.capture).ask)).toEqual({ state: null, open: null });
+  });
+
+  test("an asked start the day's review limit refuses ends the ask refused, and the popup and the page show the limit's refusal", () => {
+    const r = asking();
+    r.world.close(0, 0, 300);
+    r.world.claim(1, 10, 20);
+    const elsewhere = stableId("cap", "elsewhere");
+    for (let n = 0; n < UNTUTORED_REVIEWS_PER_DAY; n++) {
+      r.db.sql.run("INSERT INTO reviews (id, user_id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, ?, 'prepared_only', ?, ?, ?)", [
+        randomId("rvw"), r.db.userId, elsewhere, JSON.stringify({ scope: { material: Material.canonical(Material.empty) }, claimTexts: {} }), n + 1, Date.now(),
+      ]);
+    }
+    const asked = r.reviews.answerInvite(r.capture, "wait").ask;
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    expect(reviewRows(r.db)).toBe(UNTUTORED_REVIEWS_PER_DAY);
+    const options = r.reviews.options(r.capture);
+    expect(options.ask).toMatchObject({ state: "refused" });
+    expect(followAsk(asked, options.ask)).toEqual({ state: null, open: null });
+    expect(r.reviews.invite(r.capture)).toEqual({ state: "review_limit" });
+    expect(inviteNote(r.reviews.invite(r.capture))).toBe(new ReviewLimitError().message);
+    // The ask is over: a retry of the start starts nothing, and asking again opens a new ask.
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    r.reviews.answerInvite(r.capture, "review_now");
+    expect(r.askOf()).toMatchObject({ state: "open" });
   });
 
   test("the Start review button after a chunk grows with no new supported claim starts no second review", async () => {

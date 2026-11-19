@@ -8,7 +8,7 @@ import { stableId } from "../shared/ids";
 import { BUDGET_HOLDS, BUDGET_HOLDS_REVIEW } from "./migrations-budget";
 import { DEVICES_MIGRATION } from "./devices";
 import { SIZE_COLUMNS } from "./migrations-frame-bytes";
-import { PREP_ASKS } from "./migrations-prep-asks";
+import { PREP_ASK_REFUSED, PREP_ASKS } from "./migrations-prep-asks";
 import { SEGMENTATION } from "./migrations-segmentation";
 import { appendOnly } from "./migrations-sql";
 import { OBSERVATION_STATUSES, RECORD_USER_ID } from "./migrations-record";
@@ -706,7 +706,7 @@ DROP TABLE concept_index_save;
 DROP TABLE prep_controls_save;
 DROP TABLE prep_inputs_save;`,
     },
-    PREP_ASKS,
+    PREP_ASKS, PREP_ASK_REFUSED,
   ],
 
   review: [

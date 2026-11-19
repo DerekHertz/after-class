@@ -6,6 +6,7 @@
  *
  * `describePopup` is the pure view model (unit-tested); `renderPopup` only draws it.
  */
+import { REVIEW_LIMIT_MESSAGE } from "../../shared/domain";
 import type { CaptureView, InviteAnswer, InviteState } from "../../shared/domain";
 import { backend, connectPageUrl } from "../worker/backend";
 import { isWatchUrl, safeReviewUrl } from "../worker/control";
@@ -167,6 +168,17 @@ const ANSWER_LABEL: Readonly<Record<InviteAnswer, string>> = { review_now: "Revi
 const RETRY_LABEL: Readonly<Record<PopupRetry, string>> = { start: "Retry start", observe: "Retry frames and playback", transcript: "Retry captions" };
 const POLL_MS = 1500;
 
+/** The note the popup shows for an invite state that offers no answers, or null. */
+export function inviteNote(invite: InviteState): string | null {
+  switch (invite.state) {
+    case "waiting": return "Processing before your review. Review now still works, and you can stop early.";
+    case "later": return "Review postponed. You will be invited at the next stopping point.";
+    case "nothing_to_review": return "Nothing to review yet";
+    case "review_limit": return REVIEW_LIMIT_MESSAGE;
+    default: return null;
+  }
+}
+
 /** A plain link from this page reaches the backend as a cross-site navigation and is refused, so the tab is opened with the tabs API, as the worker does for Review now. */
 export const openInTab = (url: string): void => void chrome.tabs.create({ url });
 
@@ -219,16 +231,11 @@ export function renderPopup(
     for (const x of v.health) add(x.label, x.text, x.tone);
     if (v.watched) add("Watched", v.watched);
 
+    const note = inviteNote(v.invite);
     const invite =
       v.invite.state === "invited"
         ? h("div", { class: "invite" }, h("div", { text: "A review is ready. Start now, or keep watching?" }), inviteButtons())
-        : v.invite.state === "waiting"
-          ? h("div", { class: "note", text: "Processing before your review. Review now still works, and you can stop early." })
-          : v.invite.state === "later"
-            ? h("div", { class: "note", text: "Review postponed. You will be invited at the next stopping point." })
-            : v.invite.state === "nothing_to_review"
-              ? h("div", { class: "note", text: "Nothing to review yet" })
-              : null;
+        : note === null ? null : h("div", { class: "note", text: note });
 
     const children: Child[] = [
       h("h1", { text: "After Class" }),

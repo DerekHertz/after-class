@@ -20,16 +20,18 @@ export type Asks = {
   closeAsk(captureId: CaptureId, reviewId: ReviewId): void;
   /** Nothing can answer the lecture's open ask any more: end it exhausted. Does nothing when no ask is open, so it can run on every derivation. */
   exhaust(captureId: CaptureId): void;
+  /** The day's review limit refused the review the open ask asked for: end it refused. Does nothing when no ask is open. */
+  refuse(captureId: CaptureId): void;
 };
 
 export function createAsks(db: UserDb): Asks {
   const { userId } = db;
   const q = {
-    latest: db.sql.query<{ seq: number; closed_ms: number | null; review_id: string | null }, [string, string]>(
-      `SELECT seq, closed_ms, review_id FROM prep_asks WHERE user_id = ? AND capture_id = ? ORDER BY seq DESC LIMIT 1`,
+    latest: db.sql.query<{ seq: number; closed_ms: number | null; review_id: string | null; refused: number }, [string, string]>(
+      `SELECT seq, closed_ms, review_id, refused FROM prep_asks WHERE user_id = ? AND capture_id = ? ORDER BY seq DESC LIMIT 1`,
     ),
     open: db.sql.query(`INSERT INTO prep_asks (user_id, seq, capture_id, at_ms) VALUES (?, ?, ?, ?)`),
-    close: db.sql.query(`UPDATE prep_asks SET closed_ms = ?, review_id = ? WHERE user_id = ? AND capture_id = ? AND closed_ms IS NULL`),
+    close: db.sql.query(`UPDATE prep_asks SET closed_ms = ?, review_id = ?, refused = ? WHERE user_id = ? AND capture_id = ? AND closed_ms IS NULL`),
   };
 
   function latestAsk(captureId: CaptureId): LectureAsk | null {
@@ -37,6 +39,7 @@ export function createAsks(db: UserDb): Asks {
     if (row === null) return null;
     const seq = asSeq(row.seq);
     if (row.closed_ms === null) return { state: "open", seq };
+    if (row.refused === 1) return { state: "refused", seq };
     // An ask closed with no review is exhausted, as is a lecture asked under the old flow (004-prep-asks).
     return row.review_id === null ? { state: "exhausted", seq } : { state: "started", seq, reviewId: row.review_id as ReviewId };
   }
@@ -52,7 +55,8 @@ export function createAsks(db: UserDb): Asks {
     }),
     asked: (captureId) => latestAsk(captureId) !== null,
     latestAsk,
-    closeAsk: (captureId, reviewId) => void q.close.run(Date.now(), reviewId, userId, captureId),
-    exhaust: (captureId) => void q.close.run(Date.now(), null, userId, captureId),
+    closeAsk: (captureId, reviewId) => void q.close.run(Date.now(), reviewId, 0, userId, captureId),
+    exhaust: (captureId) => void q.close.run(Date.now(), null, 0, userId, captureId),
+    refuse: (captureId) => void q.close.run(Date.now(), null, 1, userId, captureId),
   };
 }

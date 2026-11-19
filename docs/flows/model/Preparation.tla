@@ -35,14 +35,15 @@ VARIABLES
     question,       \* NoQuestion, or the claim the open question judges my answer against
     paused,         \* NoQuestion, or the claim whose question paused while it is rechecked
     askNo,          \* how many asks the lecture has had; the latest is ask askNo (amendment 2026-11-18)
-    askState,       \* the latest ask: "none" | "open" | "started" (a review started from it) | "exhausted"
+    askState,       \* the latest ask: "none" | "open" | "started" (a review started from it) | "exhausted" | "refused"
     fromAsk,        \* reviews started from the latest ask (a ghost: the code keeps one review id per ask)
     taken,          \* claims some review has started with
-    waitingOn       \* the ask the learner's lecture page waits on, 0 when it waits on none
+    waitingOn,      \* the ask the learner's lecture page waits on, 0 when it waits on none
+    askedRuns       \* the review the latest ask started is still running
 
 vars == <<capture, watched, closed, boundary, boundaryFixed, status, revisions, late,
-          resources, invite, review, scope, reviewed, question, paused, askNo, askState, fromAsk, taken, waitingOn>>
-AskVars == <<askNo, askState, fromAsk, taken, waitingOn>>
+          resources, invite, review, scope, reviewed, question, paused, askNo, askState, fromAsk, taken, waitingOn, askedRuns>>
+AskVars == <<askNo, askState, fromAsk, taken, waitingOn, askedRuns>>
 \* The learner asked for this lecture's review at least once (Review now or Wait).
 requested == askNo > 0
 CaptureVars == <<capture, watched, closed, boundary, boundaryFixed>>
@@ -78,11 +79,12 @@ TypeOK ==
     /\ boundaryFixed \in BOOLEAN
     /\ status \in [Claims -> {"none", "held"} \union Pending \union Finished]
     /\ askNo \in 0..MaxAsks
-    /\ askState \in {"none", "open", "started", "exhausted"}
+    /\ askState \in {"none", "open", "started", "exhausted", "refused"}
     /\ (askState = "none") <=> (askNo = 0)
     /\ fromAsk \in 0..2
     /\ taken \subseteq Claims
     /\ waitingOn \in 0..MaxAsks
+    /\ askedRuns \in BOOLEAN
     /\ revisions \in [Claims -> 0..2]
     /\ late \in [Claims -> SUBSET {"cancelled", "outdated"}]
     /\ resources \in {"not started", "searching", "found", "failed"}
@@ -114,6 +116,7 @@ Init ==
     /\ fromAsk = 0
     /\ taken = {}
     /\ waitingOn = 0
+    /\ askedRuns = FALSE
 
 \* The chunk that is open now, or 0 when both are closed.
 OpenChunk == IF 1 \notin closed THEN 1 ELSE IF 2 \notin closed THEN 2 ELSE 0
@@ -306,6 +309,7 @@ YouChooseWait ==
 StartsFromTheAsk ==
     /\ askState' = IF askState = "open" THEN "started" ELSE askState
     /\ fromAsk' = IF askState = "open" THEN fromAsk + 1 ELSE fromAsk
+    /\ askedRuns' = (askState = "open")
 
 YouStartAReview ==
     /\ review \in {"none", "nothing to review"}
@@ -364,7 +368,7 @@ YouStopEarly ==
           /\ review' = IF ok THEN "active" ELSE "nothing to review"
           /\ scope' = IF ok THEN closed \ reviewed ELSE scope
           \* With nothing to start, the ask stays open; CodeExhaustsTheAsk ends it once nothing can answer it.
-          /\ IF ok THEN StartsFromTheAsk ELSE UNCHANGED <<askState, fromAsk>>
+          /\ IF ok THEN StartsFromTheAsk ELSE UNCHANGED <<askState, fromAsk, askedRuns>>
           /\ taken' = IF ok THEN taken \union {c \in ClaimsIn(closed \ reviewed) : s[c] = "supported"} ELSE taken
     /\ invite' = "none"
     /\ UNCHANGED <<reviewed, question, paused, askNo, waitingOn>>
@@ -445,12 +449,12 @@ YouAskForAReview(onThisPage) ==
     /\ status' = [c \in Claims |-> IF status[c] = "held" THEN "queued" ELSE status[c]]
     /\ invite' = "waiting"
     /\ UNCHANGED CaptureVars /\ UNCHANGED <<revisions, late, resources>>
-    /\ UNCHANGED <<review, scope, reviewed, question, paused, taken>>
+    /\ UNCHANGED <<review, scope, reviewed, question, paused, taken, askedRuns>>
 
 YouAskWhileAnAskIsOpen ==
     /\ askState = "open"
     /\ waitingOn' = askNo
-    /\ UNCHANGED <<askNo, askState, fromAsk, taken>>
+    /\ UNCHANGED <<askNo, askState, fromAsk, taken, askedRuns>>
     /\ UNCHANGED CaptureVars /\ UNCHANGED PrepVars /\ UNCHANGED ReviewVars
 
 \* The backend tries the start whenever the lecture's preparation changes.
@@ -463,24 +467,40 @@ CodeExhaustsTheAsk ==
     /\ askState = "open"
     /\ ~Answerable
     /\ askState' = "exhausted"
-    /\ UNCHANGED <<askNo, fromAsk, taken, waitingOn>>
+    /\ UNCHANGED <<askNo, fromAsk, taken, waitingOn, askedRuns>>
     /\ UNCHANGED CaptureVars /\ UNCHANGED PrepVars /\ UNCHANGED ReviewVars
 
-\* The page reads the latest ask. It opens the review that ask started if it is the ask it waits on.
+\* [code] The day's limit on reviews that got no tutoring refuses the asked start. The ask ends
+\*        refused, and the lecture page and the popup show the refusal, never Processing. Asking
+\*        again opens a new ask.                                              (not a rule)
+CodeRefusesTheAsk ==
+    /\ askState = "open"
+    /\ review \in {"none", "nothing to review"}
+    /\ HasNewClaim
+    /\ askState' = "refused"
+    /\ UNCHANGED <<askNo, fromAsk, taken, waitingOn, askedRuns>>
+    /\ UNCHANGED CaptureVars /\ UNCHANGED PrepVars /\ UNCHANGED ReviewVars
+
+\* The page reads the latest ask. It opens the review that ask started if it is the ask it waits on
+\* and that review still runs. A page suspended while another tab ended it opens nothing.
 PageOpensTheAskedReview ==
     /\ waitingOn # 0
     /\ askNo = waitingOn
     /\ askState = "started"
+    /\ askedRuns
     /\ waitingOn' = 0
-    /\ UNCHANGED <<askNo, askState, fromAsk, taken>>
+    /\ UNCHANGED <<askNo, askState, fromAsk, taken, askedRuns>>
     /\ UNCHANGED CaptureVars /\ UNCHANGED PrepVars /\ UNCHANGED ReviewVars
 
-\* Its ask was exhausted, or a later ask replaced it: the page shows nothing to review, never Processing.
-PageShowsNothingToReview ==
+\* Its ask was exhausted or refused, its review already ended, or a later ask replaced it: the page
+\* stops waiting and shows the lecture's current state, never Processing.
+PageShowsTheLecture ==
     /\ waitingOn # 0
-    /\ askNo # waitingOn \/ askState = "exhausted"
+    /\ \/ askNo # waitingOn
+       \/ askState \in {"exhausted", "refused"}
+       \/ askState = "started" /\ ~askedRuns
     /\ waitingOn' = 0
-    /\ UNCHANGED <<askNo, askState, fromAsk, taken>>
+    /\ UNCHANGED <<askNo, askState, fromAsk, taken, askedRuns>>
     /\ UNCHANGED CaptureVars /\ UNCHANGED PrepVars /\ UNCHANGED ReviewVars
 
 OldNext ==
@@ -505,7 +525,6 @@ OldNext ==
     \/ \E c \in Claims : TutorAsksAboutAClaim(c)
     \/ TutorResumesThePausedQuestion
     \/ YouAnswer
-    \/ YouEndTheReview
 
 \* Code, agent and Jev preparation steps keep running once they can, and so do the backend's ask steps.
 Fairness ==
@@ -519,14 +538,16 @@ Fairness ==
 
 Next ==
     \/ OldNext /\ UNCHANGED AskVars
+    \/ YouEndTheReview /\ askedRuns' = FALSE /\ UNCHANGED <<askNo, askState, fromAsk, taken, waitingOn>>
     \/ YouStartAReview
     \/ YouStopEarly
     \/ YouPressReviewNowWithNothingSupported
     \/ \E onThisPage \in BOOLEAN : YouAskForAReview(onThisPage)
     \/ YouAskWhileAnAskIsOpen
     \/ CodeExhaustsTheAsk
+    \/ CodeRefusesTheAsk
     \/ PageOpensTheAskedReview
-    \/ PageShowsNothingToReview
+    \/ PageShowsTheLecture
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -602,10 +623,14 @@ Ask_EveryStartTakesANewClaim ==
 \* One ask starts at most one review.
 Ask_OneReviewPerAsk ==
     fromAsk <= 1
-\* A page waits only on an ask open when it began to wait, and opens only the review that ask started,
-\* so it never opens an ended review an older ask started.
+\* A page waits only on an ask open when it began to wait, and opens only the review that ask started
+\* while it runs, so it never opens an ended review.
 Ask_PageFollowsItsOwnAsk ==
     /\ [][waitingOn' \notin {0, waitingOn} => askState' = "open" /\ askNo' = waitingOn']_vars
     /\ [][PageOpensTheAskedReview => askNo = waitingOn]_vars
+    /\ [][PageOpensTheAskedReview => askedRuns /\ review = "active"]_vars
+\* An ask is refused only when the review it asked for would have started.
+Ask_RefusedOnlyWhenAStartWasDue ==
+    [][askState' = "refused" /\ askState # "refused" => askState = "open" /\ HasNewClaim /\ review # "active"]_vars
 
 ====

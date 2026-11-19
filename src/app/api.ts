@@ -17,7 +17,7 @@
 import { z } from "zod";
 import type { CaptureId, ConceptId, DeviceId, EvidenceId, LinkId, NoteId, ObservationId, ReviewId, TurnId } from "../shared/ids";
 import type {
-  EvidenceBundle, InviteAnswer, LearnerAct, TopicDiagram, LinkDecision, ObservationStatus, RecordView, ReviewOptions, ReviewView, SaveResult, Seq, StartChoice,
+  EvidenceBundle, InviteAnswer, InviteAnswered, LearnerAct, TopicDiagram, LinkDecision, ObservationStatus, RecordView, ReviewOptions, ReviewView, SaveResult, StartChoice,
   StartResult, UsageSummary,
 } from "../shared/domain";
 import type { Material } from "../shared/time";
@@ -51,8 +51,8 @@ export type EvidenceQuery =
 export type AppApi = Api & {
   lectures(): Promise<LecturesResponse>;
   captureView(captureId: CaptureId): Promise<CaptureResponse>;
-  /** Resolves to the ask this answer opened or joined, which the page then waits on, or null when it opened none. */
-  answerInvite(captureId: CaptureId, answer: InviteAnswer): Promise<Seq | null>;
+  /** The ask this answer opened or joined, which the page then waits on, and the open review Review now found, which the page opens. */
+  answerInvite(captureId: CaptureId, answer: InviteAnswer): Promise<Pick<InviteAnswered, "ask" | "review">>;
   evidence(query: EvidenceQuery): Promise<EvidenceBundle>;
   frameImage(id: EvidenceId): Promise<Blob>;
   editNote(id: NoteId, text: string): Promise<void>;
@@ -182,7 +182,7 @@ export function createApi(credential: Credential, options: ApiOptions = {}): App
     usage: () => call(usageSummaryz, "GET", "/usage"),
     lectures: () => call(lecturesResponse, ROUTES.lectures.method, ROUTES.lectures.path),
     captureView: (captureId) => call(captureResponsez, "GET", `/captures/${enc(captureId)}`),
-    answerInvite: async (captureId, answer) => (await call(inviteAnsweredz, "POST", `/captures/${enc(captureId)}/invite`, { answer })).ask,
+    answerInvite: (captureId, answer) => call(inviteAnsweredz, "POST", `/captures/${enc(captureId)}/invite`, { answer }),
     evidence: (query) => call(evidenceBundlez, "GET", `/evidence?${evidenceParams(query)}`),
     frameImage: async (id) => (await send("GET", `/frames/${enc(id)}`)).blob(),
     editNote: (id, text) => command("PATCH", `/record/notes/${enc(id)}`, { text }),

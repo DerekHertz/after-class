@@ -4,7 +4,7 @@
  */
 import { heldMessage, resetDay } from "../shared/allowance";
 import type {
-  Allowance, Author, CaptureStatus, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, HeldBack, LearnerAct, LectureAsk, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
+  Allowance, AskView, Author, CaptureStatus, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, HeldBack, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
   ReviewState, ReviewView, ScopePreview, Seq, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
 } from "../shared/domain";
 import type { EvidenceId, ReviewId, SourceId } from "../shared/ids";
@@ -267,12 +267,13 @@ export function askedMark(hash: string): AskFollow {
 /**
  * Flow C, 2026-11-18: the backend starts an asked review "once a prepared chunk has a supported claim". A lecture page follows it: one
  * read of the latest ask gives the ask the page waits on next and the review to open now, if any. It opens only the review started from
- * the ask it waits on. An exhausted ask, or a later one, ends the wait, and a read older than the ask it waits on changes nothing.
+ * the ask it waits on, and only while that review runs: a page suspended while another tab ended it shows the lecture instead. An
+ * exhausted or refused ask, or a later one, ends the wait, and a read older than the ask it waits on changes nothing.
  */
-export function followAsk(waitingOn: AskFollow, ask: LectureAsk | undefined): { readonly state: AskFollow; readonly open: ReviewId | null } {
+export function followAsk(waitingOn: AskFollow, ask: AskView | undefined): { readonly state: AskFollow; readonly open: ReviewId | null } {
   if (ask?.state === "open") return { state: ask.seq, open: null };
   if (waitingOn === null || ask === undefined || ask.seq < waitingOn) return { state: waitingOn, open: null };
-  return { state: null, open: ask.seq === waitingOn && ask.state === "started" ? ask.reviewId : null };
+  return { state: null, open: ask.seq === waitingOn && ask.state === "started" && ask.running ? ask.reviewId : null };
 }
 
 export function optionsScreen(options: ReviewOptions, titles: SourceTitles = new Map(), videos: SourceVideos = new Map()): OptionsScreen {

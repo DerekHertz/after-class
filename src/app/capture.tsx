@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { heldMessage } from "../shared/allowance";
 import { randomId } from "../shared/ids";
 import type { CaptureId, ReviewId } from "../shared/ids";
+import { REVIEW_LIMIT_MESSAGE } from "../shared/domain";
 import type { ReviewOptions, StartChoice, UsageSummary } from "../shared/domain";
 import type { AppApi } from "./api";
 import { usePrefetchReviewArt } from "./art-prefetch";
@@ -261,7 +262,9 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
     setStarting(true);
     setStartError(null);
     try {
-      const ask = await api.answerInvite(captureId, kind);
+      const { ask, review } = await api.answerInvite(captureId, kind);
+      // Review now found the lecture's review already open, started from another tab: open it.
+      if (review !== null) return navigate({ page: "review", id: review });
       if (ask !== null) follow.current = ask;
       capture.reload();
       options.reload();
@@ -289,6 +292,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
       {options.data !== null && <EarlierReviews options={options.data} reviews={reviews} titles={titles} />}
       <ErrorNote error={options.error} retry={options.reload} />
       <ErrorNote error={startError} />
+      {options.data?.ask?.state === "refused" && <p className="note" role="alert">{REVIEW_LIMIT_MESSAGE}</p>}
       {options.data === null && options.error === null && <p className="page-loading" role="status">Looking for prepared lecture material...</p>}
       {starting && <p className="page-loading" role="status">Saving your choice...</p>}
       {held !== null && shown !== null && shown.kind !== "ready" && <p className="note" role="status">{held}</p>}
@@ -317,7 +321,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
         <p className="capture-answer">
           <button type="button" className="page-primary" disabled={starting} onClick={() => void answer("review_now")}>Review now</button>{" "}
           <button type="button" disabled={starting} onClick={() => void answer("wait")}>Wait</button>{" "}
-          <span className="muted">Either one prepares this lecture. It takes about two minutes for the first section.</span>
+          <span className="muted">Either one prepares this lecture.{screen?.kind === "processing" && screen.estimate !== null && <> Estimated time: {screen.estimate}.</>}</span>
         </p>
       )}
       {askOpen && <p className="page-loading" role="status">Preparing your lecture. The review starts when a section is ready.</p>}

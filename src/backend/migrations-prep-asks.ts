@@ -31,3 +31,11 @@ BEGIN SELECT RAISE(ABORT, 'prep_asks: an ask only closes, once'); END;
 INSERT INTO prep_asks (user_id, seq, capture_id, at_ms, closed_ms, review_id)
 SELECT user_id, MIN(seq), capture_id, 0, 0, NULL FROM prep_inputs GROUP BY user_id, capture_id;`,
 };
+
+export const PREP_ASK_REFUSED: Migration = {
+  id: "005-prep-ask-refused",
+  sql: `
+-- An ask ends refused when the day's review limit refuses the review it asked for. A refused ask is closed with no review.
+ALTER TABLE prep_asks ADD COLUMN refused INTEGER NOT NULL DEFAULT 0
+  CHECK (refused = 0 OR (refused = 1 AND closed_ms IS NOT NULL AND review_id IS NULL));`,
+};

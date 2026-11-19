@@ -274,6 +274,7 @@ const inviteState: z.ZodType<InviteState> = z.discriminatedUnion("state", [
   z.object({ state: z.literal("later") }),
   z.object({ state: z.literal("waiting") }),
   z.object({ state: z.literal("nothing_to_review") }),
+  z.object({ state: z.literal("review_limit") }),
 ]);
 export const inviteAnsweredResponse: z.ZodType<InviteAnswered> = z.intersection(inviteState, z.object({ ask: seqz.nullable(), review: idOf("rvw").nullable() }));
 
@@ -356,8 +357,9 @@ const scopePreviewz = z.object({
 const heldBackz = z.array(z.object({ reviewId: idOf("rvw"), material: materialWire }));
 const askz = z.discriminatedUnion("state", [
   z.object({ state: z.literal("open"), seq: seqz }),
-  z.object({ state: z.literal("started"), seq: seqz, reviewId: idOf("rvw") }),
+  z.object({ state: z.literal("started"), seq: seqz, reviewId: idOf("rvw"), running: z.boolean() }),
   z.object({ state: z.literal("exhausted"), seq: seqz }),
+  z.object({ state: z.literal("refused"), seq: seqz }),
 ]);
 
 const nothingToReviewz = z.object({
