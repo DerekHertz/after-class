@@ -78,7 +78,16 @@ import { BUDGET_HOLDS_REVIEW_ID } from "../migrations-budget";
  *   Priced as `estimateRequestUsd` prices a call (all of max_tokens spent, every input token a 1 hour cache write), a structured call
  *   with 50,000 input tokens comes to $0.75 at max_tokens 16,000. Interpretation streams with max_tokens 32,000 (STREAM_MAX_TOKENS), so
  *   the same formula gives 32,000 x $20 per million (Opus) = $0.64 plus (50,000 + 4,096 allowance) x $8 per million (1 hour write) =
- *   $0.432768, $1.072768, reserved as $1.08. Resource search adds up to 5 web searches at $0.01 per call and up to 3
+ *   $0.432768, $1.072768, which is the flat $1.08 below. On the Messages API an interpretation no longer reserves it when its input can
+ *   be counted. Derek, 2026-11-18: "count input tokens first with `countTokens`, and reserve output at 24,000 tokens instead of the
+ *   32,000 limit". The adapter counts the request as it will be sent and passes `countedHoldUsd` (providers/claude-api.ts): every counted
+ *   token at the cache write rate of the lifetime the request sends (5 minutes, 1.25 times), plus 24,000 output tokens, never more than
+ *   $1.08. A 20,900-token chunk on Opus reserves 20,900 x $5 + 24,000 x $20 per million = $0.5845 (estimated), so four interpretations
+ *   in parallel hold $2.34 of a $5 cap where they held $4.32. max_tokens stays 32,000, and a run that spends more than it reserved is
+ *   settled at its recorded cost (R17), so the month can pass the cap by that difference as described above. A count that fails, times
+ *   out or is not a number leaves the request at the flat $1.08; it never stops the request. `claude -p` cannot count, so it keeps the
+ *   flat $1.08, and because the counted hold is capped at that figure the CLI never reserves less than the API would for the same input.
+ *   Resource search adds up to 5 web searches at $0.01 per call and up to 3
  *   continuations, each a request that reserves $1 again. These are estimates, not upper bounds: the same worst case is $1.23 for a tutor turn with
  *   experiment 8's 69,251-token context and $4.81 for a resource search with 100,000, and reserving that much would refuse a
  *   learner's turn with a quarter of their $5 unused.

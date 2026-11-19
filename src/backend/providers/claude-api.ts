@@ -15,6 +15,7 @@
  *   system block with cache_control { type: "ephemeral", ttl: "5m" | "1h" }   typescript/claude-api/README.md, shared/prompt-caching.md
  *   typed error classes (Anthropic.RateLimitError and the rest)               typescript/claude-api/README.md, shared/error-codes.md
  *   Opus 5.5 request rules                                                     shared/model-migration.md, Migrating to Claude Opus 5.5
+ *   client.messages.countTokens(...), free and rate-limited apart from messages  shared/token-counting.md (via docs/trail/sdk-consult-2026-11-17.md)
  *
  * Request rules for claude-opus-5-5 and claude-sonnet-5-5: thinking is always on and is never sent, and
  * budget_tokens, temperature, top_p, top_k and forced tool_choice are 400s, so none is ever sent. Depth is
@@ -40,11 +41,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { ParseableMessageCreateParams as MessageStreamParams } from "@anthropic-ai/sdk";
-import type { ContentBlockParam, JSONOutputFormat, Message, MessageCreateParamsNonStreaming, MessageParam, TextBlockParam, ToolUnion } from "@anthropic-ai/sdk/resources/messages";
+import type { ContentBlockParam, JSONOutputFormat, Message, MessageCountTokensParams, MessageCreateParamsNonStreaming, MessageParam, TextBlockParam, ToolUnion } from "@anthropic-ai/sdk/resources/messages";
 import type { z } from "zod";
 import { abortError, createLimiter, promptOf } from "./claude";
 import type { CacheTtl, ClaudeCli, ClaudeRequest } from "./claude";
 import { createHash } from "node:crypto";
+import { ESTIMATE_USD } from "./budget";
 import { BudgetHeld, ProviderError } from "./memo";
 import type { Admitted, SendContext, UsageReport } from "./memo";
 
@@ -121,7 +123,8 @@ export const REQUEST_OVERHEAD_TOKENS = 4_096;
  *      there. Nobody has shown that for the current models, which that tokenizer's own README says it does not count. The audit
  *      measured 0.5 tokens per byte on a real lecture, so ordinary text has twofold headroom, but a hostile or unusual lecture is not
  *      covered. The API's `count_tokens` endpoint is free but is a network round trip before every turn, which is the latency this
- *      work exists to cut, and it is rate-limited separately, so it is not called here. A safety factor was not added: it would
+ *      work exists to cut, and it is rate-limited separately, so it is not called for a tutor turn (an interpretation does call it,
+ *      see `countedHoldUsd`). A safety factor was not added: it would
  *      change the number without making it a bound.
  *   2. Everything the request adds around that text is covered by REQUEST_OVERHEAD_TOKENS: role and message framing, the
  *      cache_control marker, and the instruction text the API adds to the prompt for structured output. This is an
@@ -139,6 +142,26 @@ export function estimateRequestUsd(model: string, inputBytes: number, maxTokens:
   const written = inputBytes + schemaBytes + REQUEST_OVERHEAD_TOKENS;
   const oneHour = ttl === "1h";
   return priceUsage(model, { fresh: 0, creation5m: oneHour ? 0 : written, creation1h: oneHour ? written : 0, read: 0, output: maxTokens });
+}
+
+/**
+ * The output an interpretation reserves for, below its STREAM_MAX_TOKENS limit. Derek, 2026-11-18 (docs/trail/decisions-2026-11-18.md): "reserve
+ * output at 24,000 tokens instead of the 32,000 limit". The largest interpretation output on record is 21,501 tokens, measured on the CLI.
+ * A run that spends more is still settled at its recorded cost (R17), so this decides only whether the request may start.
+ */
+export const RESERVED_OUTPUT_TOKENS = 24_000;
+
+/**
+ * What an interpretation reserves once the API has counted its input: every counted token written to the cache at the lifetime the request
+ * sends (`ttl`), plus RESERVED_OUTPUT_TOKENS of output. The count includes the system block, the images and the output format. Capped at the
+ * flat `ESTIMATE_USD.interpretation`, the figure a request reserves when it cannot be counted, so a counted request never reserves more than
+ * one that was not, and the `claude -p` adapter, which keeps the flat figure, never reserves less than this does for the same input.
+ * About $0.58 for a 20,900-token chunk on Opus at the 5 minute rate (estimated). Null for a model with no price.
+ */
+export function countedHoldUsd(model: string, inputTokens: number, ttl: CacheTtl): number | null {
+  const oneHour = ttl === "1h";
+  const usd = priceUsage(model, { fresh: 0, creation5m: oneHour ? 0 : inputTokens, creation1h: oneHour ? inputTokens : 0, read: 0, output: RESERVED_OUTPUT_TOKENS });
+  return usd === null ? null : Math.min(usd, ESTIMATE_USD.interpretation);
 }
 
 const byteLength = (s: string): number => new TextEncoder().encode(s).length;
@@ -237,6 +260,8 @@ export type ApiClient = {
   readonly messages: {
     stream(params: MessageStreamParams, options: { readonly signal: AbortSignal }): ApiStream;
     create(params: MessageCreateParamsNonStreaming, options: { readonly signal: AbortSignal }): Promise<Message>;
+    /** Free. A client without it, like one whose count fails, leaves an interpretation at its flat reservation. */
+    countTokens?(params: MessageCountTokensParams, options: { readonly signal: AbortSignal }): Promise<{ readonly input_tokens: number }>;
   };
 };
 
@@ -251,6 +276,7 @@ function sdkClient(apiKey: string): ApiClient {
     messages: {
       stream: (params, options) => sdk.messages.stream(params, options),
       create: (params, options) => sdk.messages.create(params, options),
+      countTokens: (params, options) => sdk.messages.countTokens(params, options),
     },
   };
 }
@@ -330,6 +356,9 @@ export class ApiCallError extends ProviderError {
  * is held at its worst case, which is the safe side of the cap.
  */
 export const MAX_TOKEN_COUNT = 10_000_000;
+
+/** How long an interpretation waits for its token count before it reserves the flat figure instead. */
+const COUNT_TIMEOUT_MS = 10_000;
 
 const isRecord = (v: unknown): v is Readonly<Record<string, unknown>> => typeof v === "object" && v !== null;
 
@@ -645,6 +674,30 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
     return { model, messagesFor, tools: req.webTools ? WEB_TOOLS : null };
   }
 
+  /**
+   * The input tokens of `params` as the API counts them, or null when it cannot say: no counting client, a failed or slow count, or an answer
+   * that is not a non-negative integer. A null never blocks the request, which then reserves its flat figure. Nothing is billed for a count.
+   */
+  async function countInput(params: MessageCountTokensParams, signal: AbortSignal): Promise<number | null> {
+    const count = client.messages.countTokens;
+    if (count === undefined) return null;
+    const ctl = new AbortController();
+    const onAbort = () => ctl.abort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(() => ctl.abort(), COUNT_TIMEOUT_MS);
+    let n: number | null = null;
+    try {
+      n = countOf(read(await count.call(client.messages, params, { signal: ctl.signal }), "input_tokens"));
+    } catch {
+      // A failed count is no count: the request reserves its flat figure.
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+    }
+    if (signal.aborted) throw abortError();
+    return n;
+  }
+
   /** Parse the response, report it, and price its request. Throws only for a response that cannot be read, whose request stays unpriced. */
   function read1({ value: raw, admitted }: Untrusted): Parsed {
     try {
@@ -777,6 +830,8 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
         throw new ApiCallError(`output schema cannot be expressed as JSON Schema: ${safe(textOfError(err))}`, null, false, "not_billed", null);
       }
       const maxTokens = req.longOutput ? STREAM_MAX_TOKENS : STRUCTURED_MAX_TOKENS;
+      // An interpretation counts its input first, so it reserves what it sends instead of a flat worst case (Derek, 2026-11-18).
+      const counted = req.longOutput ? await countInput({ model, system: req.system, messages: messagesFor([]), output_config: { effort: req.effort, format } }, send.signal) : null;
       // A long answer needs a stream, and so does a request with a cached head: its first event is the moment siblings may read the cache.
       const streamed = req.longOutput === true || req.cachedPrompt !== undefined;
       const warm = req.cachedPrompt === undefined ? null : await warming.enter(prefixKey(req, model), send.signal);
@@ -791,7 +846,7 @@ export function createClaudeApi(opts: ClaudeApiOptions): ClaudeCli {
             warm?.open();
           });
           return stream.finalMessage();
-        });
+        }, counted === null ? undefined : (ttl) => countedHoldUsd(model, counted, ttl));
       } finally {
         warm?.open();
       }
