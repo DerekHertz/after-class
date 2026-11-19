@@ -19,7 +19,7 @@ function world(o:any={}) {
  const unused=fakeTask({answer:()=>ok({verdict:'yes',p:.9})});
  const evidence=createEvidence(db,dir,{now:()=>clock.wall,monotonic:()=>clock.mono,lookupFrameChange:(i:any)=>memo.lookup(frameTask,i),frameChangeKey:(i:any)=>memo.key(frameTask,i),runFrameChange:(i:any,signal:any)=>memo.run(frameTask,i,{signal}),onChange:()=>{}});
  const revs=new Map(),current=new Map();
- const prep=()=>createPreparation(db,{chunk:(id:any)=>revs.get(id)??null,currentChunks:()=>[...current.values()],bundle:evidence.bundle,pin:evidence.pin,lookup:memo.lookup,run:(t:any,i:any,signal:any)=>memo.run(t,i,{signal}),clearFailures:memo.clearFailures,tasks:{interpret,revise:unused,checkClaim:unused,searchResources:unused},frameBytes:evidence.frameBytes});
+ const prep=()=>createPreparation(db,{chunk:(id:any)=>revs.get(id)??null,currentChunks:()=>[...current.values()],bundle:evidence.bundle,pin:evidence.pin,lookup:memo.lookup,lookupKey:memo.lookupKey,run:(t:any,i:any,signal:any)=>memo.run(t,i,{signal}),clearFailures:memo.clearFailures,tasks:{interpret,revise:unused,checkClaim:unused,searchResources:unused},frameBytes:evidence.frameBytes});
  const preparation=prep();
  const ingest=()=>evidence.ingest({captureId:s.captureId,facts:s.facts.splice(0)});
  const seed=()=>{s.control('start');s.source();s.transcript(Array.from({length:24},(_,i)=>[i*5,(i+1)*5,`caption ${i}`]));s.span(0,60);s.frame('a',1);s.frame('b',55);ingest();};

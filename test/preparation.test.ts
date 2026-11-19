@@ -105,6 +105,7 @@ function world(opts: { readonly interpret?: Task<InterpretationInput, Interpreta
     }),
     pin: () => null,
     lookup: memo.lookup,
+    lookupKey: memo.lookupKey,
     run: (task, input, signal) => memo.run(task, input, { signal }),
     clearFailures: memo.clearFailures,
     tasks,
@@ -342,6 +343,24 @@ describe("preparation", () => {
 
     w.script.check = (i) => verdict(i.claim.text === "claim" ? "no" : "yes");
     w.prep.retry(w.captureId, [r1.id]);
+    await w.drain();
+
+    expect(w.statusOf(r1, "claim")).toBe("supported_by_check");
+    expect(w.usable(r1.material)).toEqual(["revised claim"]);
+    expect(w.tasks.revise.calls).toHaveLength(1);
+  });
+
+  test("R4: a claim revised before the revision task changed version or model keeps that revision and gets no second one", async () => {
+    const w = world();
+    const r1 = w.close(0, 0, 20);
+    w.script.interpret = () => ok(output([{ label: "A", claims: [draft("claim", [P[0]!])] }]));
+    w.script.check = (i) => verdict(i.claim.text === "claim" ? "no" : "yes");
+    w.script.revise = () => ok(draft("revised claim", [P[0]!]));
+    await w.drain();
+    expect(w.usable(r1.material)).toEqual(["revised claim"]);
+
+    Object.assign(w.tasks.revise, { version: "next", model: "sonnet" });
+    w.script.revise = () => ok(draft("second revision", [P[0]!]));
     await w.drain();
 
     expect(w.statusOf(r1, "claim")).toBe("supported_by_check");

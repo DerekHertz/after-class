@@ -170,6 +170,8 @@ export type Memo = {
   readonly mode: MemoMode;
   key<I>(task: Task<I, unknown>, input: I): MemoKey;
   lookup: LookupFn;
+  /** What is stored under `key`, which an earlier version or model of `task` may have written. */
+  lookupKey<I, O>(task: Task<I, O>, key: MemoKey): Lookup<O>;
   /**
    * Hit or terminal failure: returned without a call. In flight: the same
    * promise (single-flight; only the first caller's `streamTo` gets deltas).
@@ -306,10 +308,13 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
     return { kind: "missing", key };
   }
 
-  function lookup<I, O>(task: Task<I, O>, input: I): Lookup<O> {
-    const key = keyOf(task, input);
+  function lookupKey<I, O>(task: Task<I, O>, key: MemoKey): Lookup<O> {
     if (inflight.has(key)) return { kind: "inflight", key };
     return settled(task as Task<unknown, O>, key);
+  }
+
+  function lookup<I, O>(task: Task<I, O>, input: I): Lookup<O> {
+    return lookupKey(task, keyOf(task, input));
   }
 
   /**
@@ -458,5 +463,5 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
     };
   }
 
-  return { mode, key: keyOf, lookup, run, clearFailures, inspect };
+  return { mode, key: keyOf, lookup, lookupKey, run, clearFailures, inspect };
 }
