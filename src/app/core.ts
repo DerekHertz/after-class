@@ -7,7 +7,7 @@ import type {
   Allowance, Author, CaptureStatus, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, HeldBack, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
   ReviewState, ReviewView, ScopePreview, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
 } from "../shared/domain";
-import type { EvidenceId, SourceId } from "../shared/ids";
+import type { EvidenceId, ReviewId, SourceId } from "../shared/ids";
 import { IntervalSet, Material } from "../shared/time";
 import type { Interval } from "../shared/time";
 
@@ -249,6 +249,15 @@ export function scopeSummary(scope: ScopePreview, titles: SourceTitles = new Map
 export function nextSection(options: ReviewOptions): "prepared" | "preparing" | null {
   if (options.kind === "ready") return "prepared";
   if (options.kind === "processing" && options.asked) return options.readyNow === null ? "preparing" : "prepared";
+  return null;
+}
+
+/**
+ * Flow C, 2026-11-18: after Review now or Wait "the review starts on its own once a prepared chunk has a supported claim". The review to start
+ * now, read from the stored answer, or null while no answer waits or nothing prepared has a supported claim.
+ */
+export function askedStart(options: ReviewOptions): ReviewId | null {
+  if (options.kind === "ready" || (options.kind === "processing" && options.readyNow !== null)) return options.askedReview ?? null;
   return null;
 }
 

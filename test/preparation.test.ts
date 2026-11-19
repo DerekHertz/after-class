@@ -278,17 +278,23 @@ describe("lazy preparation: a lecture is prepared only once someone asks for its
     for (const r of [...chunks, later]) expect(w.prep.prep(r.id)).toMatchObject({ interpretation: "done", finished: true });
   });
 
-  test("asking twice is one ask, and a restart keeps it", async () => {
+  test("asking twice interprets each chunk once, and a restart keeps the ask without interpreting again", async () => {
     const first = world({ unasked: true });
+    const chunks = [first.close(0, 0, 20), first.close(1, 20, 40)];
     first.prep.ask(first.captureId);
     first.prep.ask(first.captureId);
-    expect(first.db.sql.query("SELECT COUNT(*) AS n FROM prep_asks").get()).toEqual({ n: 1 });
-    // A new process: the same database, a fresh preparation module with nothing in memory.
+    await first.drain();
+    expect(first.tasks.interpret.calls.map((c) => c.chunkRevisionId)).toEqual(chunks.map((r) => r.id));
+    // A new process: the same database, a fresh preparation module with nothing in memory, and the learner asking again.
     const after = world({ unasked: true, db: first.db, captureId: first.captureId });
-    expect(after.prep.asked(after.captureId)).toBe(true);
-    after.close(0, 0, 20);
-    expect(after.demanded("interpretation")).toHaveLength(1);
-    expect(world({ unasked: true, db: first.db }).prep.asked(randomId("cap") as CaptureId)).toBe(false);
+    const again = [after.close(0, 0, 20), after.close(1, 20, 40)];
+    for (const r of again) expect(after.prep.prep(r.id)).toMatchObject({ interpretation: "done", finished: true });
+    after.prep.ask(after.captureId);
+    await after.drain();
+    expect(after.tasks.interpret.calls).toEqual([]);
+    // Another lecture in the same database is still held.
+    const other = world({ unasked: true, db: first.db });
+    expect(other.prep.prep(other.close(0, 0, 20).id)).toMatchObject({ interpretation: "held" });
   });
 });
 

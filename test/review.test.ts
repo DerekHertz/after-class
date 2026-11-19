@@ -331,6 +331,31 @@ describe("asking for a lecture's review (flow C, 2026-11-18)", () => {
     }
   });
 
+  test("a stored Review now or Wait names the review it starts, until a review of the lecture starts after it", () => {
+    const r = rig();
+    r.world.close(0, 0, 300);
+    r.world.claim(1, 10, 20);
+    r.world.pendingChunks.add(r.world.close(1, 300, 600).id);
+    const askedOf = (): ReviewId | undefined => {
+      const o = r.reviews.options(r.capture);
+      return o.kind === "nothing_to_review" ? undefined : o.askedReview;
+    };
+    r.reviews.answerInvite(r.capture, "later");
+    expect(askedOf()).toBeUndefined();
+    r.reviews.answerInvite(r.capture, "review_now");
+    const first = askedOf()!;
+    // Every read names the same review, so two tabs that start it start one review.
+    expect(askedOf()).toBe(first);
+    started(r.reviews.start(r.capture, "prepared_only", first));
+    started(r.reviews.start(r.capture, "prepared_only", askedOf() ?? first));
+    expect(reviewRows(r.db)).toBe(1);
+    expect(askedOf()).toBeUndefined();
+    // A later Wait asks again, for a new review.
+    r.reviews.answerInvite(r.capture, "wait");
+    expect(askedOf()).toBeDefined();
+    expect(askedOf()).not.toBe(first);
+  });
+
   test("a lecture nobody asked for says so, with no time estimate, and says it is preparing once asked", () => {
     const r = asking();
     expect(r.reviews.options(r.capture)).toMatchObject({ kind: "processing", asked: false, pendingChunks: 1, estimateS: null, readyNow: null });

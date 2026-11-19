@@ -5,7 +5,7 @@ import type { CaptureId, ReviewId } from "../shared/ids";
 import type { ReviewOptions, StartChoice, UsageSummary } from "../shared/domain";
 import type { AppApi } from "./api";
 import { usePrefetchReviewArt } from "./art-prefetch";
-import { captureStatusLabel, coveredLines, earlierReviewsNote, formatClock, inspectBundle, laterNote, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
+import { askedStart, captureStatusLabel, coveredLines, earlierReviewsNote, formatClock, inspectBundle, laterNote, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
 import type { OptionsScreen, ScopeSummary, SourceTitles, StartOffer } from "./core";
 import { ReviewRow } from "./home";
 import type { LectureReview } from "./home";
@@ -16,8 +16,8 @@ import { BundleInspector, ErrorNote, EvidencePane, Link, navigate, useAsync } fr
 
 
 const POLL_MS = 3000;
-/** A lecture nobody asked for changes only when the learner asks, so only an asked one is read again. */
-const isProcessing = (options: ReviewOptions): boolean => options.kind === "processing" && options.asked;
+/** Read again while processing, asked or not, so an ask from another tab or the extension reaches this page. */
+const isProcessing = (options: ReviewOptions): boolean => options.kind === "processing";
 const isHeld = (usage: UsageSummary): boolean => usage.allowance?.held != null;
 
 export type OptionsViewProps = {
@@ -212,8 +212,6 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
   const actionPending = useRef(false);
   // One id per choice until the start settles, so a retried start is the same review.
   const pendingIds = useRef(new Map<StartChoice, ReviewId>());
-  // Review now or Wait on a lecture not yet asked for: start the review once a prepared section has a supported claim (flow C, 2026-11-18).
-  const [startWhenReady, setStartWhenReady] = useState(false);
 
   const titles = sourceTitles(capture.data?.capture ?? null);
   const videos = sourceVideos(capture.data?.capture ?? null);
@@ -243,54 +241,24 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
     }
   }
 
-  // The wait below stops when the learner leaves this page.
-  const mounted = useRef(true);
+  // Flow C, 2026-11-18: a stored Review now or Wait starts its review once a prepared section has a supported claim, from whichever tab
+  // shows this lecture. The answer, not this page, names the review, so two tabs start the same one. Leaving the page cancels the start.
+  const asked = shown === null ? null : askedStart(shown);
   useEffect(() => {
-    mounted.current = true;
-    return () => { mounted.current = false; };
-  }, []);
+    if (asked === null) return;
+    let live = true;
+    api.startReview(captureId, "prepared_only", asked).then(
+      (result) => {
+        if (!live) return;
+        if (result.kind === "started") navigate({ page: "review", id: result.reviewId });
+        else setRefused(result);
+      },
+      (e: unknown) => { if (live) setStartError(e instanceof Error ? e.message : String(e)); },
+    );
+    return () => { live = false; };
+  }, [api, captureId, asked]);
 
-  /**
-   * Review now or Wait on a lecture nobody asked for yet: the answer asks for its review, then this page reads the options until a prepared
-   * section has a supported claim and starts the review on what is prepared then (flow C, 2026-11-18).
-   */
-  async function ask(kind: "review_now" | "wait") {
-    if (actionPending.current) return;
-    actionPending.current = true;
-    setStarting(true);
-    setStartError(null);
-    try {
-      await api.answerInvite(captureId, kind);
-    } catch (e) {
-      setStartError(e instanceof Error ? e.message : String(e));
-      return;
-    } finally {
-      actionPending.current = false;
-      setStarting(false);
-    }
-    options.reload();
-    setStartWhenReady(true);
-    try {
-      while (mounted.current) {
-        const o = await api.reviewOptions(captureId);
-        if (o.kind === "ready" || (o.kind === "processing" && o.readyNow !== null)) {
-          await start("prepared_only");
-          return;
-        }
-        if (o.kind === "nothing_to_review") {
-          setRefused(o);
-          return;
-        }
-        await new Promise((r) => setTimeout(r, POLL_MS));
-      }
-    } catch (e) {
-      if (mounted.current) setStartError(e instanceof Error ? e.message : String(e));
-    } finally {
-      if (mounted.current) setStartWhenReady(false);
-    }
-  }
-
-  async function answer(kind: "later" | "wait") {
+  async function answer(kind: "review_now" | "later" | "wait") {
     if (actionPending.current) return;
     actionPending.current = true;
     setStarting(true);
@@ -298,6 +266,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
     try {
       await api.answerInvite(captureId, kind);
       capture.reload();
+      options.reload();
     } catch (e) {
       setStartError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -348,12 +317,14 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
       )}
       {shown?.kind === "processing" && !shown.asked && (
         <p className="capture-answer">
-          <button type="button" className="page-primary" disabled={starting} onClick={() => void ask("review_now")}>Review now</button>{" "}
-          <button type="button" disabled={starting} onClick={() => void ask("wait")}>Wait</button>{" "}
+          <button type="button" className="page-primary" disabled={starting} onClick={() => void answer("review_now")}>Review now</button>{" "}
+          <button type="button" disabled={starting} onClick={() => void answer("wait")}>Wait</button>{" "}
           <span className="muted">Either one prepares this lecture. It takes about two minutes for the first section.</span>
         </p>
       )}
-      {startWhenReady && <p className="page-loading" role="status">Preparing your lecture. The review starts when the first section is ready.</p>}
+      {shown?.kind === "processing" && shown.readyNow === null && shown.askedReview !== undefined && (
+        <p className="page-loading" role="status">Preparing your lecture. The review starts when the first section is ready.</p>
+      )}
       {shown?.kind === "processing" && shown.asked && (
         <p className="capture-answer">
           <button type="button" disabled={starting} onClick={() => answer("wait")}>Wait</button> <span className="muted">Stay here until it is ready.</span>

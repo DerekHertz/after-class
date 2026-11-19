@@ -375,10 +375,14 @@ export type ScopePreview = {
  */
 export type HeldBack = readonly { readonly reviewId: ReviewId; readonly material: Material }[];
 
+/**
+ * `askedReview`: the review a stored Review now or Wait starts on its own once a prepared chunk has a supported claim. Absent when no
+ * answer waits, or a review of this lecture started after it (flow C, 2026-11-18).
+ */
 export type ReviewOptions =
-  | { readonly kind: "ready"; readonly scope: ScopePreview; readonly heldBack: HeldBack }
+  | { readonly kind: "ready"; readonly scope: ScopePreview; readonly heldBack: HeldBack; readonly askedReview?: ReviewId | undefined }
   /** `asked` false: nobody has asked for this lecture's review yet, so its `pendingChunks` are held, not preparing (flow C, 2026-11-18). */
-  | { readonly kind: "processing"; readonly asked: boolean; readonly readyNow: ScopePreview | null; readonly pendingChunks: number; readonly estimateS: number | null; readonly heldBack: HeldBack }
+  | { readonly kind: "processing"; readonly asked: boolean; readonly readyNow: ScopePreview | null; readonly pendingChunks: number; readonly estimateS: number | null; readonly heldBack: HeldBack; readonly askedReview?: ReviewId | undefined }
   | { readonly kind: "nothing_to_review"; readonly gaps: readonly Gap[]; readonly unverified: readonly Claim[]; readonly rewatch: readonly { readonly sourceId: SourceId; readonly interval: Interval }[]; readonly heldBack: HeldBack };
 
 /** "prepared_only": start on what's ready, other chunks keep preparing. "stop_early": cancel pending in-scope work first. */

@@ -386,15 +386,17 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // ───────────────────────────── Popup requests ───────────────────────────────
 
 /**
- * Answer an invite. Review now opens the review app tab and never touches capture state.
+ * Answer an invite. Review now opens the lecture page and never touches capture state.
  * R9: "Starting a review doesn't stop capture, and stopping capture doesn't end a review."
- * Every answer is also posted to the backend, which records it as a fact.
+ * Every answer is also posted to the backend, which records it as a fact. Review now is posted whatever the invite state, since it asks for
+ * the lecture's review, and the lecture page starts that review from the stored answer (flow C, 2026-11-18).
  */
 export async function answerInvite(tabId: number, answer: InviteAnswer): Promise<InviteState> {
   const state = await readState(tabId);
-  if (answer === "review_now" || answer === "stop_early") await chrome.tabs.create({ url: safeReviewUrl(state?.lastAck?.reviewAppUrl, `${BACKEND.origin}/app/`) });
+  const lecturePage = state === null ? `${BACKEND.origin}/app/` : `${BACKEND.origin}/app/capture/${state.captureId}`;
+  if (answer === "review_now" || answer === "stop_early") await chrome.tabs.create({ url: safeReviewUrl(state?.lastAck?.reviewAppUrl, lecturePage) });
   const current: InviteState = state?.lastAck?.invite ?? { state: "none" };
-  if (state === null || (answer === "review_now" && current.state !== "invited")) return current;
+  if (state === null) return current;
   const r = await backendFetch("POST", `/captures/${state.captureId}/invite`, { answer }, { capture: state.captureId });
   if (!r.ok) throw new Error(r.error);
   const s = (r.json as { state?: unknown } | null)?.state;
