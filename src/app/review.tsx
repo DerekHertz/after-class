@@ -2,7 +2,7 @@ import { RecordScreen } from "./record";
 import { useCallback, useEffect, useLayoutEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode, Ref, RefObject } from "react";
 import { Material } from "../shared/time";
-import type { ConceptId, EvidenceId, ReviewId } from "../shared/ids";
+import type { CaptureId, ConceptId, EvidenceId, ReviewId } from "../shared/ids";
 import type { Concept, TurnEvent } from "../shared/domain";
 import type { AppApi } from "./api";
 import { useAppearance, useSceneActivity } from "./appearance";
@@ -13,11 +13,11 @@ import { roomRecord } from "./room/room-record";
 import type { RoomRecord } from "./room/room-record";
 import { createReviewController, needsChecklist, resumeOnce } from "./controller";
 import type { SessionState } from "./controller";
-import { ACTION_LABEL, END_CONFIRM_TEXT, composerActions, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow, softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, toAct, unansweredLearnerTurn, owedLearnerTurn, strandedEndTurn, selectedEvidenceIds, shouldSubmitAnswer, questionScrollTop, questionsAsked, } from "./core";
+import { ACTION_LABEL, END_CONFIRM_TEXT, composerActions, currentExchange, endFlow, shouldAutoSendSpeech, shouldStopListening, stepStartHandoff, turnStatus, availableActions, conversationLines, currentEvidenceIds, inspectBundle, liveText, MOVE_LABEL, NEEDS_TEXT, observationRow, softTargetPrompt, sourceTitles, sourceVideos, formatClock, formatInterval, lectureHeading, nextSection, toAct, unansweredLearnerTurn, owedLearnerTurn, strandedEndTurn, selectedEvidenceIds, shouldSubmitAnswer, questionScrollTop, questionsAsked, } from "./core";
 import type { ActionId, EndEvent, EndStep, Heard, Line, Live, SourceSelection, StartHandoff, TurnStatus } from "./core";
 import type { Speaker, SpeechInput } from "./speech";
 import type { UnsentStore } from "./unsent";
-import { BundleInspector, ErrorNote, EvidencePane, useAsync } from "./ui";
+import { BundleInspector, ErrorNote, EvidencePane, Link, useAsync } from "./ui";
 import { CompletionPanel } from "./completion";
 import { DiagramPanel, ShowDiagramButton, useDiagrams } from "./diagram";
 import { currentQuestionTopic } from "./diagram-view";
@@ -308,6 +308,7 @@ export function ReviewScreen({ api, speaker, speech, unsent, reviewId }: ReviewD
       </header>
       <div className="front-row-notices">
         <SaveBanner state={state} onRetry={() => void controller.save()} reviewId={reviewId} onSource={openSource} />
+        {view.saved === "saved" && <NextSection api={api} captureId={view.captureId} />}
         <ErrorNote error={state.loadError} retry={() => void controller.load()} />
       </div>
       <div className="front-row-layout">
@@ -468,6 +469,19 @@ export function SaveBanner({ state, onRetry, reviewId, onSource }: { readonly st
         state.saving && <p className="note" role="status">Saving this review to your notebook...</p>
       )}
     </>
+  );
+}
+
+/** Once a review is saved, offer the lecture's next section as a new review when more of it is prepared or preparing (flow C, 2026-11-18). */
+function NextSection({ api, captureId }: { readonly api: AppApi; readonly captureId: CaptureId }) {
+  const options = useAsync(useCallback(() => api.reviewOptions(captureId), [api, captureId]));
+  const next = options.data === null ? null : nextSection(options.data);
+  if (next === null) return null;
+  return (
+    <p className="note" role="status">
+      {next === "prepared" ? "The next section of this lecture is ready to review." : "The next section of this lecture is being prepared."}{" "}
+      <Link to={{ page: "capture", id: captureId }}>Review the next section</Link>
+    </p>
   );
 }
 

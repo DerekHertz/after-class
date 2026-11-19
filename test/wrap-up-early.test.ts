@@ -95,6 +95,7 @@ async function gatedEnd(summaryOutcomes: readonly ("ok" | "fail")[] = ["ok"]) {
   const headers = () => ({ Authorization: `Bearer ${r.token}`, "Content-Type": "application/json" });
   const post = (path: string, body: unknown = {}) => fetch(`${base()}${path}`, { method: "POST", headers: headers(), body: JSON.stringify(body) }).then(async (res) => ({ status: res.status, body: (await res.json()) as Record<string, any> }));
   expect((await fetch(`${base()}/ingest`, { method: "POST", headers: headers(), body: JSON.stringify({ captureId: CAP, facts: FACTS }) })).status).toBe(200);
+  expect((await post(`/captures/${CAP}/invite`, { answer: "wait" })).status).toBe(200);
   await until(() => r.modules.segmentation.current(CAP).some((c) => r.modules.preparation.prep(c.id).finished));
   const reviewId = stableId("rvw", "wrap-up-early");
   expect((await post(`/captures/${CAP}/reviews`, { reviewId, choice: "prepared_only" })).body.kind).toBe("started");

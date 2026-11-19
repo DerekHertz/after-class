@@ -363,7 +363,7 @@ const nothingToReviewz = z.object({
 
 export const reviewOptionsResponse = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("ready"), scope: scopePreviewz, heldBack: heldBackz }),
-  z.object({ kind: z.literal("processing"), readyNow: scopePreviewz.nullable(), pendingChunks: z.number(), estimateS: z.number().nullable(), heldBack: heldBackz }),
+  z.object({ kind: z.literal("processing"), asked: z.boolean(), readyNow: scopePreviewz.nullable(), pendingChunks: z.number(), estimateS: z.number().nullable(), heldBack: heldBackz }),
   nothingToReviewz,
 ]) satisfies z.ZodType<ReviewOptions>;
 

@@ -285,7 +285,11 @@ export type AssessableClaim = {
 export type Concept = { readonly id: ConceptId; readonly label: string; readonly summary: string };
 export type PossibleConfusion = { readonly conceptId: ConceptId; readonly text: string; readonly evidence: readonly EvidenceId[] };
 
-export type InterpretationState = "pending" | "done" | "failed" | "cancelled";
+/**
+ * A chunk's interpretation. Flow C, amendment of 2026-11-18: a closed chunk is "held" until the learner asks for its lecture's review, then
+ * "pending" (queued, or running in the scheduler) until it ends "done", "failed" or "cancelled".
+ */
+export type InterpretationState = "held" | "pending" | "done" | "failed" | "cancelled";
 
 /**
  * R6: "A pending resource search never blocks a review that is otherwise ready."
@@ -373,7 +377,8 @@ export type HeldBack = readonly { readonly reviewId: ReviewId; readonly material
 
 export type ReviewOptions =
   | { readonly kind: "ready"; readonly scope: ScopePreview; readonly heldBack: HeldBack }
-  | { readonly kind: "processing"; readonly readyNow: ScopePreview | null; readonly pendingChunks: number; readonly estimateS: number | null; readonly heldBack: HeldBack }
+  /** `asked` false: nobody has asked for this lecture's review yet, so its `pendingChunks` are held, not preparing (flow C, 2026-11-18). */
+  | { readonly kind: "processing"; readonly asked: boolean; readonly readyNow: ScopePreview | null; readonly pendingChunks: number; readonly estimateS: number | null; readonly heldBack: HeldBack }
   | { readonly kind: "nothing_to_review"; readonly gaps: readonly Gap[]; readonly unverified: readonly Claim[]; readonly rewatch: readonly { readonly sourceId: SourceId; readonly interval: Interval }[]; readonly heldBack: HeldBack };
 
 /** "prepared_only": start on what's ready, other chunks keep preparing. "stop_early": cancel pending in-scope work first. */
