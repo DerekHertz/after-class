@@ -281,14 +281,14 @@ export function frameChangeTask(jev: JevClient, questions?: FrameChangeQuestions
 
 /**
  * R3: "A claim can be used to judge my answers only if it passed the evidence check."
- * state = { claim, assumptions, evidence: [{id, t, text}], frames: ["frame_0", …] }
+ * state = { claim, assumptions, evidence: [{t, text}], frames: ["frame_0", …] }
  */
 export function claimSupportTask(jev: JevClient): Task<ClaimSupportInput, { readonly verdict: Verdict; readonly p: number | null }> {
   return {
     provider: "jev",
     purpose: "claim_check",
     model: JEV_MODEL,
-    version: versionOf(`claim_check.${QUESTIONS.claimSupport.version}`),
+    version: versionOf(`claim_check.${QUESTIONS.claimSupport.version}`, THRESHOLDS, 2),
     maxAttempts: MAX_ATTEMPTS,
     canonicalInput: (i) => ({
       claim: { text: i.claim.text, evidence: i.claim.evidence, visualDependent: i.claim.visualDependent, assumptions: i.claim.assumptions },
@@ -304,7 +304,7 @@ export function claimSupportTask(jev: JevClient): Task<ClaimSupportInput, { read
           state: {
             claim: i.claim.text,
             assumptions: i.claim.assumptions,
-            evidence: i.passages.map((p) => ({ id: p.id, ...timed(p) })),
+            evidence: i.passages.map(timed),
             frames: images.map((m) => m.ref),
           },
           questions: { supported: noul(QUESTIONS.claimSupport.supported) },

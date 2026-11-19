@@ -419,10 +419,18 @@ describe("claimSupportTask", () => {
     expect(requests[0]!.state).toEqual({
       claim: "Two lines in the plane meet at one point unless parallel.",
       assumptions: ["lines are not identical"],
-      evidence: [{ id: "ev_p1", t: 12.3, text: "two lines meet at a point" }],
+      evidence: [{ t: 12.3, text: "two lines meet at a point" }],
       frames: ["frame_0"],
     });
     expect(requests[0]!.questions.supported!.instructions).toContain("labelled assumptions, not as evidence");
+  });
+
+  test("evidence IDs stay out of the request but still key the memo, under a version of their own", () => {
+    const task = claimSupportTask(fakeJev(() => ({})).jev);
+    expect(task.version).toBe("claim_check.1@0.7/0.3#2");
+    const memo = createMemo(testUserDb(), "live");
+    const at = (id: string) => memo.key(task, { claim: claim(), passages: [passage(id, 12.34, "two lines meet at a point")], frames: [] });
+    expect(at("ev_p1")).not.toBe(at("ev_p2"));
   });
 
   test("mid-range and missing probabilities are uncertain", async () => {
