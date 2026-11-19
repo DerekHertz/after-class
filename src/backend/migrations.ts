@@ -324,6 +324,12 @@ DROP TABLE memo_inputs_save;
 DROP TABLE voice_usage_events_save;`,
     },
     BUDGET_HOLDS, BUDGET_HOLDS_REVIEW,
+    {
+      id: "007-memo-inputs-by-input",
+      sql: `
+-- A task that keeps its first result finds it by input across versions and models (keepsFirstResult in memo.ts).
+CREATE INDEX memo_inputs_by_input ON memo_inputs (provider, purpose, input_json);`,
+    },
   ],
 
   evidence: [

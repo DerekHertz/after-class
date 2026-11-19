@@ -8,6 +8,7 @@
  *    same evidence has the same key, so no new call is made.
  *  - Outdated results are never selected: a result is stored under the key of
  *    the input it came from, and derivations look up the key of the CURRENT input.
+ *    A task with `keepsFirstResult` also finds the result an earlier version or model stored for that input.
  *  - Cancelled results are never applied: a result's `atSeq` is minted when it
  *    is stored, after the call returns, so a stop-early fact issued while the
  *    call was in flight has a smaller Seq. See `appliesBefore`.
@@ -110,6 +111,11 @@ export type Task<I, O> = {
   readonly model: string;
   /** Bump when wording, criteria, thresholds or output schema change. */
   readonly version: string;
+  /**
+   * The first result stored for an input stays that input's result when `version` or `model` changes, so a bump applies
+   * only to inputs with none. `decode` must read every earlier version's output.
+   */
+  readonly keepsFirstResult?: true;
   /** Attempts per run while errors are retryable. A non-retryable error is terminal at once. */
   readonly maxAttempts: number;
   /** Exactly what the provider sees, canonicalised. Equal canonical forms are the same call. */
@@ -170,8 +176,6 @@ export type Memo = {
   readonly mode: MemoMode;
   key<I>(task: Task<I, unknown>, input: I): MemoKey;
   lookup: LookupFn;
-  /** What is stored under `key`, which an earlier version or model of `task` may have written. */
-  lookupKey<I, O>(task: Task<I, O>, key: MemoKey): Lookup<O>;
   /**
    * Hit or terminal failure: returned without a call. In flight: the same
    * promise (single-flight; only the first caller's `streamTo` gets deltas).
@@ -283,6 +287,14 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
        RETURNING attempts`,
     ),
     deleteFailure: db.sql.query(`DELETE FROM memo_failures WHERE user_id = ? AND key = ?`),
+    /** The input's settled key under any version or model: the first hit, else a terminal failure. */
+    firstSettled: db.sql.query<{ key: string }, [string, Provider, Purpose, string]>(
+      `SELECT i.key FROM memo_inputs i
+       LEFT JOIN memo m ON m.user_id = i.user_id AND m.key = i.key
+       LEFT JOIN memo_failures f ON f.user_id = i.user_id AND f.key = i.key AND f.terminal = 1
+       WHERE i.user_id = ? AND i.provider = ? AND i.purpose = ? AND i.input_json = ? AND (m.seq IS NOT NULL OR f.seq IS NOT NULL)
+       ORDER BY m.seq IS NULL, COALESCE(m.seq, f.seq) LIMIT 1`,
+    ),
     nextAttempt: db.sql.query<{ n: number }, [string, string]>(`SELECT COALESCE(MAX(attempt_no), 0) + 1 AS n FROM usage_events WHERE user_id = ? AND memo_key = ?`),
     insertUsage: db.sql.query(
       `INSERT INTO usage_events (id, user_id, memo_key, capture_id, attempt_no, provider, model, purpose, outcome, input_tokens, output_tokens,
@@ -308,13 +320,16 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
     return { kind: "missing", key };
   }
 
-  function lookupKey<I, O>(task: Task<I, O>, key: MemoKey): Lookup<O> {
-    if (inflight.has(key)) return { kind: "inflight", key };
-    return settled(task as Task<unknown, O>, key);
+  /** What `input` has stored under `key`, or, for a task that keeps its first result, under any of its versions and models. */
+  function stored<I, O>(task: Task<I, O>, input: I, key: MemoKey): Lookup<O> {
+    const first = task.keepsFirstResult ? q.firstSettled.get(userId, task.provider, task.purpose, canonicalJson(task.canonicalInput(input))) : null;
+    return settled(task as Task<unknown, O>, (first?.key as MemoKey | undefined) ?? key);
   }
 
   function lookup<I, O>(task: Task<I, O>, input: I): Lookup<O> {
-    return lookupKey(task, keyOf(task, input));
+    const key = keyOf(task, input);
+    if (inflight.has(key)) return { kind: "inflight", key };
+    return stored(task, input, key);
   }
 
   /**
@@ -416,7 +431,7 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
     const key = keyOf(task, input);
     const flying = inflight.get(key);
     if (flying) return flying as Promise<RunResult<O>>;
-    const done = settled(task as Task<unknown, O>, key);
+    const done = stored(task, input, key);
     if (done.kind !== "missing") return Promise.resolve(done);
     if (mode === "replay") return Promise.reject(new ReplayMiss(task.purpose, key));
     const p = attemptLoop(task, input, key, runOpts.signal ?? NEVER, runOpts.streamTo ?? null, runOpts.onRetry ?? null, runOpts.captureId ?? null, runOpts.review ?? null).finally(() => inflight.delete(key));
@@ -463,5 +478,5 @@ export function createMemo(db: UserDb, mode: MemoMode, opts: MemoOptions = {}): 
     };
   }
 
-  return { mode, key: keyOf, lookup, lookupKey, run, clearFailures, inspect };
+  return { mode, key: keyOf, lookup, run, clearFailures, inspect };
 }

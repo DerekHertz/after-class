@@ -74,7 +74,6 @@ function preparationOf(db: UserDb, script: { interpret: Answer<InterpretationOut
     }),
     pin: () => null,
     lookup: memo.lookup,
-    lookupKey: memo.lookupKey,
     run: (task, input, signal) => memo.run(task, input, { signal }),
     clearFailures: memo.clearFailures,
     tasks,

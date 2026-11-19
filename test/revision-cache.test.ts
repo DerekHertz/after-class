@@ -163,7 +163,8 @@ describe("the revision's evidence is a cached head", () => {
     const cliTask = reviseTask(cli, frameBytes);
     await cliTask.attempt(revisionOf("Clocks order events."), { ...OPEN, streamTo: null });
     const argv = claudeArgs(seen!, "json", null);
-    expect(argv.slice(argv.indexOf("--model"), argv.indexOf("--model") + 4)).toEqual(["--model", "sonnet", "--effort", "high"]);
+    expect(argv[argv.indexOf("--model") + 1]).toBe("sonnet");
+    expect(argv[argv.indexOf("--effort") + 1]).toBe("high");
 
     const { client, sent } = manualClient(() => message(JSON.stringify(replyOf("Clocks order events."))));
     const run = createMemo(testUserDb(), "live", { retryDelayMs: () => 0 }).run(reviseTask(createClaudeApi({ apiKey: KEY, maxConcurrent: 2, client }), frameBytes), revisionOf("Clocks order events."));

@@ -286,6 +286,8 @@ export function reviseTask(claude: ClaudeCli, frameBytes: FrameBytes): Task<Revi
     purpose: "claim_revision",
     model: REVISE_MODEL,
     version: REVISE_VERSION,
+    // R4: a claim revised on an earlier version or model keeps that revision.
+    keepsFirstResult: true,
     maxAttempts: 2,
     canonicalInput: canonicalRevision,
     async attempt(input, ctx) {

@@ -156,7 +156,6 @@ export function createPreparation(db: UserDb, deps: {
   /** `bundle(material)` with its frames that have no verdict yet, or null when there are none. An interpretation waits on it. */
   pin(material: Material): FramePin | null;
   lookup<I, O>(task: Task<I, O>, input: I): Lookup<O>;
-  lookupKey<I, O>(task: Task<I, O>, key: MemoKey): Lookup<O>;
   run<I, O>(task: Task<I, O>, input: I, signal: AbortSignal): Promise<RunResult<O>>;
   clearFailures: (keys: readonly Lookup<unknown>["key"][]) => void;
   tasks: PreparationTasks;
@@ -284,15 +283,6 @@ export function createPreparation(db: UserDb, deps: {
     return input;
   }
 
-  /** R4 across a change of the revision task: a result stored under the slot's frozen key stays the claim's one revision. */
-  function revisionOf(id: ClaimId, input: RevisionInput): Lookup<ClaimDraft> {
-    const current = deps.lookup(tasks.revise, input);
-    const frozen = frozenSlot("revision", id)?.memo_key as MemoKey | undefined;
-    if (frozen === undefined || frozen === current.key) return current;
-    const kept = deps.lookupKey(tasks.revise, frozen);
-    return kept.kind === "missing" ? current : kept;
-  }
-
   function viewClaim(captureId: CaptureId, id: ClaimId, ordinal: number, concept: Concept, original: ClaimDraft, origin: UnitView, controls: readonly ControlFact[], supersededBy: readonly UnitView[]): ClaimView {
     const unit = origin.unit;
     // The claim's home chunk is where its original evidence lies; that chunk's stop-early covers it.
@@ -300,7 +290,7 @@ export function createPreparation(db: UserDb, deps: {
     const c1 = checkStep(original, unit);
     const c1v = c1.kind === "invalid_refs" || appliesBefore(c1.lookup, cutoff) ? checkVerdict(stepLookup(c1)) : null;
     const revInput = revisionSlot(captureId, id, original, c1v, unit);
-    const rv = revInput ? revisionOf(id, revInput) : null;
+    const rv = revInput ? deps.lookup(tasks.revise, revInput) : null;
     const revised = rv?.kind === "hit" ? rv.value : null;
     const c2 = revised ? checkStep(revised, unit) : null;
     const cited = [...new Set<EvidenceId>([...original.evidence, ...(revised?.evidence ?? [])])];

@@ -616,10 +616,6 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       read(memoDep(looked.key));
       return looked;
     };
-    const lookupKey: Memo["lookupKey"] = (task, key) => {
-      read(memoDep(key));
-      return memo.lookupKey(task, key);
-    };
     const evidence: EvidenceStoreWithProbe = createEvidence(db, dataDir, {
       lookupFrameChange: (input) => lookup(tasks.frameChange, input),
       // The first frame of a source has nothing to compare with: evidence keeps it without a call, and so does this.
@@ -691,7 +687,6 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       bundle: evidence.bundle,
       pin: evidence.pin,
       lookup,
-      lookupKey,
       run: (task, input, signal) => memo.run(task, input, { signal }),
       clearFailures: memo.clearFailures,
       tasks: tasks.preparation,
