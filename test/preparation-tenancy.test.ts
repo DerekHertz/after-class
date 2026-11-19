@@ -78,6 +78,8 @@ function preparationOf(db: UserDb, script: { interpret: Answer<InterpretationOut
     clearFailures: memo.clearFailures,
     tasks,
   });
+  // These tests are about a lecture being prepared, so it is asked for (flow C, 2026-11-18).
+  prep.ask(CAP);
 
   /** Segmentation's side: this user's chunk 0 covers [start, end). The id derives from the capture and material alone. */
   function close(start: number, end: number): ChunkRevision {
@@ -261,7 +263,7 @@ describe("migration preparation/003-user-id", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   };
-  const before = { ...MIGRATIONS, preparation: MIGRATIONS.preparation.filter((m) => m.id !== "003-user-id") };
+  const before = { ...MIGRATIONS, preparation: MIGRATIONS.preparation.filter((m) => m.id !== "003-user-id" && !m.id.includes("prep-ask")) };
 
   function seedOld(path: string) {
     const db = openDb(path, before);

@@ -182,7 +182,7 @@ const fixtures: Record<RouteName, Fixture> = {
   },
   lectures: { response: { lectures: [{ captureId: cap, sourceTitles: ["Locks"], sourceIds: [stableId("src", "locks")], firstSeq: 1, videos: 1, watchedSeconds: 30, status: { state: "stopped" }, reviews: [{ reviewId: rvw, startedMs: 5, phase: "ended", saved: "unsaved", mainQuestions: 0 }] }] } },
   captureView: { params: { captureId: cap }, response: { capture: captureView, invite: { state: "invited", atChunk: crv } }, app: captureResponsez },
-  answerInvite: { params: { captureId: cap }, request: { answer: "later" }, response: { state: "later" } },
+  answerInvite: { params: { captureId: cap }, request: { answer: "later" }, response: { state: "later", ask: null, review: null } },
   reviewOptions: { params: { captureId: cap }, response: { kind: "ready", scope: readyScope, heldBack: [] }, app: reviewOptionsz },
   startReview: { params: { captureId: cap }, request: { reviewId: rvw, choice: "prepared_only" }, response: { kind: "started", reviewId: rvw, scope: frozenScope }, app: startResultz },
   sendTurn: { params: { reviewId: rvw }, request: { turnId: trn, act: { kind: "answer", text: "An ordering.", modality: "speech" } }, response: { type: "learner_turn_stored", turnId: trn }, app: turnEventz },
@@ -359,7 +359,7 @@ describe("both clients stay inside ROUTES", () => {
 
   test("the extension reads the invite state back from the invite answer", () => {
     const reply = ROUTES.answerInvite.reply;
-    expect(reply.kind === "json" && reply.schema.parse({ state: "waiting" })).toEqual({ state: "waiting" });
+    expect(reply.kind === "json" && reply.schema.parse({ state: "waiting", ask: 3, review: null })).toEqual({ state: "waiting", ask: 3, review: null });
   });
 });
 

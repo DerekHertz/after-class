@@ -106,7 +106,7 @@ const TERMINAL: ReadonlySet<ClaimStatus> = new Set<ClaimStatus>(["supported_by_c
 
 /** Interpretation terminal ∧ every member claim terminal (supported | unverified | dropped). */
 export function isFinished(prep: Omit<ChunkPrep, "finished">): boolean {
-  return prep.interpretation !== "pending" && prep.claims.every((c) => TERMINAL.has(c.status));
+  return prep.interpretation !== "pending" && prep.interpretation !== "held" && prep.claims.every((c) => TERMINAL.has(c.status));
 }
 
 /** Where a piece of evidence sits on its source's media timeline: a passage spans, a frame is an instant. */

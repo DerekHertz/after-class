@@ -121,8 +121,12 @@ export type Backend = {
   refuseWith: { readonly status: number; readonly retryAfter?: string } | null;
   calls: number;
   readonly stored: Map<string, Map<number, WireFact>>;
+  /** Each invite answer posted, as `<captureId> <answer>`. */
+  readonly invites: string[];
+  /** The ask the backend says an invite answer opened or joined, or null when it opened none. */
+  inviteAsk: number | null;
 };
-const newBackend = (): Backend => ({ down: false, refuses: () => false, lostAckOnce: false, refuseWith: null, calls: 0, stored: new Map() });
+const newBackend = (): Backend => ({ down: false, refuses: () => false, lostAckOnce: false, refuseWith: null, calls: 0, stored: new Map(), invites: [], inviteAsk: 1 });
 
 function ackFor(b: Backend, cap: string) {
   const m = b.stored.get(cap) ?? new Map();
@@ -137,11 +141,16 @@ function ackFor(b: Backend, cap: string) {
 }
 
 function fakeFetch(b: Backend) {
-  return async (_url: string, init: Any) => {
+  return async (url: string, init: Any) => {
     b.calls++;
     if (b.down) throw new TypeError("fetch failed");
     if (b.refuseWith) return new Response("", { status: b.refuseWith.status, headers: b.refuseWith.retryAfter === undefined ? {} : { "Retry-After": b.refuseWith.retryAfter } });
     const body = JSON.parse(init.body);
+    const invite = /\/captures\/([^/]+)\/invite$/.exec(url);
+    if (invite) {
+      b.invites.push(`${invite[1]} ${body.answer}`);
+      return new Response(JSON.stringify({ state: "none", ask: b.inviteAsk, review: null }), { status: 200 });
+    }
     let batch;
     try {
       batch = parseIngestBatch(body);

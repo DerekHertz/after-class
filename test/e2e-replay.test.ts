@@ -19,7 +19,7 @@ import { join } from "node:path";
 import type { ClaimDraft, Cost, Observation, RecordView, TutorMove, TutorMoveKind } from "../src/shared/domain";
 import type { CaptureId, EvidenceId, ReviewId, TurnId } from "../src/shared/ids";
 import { stableId } from "../src/shared/ids";
-import { captureResponse, diagramsResponse, topicDiagramResponse, encodeMaterial, evidenceBundleResponse, ingestAckResponse, recordViewResponse, reviewOptionsResponse, reviewViewResponse, saveResponse, startReviewResponse, tutorStreamEvent, usageResponse, } from "../src/shared/wire";
+import { captureResponse, diagramsResponse, topicDiagramResponse, encodeMaterial, evidenceBundleResponse, ingestAckResponse, recordViewResponse, reviewOptionsResponse, reviewViewResponse, saveResponse, tutorStreamEvent, usageResponse, } from "../src/shared/wire";
 import type { TutorStreamEvent } from "../src/shared/wire";
 import { main } from "../src/backend/main";
 import type { Running, TaskSet } from "../src/backend/main";
@@ -36,7 +36,6 @@ import { UNASKED_CACHE } from "./fakes";
 import { JPEG_BYTES } from "./jpeg-fixture";
 
 const CAP = stableId("cap", "e2e-replay") as CaptureId;
-const REVIEW = stableId("rvw", "e2e-replay") as ReviewId;
 const turnId = (n: number) => stableId("turn", "e2e-replay", n) as TurnId;
 const VIDEO = "dQw4w9WgXcQ";
 const EXT_ID = "abcdefghijklmnopabcdefghijklmnop";
@@ -103,7 +102,9 @@ const FAKE_UNKNOWN = price({ kind: "unknown", reason: "replay data: the fake rep
 
 type Faked<I, O> = Task<I, O> & { readonly calls: I[] };
 
-function faked<I, O>(real: Task<I, O>, answer: (input: I, ctx: AttemptContext) => { output: O; usage: UsageReport }): Faked<I, O> {
+type Answer<O> = { output: O; usage: UsageReport };
+
+function faked<I, O>(real: Task<I, O>, answer: (input: I, ctx: AttemptContext) => Answer<O> | Promise<Answer<O>>): Faked<I, O> {
   const calls: I[] = [];
   return {
     ...real,
@@ -128,7 +129,15 @@ function fakeTasks() {
     usage: FAKE_JEV,
   }));
   const frameChange = faked(frameChangeTask(noJev), () => ({ output: { verdict: "yes" as const, p: 0.9 }, usage: FAKE_JEV }));
-  const checkClaim = faked(claimSupportTask(noJev), () => ({ output: { verdict: "yes" as const, p: 0.9 }, usage: FAKE_JEV }));
+  // The three claim checks answer together, so both sections are prepared in the same moment and the review the backend starts on its
+  // own (flow C, 2026-11-18) covers all three claims. Its scope is "the chunks prepared at that moment", which is otherwise a race.
+  let release = () => {};
+  const together = new Promise<void>((resolve) => (release = resolve));
+  const checkClaim = faked(claimSupportTask(noJev), async () => {
+    if (checkClaim.calls.length >= 3) release();
+    await together;
+    return { output: { verdict: "yes" as const, p: 0.9 }, usage: FAKE_JEV };
+  });
 
   const interpret = faked(interpretTask(noClaude, () => null), (i) => {
     const ps = i.newMaterial.passages;
@@ -344,6 +353,8 @@ type Product = {
   readonly record: RecordView;
   readonly counts: Record<string, number>;
   readonly boots: number;
+  /** The review the backend started on its own once the asked lecture was prepared. */
+  readonly reviewId: ReviewId;
 };
 
 /** Runs the whole script. `restartAfterTurn` stops the backend and boots it again on the same dir at that point. */
@@ -370,22 +381,26 @@ async function runProduct(opts: { restartAfterTurn: number | null }): Promise<Pr
     expect(ingestAckResponse.parse(reply.json).ackedThroughSeq).toBe(facts.at(-1)!.clientSeq as number);
   }
 
-  // 2. the backend prepares it with the fake tasks: boundaries, frames, claims
-  const optionsReq = get("review options", `/captures/${CAP}/review-options`);
-  await until(async () => reviewOptionsResponse.parse((await peek(optionsReq)).json).kind === "ready");
-  await settled(s);
-  expect(reviewOptionsResponse.parse((await send(optionsReq)).json)).toMatchObject({ kind: "ready", scope: { supportedClaims: 3 } });
-
-  // 3. the invite: chunk 0 closed at a boundary while the capture ran; the learner says yes
-  const view = captureResponse.parse((await send(get("capture view", `/captures/${CAP}`))).json);
+  // 2. the invite: chunk 0 closed at a boundary while the capture ran; the learner says yes, which asks for the lecture's review
+  const viewReq = get("capture view", `/captures/${CAP}`);
+  await until(async () => captureResponse.parse((await peek(viewReq)).json).invite.state === "invited");
+  const view = captureResponse.parse((await send(viewReq)).json);
   expect(view.capture.status.state).toBe("stopped");
   expect(view.invite.state).toBe("invited");
   const invited = await send(post("invite answer", `/captures/${CAP}/invite`, { answer: "review_now" }, "extension"));
   expect(invited.status).toBe(200);
 
-  // 4. the review: start, then ten turns streamed
-  const started = startReviewResponse.parse((await send(post("start review", `/captures/${CAP}/reviews`, { reviewId: REVIEW, choice: "prepared_only" }))).json);
-  expect(started.kind).toBe("started");
+  // 3. once asked, the backend prepares it with the fake tasks (claims, checks and revisions) and starts the review on its own
+  const optionsReq = get("review options", `/captures/${CAP}/review-options`);
+  const askOf = async () => reviewOptionsResponse.parse((await peek(optionsReq)).json).ask;
+  await until(async () => (await askOf())?.state === "started");
+  await settled(s);
+  const ask = reviewOptionsResponse.parse((await send(optionsReq)).json).ask;
+  if (ask?.state !== "started") throw new Error("the asked review did not start");
+  const REVIEW = ask.reviewId;
+
+  // 4. the review: its scope, then ten turns streamed
+  expect(reviewViewResponse.parse((await send(get("started review", `/reviews/${REVIEW}`))).json).scope.claimsAtStart).toHaveLength(3);
 
   for (const [n, { act }] of ACTS.entries()) {
     const reply = await send(post(`turn ${n + 1}`, `/reviews/${REVIEW}/turns`, { turnId: turnId(n + 1), act }));
@@ -428,7 +443,7 @@ async function runProduct(opts: { restartAfterTurn: number | null }): Promise<Pr
   expect((await send(get("usage", "/usage", "extension"))).status).toBe(200);
 
   await stop(s);
-  return { configDir, dataDir, fakes, sent, replies, record, counts: tableCounts(dataDir), boots };
+  return { configDir, dataDir, fakes, sent, replies, record, counts: tableCounts(dataDir), boots, reviewId: REVIEW };
 }
 
 /** Boots the backend on a fresh copy of a finished run's data dir, so a test never disturbs the dir another test reads. */
@@ -514,7 +529,7 @@ describe("REPLAY DATA (fake tasks, no live call): capture to saved record over H
     expect(note).toBeDefined();
     expect(note!.generated.filter((g) => g.author === "learner").every((g) => g.turnId !== null)).toBe(true);
     await withCopy(product, async (s) => {
-      expect(reviewViewResponse.parse((await call(s, get("x", `/reviews/${REVIEW}`))).json).saved).toBe("saved");
+      expect(reviewViewResponse.parse((await call(s, get("x", `/reviews/${product.reviewId}`))).json).saved).toBe("saved");
     });
   }, 30_000);
 
@@ -602,7 +617,7 @@ describe("REPLAY DATA (fake tasks, no live call): capture to saved record over H
     cpSync(product.dataDir, copy, { recursive: true });
     const s = await bootOn(copy, product.configDir, { ...product.fakes.tasks, diagramSummary: own });
     try {
-      const listed = diagramsResponse.parse((await call(s, get("diagrams", `/reviews/${REVIEW}/diagrams`))).json).topics;
+      const listed = diagramsResponse.parse((await call(s, get("diagrams", `/reviews/${product.reviewId}/diagrams`))).json).topics;
       expect(listed.map((t) => t.label)).toEqual(["Alpha", "Beta", "Gamma"]);
       expect(listed.every((t) => t.summary.state === "not_requested")).toBe(true);
       expect(own.calls).toHaveLength(0);
@@ -612,15 +627,15 @@ describe("REPLAY DATA (fake tasks, no live call): capture to saved record over H
       expect(listed[0]!.frame).toBeNull();
       expect(listed[2]!.frame).toBeNull();
 
-      const started = topicDiagramResponse.parse((await call(s, post("start", `/reviews/${REVIEW}/diagrams/${beta.topicId}`))).json);
+      const started = topicDiagramResponse.parse((await call(s, post("start", `/reviews/${product.reviewId}/diagrams/${beta.topicId}`))).json);
       expect(started.summary.state).toBe("preparing");
-      await until(async () => diagramsResponse.parse((await call(s, get("poll", `/reviews/${REVIEW}/diagrams`))).json).topics[1]!.summary.state === "ready");
-      const done = diagramsResponse.parse((await call(s, get("done", `/reviews/${REVIEW}/diagrams`))).json).topics[1]!;
+      await until(async () => diagramsResponse.parse((await call(s, get("poll", `/reviews/${product.reviewId}/diagrams`))).json).topics[1]!.summary.state === "ready");
+      const done = diagramsResponse.parse((await call(s, get("done", `/reviews/${product.reviewId}/diagrams`))).json).topics[1]!;
       expect(done.summary).toMatchObject({ state: "ready", title: "What is Beta?" });
       // R19: the line citing evidence outside the topic, which the scripted model returned, is not shown
       expect((done.summary as { lines: { text: string }[] }).lines.map((l) => l.text)).toEqual(["Replay-data line."]);
 
-      const again = topicDiagramResponse.parse((await call(s, post("again", `/reviews/${REVIEW}/diagrams/${beta.topicId}`))).json);
+      const again = topicDiagramResponse.parse((await call(s, post("again", `/reviews/${product.reviewId}/diagrams/${beta.topicId}`))).json);
       expect(again.summary.state).toBe("ready");
       expect(own.calls).toHaveLength(1);
 
@@ -670,16 +685,18 @@ describe("REPLAY DATA (fake tasks, no live call): retro 1, resending every reque
       await idle(s);
       expect(product.fakes.callCounts()).toEqual(calledBefore);
 
-      const recordBefore = recordViewResponse.parse((await call(s, get("x", `/record?reviewId=${REVIEW}`))).json);
-      const turnsBefore = reviewViewResponse.parse((await call(s, get("x", `/reviews/${REVIEW}`))).json).turns;
+      const recordBefore = recordViewResponse.parse((await call(s, get("x", `/record?reviewId=${product.reviewId}`))).json);
+      const turnsBefore = reviewViewResponse.parse((await call(s, get("x", `/reviews/${product.reviewId}`))).json).turns;
 
       const resent: Reply[] = [];
       for (const req of product.sent) resent.push(await call(s, req));
       await idle(s);
 
+      // The resent Review now finds the stopped lecture fully reviewed, so it asks for nothing and the options still name the review.
       const after = tableCounts(copy);
       expect(Object.keys(after)).toEqual(Object.keys(before));
       for (const table of Object.keys(before)) expect({ table, rows: after[table] }).toEqual({ table, rows: before[table] });
+      expect(reviewOptionsResponse.parse((await call(s, get("x", `/captures/${CAP}/review-options`))).json)).toMatchObject({ kind: "nothing_to_review", ask: { state: "started", reviewId: product.reviewId } });
       expect(product.fakes.callCounts()).toEqual(calledBefore);
 
       // the comparison is not vacuous: the script filled every table the product writes in this flow
@@ -687,10 +704,10 @@ describe("REPLAY DATA (fake tasks, no live call): retro 1, resending every reque
       const filled = ["capture_facts", "frames", "memo", "memo_inputs", "usage_events", "chunk_revisions", "claim_index", "concept_index", "reviews", "review_turns", "invite_answers", "notes", "note_evidence", "observations", "saved_reviews", "link_suggestions", "link_decisions", "note_edits", "note_deletions", "evidence_snapshots"];
       for (const table of filled) expect({ table, filled: (before[table] ?? 0) > 0 }).toEqual({ table, filled: true });
 
-      const recordAfter = recordViewResponse.parse((await call(s, get("x", `/record?reviewId=${REVIEW}`))).json);
+      const recordAfter = recordViewResponse.parse((await call(s, get("x", `/record?reviewId=${product.reviewId}`))).json);
       expect(plain_(recordAfter)).toEqual(plain_(recordBefore));
       expect(plain_(recordAfter)).toEqual(plain_(product.record));
-      expect(reviewViewResponse.parse((await call(s, get("x", `/reviews/${REVIEW}`))).json).turns).toEqual(turnsBefore);
+      expect(reviewViewResponse.parse((await call(s, get("x", `/reviews/${product.reviewId}`))).json).turns).toEqual(turnsBefore);
 
       // each resent turn replays the stored move and the same words, with no second model call
       const shape = (r: Reply) => ({
@@ -722,7 +739,7 @@ describe("REPLAY DATA (fake tasks, no live call): retro 1, resending every reque
       expect((await call(s, del)).status).toBe(204);
       const frameId = (del.body as { evidenceIds: string[] }).evidenceIds[0]!;
       expect((await call(s, get("x", `/frames/${frameId}`))).status).toBe(404);
-      const record = recordViewResponse.parse((await call(s, get("x", `/record?reviewId=${REVIEW}`))).json);
+      const record = recordViewResponse.parse((await call(s, get("x", `/record?reviewId=${product.reviewId}`))).json);
       expect(record.unavailableEvidence.map((u) => u.id)).toEqual([frameId as EvidenceId]);
       expect(tableCounts(copy)).toEqual(once);
     });

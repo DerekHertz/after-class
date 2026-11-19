@@ -4,10 +4,10 @@
  */
 import { heldMessage, resetDay } from "../shared/allowance";
 import type {
-  Allowance, Author, CaptureStatus, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, HeldBack, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
-  ReviewState, ReviewView, ScopePreview, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
+  Allowance, AskView, Author, CaptureStatus, CaptureView, Claim, Concept, EvidenceBundle, Gap, GapReason, HeldBack, LearnerAct, Note, Observation, PartialReason, RecordedStatus, ReviewOptions,
+  ReviewState, ReviewView, ScopePreview, Seq, StartChoice, Turn, TurnEvent, TutorMove, UsageSummary,
 } from "../shared/domain";
-import type { EvidenceId, SourceId } from "../shared/ids";
+import type { EvidenceId, ReviewId, SourceId } from "../shared/ids";
 import { IntervalSet, Material } from "../shared/time";
 import type { Interval } from "../shared/time";
 
@@ -168,6 +168,8 @@ export type OptionsScreen =
     }
   | {
       readonly kind: "processing";
+      /** False until the learner asks for this lecture's review. Until then nothing is prepared (flow C, 2026-11-18). */
+      readonly asked: boolean;
       /** Null unless the backend gave a usable estimate: an unreliable estimate is never invented. */
       readonly estimate: string | null;
       readonly pendingChunks: number;
@@ -240,6 +242,40 @@ export function scopeSummary(scope: ScopePreview, titles: SourceTitles = new Map
   };
 }
 
+/**
+ * Flow C, 2026-11-18: "A review ends while more chunks are prepared or preparing → offer the next section as a new review." What the
+ * lecture's options say about its next section once a review is over, or null when nothing more is prepared or preparing.
+ */
+export function nextSection(options: ReviewOptions): "prepared" | "preparing" | null {
+  if (options.kind === "ready") return "prepared";
+  if (options.kind === "processing" && options.asked) return options.readyNow === null ? "preparing" : "prepared";
+  return null;
+}
+
+/**
+ * The ask a lecture page waits on, or null: the ask its own Review now or Wait opened or joined, the one the popup's `#asked=<seq>` names,
+ * or one it read open. Never an ask that had ended when the page began to wait (Ask_PageFollowsItsOwnAsk in Preparation.tla).
+ */
+export type AskFollow = Seq | null;
+
+/** The ask a lecture page opened by the popup's Review now waits on: `#asked=<seq>`, which the popup adds only when it opened or joined one. */
+export function askedMark(hash: string): AskFollow {
+  const m = /^#asked=([1-9]\d*)$/.exec(hash);
+  return m === null ? null : (Number(m[1]) as Seq);
+}
+
+/**
+ * Flow C, 2026-11-18: the backend starts an asked review "once a prepared chunk has a supported claim". A lecture page follows it: one
+ * read of the latest ask gives the ask the page waits on next and the review to open now, if any. It opens only the review started from
+ * the ask it waits on, and only while that review runs: a page suspended while another tab ended it shows the lecture instead. An
+ * exhausted or refused ask, or a later one, ends the wait, and a read older than the ask it waits on changes nothing.
+ */
+export function followAsk(waitingOn: AskFollow, ask: AskView | undefined): { readonly state: AskFollow; readonly open: ReviewId | null } {
+  if (ask?.state === "open") return { state: ask.seq, open: null };
+  if (waitingOn === null || ask === undefined || ask.seq < waitingOn) return { state: waitingOn, open: null };
+  return { state: null, open: ask.seq === waitingOn && ask.state === "started" && ask.running ? ask.reviewId : null };
+}
+
 export function optionsScreen(options: ReviewOptions, titles: SourceTitles = new Map(), videos: SourceVideos = new Map()): OptionsScreen {
   switch (options.kind) {
     case "ready":
@@ -254,6 +290,7 @@ export function optionsScreen(options: ReviewOptions, titles: SourceTitles = new
       const rest = sections(options.pendingChunks);
       return {
         kind: "processing",
+        asked: options.asked,
         estimate: estimateText(options.estimateS),
         pendingChunks: options.pendingChunks,
         // The pending sections get their own sentence on this screen, so they are not repeated as a limit.

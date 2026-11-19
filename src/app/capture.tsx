@@ -1,12 +1,13 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { heldMessage } from "../shared/allowance";
 import { randomId } from "../shared/ids";
 import type { CaptureId, ReviewId } from "../shared/ids";
+import { REVIEW_LIMIT_MESSAGE } from "../shared/domain";
 import type { ReviewOptions, StartChoice, UsageSummary } from "../shared/domain";
 import type { AppApi } from "./api";
 import { usePrefetchReviewArt } from "./art-prefetch";
-import { captureStatusLabel, coveredLines, earlierReviewsNote, formatClock, inspectBundle, laterNote, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
-import type { OptionsScreen, ScopeSummary, SourceTitles, StartOffer } from "./core";
+import { askedMark, captureStatusLabel, coveredLines, earlierReviewsNote, followAsk, formatClock, inspectBundle, laterNote, lectureHeading, optionsScreen, sourceTitles, sourceVideos } from "./core";
+import type { AskFollow, OptionsScreen, ScopeSummary, SourceTitles, StartOffer } from "./core";
 import { ReviewRow } from "./home";
 import type { LectureReview } from "./home";
 import { usePolled } from "./poll";
@@ -16,7 +17,8 @@ import { BundleInspector, ErrorNote, EvidencePane, Link, navigate, useAsync } fr
 
 
 const POLL_MS = 3000;
-const isProcessing = (options: ReviewOptions): boolean => options.kind === "processing";
+/** Read again whatever the options say, so an ask from another tab or the extension reaches this page in every state (flow C, 2026-11-18). */
+const always = (): boolean => true;
 const isHeld = (usage: UsageSummary): boolean => usage.allowance?.held != null;
 
 export type OptionsViewProps = {
@@ -41,6 +43,18 @@ export function OptionsView({ screen, busy, onStart, onRetry, api, titles }: Opt
         </section>
       );
     case "processing":
+      if (!screen.asked) {
+        return (
+          <section className="invitation-paper" aria-labelledby="invitation-heading">
+            <p className="page-kicker">Prepared when you ask</p>
+            <h2 id="invitation-heading">Not prepared yet</h2>
+            <p>
+              We prepare a lecture only when you ask to review it. Choose Review now or Wait below. The review starts on its own once the first
+              section is ready.
+            </p>
+          </section>
+        );
+      }
       return (
         <section className="invitation-paper" aria-labelledby="invitation-heading">
           <p className="page-kicker">Getting your lecture ready</p>
@@ -187,7 +201,7 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
   const capture = useAsync(useCallback(() => api.captureView(captureId), [api, captureId]));
   // Read once on arrival, only for the rows the note links to: a review started from this page navigates away, so the list cannot go stale here.
   const reviews = useAsync(useCallback(() => loadLectureReviews(api, captureId), [api, captureId]));
-  const options = usePolled(useCallback(() => api.reviewOptions(captureId), [api, captureId]), isProcessing, POLL_MS);
+  const options = usePolled(useCallback(() => api.reviewOptions(captureId), [api, captureId]), always, POLL_MS);
   // A budget that holds back new model calls holds back preparation too. Read again while it does, so the note goes when it lifts.
   const usage = usePolled(useCallback(() => api.usage(), [api]), isHeld, POLL_MS);
   const allowance = usage.data?.allowance ?? null;
@@ -228,14 +242,32 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
     }
   }
 
-  async function answer(kind: "later" | "wait") {
+  // Flow C, 2026-11-18: the backend starts an asked review once a prepared section has a supported claim. This page opens it if it
+  // waited for it. A page that has unmounted reads nothing, so leaving the page never navigates.
+  const follow = useRef<AskFollow>(askedMark(location.hash));
+  useEffect(() => {
+    if (location.hash.startsWith("#asked")) history.replaceState(history.state, "", location.pathname + location.search);
+  }, []);
+  useEffect(() => {
+    if (options.data === null) return;
+    const next = followAsk(follow.current, options.data.ask);
+    follow.current = next.state;
+    if (next.open !== null) navigate({ page: "review", id: next.open });
+  }, [options.data]);
+  const askOpen = options.data?.ask?.state === "open";
+
+  async function answer(kind: "review_now" | "later" | "wait") {
     if (actionPending.current) return;
     actionPending.current = true;
     setStarting(true);
     setStartError(null);
     try {
-      await api.answerInvite(captureId, kind);
+      const { ask, review } = await api.answerInvite(captureId, kind);
+      // Review now found the lecture's review already open, started from another tab: open it.
+      if (review !== null) return navigate({ page: "review", id: review });
+      if (ask !== null) follow.current = ask;
       capture.reload();
+      options.reload();
     } catch (e) {
       setStartError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -260,10 +292,11 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
       {options.data !== null && <EarlierReviews options={options.data} reviews={reviews} titles={titles} />}
       <ErrorNote error={options.error} retry={options.reload} />
       <ErrorNote error={startError} />
+      {options.data?.ask?.state === "refused" && <p className="note" role="alert">{REVIEW_LIMIT_MESSAGE}</p>}
       {options.data === null && options.error === null && <p className="page-loading" role="status">Looking for prepared lecture material...</p>}
       {starting && <p className="page-loading" role="status">Saving your choice...</p>}
       {held !== null && shown !== null && shown.kind !== "ready" && <p className="note" role="status">{held}</p>}
-      {shown && (
+      {shown && !(askOpen && shown.kind === "nothing_to_review" && shown.gaps.length === 0 && shown.unverified.length === 0 && shown.rewatch.length === 0) && (
         <OptionsView
           screen={screen!}
           busy={starting}
@@ -284,7 +317,15 @@ export function CaptureScreen({ api, captureId }: { readonly api: AppApi; readon
           <button type="button" disabled={starting} onClick={() => answer("later")}>Later</button> <span className="muted">{laterNote(capture.data?.capture.status ?? null)}</span>
         </p>
       )}
-      {shown?.kind === "processing" && (
+      {shown?.kind === "processing" && !shown.asked && (
+        <p className="capture-answer">
+          <button type="button" className="page-primary" disabled={starting} onClick={() => void answer("review_now")}>Review now</button>{" "}
+          <button type="button" disabled={starting} onClick={() => void answer("wait")}>Wait</button>{" "}
+          <span className="muted">Either one prepares this lecture.{screen?.kind === "processing" && screen.estimate !== null && <> Estimated time: {screen.estimate}.</>}</span>
+        </p>
+      )}
+      {askOpen && <p className="page-loading" role="status">Preparing your lecture. The review starts when a section is ready.</p>}
+      {shown?.kind === "processing" && shown.asked && (
         <p className="capture-answer">
           <button type="button" disabled={starting} onClick={() => answer("wait")}>Wait</button> <span className="muted">Stay here until it is ready.</span>
         </p>

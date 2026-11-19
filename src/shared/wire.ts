@@ -11,7 +11,7 @@
 import { z } from "zod";
 import { FRAME_BOUNDS, MAX_FRAME_BASE64_CHARS } from "./domain";
 import type {
-  Allowance, BudgetHold, CaptureFact, CaptureView, Claim, ClaimDraft, DetourState, DiagramSummary, TopicDiagram, EvidenceBundle, Frame, FrozenScope, InviteAnswer, InviteState, LearnerAct,
+  Allowance, BudgetHold, CaptureFact, CaptureView, Claim, ClaimDraft, DetourState, DiagramSummary, TopicDiagram, EvidenceBundle, Frame, FrozenScope, InviteAnswer, InviteAnswered, InviteState, LearnerAct,
   LinkDecision, Note, Observation, ObservationStatus, Passage, RecordView, ReviewOptions, ReviewView, SaveResult, Seq, StartChoice,
   StartResult, Turn, TurnEvent, TutorMove, UsageSummary,
 } from "./domain";
@@ -273,7 +273,10 @@ const inviteState: z.ZodType<InviteState> = z.discriminatedUnion("state", [
   z.object({ state: z.literal("invited"), atChunk: idOf("crv") }),
   z.object({ state: z.literal("later") }),
   z.object({ state: z.literal("waiting") }),
+  z.object({ state: z.literal("nothing_to_review") }),
+  z.object({ state: z.literal("review_limit") }),
 ]);
+export const inviteAnsweredResponse: z.ZodType<InviteAnswered> = z.intersection(inviteState, z.object({ ask: seqz.nullable(), review: idOf("rvw").nullable() }));
 
 const captureViewz = z.object({
   captureId: idOf("cap"),
@@ -352,6 +355,12 @@ const scopePreviewz = z.object({
 });
 
 const heldBackz = z.array(z.object({ reviewId: idOf("rvw"), material: materialWire }));
+const askz = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("open"), seq: seqz }),
+  z.object({ state: z.literal("started"), seq: seqz, reviewId: idOf("rvw"), running: z.boolean() }),
+  z.object({ state: z.literal("exhausted"), seq: seqz }),
+  z.object({ state: z.literal("refused"), seq: seqz }),
+]);
 
 const nothingToReviewz = z.object({
   kind: z.literal("nothing_to_review"),
@@ -359,11 +368,12 @@ const nothingToReviewz = z.object({
   gaps: z.array(gapz),
   unverified: z.array(claimz),
   rewatch: z.array(z.object({ sourceId: idOf("src"), interval: intervalz })),
+  ask: askz.optional(),
 });
 
 export const reviewOptionsResponse = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("ready"), scope: scopePreviewz, heldBack: heldBackz }),
-  z.object({ kind: z.literal("processing"), readyNow: scopePreviewz.nullable(), pendingChunks: z.number(), estimateS: z.number().nullable(), heldBack: heldBackz }),
+  z.object({ kind: z.literal("ready"), scope: scopePreviewz, heldBack: heldBackz, ask: askz.optional() }),
+  z.object({ kind: z.literal("processing"), asked: z.boolean(), readyNow: scopePreviewz.nullable(), pendingChunks: z.number(), estimateS: z.number().nullable(), heldBack: heldBackz, ask: askz.optional() }),
   nothingToReviewz,
 ]) satisfies z.ZodType<ReviewOptions>;
 
@@ -721,7 +731,7 @@ export const ROUTES = {
   /** The home page's list of lectures and their reviews. Read-only. */
   lectures: route("GET", "/lectures", { bearer: APP, reply: json(lecturesResponse) }),
   captureView: route("GET", "/captures/:captureId", { capture: "path", bearer: APP, reply: json(captureResponse) }),
-  answerInvite: route("POST", "/captures/:captureId/invite", { capture: "path", request: inviteAnswerRequest, bearer: BOTH, reply: json(inviteState) }),
+  answerInvite: route("POST", "/captures/:captureId/invite", { capture: "path", request: inviteAnswerRequest, bearer: BOTH, reply: json(inviteAnsweredResponse) }),
   reviewOptions: route("GET", "/captures/:captureId/review-options", { capture: "path", bearer: APP, reply: json(reviewOptionsResponse) }),
   startReview: route("POST", "/captures/:captureId/reviews", { capture: "path", request: startReviewRequest, bearer: APP, reply: json(startReviewResponse) }),
   sendTurn: route("POST", "/reviews/:reviewId/turns", { request: turnRequest, bearer: APP, reply: { kind: "ndjson", event: tutorStreamEvent } }),

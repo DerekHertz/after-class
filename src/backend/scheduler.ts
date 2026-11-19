@@ -36,7 +36,7 @@ export type WorkItem = {
 /** memo.run's answer when a budget refused the attempt. The only part of a result the scheduler reads. */
 const isHeld = (result: unknown): boolean => typeof result === "object" && result !== null && (result as { readonly kind?: unknown }).kind === "held";
 
-export type SchedulerLimits = { readonly jev: number; readonly claude: number }; // starting values: 4, 2
+export type SchedulerLimits = { readonly jev: number; readonly claude: number };
 
 export type Scheduler = {
   pump(): void;
@@ -66,7 +66,13 @@ export type SchedulerOptions = {
   readonly onError?: (where: string, error: unknown) => void;
 };
 
-export const DEFAULT_LIMITS: SchedulerLimits = { jev: 4, claude: 2 };
+/**
+ * Claude 4, shared by every user, raised from 2 for lazy preparation (flow C, 2026-11-18). Only a lecture someone asked for demands Claude
+ * work, so every slot serves an asked lecture, and four of its chunks prepare at once, earliest first. Four counted interpretations
+ * reserve about $2.34 of a learner's $5 cap (providers/budget.ts), and four flat $1.08 holds still fit under it. The interactive lane has
+ * its own four (`INTERACTIVE_CLAUDE_LIMIT` in main.ts), so a tutor turn never waits behind preparation.
+ */
+export const DEFAULT_LIMITS: SchedulerLimits = { jev: 4, claude: 4 };
 export const MIN_ESTIMATE_SAMPLES = 5;
 const DAY_MS = 24 * 60 * 60 * 1000;
 

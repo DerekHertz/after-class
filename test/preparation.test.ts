@@ -10,6 +10,7 @@ import { claimSupportTask } from "../src/backend/providers/jev-tasks";
 import type { ClaimSupportInput } from "../src/backend/providers/jev-tasks";
 import type { JevClient } from "../src/backend/providers/jev";
 import type { WorkItem } from "../src/backend/scheduler";
+import type { UserDb } from "../src/backend/db";
 import { slotDep } from "../src/backend/deps";
 import type { Dep, ReadDep } from "../src/backend/deps";
 import { createPreparation } from "../src/backend/preparation";
@@ -71,10 +72,10 @@ const checkCanonical = (i: ClaimSupportInput): IdPart => ({
 
 const keepsLike = <T extends object>(product: Task<never, unknown>, fake: T): T => (product.keepsFirstResult ? Object.assign(fake, { keepsFirstResult: true }) : fake);
 
-function world(opts:{ readonly interpret?: Task<InterpretationInput, InterpretationOutput>; readonly read?: ReadDep; readonly changed?: (keys: readonly Dep[]) => void } = {}) {
-  const db = testUserDb();
+function world(opts: { readonly unasked?: boolean; readonly db?: UserDb; readonly captureId?: CaptureId; readonly interpret?: Task<InterpretationInput, InterpretationOutput>; readonly read?: ReadDep; readonly changed?: (keys: readonly Dep[]) => void } = {}) {
+  const db = opts.db ?? testUserDb();
   const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
-  const captureId = randomId("cap") as CaptureId;
+  const captureId = opts.captureId ?? (randomId("cap") as CaptureId);
   const revisions = new Map<ChunkRevisionId, ChunkRevision>();
   const latest = new Map<number, ChunkRevision>();
 
@@ -117,6 +118,8 @@ function world(opts:{ readonly interpret?: Task<InterpretationInput, Interpretat
     ...(opts.read ? { read: opts.read } : {}),
     ...(opts.changed ? { changed: opts.changed } : {}),
   });
+  // Most tests here are about a lecture being prepared, so it is asked for (flow C, 2026-11-18). `unasked` leaves it held.
+  if (!opts.unasked) prep.ask(captureId);
 
   /** Segmentation's side: append a revision of chunk `ordinal` covering [start, end). */
   function close(ordinal: number, start: number, end: number): ChunkRevision {
@@ -247,6 +250,53 @@ describe("validateDraft and assessable", () => {
 });
 
 // ───────────────────────────── preparation over a capture ────────────────────
+
+describe("lazy preparation: a lecture is prepared only once someone asks for its review (flow C, 2026-11-18)", () => {
+  test("nothing is sent to Claude for a lecture nobody asked for, and its chunks are held", async () => {
+    const w = world({ unasked: true });
+    const a = w.close(0, 0, 20);
+    const b = w.close(1, 20, 40);
+    expect(w.prep.demand(w.captureId)).toEqual([]);
+    await w.drain();
+    expect(w.tasks.interpret.calls).toEqual([]);
+    expect(w.tasks.revise.calls).toEqual([]);
+    expect(w.tasks.checkClaim.calls).toEqual([]);
+    expect(w.prep.prep(a.id)).toMatchObject({ interpretation: "held", finished: false, claims: [] });
+    expect(w.prep.prep(b.id)).toMatchObject({ interpretation: "held", finished: false });
+  });
+
+  test("asking queues every held chunk at once, earliest first, and every chunk that closes later", async () => {
+    const w = world({ unasked: true });
+    const chunks = [w.close(0, 0, 20), w.close(1, 20, 40)];
+    w.prep.ask(w.captureId);
+    expect(w.demanded("interpretation")).toHaveLength(2);
+    const later = w.close(2, 40, 60);
+    expect(w.demanded("interpretation")).toHaveLength(3);
+    // Demand lists them earliest first, and the scheduler starts equal-priority work in that order.
+    await w.drain();
+    expect(w.tasks.interpret.calls.map((c) => c.chunkRevisionId)).toEqual([...chunks, later].map((r) => r.id));
+    for (const r of [...chunks, later]) expect(w.prep.prep(r.id)).toMatchObject({ interpretation: "done", finished: true });
+  });
+
+  test("asking twice interprets each chunk once, and a restart keeps the ask without interpreting again", async () => {
+    const first = world({ unasked: true });
+    const chunks = [first.close(0, 0, 20), first.close(1, 20, 40)];
+    first.prep.ask(first.captureId);
+    first.prep.ask(first.captureId);
+    await first.drain();
+    expect(first.tasks.interpret.calls.map((c) => c.chunkRevisionId)).toEqual(chunks.map((r) => r.id));
+    // A new process: the same database, a fresh preparation module with nothing in memory, and the learner asking again.
+    const after = world({ unasked: true, db: first.db, captureId: first.captureId });
+    const again = [after.close(0, 0, 20), after.close(1, 20, 40)];
+    for (const r of again) expect(after.prep.prep(r.id)).toMatchObject({ interpretation: "done", finished: true });
+    after.prep.ask(after.captureId);
+    await after.drain();
+    expect(after.tasks.interpret.calls).toEqual([]);
+    // Another lecture in the same database is still held.
+    const other = world({ unasked: true, db: first.db });
+    expect(other.prep.prep(other.close(0, 0, 20).id)).toMatchObject({ interpretation: "held" });
+  });
+});
 
 describe("preparation", () => {
   test("a closed chunk is interpreted, checked, revised once where needed, and finishes ready", async () => {

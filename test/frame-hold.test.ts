@@ -385,6 +385,7 @@ describe("composition", () => {
       s.frame("a", 1);
       s.frame("b", 220);
       r.modules.evidence.ingest({ captureId: s.captureId, facts: s.facts.splice(0) });
+      r.modules.reviews.answerInvite(s.captureId, "wait");
       await until(() => f.preparation.interpret.calls.length === 1);
       const frameId = stableId("ev", s.captureId, "b");
       expect(f.preparation.interpret.calls[0]!.newMaterial.frames.some((fr) => fr.id === frameId)).toBe(true);
@@ -399,6 +400,7 @@ describe("composition", () => {
     const r = await app(f);
     try {
       r.modules.evidence.ingest({ captureId: l.s.captureId, facts: l.play() });
+      r.modules.reviews.answerInvite(l.s.captureId, "wait");
       await until(() => f.frameChange.calls.length === 2);
       r.modules.evidence.ingest({ captureId: l.s.captureId, facts: l.playOn() });
       await Bun.sleep(100);

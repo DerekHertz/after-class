@@ -21,7 +21,7 @@ const later = Material.of([[src, [interval(200, 300)]]]);
 const held = [{ reviewId: first, material: early }];
 const withHeld = (options: ReviewOptions, heldBack: ReviewOptions["heldBack"]): ReviewOptions => ({ ...options, heldBack });
 const ready = reviewOptionsz.parse(READY);
-const processing: ReviewOptions = { kind: "processing", readyNow: null, pendingChunks: 2, estimateS: null, heldBack: held };
+const processing: ReviewOptions = { kind: "processing", asked: true, readyNow: null, pendingChunks: 2, estimateS: null, heldBack: held };
 const nothing: ReviewOptions = { kind: "nothing_to_review", gaps: [], unverified: [], rewatch: [], heldBack: held };
 const loaded = (data: readonly LectureReview[] | null, error: string | null = null) => ({ data, error, reload() {} });
 

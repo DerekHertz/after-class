@@ -5,6 +5,7 @@
 export {
   captureResponse as captureResponsez,
   evidenceBundleResponse as evidenceBundlez,
+  inviteAnsweredResponse as inviteAnsweredz,
   encodeMaterial,
   materialWire as materialz,
   recordViewResponse as recordViewz,

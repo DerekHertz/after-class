@@ -20,6 +20,7 @@
  * restarts: a browser restart ends capture, which is the visible, honest outcome).
  * The policy itself is in control.ts and the upload loop in outbox.ts, both pure.
  */
+import { parseId } from "../../shared/ids";
 import type { CaptureId } from "../../shared/ids";
 import type { CaptureFactBody, InviteAnswer, InviteState } from "../../shared/domain";
 import type { ConnectReply, IngestAck } from "../../shared/wire";
@@ -386,19 +387,36 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // ───────────────────────────── Popup requests ───────────────────────────────
 
 /**
- * Answer an invite. Review now opens the review app tab and never touches capture state.
+ * Answer an invite. Review now opens the lecture page and never touches capture state.
  * R9: "Starting a review doesn't stop capture, and stopping capture doesn't end a review."
- * Every answer is also posted to the backend, which records it as a fact.
+ * Every answer is also posted to the backend, which records it as a fact. Review now is posted whatever the invite state, since it asks for
+ * the lecture's review, and the backend starts that review once a prepared chunk has a supported claim (flow C, 2026-11-18). When the
+ * answer opened or joined an ask, the lecture page opens after it is stored, marked `#asked=<seq>`, so the page waits on that ask and
+ * follows only the review it starts. Review now while a review of the lecture is open opens that review.
  */
 export async function answerInvite(tabId: number, answer: InviteAnswer): Promise<InviteState> {
   const state = await readState(tabId);
-  if (answer === "review_now" || answer === "stop_early") await chrome.tabs.create({ url: safeReviewUrl(state?.lastAck?.reviewAppUrl, `${BACKEND.origin}/app/`) });
+  const app = new URL(safeReviewUrl(state?.lastAck?.reviewAppUrl, `${BACKEND.origin}/app/`));
+  const opensPage = answer === "review_now" || answer === "stop_early";
   const current: InviteState = state?.lastAck?.invite ?? { state: "none" };
-  if (state === null || (answer === "review_now" && current.state !== "invited")) return current;
+  if (state === null) {
+    if (opensPage) await chrome.tabs.create({ url: app.href });
+    return current;
+  }
   const r = await backendFetch("POST", `/captures/${state.captureId}/invite`, { answer }, { capture: state.captureId });
+  const body = r.ok ? (r.json as { state?: unknown; ask?: unknown; review?: unknown } | null) : null;
+  const ask = typeof body?.ask === "number" && Number.isSafeInteger(body.ask) && body.ask > 0 ? body.ask : null;
+  const review = parseId("rvw", body?.review);
+  const path = review !== null && answer === "review_now"
+    ? `/app/review/${encodeURIComponent(review)}`
+    : `/app/capture/${encodeURIComponent(state.captureId)}${ask !== null && answer === "review_now" ? `#asked=${ask}` : ""}`;
+  if (opensPage) await chrome.tabs.create({ url: new URL(path, app.origin).href });
   if (!r.ok) throw new Error(r.error);
-  const s = (r.json as { state?: unknown } | null)?.state;
-  return s === "none" || s === "invited" || s === "later" || s === "waiting" ? (r.json as InviteState) : current;
+  const s = body?.state;
+  if (s !== "none" && s !== "invited" && s !== "later" && s !== "waiting" && s !== "nothing_to_review" && s !== "review_limit") return current;
+  // Keep only the invite state: the ack it joins carries no ask.
+  const { ask: _ask, review: _review, ...invite } = body as InviteState & { ask?: unknown; review?: unknown };
+  return invite;
 }
 
 async function ensureWatchPage(tabId: number): Promise<void> {

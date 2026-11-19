@@ -4,12 +4,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { AppApi } from "../src/app/api";
 import { ApiError } from "../src/app/api";
 import { OptionsView, checkAgain } from "../src/app/capture";
-import { questionsAsked, availableActions, captureStatusLabel, citedInWatchOrder, conversationLines, coveredLines, currentEvidenceIds, estimateText, formatClock, groupGaps, inspectBundle, laterNote, lectureHeading, liveText, noteView, observationRow, optionsScreen, parseRoute, partialLines, reduceLive, routePath, softTargetPrompt, sourceWatchOrder, startLive, strandedEndTurn, toAct, unansweredLearnerTurn, usageRows } from "../src/app/core";
+import { askedMark, questionsAsked, availableActions, captureStatusLabel, citedInWatchOrder, conversationLines, coveredLines, currentEvidenceIds, estimateText, followAsk, formatClock, groupGaps, inspectBundle, laterNote, lectureHeading, liveText, nextSection, noteView, observationRow, optionsScreen, parseRoute, partialLines, reduceLive, routePath, softTargetPrompt, sourceWatchOrder, startLive, strandedEndTurn, toAct, unansweredLearnerTurn, usageRows } from "../src/app/core";
 import { evidenceBundlez, reviewOptionsz, reviewViewz } from "../src/app/decode";
 import { UsageTable } from "../src/app/record";
 import { BundleInspector, EvidencePane } from "../src/app/ui";
-import type { ScopePreview, TurnEvent, UsageSummary } from "../src/shared/domain";
+import type { ScopePreview, Seq, TurnEvent, UsageSummary } from "../src/shared/domain";
 import { stableId } from "../src/shared/ids";
+import type { ReviewId } from "../src/shared/ids";
 import { media } from "../src/shared/time";
 import { Material, interval } from "../src/shared/time";
 import { captureId, claimJson, clm, cpt, crv, ev1, ev2, findElements, learnerAnswer, parsedReview, reviewId, reviewJson, sentence, src, stored, thr, tid, turnJson, tutorAsk } from "./app-fixtures";
@@ -83,7 +84,7 @@ describe("review options screens", () => {
   });
 
   test("processing shows an estimate only when the backend gave a usable one", () => {
-    const processing = (estimateS: number | null) => optionsScreen({ kind: "processing", heldBack: [], readyNow: null, pendingChunks: 2, estimateS });
+    const processing = (estimateS: number | null) => optionsScreen({ kind: "processing", asked: true, heldBack: [], readyNow: null, pendingChunks: 2, estimateS });
     expect(processing(null)).toMatchObject({ estimate: null });
     expect(processing(0)).toMatchObject({ estimate: null });
     expect(processing(Number.NaN)).toMatchObject({ estimate: null });
@@ -93,16 +94,16 @@ describe("review options screens", () => {
   });
 
   test("processing offers a start only when something is ready, and both ways of starting then", () => {
-    const none = optionsScreen({ kind: "processing", heldBack: [], readyNow: null, pendingChunks: 1, estimateS: null });
+    const none = optionsScreen({ kind: "processing", asked: true, heldBack: [], readyNow: null, pendingChunks: 1, estimateS: null });
     expect(none.kind === "processing" && none.offers).toEqual([]);
-    const some = optionsScreen({ kind: "processing", heldBack: [], readyNow: scopeOf({ supportedClaims: 3, partial: [{ kind: "chunks_still_preparing", count: 1 }] }), pendingChunks: 1, estimateS: 120 });
+    const some = optionsScreen({ kind: "processing", asked: true, heldBack: [], readyNow: scopeOf({ supportedClaims: 3, partial: [{ kind: "chunks_still_preparing", count: 1 }] }), pendingChunks: 1, estimateS: 120 });
     expect(some.kind === "processing" && some.offers.map((o) => o.choice)).toEqual(["prepared_only", "stop_early"]);
     // The pending section has its own sentence on this screen, so it is not listed again as a limit.
     expect(some.kind === "processing" && some.ready?.limits).toEqual([]);
   });
 
   test("processing makes starting with ready topics the usual path and puts stopping behind a disclosure that says what it cancels", () => {
-    const out = html({ kind: "processing", heldBack: [], readyNow: scopeOf({ topics: [topic("Logical clocks")] }), pendingChunks: 2, estimateS: null });
+    const out = html({ kind: "processing", asked: true, heldBack: [], readyNow: scopeOf({ topics: [topic("Logical clocks")] }), pendingChunks: 2, estimateS: null });
     expect(out).toContain("Some topics are ready");
     expect(out).toContain("2 more sections are still being prepared. They are not in a review you start now.");
     expect(out).toContain("<li>Logical clocks</li>");
@@ -113,7 +114,7 @@ describe("review options screens", () => {
     expect(more).toContain(">Stop preparing and start</button>");
     expect(more).toContain("Cancels the preparation still running for 2 sections.");
     expect(out.indexOf("Stop preparing and start")).toBeGreaterThan(out.indexOf("<details"));
-    const waiting = html({ kind: "processing", heldBack: [], readyNow: null, pendingChunks: 1, estimateS: null });
+    const waiting = html({ kind: "processing", asked: true, heldBack: [], readyNow: null, pendingChunks: 1, estimateS: null });
     expect(waiting).toContain("Preparing your lecture");
     expect(waiting).toContain("1 section is still being prepared.");
     expect(waiting).not.toContain("<button");
@@ -135,8 +136,8 @@ describe("review options screens", () => {
   const nothing = { kind: "nothing_to_review", heldBack: [], gaps: [], unverified: [], rewatch: [{ sourceId: src, interval: interval(120, 180) }] } as const;
 
   test("the rendered screens carry the content", () => {
-    expect(html({ kind: "processing", heldBack: [], readyNow: null, pendingChunks: 2, estimateS: null })).toContain("No reliable time estimate yet.");
-    expect(html({ kind: "processing", heldBack: [], readyNow: null, pendingChunks: 2, estimateS: 300 })).toContain("about 5 min");
+    expect(html({ kind: "processing", asked: true, heldBack: [], readyNow: null, pendingChunks: 2, estimateS: null })).toContain("No reliable time estimate yet.");
+    expect(html({ kind: "processing", asked: true, heldBack: [], readyNow: null, pendingChunks: 2, estimateS: 300 })).toContain("about 5 min");
     expect(html({ kind: "ready", heldBack: [], scope: scopeOf({ supportedClaims: 4 }) })).toContain("Start review");
     expect(html({ kind: "nothing_to_review", heldBack: [], gaps: [], unverified: [], rewatch: [] })).toContain("Nothing to review yet");
   });
@@ -445,5 +446,54 @@ describe("questionsAsked", () => {
     expect(questionsAsked({ mainQuestions: 1, quickChecks: 3 })).toBe(4);
     expect(questionsAsked({ mainQuestions: 0, quickChecks: 0 })).toBe(0);
     expect(questionsAsked({ mainQuestions: 3, quickChecks: 0 })).toBe(3);
+  });
+});
+
+describe("a lecture nobody asked for (flow C, 2026-11-18)", () => {
+  const preview: ScopePreview = { chunkRevisions: [crv], supportedClaims: 1, topics: [], material: Material.empty, partial: [] };
+  const api = {} as AppApi;
+
+  test("says nothing is prepared yet and never shows a preparing count or a start", () => {
+    const screen = optionsScreen({ kind: "processing", asked: false, readyNow: null, pendingChunks: 3, estimateS: null, heldBack: [] });
+    const html = renderToStaticMarkup(createElement(OptionsView, { screen, busy: false, onStart() {}, onRetry() {}, api, titles: new Map() }));
+    expect(html).toContain("Not prepared yet");
+    expect(html).not.toContain("still being prepared");
+    expect(html).not.toContain("<button");
+  });
+
+  test("after a review, the next section is offered when more is prepared or preparing, and not when nobody asked", () => {
+    expect(nextSection({ kind: "ready", scope: preview, heldBack: [] })).toBe("prepared");
+    expect(nextSection({ kind: "processing", asked: true, readyNow: preview, pendingChunks: 1, estimateS: null, heldBack: [] })).toBe("prepared");
+    expect(nextSection({ kind: "processing", asked: true, readyNow: null, pendingChunks: 1, estimateS: null, heldBack: [] })).toBe("preparing");
+    expect(nextSection({ kind: "processing", asked: false, readyNow: null, pendingChunks: 2, estimateS: null, heldBack: [] })).toBeNull();
+    expect(nextSection({ kind: "nothing_to_review", gaps: [], unverified: [], rewatch: [], heldBack: [] })).toBeNull();
+  });
+
+  test("a lecture page opens only the review started from the ask it waits on", () => {
+    const old = stableId("rvw", "earlier") as ReviewId;
+    const fresh = stableId("rvw", "asked") as ReviewId;
+    const [one, two, three] = [1 as Seq, 2 as Seq, 3 as Seq];
+    // A review that had started before the page loaded is the learner's to open from the list.
+    const first = followAsk(null, { state: "started", seq: one, reviewId: old, running: true });
+    expect(first).toEqual({ state: null, open: null });
+    // An ask made elsewhere: the page reads it open, then the review it started, and opens that one.
+    const waiting = followAsk(first.state, { state: "open", seq: two });
+    expect(waiting).toEqual({ state: two, open: null });
+    expect(followAsk(waiting.state, { state: "started", seq: two, reviewId: fresh, running: true }).open).toBe(fresh);
+    // The page asked itself: a stale read that still names the old ask's review opens nothing and keeps the wait.
+    expect(followAsk(two, { state: "started", seq: one, reviewId: old, running: true })).toEqual({ state: two, open: null });
+    // Its ask was exhausted, or a later ask replaced it: the wait ends with nothing opened.
+    expect(followAsk(two, { state: "exhausted", seq: two })).toEqual({ state: null, open: null });
+    expect(followAsk(two, { state: "started", seq: three, reviewId: fresh, running: true })).toEqual({ state: null, open: null });
+    // The popup opened the page marked with its ask, after the ask was stored: its first read may already name the review.
+    expect(followAsk(askedMark("#asked=2"), { state: "started", seq: two, reviewId: fresh, running: true }).open).toBe(fresh);
+    expect(followAsk(two, undefined)).toEqual({ state: two, open: null });
+  });
+
+  test("a page opened by an older popup's bare #asked waits on no ask, so it never opens the ended review of an older one", () => {
+    const old = stableId("rvw", "earlier") as ReviewId;
+    expect(askedMark("#asked")).toBeNull();
+    expect(askedMark("#asked=0")).toBeNull();
+    expect(followAsk(askedMark("#asked"), { state: "started", seq: 1 as Seq, reviewId: old, running: true }).open).toBeNull();
   });
 });

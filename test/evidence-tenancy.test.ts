@@ -311,7 +311,7 @@ describe("the evidence routes with a second user", () => {
 
   function rig() {
     const { raw, alice, bob } = twoUsers();
-    const reviews = { invite: () => ({ state: "none" }), answerInvite: () => ({ state: "later" }) } as unknown as Reviews;
+    const reviews = { invite: () => ({ state: "none" }), answerInvite: () => ({ state: "later", ask: null, review: null }) } as unknown as Reviews;
     const appDir = fixtureApp();
     const serveFor = (u: { db: UserDb; evidence: ReturnType<typeof twoUsers>["alice"]["evidence"] }) => {
       const server = serve({ modules: { ledger: createLedger(u.db), evidence: u.evidence, reviews }, auth: { port: 0, extensionId: EXT_ID, token: TOKEN }, appDir });
@@ -532,7 +532,7 @@ describe("every capture-scoped route answers 404 for a capture id the caller doe
     const reached: string[] = [];
     const reviews = {
       invite: () => (reached.push("invite"), { state: "none" }),
-      answerInvite: () => (reached.push("answerInvite"), { state: "later" }),
+      answerInvite: () => (reached.push("answerInvite"), { state: "later", ask: null, review: null }),
       options: () => (reached.push("options"), NOTHING),
       start: () => (reached.push("start"), NOTHING),
       view: () => {

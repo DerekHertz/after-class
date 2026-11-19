@@ -437,7 +437,7 @@ describe("GET /captures/:id and the invite answer", () => {
     await ingest(base, wireFacts(0, 2));
     const r = await post(base, `/captures/${CAP}/invite`, { answer: "later" });
     expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ state: "later" });
+    expect(await r.json()).toEqual({ state: "later", ask: null, review: null });
     expect(invite.answers).toEqual(["later"]);
     expect((await post(base, `/captures/${CAP}/invite`, { answer: "maybe" })).status).toBe(400);
     expect((await post(base, `/captures/${CAP}/invite`, "{")).status).toBe(400);

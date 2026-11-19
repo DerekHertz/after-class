@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { createReviews } from "../src/backend/review";
+import { createAsks } from "../src/backend/preparation/asks";
+import { followAsk } from "../src/app/core";
+import { createReviews, ReviewLimitError, UNTUTORED_REVIEWS_PER_DAY } from "../src/backend/review";
+import { inviteNote } from "../src/extension/popup/popup";
 import type { InviteEvent } from "../src/backend/review/core";
 import { corrections, foldInvites, freezeScope, takeSentences } from "../src/backend/review/core";
 import type { AssessableClaim, ChunkPrep, ChunkProvenance, ChunkRevision, Gap } from "../src/shared/domain";
@@ -7,7 +10,7 @@ import type { ClaimId, ConceptId, ReviewId } from "../src/shared/ids";
 import { randomId, stableId } from "../src/shared/ids";
 import { Material, interval } from "../src/shared/time";
 import { testUserDb } from "./fakes";
-import { CONCEPT, SRC, World, kit, reviewRows, rig, seq, started, startedRig } from "./review-fixtures";
+import { CONCEPT, SRC, World, answer, collect, kit, reply, reviewRows, rig, seq, started, startedRig } from "./review-fixtures";
 
 // ───────────────────────────── core: invite fold ─────────────────────────────
 
@@ -165,12 +168,12 @@ describe("invite", () => {
     expect(r.reviews.invite(r.capture)).toEqual({ state: "none" });
     const a = r.world.close(0, 0, 300);
     expect(r.reviews.invite(r.capture)).toEqual({ state: "invited", atChunk: a.id });
-    expect(r.reviews.answerInvite(r.capture, "later")).toEqual({ state: "later" });
+    expect(r.reviews.answerInvite(r.capture, "later")).toMatchObject({ state: "later" });
     r.world.close(1, 300, 780, "time");
     expect(r.reviews.invite(r.capture)).toEqual({ state: "later" });
     const c = r.world.close(2, 780, 1100);
     expect(r.reviews.invite(r.capture)).toEqual({ state: "invited", atChunk: c.id });
-    expect(r.reviews.answerInvite(r.capture, "wait")).toEqual({ state: "waiting" });
+    expect(r.reviews.answerInvite(r.capture, "wait")).toMatchObject({ state: "waiting" });
   });
 
   test("an outstanding boundary invite survives a revision of that chunk's boundary, and names the new revision", () => {
@@ -193,7 +196,7 @@ describe("invite", () => {
     r.world.close(0, 0, 300);
     r.reviews.answerInvite(r.capture, "later");
     r.world.close(1, 300, 700, "time");
-    expect(r.reviews.answerInvite(r.capture, "later")).toEqual({ state: "later" });
+    expect(r.reviews.answerInvite(r.capture, "later")).toMatchObject({ state: "later" });
     expect(r.db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM invite_answers").get()!.n).toBe(1);
     r.world.close(2, 700, 1250, "time");
     expect(r.reviews.invite(r.capture)).toMatchObject({ state: "invited" });
@@ -221,7 +224,7 @@ describe("invite", () => {
     const pending = r.world.close(0, 0, 300);
     r.world.pendingChunks.add(pending.id);
     const before = r.reviews.options(r.capture);
-    expect(r.reviews.answerInvite(r.capture, "later")).toEqual({ state: "later" });
+    expect(r.reviews.answerInvite(r.capture, "later")).toMatchObject({ state: "later" });
     expect(r.world.stops).toEqual([]);
     expect(r.world.pendingChunks.has(pending.id)).toBe(true);
     expect(r.reviews.options(r.capture)).toEqual(before);
@@ -302,6 +305,234 @@ describe("options", () => {
 });
 
 // ───────────────────────────── start ─────────────────────────────
+
+describe("asking for a lecture's review (flow C, 2026-11-18)", () => {
+  /** A rig with preparation's real ask record on the same database. */
+  function asking(stopped = false) {
+    // The tutor answers an end by wrapping up, so a review can finish.
+    const r = rig(() => reply({ kind: "wrap_up" }, "Done."), { estimateS: (n) => n * 40 });
+    const asks = createAsks(r.db);
+    const deps = { ...r.world.deps, runTutor: r.tutor.runTutor, clearFailures: r.tutor.clearFailures, asks, allChunksClosed: () => stopped };
+    const reviews = createReviews(r.db, deps, { tutor: kit, estimateS: (n) => n * 40 });
+    const askRows = () => r.db.sql.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM prep_asks").get()!.n;
+    return { ...r, reviews, asks, askRows, askOf: () => reviews.options(r.capture).ask };
+  }
+
+  test("only Review now and Wait ask; Later and Stop early do not, and reading the options asks nothing", () => {
+    for (const answer of ["later", "stop_early"] as const) {
+      const r = asking();
+      r.reviews.options(r.capture);
+      r.reviews.answerInvite(r.capture, answer);
+      expect(r.asks.asked(r.capture)).toBe(false);
+    }
+    for (const answer of ["review_now", "wait"] as const) {
+      const r = asking();
+      r.reviews.answerInvite(r.capture, answer);
+      expect(r.asks.latestAsk(r.capture)?.state).toBe("open");
+    }
+  });
+
+  test("an ask made before any chunk closed starts the review once a prepared chunk has a supported claim", () => {
+    const r = asking();
+    r.reviews.answerInvite(r.capture, "review_now");
+    // Nothing has closed: the options say nothing to review, and the ask waits, open, in that answer too.
+    expect(r.reviews.options(r.capture)).toMatchObject({ kind: "nothing_to_review", ask: { state: "open" } });
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    const chunk = r.world.close(0, 0, 300);
+    r.world.pendingChunks.add(chunk.id);
+    const claim = r.world.claim(1, 10, 20, "awaiting_check");
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    r.world.pendingChunks.delete(chunk.id);
+    r.world.check(claim, "supported_by_check");
+    const reviewId = r.reviews.startAsked(r.capture)!;
+    expect(reviewId).not.toBeNull();
+    expect(r.reviews.view(reviewId).scope.chunkRevisions).toEqual([chunk.id]);
+    expect(r.askOf()).toMatchObject({ state: "started", reviewId });
+    expect(r.asks.latestAsk(r.capture)).toMatchObject({ state: "started", reviewId });
+  });
+
+  test("Wait, finish the review, then Wait again starts a second review on the section prepared since", async () => {
+    const r = asking();
+    r.world.close(0, 0, 300);
+    r.world.claim(1, 10, 20);
+    r.reviews.answerInvite(r.capture, "wait");
+    const first = r.reviews.startAsked(r.capture)!;
+    expect(first).not.toBeNull();
+    await collect(r.reviews.turn(first, randomId("turn"), answer()));
+    await collect(r.reviews.turn(first, randomId("turn"), { kind: "end" }));
+    expect(r.reviews.view(first).state.phase).toBe("ended");
+    const next = r.world.close(1, 300, 600);
+    r.world.pendingChunks.add(next.id);
+    r.world.claim(2, 310, 320);
+    // The same answer to the same invite stores no new answer, yet it opens a new ask.
+    r.reviews.answerInvite(r.capture, "wait");
+    expect(r.askOf()).toMatchObject({ state: "open" });
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    r.world.pendingChunks.delete(next.id);
+    const second = r.reviews.startAsked(r.capture)!;
+    expect(second).not.toBeNull();
+    expect(second).not.toBe(first);
+    expect(r.reviews.view(second).scope.chunkRevisions).toEqual([next.id]);
+    expect(reviewRows(r.db)).toBe(2);
+  });
+
+  test("asking twice while an ask is open starts one review, however often the start runs", () => {
+    const r = asking();
+    r.world.close(0, 0, 300);
+    r.world.claim(1, 10, 20);
+    r.reviews.answerInvite(r.capture, "wait");
+    r.reviews.answerInvite(r.capture, "review_now");
+    expect(r.askRows()).toBe(1);
+    const reviewId = r.reviews.startAsked(r.capture)!;
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    expect(reviewRows(r.db)).toBe(1);
+    expect(r.askOf()).toMatchObject({ state: "started", reviewId });
+  });
+
+  test("a review the learner starts by hand answers the open ask, so no second review starts from it", () => {
+    const r = asking();
+    r.world.close(0, 0, 300);
+    r.world.claim(1, 10, 20);
+    r.reviews.answerInvite(r.capture, "wait");
+    const mine = randomId("rvw");
+    started(r.reviews.start(r.capture, "prepared_only", mine));
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    expect(r.askOf()).toMatchObject({ state: "started", reviewId: mine });
+    expect(reviewRows(r.db)).toBe(1);
+  });
+
+  test("an ask resent while its review runs starts no second review over that review's claims, until a new claim is prepared", () => {
+    const r = asking();
+    r.world.close(0, 0, 300);
+    r.world.claim(1, 10, 20);
+    r.reviews.answerInvite(r.capture, "review_now");
+    const first = r.reviews.startAsked(r.capture)!;
+    expect(first).not.toBeNull();
+    r.reviews.answerInvite(r.capture, "wait");
+    expect(r.askOf()).toMatchObject({ state: "open" });
+    // The section grows with no new supported claim: the grown chunk is offered whole, yet its only claim is the running review's.
+    r.world.close(0, 0, 330);
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    expect(reviewRows(r.db)).toBe(1);
+    expect(r.askOf()).toMatchObject({ state: "open" });
+    r.world.claim(2, 310, 320);
+    const second = r.reviews.startAsked(r.capture)!;
+    expect(second).not.toBeNull();
+    expect(second).not.toBe(first);
+  });
+
+  test("Review now resent while the lecture's review is open returns that review and opens no ask", () => {
+    const r = asking();
+    r.world.close(0, 0, 300);
+    r.world.claim(1, 10, 20);
+    r.reviews.answerInvite(r.capture, "review_now");
+    const first = r.reviews.startAsked(r.capture)!;
+    r.reviews.answerInvite(r.capture, "review_now");
+    expect(r.askRows()).toBe(1);
+    expect(r.askOf()).toMatchObject({ state: "started", reviewId: first });
+  });
+
+  test("Review now resent on a fully reviewed, stopped lecture opens no ask and says nothing to review", async () => {
+    const r = asking(true);
+    r.world.close(0, 0, 300);
+    r.world.claim(1, 10, 20);
+    r.reviews.answerInvite(r.capture, "review_now");
+    const first = r.reviews.startAsked(r.capture)!;
+    await collect(r.reviews.turn(first, randomId("turn"), answer()));
+    await collect(r.reviews.turn(first, randomId("turn"), { kind: "end" }));
+    expect(r.reviews.view(first).state.phase).toBe("ended");
+    // The answer names no ask, so the popup opens the lecture page unmarked, and the page waits on none: it never opens the ended review.
+    expect(r.reviews.answerInvite(r.capture, "review_now")).toMatchObject({ ask: null, review: null });
+    expect(r.askRows()).toBe(1);
+    const options = r.reviews.options(r.capture);
+    expect(options).toMatchObject({ kind: "nothing_to_review", ask: { state: "started", reviewId: first } });
+    expect(followAsk(null, options.ask)).toEqual({ state: null, open: null });
+  });
+
+  test("a lecture stopped while its last chunk prepares, with every claim unverified, ends in nothing to review, not Processing", () => {
+    const r = asking(true);
+    const chunk = r.world.close(0, 0, 300);
+    r.world.pendingChunks.add(chunk.id);
+    const claim = r.world.claim(1, 10, 20, "awaiting_check");
+    const asked = r.reviews.answerInvite(r.capture, "wait");
+    expect(asked.ask).not.toBeNull();
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    expect(r.askOf()).toMatchObject({ state: "open" });
+    // The last check lands: the claim is unverified, and nothing is left to prepare or close.
+    r.world.pendingChunks.delete(chunk.id);
+    r.world.check(claim, "unverified");
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    expect(r.askOf()).toEqual({ state: "exhausted", seq: asked.ask! });
+    // Again, as every later derivation does: it stays exhausted, and nothing starts.
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    expect(reviewRows(r.db)).toBe(0);
+    // The page that waited stops waiting and shows nothing to review; the popup's Processing turns into nothing to review.
+    const options = r.reviews.options(r.capture);
+    expect(options.kind).toBe("nothing_to_review");
+    expect(followAsk(asked.ask, options.ask)).toEqual({ state: null, open: null });
+    expect(r.reviews.invite(r.capture)).toEqual({ state: "nothing_to_review" });
+  });
+
+  test("a page that waited on an ask opens its review while it runs, and not once another tab has ended it", async () => {
+    const r = asking();
+    r.world.close(0, 0, 300);
+    r.world.claim(1, 10, 20);
+    const asked = r.reviews.answerInvite(r.capture, "wait").ask;
+    const reviewId = r.reviews.startAsked(r.capture)!;
+    expect(followAsk(asked, r.reviews.options(r.capture).ask).open).toBe(reviewId);
+    await collect(r.reviews.turn(reviewId, randomId("turn"), answer()));
+    await collect(r.reviews.turn(reviewId, randomId("turn"), { kind: "end" }));
+    expect(r.reviews.view(reviewId).state.phase).toBe("ended");
+    expect(followAsk(asked, r.reviews.options(r.capture).ask)).toEqual({ state: null, open: null });
+  });
+
+  test("an asked start the day's review limit refuses ends the ask refused, and the popup and the page show the limit's refusal", () => {
+    const r = asking();
+    r.world.close(0, 0, 300);
+    r.world.claim(1, 10, 20);
+    const elsewhere = stableId("cap", "elsewhere");
+    for (let n = 0; n < UNTUTORED_REVIEWS_PER_DAY; n++) {
+      r.db.sql.run("INSERT INTO reviews (id, user_id, capture_id, choice, scope_json, frozen_at_seq, started_ms) VALUES (?, ?, ?, 'prepared_only', ?, ?, ?)", [
+        randomId("rvw"), r.db.userId, elsewhere, JSON.stringify({ scope: { material: Material.canonical(Material.empty) }, claimTexts: {} }), n + 1, Date.now(),
+      ]);
+    }
+    const asked = r.reviews.answerInvite(r.capture, "wait").ask;
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    expect(reviewRows(r.db)).toBe(UNTUTORED_REVIEWS_PER_DAY);
+    const options = r.reviews.options(r.capture);
+    expect(options.ask).toMatchObject({ state: "refused" });
+    expect(followAsk(asked, options.ask)).toEqual({ state: null, open: null });
+    expect(r.reviews.invite(r.capture)).toEqual({ state: "review_limit" });
+    expect(inviteNote(r.reviews.invite(r.capture))).toBe(new ReviewLimitError().message);
+    // The ask is over: a retry of the start starts nothing, and asking again opens a new ask.
+    expect(r.reviews.startAsked(r.capture)).toBeNull();
+    r.reviews.answerInvite(r.capture, "review_now");
+    expect(r.askOf()).toMatchObject({ state: "open" });
+  });
+
+  test("the Start review button after a chunk grows with no new supported claim starts no second review", async () => {
+    const r = asking();
+    r.world.close(0, 0, 300);
+    r.world.claim(1, 10, 20);
+    const first = started(r.reviews.start(r.capture, "prepared_only", randomId("rvw")));
+    await collect(r.reviews.turn(first.reviewId, randomId("turn"), answer()));
+    await collect(r.reviews.turn(first.reviewId, randomId("turn"), { kind: "end" }));
+    // The section grows to 5:30 with no new claim: the grown chunk is offered whole, but its only claim is the first review's.
+    r.world.close(0, 0, 330);
+    expect(r.reviews.options(r.capture).kind).toBe("nothing_to_review");
+    expect(r.reviews.start(r.capture, "prepared_only", randomId("rvw")).kind).toBe("nothing_to_review");
+    expect(r.reviews.start(r.capture, "stop_early", randomId("rvw")).kind).toBe("nothing_to_review");
+    expect(reviewRows(r.db)).toBe(1);
+  });
+
+  test("a lecture nobody asked for says so, with no time estimate, and says it is preparing once asked", () => {
+    const r = asking();
+    r.world.pendingChunks.add(r.world.close(0, 0, 300).id);
+    expect(r.reviews.options(r.capture)).toMatchObject({ kind: "processing", asked: false, pendingChunks: 1, estimateS: null, readyNow: null });
+    r.reviews.answerInvite(r.capture, "wait");
+    expect(r.reviews.options(r.capture)).toMatchObject({ kind: "processing", asked: true, pendingChunks: 1, estimateS: 40, ask: { state: "open" } });
+  });
+});
 
 describe("start", () => {
   test("R10: zero supported claims returns nothing_to_review and writes no review row", () => {

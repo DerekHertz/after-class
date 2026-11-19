@@ -52,6 +52,7 @@ import { join, resolve } from "node:path";
 import { buildApp } from "../../scripts/build-app";
 import { parseExtensionIds } from "../shared/extension-ids";
 import { stableId } from "../shared/ids";
+import { Material } from "../shared/time";
 import type { CaptureId, EvidenceId, ReviewId, UserId } from "../shared/ids";
 import { memoDep } from "./deps";
 import type { Dep, ReadDep } from "./deps";
@@ -719,6 +720,11 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       concepts: preparation.concepts,
       bundle: evidence.bundle,
       watchedSeconds: (captureId) => evidence.captureView(captureId).watchedSeconds,
+      allChunksClosed: (captureId) => {
+        const order = evidence.watchOrder(captureId);
+        const chunked = segmentation.current(captureId).reduce((m, r) => Material.union(m, r.material), Material.empty);
+        return order.status.state === "stopped" && order.passages.every((w) => Material.covers(chunked, w.passage.sourceId, w.passage.interval));
+      },
       runTutor: (input, streamTo, signal, onRetry) => memo.run(tasks.tutor, input, { signal, streamTo, onRetry, review: input.state.reviewId }),
       clearFailures: memo.clearFailures,
       startWrapUp(reviewId) {
@@ -727,6 +733,11 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       },
       endedInTx: (reviewId) => record.markEndedInTx(reviewId),
       nextSeq: () => db.nextSeq(),
+      // An ask makes preparation demand work and may start a review; the next pump does both, shared with any upload in the same burst.
+      asks: {
+        asked: preparation.asked, latestAsk: preparation.latestAsk, closeAsk: preparation.closeAsk, exhaust: preparation.exhaust, refuse: preparation.refuse,
+        ask: (captureId) => { const seq = preparation.ask(captureId); wake(captureId); pumpSoon(); return seq; },
+      },
     });
 
     /** The claims usable now (R3, R7) inside the review's frozen material, not the ones it started with. */
@@ -804,7 +815,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
   if (auth.kind === "local") graphFor(ensureLocalUser(rawDb));
   else for (const userId of signedInUsers(rawDb)) graphFor(userId);
 
-  /** Per capture, the three derivations that can ask for work. A failing one is reported and leaves the others running. */
+  /** Per capture, the three derivations that can ask for work, then the asked review's start. A failing one is reported and leaves the others running. */
   const DEMAND: readonly (readonly [string, (graph: UserGraph, captureId: CaptureId) => readonly WorkItem[]])[] = [
     ["segmentation", ({ segmentation, memo, tasks }, captureId) =>
       segmentation.sync(captureId).demand.map((input): WorkItem => ({
@@ -815,6 +826,9 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       }))],
     ["frame demand", ({ evidence }, captureId) => evidence.frameDemand(captureId)],
     ["preparation", ({ preparation }, captureId) => preparation.demand(captureId)],
+    // Flow C, 2026-11-18: the backend starts an asked review once a prepared chunk has a supported claim, or ends the ask exhausted once
+    // nothing can answer it. It asks for no work, and what it reads wakes a sleeping capture, so it runs again when a check it waits for lands.
+    ["asked review", ({ reviews }, captureId) => (reviews.startAsked(captureId), [])],
   ];
 
   /**
