@@ -119,6 +119,8 @@ async function newReview(): Promise<string> {
     { kind: "control", action: "stop", reason: "user" },
   ].map((f, clientSeq) => ({ ...f, clientSeq, wallMs: 1000 + clientSeq }));
   await call("/ingest", { captureId, facts });
+  // The learner's Wait asks for this lecture's review, so it is prepared (flow C, 2026-11-18).
+  await call(`/captures/${captureId}/invite`, { answer: "wait" });
   const reviewId = randomId("rvw");
   for (let i = 0; i < 300; i++) {
     const started = JSON.parse(await call(`/captures/${captureId}/reviews`, { reviewId, choice: "prepared_only" })) as { kind: string };

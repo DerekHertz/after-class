@@ -75,6 +75,7 @@ export const TABLE_SCOPES: { readonly [table: string]: TableScope } = {
   concept_index: "user", // content-derived, but carries a per-pipeline seq
   prep_controls: "user",
   prep_inputs: "user",
+  prep_asks: "user",
   invite_answers: "user",
   reviews: "user",
   review_turns: "user",

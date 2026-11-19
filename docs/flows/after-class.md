@@ -72,7 +72,9 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 ## C. Preparation and review invites (approved 2026-11-03)
 
 ```text
-[code] Chunk closed → valid cache hit? reuse : queue interpretation.
+[code] Chunk closed → valid cache hit? reuse : hold it until I ask for this
+       lecture's review. Once asked, queue interpretation at once, earliest
+       chunk first, and queue every chunk that closes later.
 [agent] Write evidence-linked concepts, assumptions, possible confusions.
 [Jev]  Given one claim + its passages (+ frames if visual): "Does this evidence
        support the claim in its stated scope?" yes = supported; no = not.
@@ -85,6 +87,11 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 [code] Invite on a boundary close (yes/yes). On a time-cap close, invite only
        if ≥ ~15 min watched since the last invite or Later.
 [user] Review now / Later / wait / Stop early. (Review now always available.)
+[code] Review now or Wait on a lecture not yet asked for → ask for it, show
+       Processing, and start the review once a prepared chunk has a supported
+       claim. Its scope is the chunks prepared at that moment.
+[code] A review ends while more chunks are prepared or preparing → offer the
+       next section as a new review.
 [code] Later → keep preparing; next invite at the next boundary close.
 [code] Wait → show Processing; estimate only when reliable.
 [code] Stop early → cancel pending jobs in scope; keep every finished claim;
@@ -96,6 +103,8 @@ Numbers (30s, 2 min, 8 min) are starting values to tune on held-out clips.
 [code] No supported claims in scope → don't start; show gaps and unverified
        claims with evidence; offer rewatch of that interval or retry.
 ```
+
+Amendment (2026-11-18), Derek, on 2026-11-17: "record the frames in transcript and save those for some amount of time, and really only start the LLM or agent tutor session as needed, because I don't think every time will a student record and review." The agent drafted the three lines above that change or follow "Chunk closed" and "Review now / Later / wait / Stop early", in `docs/trail/lazy-prep-amendment-draft.md`. Derek approved them on 2026-11-18 as drafted, word for word (`docs/trail/decisions-2026-11-18.md`). He also decided that only Review now and Wait ask for a lecture's review, so opening or browsing a lecture prepares nothing and neither does Later. R5 "Choosing Later never cancels preparation." holds as written, and a short wait when the learner comes back is acceptable. Capture, the transcript, frames and Jev's boundary and frame checks still run while the learner watches. No rule text changed. `docs/flows/model/Preparation.tla` models the ask, and TLC checks R3 to R10 on it with 112,524 distinct states and no error. It also checks three properties that are not rules and carry no R number: nothing is prepared for a lecture nobody asked for, once asked no chunk stays held, and once asked every claim being prepared finishes.
 
 ## D. Review and learning record (approved 2026-11-03)
 

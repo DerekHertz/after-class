@@ -3,6 +3,7 @@
  * for the replay tests, none at all: no test makes a live Jev or Claude call.
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { DEFAULT_LIMITS } from "../src/backend/scheduler";
 import net from "node:net";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -91,10 +92,18 @@ function fixture(o: { frames: boolean }): Record<string, unknown>[] {
 
 const authed = (token: string) => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" });
 
+/** The learner's Wait, which asks for the lecture's review, so its preparation runs (flow C, 2026-11-18). Asking again changes nothing. */
+async function ask(b: Boot, captureId: CaptureId = CAP) {
+  const res = await fetch(`${b.base}/captures/${captureId}/invite`, { method: "POST", headers: authed(b.r.token), body: JSON.stringify({ answer: "wait" }) });
+  expect(res.status).toBe(200);
+}
+
 async function ingest(b: Boot, facts: unknown[]) {
   const res = await fetch(`${b.base}/ingest`, { method: "POST", headers: authed(b.r.token), body: JSON.stringify({ captureId: CAP, facts }) });
   expect(res.status).toBe(200);
-  return ingestAckResponse.parse(await res.json());
+  const ack = ingestAckResponse.parse(await res.json());
+  await ask(b);
+  return ack;
 }
 
 // ───────────────────────────── fake tasks ─────────────────────────────
@@ -202,6 +211,7 @@ describe("main, replay mode with fake tasks", () => {
 async function ingestInto(b: Boot, captureId: CaptureId, facts: Record<string, unknown>[]): Promise<void> {
   const res = await fetch(`${b.base}/ingest`, { method: "POST", headers: authed(b.r.token), body: JSON.stringify({ captureId, facts }) });
   expect(res.status).toBe(200);
+  await ask(b, captureId);
 }
 
 /** Counts every pump the scheduler is asked to run. */
@@ -358,12 +368,12 @@ describe("main, the pump an upload triggers", () => {
 
   const noClaims: InterpretationOutput = { concepts: [], links: [], supersedes: [] };
 
-  /** Both Claude slots held by two lectures' interpretations until `gate` opens, so a woken capture shows as not started. */
+  /** Every Claude slot held by one lecture's interpretation each until `gate` opens, so a woken capture shows as not started. */
   function crowded() {
     const gate = deferred<FakeStep<InterpretationOutput>>();
     let held = 0;
     const fakes = fakeTasks();
-    const interpret = scripted<InterpretationInput, InterpretationOutput>("interpretation", "claude", canonicalInterpretation, () => (++held <= 2 ? gate.promise : ok(noClaims)));
+    const interpret = scripted<InterpretationInput, InterpretationOutput>("interpretation", "claude", canonicalInterpretation, () => (++held <= DEFAULT_LIMITS.claude ? gate.promise : ok(noClaims)));
     const tasks = { ...fakes.tasks, preparation: { ...fakes.tasks.preparation, interpret } } as unknown as TaskSet;
     return { gate, interpret, tasks };
   }
@@ -375,11 +385,11 @@ describe("main, the pump an upload triggers", () => {
     const { gate, interpret, tasks } = crowded();
     const b = await boot({ tasks, ingestPumpMs: 10 }, { AFTERCLASS_MODE: "replay" });
     const { evidence, segmentation, preparation, scheduler } = b.r.modules;
-    const [block1, block2, a, other] = ["block1", "block2", "deleted-A", "fresh-B"].map((n) => stableId("cap", `main-test-${n}`) as CaptureId);
-    await ingestInto(b, block1!, lectureFacts("bbbbbbbbbbb", "first blocker"));
-    await until(() => interpret.calls.length === 1);
-    await ingestInto(b, block2!, lectureFacts("ccccccccccc", "second blocker"));
-    await until(() => interpret.calls.length === 2);
+    const [a, other] = ["deleted-A", "fresh-B"].map((n) => stableId("cap", `main-test-${n}`) as CaptureId);
+    for (let n = 1; n <= DEFAULT_LIMITS.claude; n++) {
+      await ingestInto(b, stableId("cap", `main-test-block${n}`) as CaptureId, lectureFacts(`blocker${n}`.padEnd(11, "x"), `blocker ${n}`));
+      await until(() => interpret.calls.length === n);
+    }
     await ingestInto(b, a!, lectureFacts("aaaaaaaaaaa", "old transcript"));
     await until(() => segmentation.current(a!).length > 0);
     evidence.deleteByUser(evidence.captureBundle(a!).passages.map((p) => p.id as EvidenceId), "test-delete");

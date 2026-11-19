@@ -727,6 +727,15 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       },
       endedInTx: (reviewId) => record.markEndedInTx(reviewId),
       nextSeq: () => db.nextSeq(),
+      // An ask is a fact that makes preparation demand work; the next pump starts it, shared with any upload in the same burst.
+      asks: {
+        ask: (captureId) => {
+          preparation.ask(captureId);
+          wake(captureId);
+          pumpSoon();
+        },
+        asked: preparation.asked,
+      },
     });
 
     /** The claims usable now (R3, R7) inside the review's frozen material, not the ones it started with. */

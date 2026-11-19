@@ -40,7 +40,8 @@ export type Reviews = {
   /**
    * User fact.
    * R5: "Choosing Later never cancels preparation."
-   * `later` and `wait` change only invite state. `review_now` / `stop_early` go through start().
+   * `later` changes only invite state. `review_now` and `wait` also ask for the lecture's review, so its preparation starts
+   * (flow C, 2026-11-18). Starting a review goes through start().
    */
   answerInvite(captureId: CaptureId, answer: InviteAnswer): InviteState;
   /** "Review now always available": callable any time, regardless of invite state. */
@@ -113,6 +114,10 @@ export type ReviewsDeps = {
    */
   startWrapUp(reviewId: ReviewId): void;
   nextSeq(): Seq;
+  /**
+   * Preparation's ask record (flow C, 2026-11-18). Absent: every lecture counts as asked, which is how a test of a prepared lecture runs.
+   */
+  asks?: { ask(captureId: CaptureId): void; asked(captureId: CaptureId): boolean };
   /** The record's markEndedInTx, run in the transaction that stores the wrap_up turn, so an ended review always has a save row (#138). */
   endedInTx?(reviewId: ReviewId): void;
 };
@@ -244,6 +249,8 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
   /** Idempotent per invite: an answer already given to the latest invite is a retry and stores nothing. */
   function answerInvite(captureId: CaptureId, answer: InviteAnswer): InviteState {
     return db.tx(() => {
+      // Only Review now and Wait ask. Later and Stop early never do, and opening the lecture asks nothing.
+      if (answer === "review_now" || answer === "wait") deps.asks?.ask(captureId);
       if (!inviteFold(captureId).answered.has(answer)) {
         q.insertAnswer.run(deps.nextSeq(), userId, captureId, answer, deps.watchedSeconds(captureId), Math.round(now()));
       }
@@ -327,7 +334,8 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     const scope = asOf > 0 ? freezeScope(cands, (m) => deps.assessableIn(captureId, m), gapsOf, asSeq(asOf)) : null;
     const pending = cands.filter((c) => !c.prep.finished).length;
     if (pending > 0) {
-      return { kind: "processing", readyNow: scope && preview(captureId, scope), pendingChunks: pending, estimateS: config.estimateS?.(pending) ?? null, heldBack: heldBack(cands, captureId) };
+      const asked = deps.asks?.asked(captureId) ?? true;
+      return { kind: "processing", asked, readyNow: scope && preview(captureId, scope), pendingChunks: pending, estimateS: asked ? config.estimateS?.(pending) ?? null : null, heldBack: heldBack(cands, captureId) };
     }
     return scope ? { kind: "ready", scope: preview(captureId, scope), heldBack: heldBack(cands, captureId) } : nothingToReview(cands, captureId);
   }

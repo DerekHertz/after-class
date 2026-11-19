@@ -168,6 +168,8 @@ export type OptionsScreen =
     }
   | {
       readonly kind: "processing";
+      /** False until the learner asks for this lecture's review. Until then nothing is prepared (flow C, 2026-11-18). */
+      readonly asked: boolean;
       /** Null unless the backend gave a usable estimate: an unreliable estimate is never invented. */
       readonly estimate: string | null;
       readonly pendingChunks: number;
@@ -240,6 +242,16 @@ export function scopeSummary(scope: ScopePreview, titles: SourceTitles = new Map
   };
 }
 
+/**
+ * Flow C, 2026-11-18: "A review ends while more chunks are prepared or preparing → offer the next section as a new review." What the
+ * lecture's options say about its next section once a review is over, or null when nothing more is prepared or preparing.
+ */
+export function nextSection(options: ReviewOptions): "prepared" | "preparing" | null {
+  if (options.kind === "ready") return "prepared";
+  if (options.kind === "processing" && options.asked) return options.readyNow === null ? "preparing" : "prepared";
+  return null;
+}
+
 export function optionsScreen(options: ReviewOptions, titles: SourceTitles = new Map(), videos: SourceVideos = new Map()): OptionsScreen {
   switch (options.kind) {
     case "ready":
@@ -254,6 +266,7 @@ export function optionsScreen(options: ReviewOptions, titles: SourceTitles = new
       const rest = sections(options.pendingChunks);
       return {
         kind: "processing",
+        asked: options.asked,
         estimate: estimateText(options.estimateS),
         pendingChunks: options.pendingChunks,
         // The pending sections get their own sentence on this screen, so they are not repeated as a limit.

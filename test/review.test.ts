@@ -303,6 +303,42 @@ describe("options", () => {
 
 // ───────────────────────────── start ─────────────────────────────
 
+describe("asking for a lecture's review (flow C, 2026-11-18)", () => {
+  /** A rig whose preparation records each ask, as preparation's prep_asks does. */
+  function asking() {
+    const r = rig(undefined, { estimateS: (n) => n * 40 });
+    const asks: string[] = [];
+    const reviews = createReviews(r.db, {
+      ...r.world.deps, runTutor: r.tutor.runTutor, clearFailures: r.tutor.clearFailures,
+      asks: { ask: (captureId) => void asks.push(captureId), asked: (captureId) => asks.includes(captureId) },
+    }, { tutor: kit, estimateS: (n) => n * 40 });
+    const held = r.world.close(0, 0, 300);
+    r.world.pendingChunks.add(held.id);
+    return { ...r, reviews, asks };
+  }
+
+  test("only Review now and Wait ask; Later and Stop early do not, and reading the options asks nothing", () => {
+    for (const answer of ["later", "stop_early"] as const) {
+      const r = asking();
+      r.reviews.options(r.capture);
+      r.reviews.answerInvite(r.capture, answer);
+      expect(r.asks).toEqual([]);
+    }
+    for (const answer of ["review_now", "wait"] as const) {
+      const r = asking();
+      r.reviews.answerInvite(r.capture, answer);
+      expect(r.asks).toEqual([r.capture]);
+    }
+  });
+
+  test("a lecture nobody asked for says so, with no time estimate, and says it is preparing once asked", () => {
+    const r = asking();
+    expect(r.reviews.options(r.capture)).toMatchObject({ kind: "processing", asked: false, pendingChunks: 1, estimateS: null, readyNow: null });
+    r.reviews.answerInvite(r.capture, "wait");
+    expect(r.reviews.options(r.capture)).toMatchObject({ kind: "processing", asked: true, pendingChunks: 1, estimateS: 40 });
+  });
+});
+
 describe("start", () => {
   test("R10: zero supported claims returns nothing_to_review and writes no review row", () => {
     const r = rig();

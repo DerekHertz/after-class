@@ -121,7 +121,7 @@ const mutants: Mutant[] = [
     rule: "R5_PreparationFinishesAfterLater",
     kind: "PROPERTY",
     removes: "Later -> keep preparing (the Jev check keeps running)",
-    from: `        /\\ WF_vars(JevChecksAClaim(c))\n`,
+    from: `        /\\ WF_vars(JevChecksAClaim(c) /\\ UNCHANGED requested)\n`,
     to: ``,
   },
   {
@@ -168,6 +168,15 @@ const mutants: Mutant[] = [
     removes: "[user] Accept or decline the detour",
     from: `    /\\ detour' = "offered"\n`,
     to: `    /\\ detour' \\in {"offered", "on"}\n`,
+  },
+  {
+    name: "chunk queued without an ask",
+    module: "Preparation",
+    rule: "Lazy_NothingPreparedUnasked",
+    kind: "INVARIANT",
+    removes: "hold it until I ask for this lecture's review (amendment 2026-11-18, not a rule)",
+    from: `(IF requested THEN "queued" ELSE "held")`,
+    to: `"queued"`,
   },
 ];
 

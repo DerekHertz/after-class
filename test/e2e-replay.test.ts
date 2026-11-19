@@ -370,18 +370,20 @@ async function runProduct(opts: { restartAfterTurn: number | null }): Promise<Pr
     expect(ingestAckResponse.parse(reply.json).ackedThroughSeq).toBe(facts.at(-1)!.clientSeq as number);
   }
 
-  // 2. the backend prepares it with the fake tasks: boundaries, frames, claims
-  const optionsReq = get("review options", `/captures/${CAP}/review-options`);
-  await until(async () => reviewOptionsResponse.parse((await peek(optionsReq)).json).kind === "ready");
-  await settled(s);
-  expect(reviewOptionsResponse.parse((await send(optionsReq)).json)).toMatchObject({ kind: "ready", scope: { supportedClaims: 3 } });
-
-  // 3. the invite: chunk 0 closed at a boundary while the capture ran; the learner says yes
-  const view = captureResponse.parse((await send(get("capture view", `/captures/${CAP}`))).json);
+  // 2. the invite: chunk 0 closed at a boundary while the capture ran; the learner says yes, which asks for the lecture's review
+  const viewReq = get("capture view", `/captures/${CAP}`);
+  await until(async () => captureResponse.parse((await peek(viewReq)).json).invite.state === "invited");
+  const view = captureResponse.parse((await send(viewReq)).json);
   expect(view.capture.status.state).toBe("stopped");
   expect(view.invite.state).toBe("invited");
   const invited = await send(post("invite answer", `/captures/${CAP}/invite`, { answer: "review_now" }, "extension"));
   expect(invited.status).toBe(200);
+
+  // 3. once asked, the backend prepares it with the fake tasks: claims, checks and revisions
+  const optionsReq = get("review options", `/captures/${CAP}/review-options`);
+  await until(async () => reviewOptionsResponse.parse((await peek(optionsReq)).json).kind === "ready");
+  await settled(s);
+  expect(reviewOptionsResponse.parse((await send(optionsReq)).json)).toMatchObject({ kind: "ready", scope: { supportedClaims: 3 } });
 
   // 4. the review: start, then ten turns streamed
   const started = startReviewResponse.parse((await send(post("start review", `/captures/${CAP}/reviews`, { reviewId: REVIEW, choice: "prepared_only" }))).json);

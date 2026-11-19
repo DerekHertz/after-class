@@ -221,7 +221,7 @@ export function createFixture(scenario: Scenario): Fixture {
       const scope = { chunkRevisions: [ids.chunk], supportedClaims: 3, topics, material, partial: [{ kind: "capture_gap", gap }] };
       // "capture-split": the review above holds the first 4:18 of the lecture, which this answer leaves out of the next review.
       const heldBack = scenario === "capture-split" ? [{ reviewId: ids.review, material: [[ids.source, [[0, 258]]]] }] : [];
-      return reviewOptionsz.parse(scenario === "capture-empty" ? { kind: "nothing_to_review", heldBack: [], gaps: [gap], unverified: [], rewatch: [{ sourceId: ids.source, interval: { start: 600, end: 640 } }] } : scenario === "capture-processing" || scenario === "capture-held" ? { kind: "processing", readyNow: scope, pendingChunks: 2, estimateS: null, heldBack } : { kind: "ready", scope, heldBack });
+      return reviewOptionsz.parse(scenario === "capture-empty" ? { kind: "nothing_to_review", heldBack: [], gaps: [gap], unverified: [], rewatch: [{ sourceId: ids.source, interval: { start: 600, end: 640 } }] } : scenario === "capture-processing" || scenario === "capture-held" ? { kind: "processing", asked: true, readyNow: scope, pendingChunks: 2, estimateS: null, heldBack } : { kind: "ready", scope, heldBack });
     },
     async startReview(_capture, _choice, reviewId) { log("review.start"); return { kind: "started", reviewId, scope: view.scope }; },
     async answerInvite(_id, answer) { log(`invite.${answer}`); },
