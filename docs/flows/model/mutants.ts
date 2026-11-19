@@ -121,7 +121,7 @@ const mutants: Mutant[] = [
     rule: "R5_PreparationFinishesAfterLater",
     kind: "PROPERTY",
     removes: "Later -> keep preparing (the Jev check keeps running)",
-    from: `        /\\ WF_vars(JevChecksAClaim(c) /\\ UNCHANGED <<requested, askOpen>>)\n`,
+    from: `        /\\ WF_vars(JevChecksAClaim(c) /\\ UNCHANGED <<requested, askOpen, taken>>)\n`,
     to: ``,
   },
   {
@@ -139,8 +139,8 @@ const mutants: Mutant[] = [
     rule: "R9_ReviewAndCaptureIndependent",
     kind: "PROPERTY",
     removes: "Review now leaves capture alone",
-    from: `    /\\ askOpen' = FALSE\n    /\\ UNCHANGED <<reviewed, question, paused, requested>>\n    /\\ UNCHANGED CaptureVars /\\ UNCHANGED PrepVars\n`,
-    to: `    /\\ askOpen' = FALSE\n    /\\ UNCHANGED <<reviewed, question, paused, requested>>\n    /\\ capture' = IF capture = "not started" THEN capture ELSE "stopped"\n    /\\ UNCHANGED <<watched, closed, boundary, boundaryFixed>> /\\ UNCHANGED PrepVars\n`,
+    from: `    /\\ UNCHANGED <<reviewed, question, paused, requested>>\n    /\\ UNCHANGED CaptureVars /\\ UNCHANGED PrepVars\n`,
+    to: `    /\\ UNCHANGED <<reviewed, question, paused, requested>>\n    /\\ capture' =IF capture = "not started" THEN capture ELSE "stopped"\n    /\\ UNCHANGED <<watched, closed, boundary, boundaryFixed>> /\\ UNCHANGED PrepVars\n`,
   },
   {
     name: "stop capture ends review",
@@ -195,6 +195,15 @@ const mutants: Mutant[] = [
     removes: "start the review once a prepared chunk has a supported claim (amendment 2026-11-18)",
     from: `    /\\ WF_vars(CodeStartsTheAskedReview)\n`,
     to: ``,
+  },
+  {
+    name: "a resent ask restarts taken claims",
+    module: "Preparation",
+    rule: "Lazy_AskedStartTakesANewClaim",
+    kind: "PROPERTY",
+    removes: "an asked start needs a claim no review has started with (not a rule)",
+    from: `    /\\ askOpen\n    /\\ HasNewClaim\n`,
+    to: `    /\\ askOpen\n`,
   },
 ];
 

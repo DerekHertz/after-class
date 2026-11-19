@@ -52,6 +52,7 @@ import { join, resolve } from "node:path";
 import { buildApp } from "../../scripts/build-app";
 import { parseExtensionIds } from "../shared/extension-ids";
 import { stableId } from "../shared/ids";
+import { Material } from "../shared/time";
 import type { CaptureId, EvidenceId, ReviewId, UserId } from "../shared/ids";
 import { memoDep } from "./deps";
 import type { Dep, ReadDep } from "./deps";
@@ -719,6 +720,11 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       concepts: preparation.concepts,
       bundle: evidence.bundle,
       watchedSeconds: (captureId) => evidence.captureView(captureId).watchedSeconds,
+      allChunksClosed: (captureId) => {
+        const order = evidence.watchOrder(captureId);
+        const chunked = segmentation.current(captureId).reduce((m, r) => Material.union(m, r.material), Material.empty);
+        return order.status.state === "stopped" && order.passages.every((w) => Material.covers(chunked, w.passage.sourceId, w.passage.interval));
+      },
       runTutor: (input, streamTo, signal, onRetry) => memo.run(tasks.tutor, input, { signal, streamTo, onRetry, review: input.state.reviewId }),
       clearFailures: memo.clearFailures,
       startWrapUp(reviewId) {

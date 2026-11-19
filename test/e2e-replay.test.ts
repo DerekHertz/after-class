@@ -692,12 +692,11 @@ describe("REPLAY DATA (fake tasks, no live call): retro 1, resending every reque
       for (const req of product.sent) resent.push(await call(s, req));
       await idle(s);
 
-      // One exception, flow C as amended 2026-11-18: the resent Review now comes after its review started, so it is a new ask for the
-      // next section. It stores one ask and starts nothing, since nothing more of the lecture is prepared.
+      // The resent Review now finds the stopped lecture fully reviewed, so it asks for nothing and the options still name the review.
       const after = tableCounts(copy);
       expect(Object.keys(after)).toEqual(Object.keys(before));
-      for (const table of Object.keys(before)) expect({ table, rows: after[table] }).toEqual({ table, rows: before[table]! + (table === "prep_asks" ? 1 : 0) });
-      expect(reviewOptionsResponse.parse((await call(s, get("x", `/captures/${CAP}/review-options`))).json).ask).toEqual({ state: "open" });
+      for (const table of Object.keys(before)) expect({ table, rows: after[table] }).toEqual({ table, rows: before[table] });
+      expect(reviewOptionsResponse.parse((await call(s, get("x", `/captures/${CAP}/review-options`))).json)).toMatchObject({ kind: "nothing_to_review", ask: { state: "started", reviewId: product.reviewId } });
       expect(product.fakes.callCounts()).toEqual(calledBefore);
 
       // the comparison is not vacuous: the script filled every table the product writes in this flow

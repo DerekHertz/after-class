@@ -131,6 +131,8 @@ export type ReviewsDeps = {
     latestAsk(captureId: CaptureId): LectureAsk | null;
     closeAsk(captureId: CaptureId, reviewId: ReviewId): void;
   };
+  /** Whether the capture has stopped and every watched passage is in a closed chunk, so no chunk will close. Absent: more may close. */
+  allChunksClosed?(captureId: CaptureId): boolean;
   /** The record's markEndedInTx, run in the transaction that stores the wrap_up turn, so an ended review always has a save row (#138). */
   endedInTx?(reviewId: ReviewId): void;
 };
@@ -262,8 +264,10 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
   /** Idempotent per invite: an answer already given to the latest invite is a retry and stores nothing. */
   function answerInvite(captureId: CaptureId, answer: InviteAnswer): InviteState {
     return db.tx(() => {
-      // Only Review now and Wait ask. Later and Stop early never do, and opening the lecture asks nothing.
-      if (answer === "review_now" || answer === "wait") deps.asks?.ask(captureId);
+      // Only Review now and Wait ask. Later and Stop early never do, and opening the lecture asks nothing. Review now with a review of
+      // the lecture still open returns that review, and nobody asks for what nothing can still answer.
+      const asks = answer === "wait" || (answer === "review_now" && activeReview(captureId) === null);
+      if (asks && answerable(captureId)) deps.asks?.ask(captureId);
       if (!inviteFold(captureId).answered.has(answer)) {
         q.insertAnswer.run(deps.nextSeq(), userId, captureId, answer, deps.watchedSeconds(captureId), Math.round(now()));
       }
@@ -279,13 +283,36 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
    * skip or an "I don't know"). An ended review with no response, such as one ended by a mis-click, used up nothing,
    * so its material is offered again. R7 is about a started review's own frozen scope, which this never touches.
    */
-  function holding(captureId: CaptureId): readonly { readonly reviewId: ReviewId; readonly material: Material }[] {
+  function holding(captureId: CaptureId): readonly { readonly reviewId: ReviewId; readonly material: Material; readonly claims: readonly ClaimId[] }[] {
     const counts = (r: ReviewRow): boolean => {
       const turns = loadTurns(r.id as ReviewId);
       const responded = turns.some((t) => t.actor === "learner" && (t.act.kind === "answer" || t.act.kind === "skip" || t.act.kind === "dont_know"));
       return responded || kit.reviewState(r.id as ReviewId, turns, [], softTargetS, now()).phase !== "ended";
     };
-    return q.reviewsOf.all(userId, captureId).filter(counts).map((r) => ({ reviewId: r.id as ReviewId, material: decodeScope(r.scope_json).scope.material }));
+    return q.reviewsOf.all(userId, captureId).filter(counts).map((r) => {
+      const { scope } = decodeScope(r.scope_json);
+      return { reviewId: r.id as ReviewId, material: scope.material, claims: scope.claimsAtStart };
+    });
+  }
+
+  /** The lecture's latest review that has not ended, or null. */
+  function activeReview(captureId: CaptureId): ReviewId | null {
+    const open = q.reviewsOf.all(userId, captureId).filter((r) => kit.reviewState(r.id as ReviewId, loadTurns(r.id as ReviewId), [], softTargetS, now()).phase !== "ended");
+    return (open.sort((a, b) => a.started_ms - b.started_ms).at(-1)?.id as ReviewId | undefined) ?? null;
+  }
+
+  /** Whether a review started now would take a supported claim that no review still holding this lecture's material took. */
+  function hasNewClaim(captureId: CaptureId, cands: Candidates): boolean {
+    const asOf = cands.reduce((s, c) => Math.max(s, c.rev.closedAtSeq), 0);
+    const scope = asOf > 0 ? freezeScope(cands, (m) => deps.assessableIn(captureId, m), gapsOf, asSeq(asOf)) : null;
+    const taken = new Set(holding(captureId).flatMap((r) => r.claims));
+    return scope !== null && scope.claimsAtStart.some((id) => !taken.has(id));
+  }
+
+  /** Whether an ask could still start a review: a new claim is prepared, a chunk is held or preparing, or more may close. */
+  function answerable(captureId: CaptureId): boolean {
+    const cands = candidates(captureId);
+    return !(deps.allChunksClosed?.(captureId) ?? false) || cands.some((c) => !c.prep.finished) || hasNewClaim(captureId, cands);
   }
 
   const reviewedMaterial = (captureId: CaptureId): Material => holding(captureId).reduce((m, r) => Material.union(m, r.material), Material.empty);
@@ -359,12 +386,16 @@ export function createReviews(db: UserDb, deps: ReviewsDeps, config: ReviewsOpti
     const ask = deps.asks?.latestAsk(captureId) ?? null;
     if (ask === null) return null;
     if (ask.state === "open") return { ask: { state: "open" } };
-    return ask.reviewId === null ? null : { ask: { state: "started", reviewId: ask.reviewId } };
+    // Review now while a review is open returns that review, whichever ask started it.
+    const reviewId = activeReview(captureId) ?? ask.reviewId;
+    return reviewId === null ? null : { ask: { state: "started", reviewId } };
   }
 
   function startAsked(captureId: CaptureId): ReviewId | null {
     const ask = deps.asks?.latestAsk(captureId) ?? null;
     if (ask?.state !== "open") return null;
+    // A review needs a claim no open or answered review took, or a resent ask would start the same review again. Until then the ask waits.
+    if (!hasNewClaim(captureId, candidates(captureId))) return null;
     // The ask names its review, so a start retried after a crash finds the review it already stored.
     const result = start(captureId, "prepared_only", stableId("rvw", captureId, ask.seq));
     return result.kind === "started" ? result.reviewId : null;
