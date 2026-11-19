@@ -736,12 +736,7 @@ async function compose(options: MainOptions, auth: Auth): Promise<Composed> {
       // An ask makes preparation demand work and may start a review; the next pump does both, shared with any upload in the same burst.
       asks: {
         asked: preparation.asked, latestAsk: preparation.latestAsk, closeAsk: preparation.closeAsk, exhaust: preparation.exhaust, refuse: preparation.refuse,
-        ask: (captureId) => {
-          const seq = preparation.ask(captureId);
-          wake(captureId);
-          pumpSoon();
-          return seq;
-        },
+        ask: (captureId) => { const seq = preparation.ask(captureId); wake(captureId); pumpSoon(); return seq; },
       },
     });
 
