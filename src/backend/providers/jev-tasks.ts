@@ -289,6 +289,8 @@ export function claimSupportTask(jev: JevClient): Task<ClaimSupportInput, { read
     purpose: "claim_check",
     model: JEV_MODEL,
     version: versionOf(`claim_check.${QUESTIONS.claimSupport.version}`, THRESHOLDS, 2),
+    // A claim's check, once stored, stays its check, so a new version never changes a prepared claim's status.
+    keepsFirstResult: true,
     maxAttempts: MAX_ATTEMPTS,
     canonicalInput: (i) => ({
       claim: { text: i.claim.text, evidence: i.claim.evidence, visualDependent: i.claim.visualDependent, assumptions: i.claim.assumptions },

@@ -185,9 +185,9 @@ function describeEvidence(b: EvidenceBundle, gaps: EvidenceBundle["gaps"], bytes
   return { text, images, labels };
 }
 
-function request(system: string, prompt: string, images: readonly ClaudeImage[], opts: { effort: ClaudeRequest["effort"]; webTools: boolean; cachedPrompt?: string; longOutput?: boolean }): ClaudeRequest {
+function request(system: string, prompt: string, images: readonly ClaudeImage[], opts: { model: ClaudeRequest["model"]; effort: ClaudeRequest["effort"]; webTools: boolean; cachedPrompt?: string; longOutput?: boolean }): ClaudeRequest {
   return {
-    model: "opus", effort: opts.effort, system, prompt, images, webTools: opts.webTools, timeoutMs: 600_000,
+    model: opts.model, effort: opts.effort, system, prompt, images, webTools: opts.webTools, timeoutMs: 600_000,
     ...(opts.cachedPrompt === undefined ? {} : { cachedPrompt: opts.cachedPrompt }),
     ...(opts.longOutput ? { longOutput: true } : {}),
   };
@@ -222,7 +222,7 @@ export function interpretTask(claude: ClaudeCli, frameBytes: FrameBytes): Task<I
       const existing = new Map(input.existingClaims.map((c, n) => [`c${n + 1}`, c.id] as const));
       const existingText = input.existingClaims.length > 0 ? input.existingClaims.map((c, n) => `- c${n + 1}: ${c.text}`).join("\n") : "- none";
       const prompt = `${evidence.text}\n\nExisting claims:\n${existingText}`;
-      const { output, usage } = await claude.structured(request(INTERPRET_SYSTEM, prompt, evidence.images, { effort: "high", webTools: false, longOutput: true }), interpretationSchema, ctx);
+      const { output, usage } = await claude.structured(request(INTERPRET_SYSTEM, prompt, evidence.images, { model: "opus", effort: "high", webTools: false, longOutput: true }), interpretationSchema, ctx);
       return { output: toInterpretation(output, evidence.labels, existing, usage, attemptNo >= INTERPRET_MAX_ATTEMPTS), usage };
     },
     decode: (stored) => {
@@ -275,13 +275,19 @@ ${EVIDENCE_RULES}
 
 Return one revised claim. Keep what the evidence supports and drop or narrow the rest, fix its citations, and move anything the evidence does not state into assumptions. Do not add content from outside the evidence.`;
 
+/** Sonnet at effort high since 2026-11-18 (docs/flows/after-class.md). A new model is a new version, so no memo key mixes the two. */
+const REVISE_MODEL = "sonnet";
+const REVISE_VERSION = "revise-v2";
+
 /** "Revise once against the evidence; never fill missing capture." */
 export function reviseTask(claude: ClaudeCli, frameBytes: FrameBytes): Task<RevisionInput, ClaimDraft> {
   return {
     provider: "claude",
     purpose: "claim_revision",
-    model: "opus",
-    version: "revise-v1",
+    model: REVISE_MODEL,
+    version: REVISE_VERSION,
+    // R4: a claim revised on an earlier version or model keeps that revision.
+    keepsFirstResult: true,
     maxAttempts: 2,
     canonicalInput: canonicalRevision,
     async attempt(input, ctx) {
@@ -295,7 +301,7 @@ export function reviseTask(claude: ClaudeCli, frameBytes: FrameBytes): Task<Revi
         `Assumptions: ${o.assumptions.length > 0 ? o.assumptions.join("; ") : "none"}`,
         `Check verdict: ${input.check.verdict}${input.check.p === null ? "" : ` (p = ${input.check.p.toFixed(2)})`}`,
       ].join("\n");
-      const { output, usage } = await claude.structured(request(REVISE_SYSTEM, prompt, evidence.images, { effort: "high", webTools: false, cachedPrompt: `${evidence.text}\n\n` }), draftSchema, ctx);
+      const { output, usage } = await claude.structured(request(REVISE_SYSTEM, prompt, evidence.images, { model: REVISE_MODEL, effort: "high", webTools: false, cachedPrompt: `${evidence.text}\n\n` }), draftSchema, ctx);
       return { output: toDraft(output, evidence.labels, usage), usage };
     },
     decode: (stored) => draftSchema.parse(stored) as unknown as ClaimDraft,
@@ -321,7 +327,7 @@ export function resourceSearchTask(claude: ClaudeCli): Task<ResourceSearchInput,
         "Claims the lecture supports:",
         ...input.supportedClaims.map((c) => `- ${c.text} (evidence: ${c.evidence.join(", ")})`),
       ].join("\n");
-      const { output, usage } = await claude.structured(request(RESOURCE_SYSTEM, prompt, [], { effort: "medium", webTools: true }), resourceSchema, ctx);
+      const { output, usage } = await claude.structured(request(RESOURCE_SYSTEM, prompt, [], { model: "opus", effort: "medium", webTools: true }), resourceSchema, ctx);
       return { output: toConnections(output, input), usage };
     },
     decode: (stored) => z.array(connectionSchema).parse(stored) as unknown as readonly ResourceConnection[],

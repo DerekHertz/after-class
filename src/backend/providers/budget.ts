@@ -51,8 +51,8 @@ import { BUDGET_HOLDS_REVIEW_ID } from "../migrations-budget";
  * What one request reserves, in USD. A settlement replaces it with the recorded cost, so for a priced call it only decides
  * whether the attempt may start. For a call of unknown cost it is the amount counted.
  *
- *   Claude (the Messages API in hosted mode; the tutor and wrap-up on claude-sonnet-5-5 unless AFTERCLASS_TUTOR_MODEL=opus, every
- *   other task on claude-opus-5-5). Experiment 8 measured, on Opus with the 1 hour cache, a first tutor turn at $0.5575, later turns
+ *   Claude (the Messages API in hosted mode; the tutor and wrap-up on claude-sonnet-5-5 unless AFTERCLASS_TUTOR_MODEL=opus, claim
+ *   revision on claude-sonnet-5-5, every other task on claude-opus-5-5). Experiment 8 measured, on Opus with the 1 hour cache, a first tutor turn at $0.5575, later turns
  *   at $0.02 to $0.04 and a wrap-up at $0.1688 (docs/experiments/08-api-tutor.md, estimates at list price). Of that first turn,
  *   $0.5540 was writing 69,251 tokens at 2 times the input price. A review's first turn now writes them at 1.25 times, but the turn
  *   after a long pause writes them at 2 times again (`tutorCache` in review/tutor.ts), so $0.75 covered that turn on Opus, and

@@ -6,14 +6,16 @@ import { Material, interval, media } from "../src/shared/time";
 import { createMemo } from "../src/backend/providers/memo";
 import type { Lookup, Task } from "../src/backend/providers/memo";
 import type { ClaudeCli } from "../src/backend/providers/claude";
+import { claimSupportTask } from "../src/backend/providers/jev-tasks";
 import type { ClaimSupportInput } from "../src/backend/providers/jev-tasks";
+import type { JevClient } from "../src/backend/providers/jev";
 import type { WorkItem } from "../src/backend/scheduler";
 import { slotDep } from "../src/backend/deps";
 import type { Dep, ReadDep } from "../src/backend/deps";
 import { createPreparation } from "../src/backend/preparation";
 import { assessable, deriveClaimStatus, validateDraft } from "../src/backend/preparation/core";
 import type { Check } from "../src/backend/preparation/core";
-import { canonicalInterpretation, canonicalResourceSearch, canonicalRevision, interpretTask } from "../src/backend/preparation/tasks";
+import { canonicalInterpretation, canonicalResourceSearch, canonicalRevision, interpretTask, reviseTask } from "../src/backend/preparation/tasks";
 import type { InterpretationInput, InterpretationOutput, ResourceSearchInput, RevisionInput } from "../src/backend/preparation/tasks";
 import { deferred, fail, fakeTask, ok, testUserDb, testSeq, usage } from "./fakes";
 import { ctx } from "./providers-fixtures";
@@ -67,7 +69,9 @@ const checkCanonical = (i: ClaimSupportInput): IdPart => ({
   frames: i.frames.map((f) => f.frame.id),
 });
 
-function world(opts: { readonly interpret?: Task<InterpretationInput, InterpretationOutput>; readonly read?: ReadDep; readonly changed?: (keys: readonly Dep[]) => void } = {}) {
+const keepsLike = <T extends object>(product: Task<never, unknown>, fake: T): T => (product.keepsFirstResult ? Object.assign(fake, { keepsFirstResult: true }) : fake);
+
+function world(opts:{ readonly interpret?: Task<InterpretationInput, InterpretationOutput>; readonly read?: ReadDep; readonly changed?: (keys: readonly Dep[]) => void } = {}) {
   const db = testUserDb();
   const memo = createMemo(db, "live", { retryDelayMs: () => 0 });
   const captureId = randomId("cap") as CaptureId;
@@ -86,10 +90,11 @@ function world(opts: { readonly interpret?: Task<InterpretationInput, Interpreta
     resources: () => ok([]),
   };
 
+  // The scripted check and revision keep their first result exactly when the product's tasks do.
   const tasks = {
     interpret: (opts.interpret ?? scripted("interpretation", "claude", canonicalInterpretation, () => script.interpret)) as FakeTask<InterpretationInput, InterpretationOutput>,
-    revise: scripted("claim_revision", "claude", canonicalRevision, () => script.revise),
-    checkClaim: scripted("claim_check", "jev", checkCanonical, () => script.check),
+    revise: keepsLike(reviseTask({} as ClaudeCli, () => null), scripted("claim_revision", "claude", canonicalRevision, () => script.revise)),
+    checkClaim: keepsLike(claimSupportTask({} as JevClient), scripted("claim_check", "jev", checkCanonical, () => script.check)),
     searchResources: scripted("resource_search", "claude", canonicalResourceSearch, () => script.resources),
   };
 
@@ -347,6 +352,63 @@ describe("preparation", () => {
     expect(w.statusOf(r1, "claim")).toBe("supported_by_check");
     expect(w.usable(r1.material)).toEqual(["revised claim"]);
     expect(w.tasks.revise.calls).toHaveLength(1);
+  });
+
+  test("R4: a claim revised before the revision task changed version or model keeps that revision and gets no second one", async () => {
+    const w = world();
+    const r1 = w.close(0, 0, 20);
+    w.script.interpret = () => ok(output([{ label: "A", claims: [draft("claim", [P[0]!])] }]));
+    w.script.check = (i) => verdict(i.claim.text === "claim" ? "no" : "yes");
+    w.script.revise = () => ok(draft("revised claim", [P[0]!]));
+    await w.drain();
+    expect(w.usable(r1.material)).toEqual(["revised claim"]);
+
+    Object.assign(w.tasks.revise, { version: "next", model: "sonnet" });
+    w.script.revise = () => ok(draft("second revision", [P[0]!]));
+    await w.drain();
+
+    expect(w.statusOf(r1, "claim")).toBe("supported_by_check");
+    expect(w.usable(r1.material)).toEqual(["revised claim"]);
+    expect(w.tasks.revise.calls).toHaveLength(1);
+  });
+
+  test("R4: a revision pending when the revision task changes gets one revision, and the next change gets none", async () => {
+    const w = world();
+    const r1 = w.close(0, 0, 20);
+    w.script.interpret = () => ok(output([{ label: "A", claims: [draft("claim", [P[0]!])] }]));
+    w.script.check = (i) => verdict(i.claim.text === "claim" ? "no" : "yes");
+    const signal = new AbortController().signal;
+    for (const purpose of ["interpretation", "claim_check"] as const) await Promise.all(w.demanded(purpose).map((i) => i.run(signal)));
+    expect(w.demanded("claim_revision")).toHaveLength(1);
+
+    Object.assign(w.tasks.revise, { version: "v2", model: "sonnet" });
+    w.script.revise = () => ok(draft("revised on v2", [P[0]!]));
+    await w.drain();
+    expect(w.usable(r1.material)).toEqual(["revised on v2"]);
+
+    Object.assign(w.tasks.revise, { version: "v3" });
+    w.script.revise = () => ok(draft("revised on v3", [P[0]!]));
+    await w.drain();
+
+    expect(w.tasks.revise.calls).toHaveLength(1);
+    expect(w.statusOf(r1, "claim")).toBe("supported_by_check");
+    expect(w.usable(r1.material)).toEqual(["revised on v2"]);
+  });
+
+  test("a claim's stored check survives a new check version: no second check, no revision, the same status", async () => {
+    const w = world();
+    const r1 = w.close(0, 0, 20);
+    w.script.interpret = () => ok(output([{ label: "A", claims: [draft("borderline", [P[0]!])] }]));
+    await w.drain();
+    expect(w.statusOf(r1, "borderline")).toBe("supported_by_check");
+
+    Object.assign(w.tasks.checkClaim, { version: "v2" });
+    w.script.check = () => verdict("no");
+    await w.drain();
+
+    expect(w.tasks.checkClaim.calls).toHaveLength(1);
+    expect(w.tasks.revise.calls).toHaveLength(0);
+    expect(w.statusOf(r1, "borderline")).toBe("supported_by_check");
   });
 
   test("R8 TLC path: a later window moves the boundary while a check is in flight; the outdated result lands on no current chunk", async () => {

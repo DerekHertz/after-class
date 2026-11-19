@@ -45,7 +45,7 @@ export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export type ClaudeImage = { readonly label: string; readonly mediaType: "image/jpeg" | "image/png"; readonly bytes: Uint8Array };
 
 export type ClaudeRequest = {
-  readonly model: string; // "opus" (default per stack) | "sonnet" (lab comparison arm)
+  readonly model: string; // "opus" | "sonnet"
   readonly effort: Effort;
   readonly system: string;
   /** The user turn after `cachedPrompt`, or all of it when there is none. */

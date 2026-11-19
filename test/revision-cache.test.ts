@@ -151,6 +151,36 @@ describe("the revision's evidence is a cached head", () => {
     expect(sent[0]!.params.system).toEqual([expect.objectContaining({ cache_control: { type: "ephemeral", ttl: "5m" } })]);
   });
 
+  test("a revision is sent on Sonnet at effort high on both backends, under a version no Opus revision used", async () => {
+    let seen: ClaudeRequest | undefined;
+    const cli: ClaudeCli = {
+      structured: (req) => {
+        seen = req;
+        return Promise.resolve({ output: replyOf("x"), usage: { model: "m", inputTokens: 1, outputTokens: 1, cacheReadTokens: null, cost: { kind: "unknown", reason: "t" } } }) as never;
+      },
+      streamText: () => Promise.reject(new Error("not used")),
+    };
+    const cliTask = reviseTask(cli, frameBytes);
+    await cliTask.attempt(revisionOf("Clocks order events."), { ...OPEN, streamTo: null });
+    const argv = claudeArgs(seen!, "json", null);
+    expect(argv[argv.indexOf("--model") + 1]).toBe("sonnet");
+    expect(argv[argv.indexOf("--effort") + 1]).toBe("high");
+
+    const { client, sent } = manualClient(() => message(JSON.stringify(replyOf("Clocks order events."))));
+    const run = createMemo(testUserDb(), "live", { retryDelayMs: () => 0 }).run(reviseTask(createClaudeApi({ apiKey: KEY, maxConcurrent: 2, client }), frameBytes), revisionOf("Clocks order events."));
+    await tick();
+    sent[0]!.begin();
+    sent[0]!.finish();
+    expect((await run).kind).toBe("hit");
+    expect(sent[0]!.params.model).toBe("claude-sonnet-5-5");
+    expect(sent[0]!.params.output_config).toEqual(expect.objectContaining({ effort: "high" }));
+
+    const memo = createMemo(testUserDb(), "live", { retryDelayMs: () => 0 });
+    const input = revisionOf("Clocks order events.");
+    expect(cliTask.version).not.toBe("revise-v1");
+    expect(memo.key(cliTask, input)).not.toBe(memo.key({ ...cliTask, version: "revise-v1" }, input));
+  });
+
   test("two revisions of one chunk send a byte-identical prefix, and the second is sent only after the first has begun", async () => {
     const { client, sent } = manualClient(() => message(JSON.stringify(replyOf("r"))));
     const task = reviseTask(createClaudeApi({ apiKey: KEY, maxConcurrent: 2, client }), frameBytes);
