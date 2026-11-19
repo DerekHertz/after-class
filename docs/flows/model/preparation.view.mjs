@@ -50,6 +50,11 @@ const STEPS = {
   ALateResultArrives: "a late result is logged",
   YouAnswer: "you answer",
   YouEndTheReview: "you end the review",
+  YouAskForAReview: "you press Review now or Wait, which asks",
+  YouAskWhileAnAskIsOpen: "the page waits on the open ask",
+  CodeExhaustsTheAsk: "nothing can answer the ask, so it ends exhausted",
+  PageOpensTheAskedReview: "the page opens the review its ask started",
+  PageShowsNothingToReview: "the page's ask ended with nothing to review",
 };
 
 export const step = (action, from, to) => {

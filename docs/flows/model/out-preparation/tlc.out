@@ -1,28 +1,32 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 0 and seed -1035366110202075891 with 1 worker on 8 cores with 1986MB heap and 64MB offheap memory [pid: 1928518] (Linux 6.18.58.1-microsoft-standard-WSL2 amd64, Ubuntu 21.0.13.0.3 x86_64, MSBDiskFPSet, DiskStateQueue).
-Parsing file /home/dhertzell/AfterClass/.claude/worktrees/agent-a68648bc39a4d9cb2/docs/flows/model/Preparation.tla
-Parsing file /tmp/statechart-g2HZ01/statechart-qMuh9x/tmp-verdict-1/Naturals.tla
+Running breadth-first search Model-Checking with fp 0 and seed 1057723936664894619 with 1 worker on 8 cores with 1986MB heap and 64MB offheap memory [pid: 2322714] (Linux 6.18.58.1-microsoft-standard-WSL2 amd64, Ubuntu 21.0.13.0.3 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/dhertzell/AfterClass/.claude/worktrees/agent-a4cacc11281e1ad35/docs/flows/model/Preparation.tla
+Parsing file /tmp/statechart-5s7cZg/statechart-6A9xMa/tmp-verdict-1/Naturals.tla
 Semantic processing of module Naturals
 Semantic processing of module Preparation
-Starting... (2026-11-18 20:15:55)
+Starting... (2026-11-18 21:13:36)
 Implied-temporal checking--satisfiability problem has 5 branches.
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-11-18 20:15:55.
-Progress(13) at 2026-11-18 20:15:58: 21,925 states generated (21,925 s/min), 6,107 distinct states found (6,107 ds/min), 2,865 states left on queue.
-Progress(20) at 2026-11-18 20:17:00: 616,659 states generated (594,734 s/min), 112,804 distinct states found (106,697 ds/min), 26,120 states left on queue.
-Progress(27) at 2026-11-18 20:18:03: 1,533,170 states generated (916,511 s/min), 221,675 distinct states found (108,871 ds/min), 5,360 states left on queue.
-Progress(33) at 2026-11-18 20:18:08: 1,605,850 states generated, 226,797 distinct states found, 0 states left on queue.
-Checking 5 branches of temporal properties for the complete state space with 1133985 total distinct states at (2026-11-18 20:18:08)
-Finished checking temporal properties in 13s at 2026-11-18 20:18:21
+Finished computing initial states: 1 distinct state generated at 2026-11-18 21:13:36.
+Progress(12) at 2026-11-18 21:13:39: 31,117 states generated (31,117 s/min), 8,284 distinct states found (8,284 ds/min), 4,149 states left on queue.
+Progress(18) at 2026-11-18 21:14:42: 717,837 states generated (686,720 s/min), 136,274 distinct states found (127,990 ds/min), 47,969 states left on queue.
+Progress(20) at 2026-11-18 21:15:45: 1,660,459 states generated (942,622 s/min), 282,402 distinct states found (146,128 ds/min), 79,180 states left on queue.
+Progress(21) at 2026-11-18 21:16:48: 2,690,433 states generated (1,029,974 s/min), 422,544 distinct states found (140,142 ds/min), 95,260 states left on queue.
+Progress(22) at 2026-11-18 21:17:50: 3,706,646 states generated (1,016,213 s/min), 548,573 distinct states found (126,029 ds/min), 93,381 states left on queue.
+Progress(24) at 2026-11-18 21:18:53: 4,819,149 states generated (1,112,503 s/min), 673,808 distinct states found (125,235 ds/min), 75,050 states left on queue.
+Progress(27) at 2026-11-18 21:19:55: 5,991,118 states generated (1,171,969 s/min), 782,020 distinct states found (108,212 ds/min), 28,465 states left on queue.
+Progress(34) at 2026-11-18 21:20:21: 6,439,114 states generated, 813,777 distinct states found, 0 states left on queue.
+Checking 5 branches of temporal properties for the complete state space with 4068885 total distinct states at (2026-11-18 21:20:21)
+Finished checking temporal properties in 45s at 2026-11-18 21:21:06
 Model checking completed. No error has been found.
   Estimates of the probability that TLC did not check all reachable states
   because two distinct states had the same fingerprint:
-  calculated (optimistic):  val = 1.7E-8
-  based on the actual fingerprints:  val = 2.4E-9
-1605850 states generated, 226797 distinct states found, 0 states left on queue.
-The depth of the complete state graph search is 33.
+  calculated (optimistic):  val = 2.5E-7
+  based on the actual fingerprints:  val = 5.9E-8
+6439114 states generated, 813777 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 34.
 The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 10 and the 95th percentile is 3).
-Finished in 02min 26s at (2026-11-18 20:18:21)
+Finished in 07min 30s at (2026-11-18 21:21:06)
 
