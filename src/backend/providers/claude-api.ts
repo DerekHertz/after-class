@@ -145,7 +145,7 @@ export function estimateRequestUsd(model: string, inputBytes: number, maxTokens:
 }
 
 /**
- * The output an interpretation reserves for, below its STREAM_MAX_TOKENS limit. Derek, 2026-11-18 (docs/trail/decisions-2026-11-18.md): "reserve
+ * The output an interpretation reserves for, below its STREAM_MAX_TOKENS limit. Derek's decision of 2026-11-18: "reserve
  * output at 24,000 tokens instead of the 32,000 limit". The largest interpretation output on record is 21,501 tokens, measured on the CLI.
  * A run that spends more is still settled at its recorded cost (R17), so this decides only whether the request may start.
  */
