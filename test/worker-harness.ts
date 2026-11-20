@@ -202,7 +202,32 @@ const GLOBALS = ["chrome", "indexedDB", "fetch", "IDBKeyRange"] as const;
 const originals = new Map<string, unknown>();
 const g = globalThis as Any;
 
+/**
+ * Timers set while the fakes are installed. An outbox retry waits out its backoff or a Retry-After, 120 s in worker-gate,
+ * so it can fire after restoreGlobals has removed `chrome` and throw between later test files. The browser drops a
+ * stopped worker's timers, so restoreGlobals clears them.
+ */
+const pending = new Set<ReturnType<typeof setTimeout>>();
+const realSetTimeout = globalThis.setTimeout;
+const realClearTimeout = globalThis.clearTimeout;
+const trackedSetTimeout = ((fn: (...a: Any[]) => void, ms?: number, ...args: Any[]) => {
+  const handle = realSetTimeout(() => {
+    pending.delete(handle);
+    fn(...args);
+  }, ms);
+  pending.add(handle);
+  return handle;
+}) as typeof setTimeout;
+const trackedClearTimeout = ((handle: Any) => {
+  pending.delete(handle);
+  realClearTimeout(handle);
+}) as typeof clearTimeout;
+
 export function restoreGlobals(): void {
+  for (const handle of pending) realClearTimeout(handle);
+  pending.clear();
+  g.setTimeout = realSetTimeout;
+  g.clearTimeout = realClearTimeout;
   for (const k of GLOBALS) {
     if (originals.has(k)) g[k] = originals.get(k);
   }
@@ -245,6 +270,8 @@ export async function boot(env: Env): Promise<{ c: FakeChrome; errors: string[] 
   g.indexedDB = env.idb;
   g.IDBKeyRange = { bound: (lo: Any, hi: Any) => ({ lo, hi }) };
   g.fetch = fakeFetch(env.backend);
+  g.setTimeout = trackedSetTimeout;
+  g.clearTimeout = trackedClearTimeout;
   const realError = console.error;
   console.error = (...a: unknown[]) => void errors.push(a.map(String).join(" "));
   try {
